@@ -169,6 +169,7 @@ export interface RunRequest extends ReworkRequestFields {
   publishFromBuild?: boolean;
   /** sizeGate.mode resolved (ADR-0147, #2048); undefined = file (both size gates on). */
   sizeGateMode?: SizeGateMode;
+  parkOverBudget?: boolean;
   /** sizeGate.maxSlices or --max-slices resolved (ADR-0156); undefined = DEFAULT_MAX_SLICES. */
   maxSlices?: number;
   /** sizeGate.tokenBudget / maxFiles resolved (#3350); undefined = defaults. */
@@ -688,6 +689,7 @@ async function runIssueOnce(
           fastPath: request.efficiency.fastPath,
           enforceSizeGate: !request.noPr && (request.sizeGateMode ?? 'file') !== 'off',
           sizeGateMode: request.sizeGateMode,
+          parkOverBudget: request.parkOverBudget,
           sliceIndex: request.sliceIndex,
           slicePlanStore: ports.slicePlanStore,
           maxSlices: request.maxSlices,

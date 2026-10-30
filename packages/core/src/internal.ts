@@ -428,3 +428,5 @@ export {
   readOpenFactoryDrafts,
   formatOpenFactoryDraftsLine,
 } from './utils/open-factory-drafts.js';
+
+export { listBlockedBy, type BlockedByItem } from './blockers/dependencies.js';

@@ -328,6 +328,7 @@ async function planPhaseImpl(opts: {
   enforceSizeGate?: boolean;
   /** sizeGate.mode (ADR-0147). 'slice' records a slice plan and plans only the current slice; 'stack' (ADR-0161) uses the slice-mode gates and may plan an explicit `sliceIndex`. Ignored when enforceSizeGate is false. */
   sizeGateMode?: SizeGateMode;
+  parkOverBudget?: boolean;
   /** Slice-plan store for a non-issue source in slice/stack mode (#3813); issue sources default to the issue comment. */
   slicePlanStore?: SlicePlanStore;
   /** Slice cap for sizeGate.mode 'slice' (ADR-0156); default DEFAULT_MAX_SLICES. */
@@ -490,7 +491,7 @@ async function planPhaseImpl(opts: {
   let planningSlice = false;
   let sliceLabel = '';
   let plannedSlice: PlanResult['slice'];
-  if (enforceSizeGate && sliceMode && sliceGateOn) {
+  if (enforceSizeGate && sliceMode && sliceGateOn && !opts.parkOverBudget) {
     const gate = await resolveSliceGate({
       issue: sliceIssue,
       repo: sliceRepo,
@@ -781,11 +782,7 @@ async function planPhaseImpl(opts: {
         log('design_open_questions', `plan has ${designArtifact.openQuestions.length} open question(s): ${truncated}`);
       }
 
-      // Build-scope gate (#3350): a plan whose estimated size (changed files, and tokens from the
-      // bytes of the files it names) is over sizeGate.tokenBudget / maxFiles is too big for one
-      // bounded BUILD pass; a plan changing 3 files or fewer never splits. Decompose the issue
-      // instead of handing a mega-slice to BUILD. File mode files the decomposition as sub-issues
-      // and re-queues them (#2662).
+      // Build-scope gate (#3350): park or decompose plans that exceed the bounded BUILD budget.
       const overBudget = planOverBudget(estimatePlanSize(designArtifact, { worktree }), sizeBudget);
       if (enforceSizeGate && sliceGateOn && overBudget !== null) {
         const scope = overBudget;
@@ -798,6 +795,10 @@ async function planPhaseImpl(opts: {
           escalate: reason,
           designArtifact: null,
         });
+        if (opts.parkOverBudget) {
+          log('size-gate-escalated', fileReason);
+          return park(fileReason);
+        }
         // ADR-0147: in slice mode the post-plan gate slices a whole issue; a slice is never sliced again.
         if (sliceMode) {
           if (planningSlice) {

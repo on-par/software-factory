@@ -19,6 +19,7 @@ describe('blocked_by REST contract', () => {
       repo: 'software-factory',
       issue_number: 7,
       per_page: 100,
+      page: 1,
     });
   });
 
@@ -60,4 +61,16 @@ describe('listBlockedBy mapping', () => {
     await expect(listBlockedBy(makeDeps(request), 7)).rejects.toThrow('boom');
     await expect(addBlockedBy(makeDeps(request), 7, 1)).rejects.toThrow('boom');
   });
+});
+
+it('fetches every page and rejects malformed later pages', async () => {
+  const page = Array.from({ length: 100 }, (_, number) => ({ number }));
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce({ data: page })
+    .mockResolvedValueOnce({ data: [{ number: 100 }] });
+  expect(await listBlockedBy(makeDeps(request), 7)).toHaveLength(101);
+  expect(request.mock.calls[1]?.[1]).toMatchObject({ page: 2, per_page: 100 });
+  request.mockResolvedValueOnce({ data: page }).mockResolvedValueOnce({ data: {} });
+  await expect(listBlockedBy(makeDeps(request), 7)).rejects.toThrow('did not return an array');
 });

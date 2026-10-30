@@ -30,7 +30,7 @@ it('passes the resolved factory state and primary git directory to Codex', () =>
     product: undefined,
     runStartedAt: '2026-10-19T00:00:00Z',
     lane: undefined,
-    opts: {},
+    opts: { parkOverBudget: true },
     autoRework: false,
     planApprovalEnabled: false,
     factoryConfig: { sandbox: {} } as FactoryConfig,
@@ -53,6 +53,7 @@ it('passes the resolved factory state and primary git directory to Codex', () =>
     primaryRepoRoot: repoRoot,
     writableRoots: [paths.state, `${repoRoot}/.git`],
   });
+  expect(request.parkOverBudget).toBe(true);
   expect(request.specPath.startsWith(`${paths.state}/plans/`)).toBe(true);
 });
 

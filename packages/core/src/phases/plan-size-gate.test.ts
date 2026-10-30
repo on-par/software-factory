@@ -111,7 +111,8 @@ npm run test`;
 
   async function run(opts: {
     yaml: string;
-    mode?: 'file' | 'slice';
+    mode?: 'file' | 'slice' | 'stack';
+    parkOverBudget?: boolean;
     sizeBudget?: { tokenBudget: number; maxFiles: number };
     decomposition?: string;
     state?: string;
@@ -147,10 +148,26 @@ npm run test`;
       } as any,
       log: (type: any, msg: any) => logs.push({ type, msg }),
       sizeGateMode: opts.mode ?? 'file',
+      parkOverBudget: opts.parkOverBudget,
       sizeBudget: opts.sizeBudget,
     });
     return { result, stub, logs, createComment, create };
   }
+
+  it('parks an over-budget chain member without slicing or filing', async () => {
+    const { result, stub, logs, createComment, create } = await run({
+      yaml: designYaml(4, 4),
+      mode: 'stack',
+      parkOverBudget: true,
+      sizeBudget: { tokenBudget: 10, maxFiles: 12 },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.escalate).toContain('bounded-build budget');
+    expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
+    expect(logs.map((l) => l.type)).toContain('size-gate-escalated');
+    expect(createComment).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
 
   it.each(['file', 'slice'] as const)(
     'does not slice a many-AC issue whose plan touches three files (%s mode)',

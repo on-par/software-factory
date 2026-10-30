@@ -9,6 +9,8 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- Build open same-repository blocked-by issues in prerequisite order with `run-issue --stack`. #3814
+
 - PR receipts and verification summaries omit paths and plan evidence, and Proof reports TypeScript net line counts (#3817).
 
 - `factory run-brief <file> --stack` now slices an over-budget brief and builds the slices as stacked PRs in one run; the slice plan is kept in `.factory/state/slice-plans/` (#3813).

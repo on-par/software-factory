@@ -249,7 +249,13 @@ async function shipIssueFrom(
   const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
   const { branchPrefix } = policy.effective;
   const claim = { issueNum, issueTitle, ghRepo, sizeGateMode, work, ctx, octokit, baseBranch: opts.baseBranch };
-  const branch = await resolveRunBranch({ ...claim, branchPrefix, noPr, eventsFile: paths.events });
+  const branch = await resolveRunBranch({
+    ...claim,
+    branchPrefix,
+    noPr,
+    parkOverBudget: opts.parkOverBudget,
+    eventsFile: paths.events,
+  });
   const worktree = ctx?.resumeFrom
     ? ctx.resumeFrom.worktree
     : ctx?.localOnly

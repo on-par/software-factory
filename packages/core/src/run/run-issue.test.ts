@@ -357,9 +357,9 @@ describe('runIssue — size gate mode (#2048)', () => {
     ['slice', true],
     ['off', false],
   ] as const)('sizeGateMode %s -> enforceSizeGate %s', async (mode, expected) => {
-    await runIssue(baseRequest({ sizeGateMode: mode }), basePolicy(), basePorts());
+    await runIssue(baseRequest({ sizeGateMode: mode, parkOverBudget: true }), basePolicy(), basePorts());
     expect(vi.mocked(planPhase).mock.calls[0][0].enforceSizeGate).toBe(expected);
-    expect(vi.mocked(planPhase).mock.calls[0][0].sizeGateMode).toBe(mode);
+    expect(vi.mocked(planPhase).mock.calls[0][0]).toMatchObject({ sizeGateMode: mode, parkOverBudget: true });
   });
 
   it('passes maxSlices through to planPhase (ADR-0156)', async () => {

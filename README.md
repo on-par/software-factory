@@ -140,7 +140,7 @@ factory run-issue <N> --run-children Also run the child issues the size gate fil
 factory run-issue <N> --base-branch <ref>  Start from origin/<ref> and open the PR against <ref> (also ship, run-brief)
 factory run-brief a.md b.md --stack   Open the briefs as a PR stack (each on the previous brief's PR head)
 factory run-brief big.md --stack       Slice an over-budget brief and build the slices as a PR stack in one run
-factory run-issue 42 --stack        Build an oversized issue as a PR stack in one run (each slice on the previous slice's PR head)
+factory run-issue 42 --stack        Build open same-repo prerequisites in order as a PR stack; otherwise stack an oversized issue's slices
 factory run                         Claim queued issues and ship them, lanes in parallel; merges only when auto-merge is on
 factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
 factory land <N>                    Squash-merge the issue's open PR once CI is green, then remove its worktree

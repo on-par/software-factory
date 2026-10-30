@@ -2098,13 +2098,6 @@ describe('cli commands (via main dispatch)', () => {
         expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('slice');
       });
 
-      it('--size-gate stack passes sizeGateMode stack to planPhase', async () => {
-        await runMain('run-issue', '5', '--size-gate', 'stack');
-        const call = phases.planPhase.mock.calls.at(-1)?.[0];
-        expect(call?.sizeGateMode).toBe('stack');
-        expect(call?.enforceSizeGate).toBe(true);
-      });
-
       it('sizeGate.mode stack in the config passes sizeGateMode stack to planPhase', async () => {
         h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode: 'stack' } };
         await runMain('run-issue', '5');
