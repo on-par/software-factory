@@ -1,6 +1,5 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { describe, expect, it, vi } from 'vitest';
+import { createTempDirs } from '@on-par/factory-core/testing';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { landBaseGate } from './land-base-gate.js';
 
 const fakeOctokit = (head: string, merge: string | null, status = 'ahead') => {
@@ -25,14 +24,9 @@ const fakeOctokit = (head: string, merge: string | null, status = 'ahead') => {
   return { octokit, getBranch };
 };
 
-const withState = async (fn: (state: string) => Promise<void>) => {
-  const state = mkdtempSync(`${tmpdir()}/base-gate-`);
-  try {
-    await fn(state);
-  } finally {
-    rmSync(state, { recursive: true, force: true });
-  }
-};
+const dirs = createTempDirs();
+afterEach(() => dirs.cleanup());
+const withState = (fn: (state: string) => Promise<void>) => fn(dirs.makeSync('base-gate-'));
 
 describe('landing base lookup', () => {
   it('reads the actual base branch and records its merged commit', () =>
