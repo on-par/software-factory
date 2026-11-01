@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Fixed
+
+- Stack mode routes planner requests to split an oversized issue through the slice gate; missing information and contradictions still park (#3855).
+
 ## 0.9.25 - 2026-10-30
 
 One stack engine for `run-issue` and `run-brief` (`--size-gate` takes `off` or `stack`, `file` and `slice` are deprecated aliases for `stack`, and `--run-children` is removed), PR bodies whose risk receipt no longer lists changed paths or internal plan names, and Codex running with no sandbox by default (#3832, #3817, #3824).
