@@ -7,56 +7,17 @@ import type { EventKind, FactoryEvent, ParkReason } from '@on-par/factory-core';
 import type { CiOutcome, InfraRerunOutcome, WatchChecksOptions } from '@on-par/factory-core/internal';
 import {
   hasAnyCiSignal,
-  shellEscape,
   syncLandBranch,
   warnNoBranchProtectionOnce,
   watchChecksWithInfraRerun,
 } from '@on-par/factory-core/internal';
 import { MAX_LAND_SYNC_ROUNDS, probeHeadBehindBase } from './land-behind.js';
 import { landRuntime } from './land-runtime.js';
+import { BaseCiPendingError } from './merge-base-gate.js';
 
-export type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
-
-export async function defaultListIssueLabels(
-  octokit: Octokit,
-  owner: string,
-  repo: string,
-  issue: number,
-): Promise<string[]> {
-  const { data } = await octokit.rest.issues.listLabelsOnIssue({ owner, repo, issue_number: issue });
-  return data.map((label) => label.name);
-}
-
-export async function squashMergeAndDelete(
-  octokit: Octokit,
-  owner: string,
-  repoName: string,
-  branch: string,
-  prNumber: number,
-  /** `sha`: the CI-verified head commit. GitHub refuses the merge if the PR head has moved. */
-  opts: { admin?: boolean; run?: CommandRunner; sha?: string; signal?: AbortSignal } = {},
-): Promise<void> {
-  opts.signal?.throwIfAborted(); // #3146: never merge once the claim is lost
-  const { sha } = opts;
-  if (opts.admin) {
-    const run = opts.run ?? landRuntime().shellOps.exec;
-    const pin = sha ? ` --match-head-commit ${shellEscape(sha)}` : '';
-    await run(
-      `gh pr merge ${prNumber} --repo ${shellEscape(`${owner}/${repoName}`)} --admin --squash --delete-branch${pin}`,
-    );
-    return;
-  }
-
-  await octokit.rest.pulls.merge({
-    owner,
-    repo: repoName,
-    pull_number: prNumber,
-    merge_method: 'squash',
-    ...(sha ? { sha } : {}),
-  });
-  // Best-effort branch delete: the merge is the source of truth.
-  await octokit.rest.git.deleteRef({ owner, repo: repoName, ref: `heads/${branch}` }).catch(() => {});
-}
+export { defaultListIssueLabels, squashMergeAndDelete } from './land-merge.js';
+export type { CommandRunner } from './land-merge.js';
+import { squashMergeAndDelete, type CommandRunner } from './land-merge.js';
 
 export class MergeGatedError extends Error {
   constructor(
@@ -156,12 +117,17 @@ export class CiInfraError extends CiFailedError {
 
 /** True for the errors that leave the PR open and unmerged without a land failure: awaiting review, CI red or unverified, or CI not started. */
 export function isLandLeftOpen(err: unknown): boolean {
-  return err instanceof AwaitingReviewError || err instanceof CiFailedError || err instanceof AwaitingCiError;
+  return (
+    err instanceof AwaitingReviewError ||
+    err instanceof CiFailedError ||
+    err instanceof AwaitingCiError ||
+    err instanceof BaseCiPendingError
+  );
 }
 
 /** True when CI never reached a green verdict: unverified, or never started. */
 export function isCiNotGreen(err: unknown): boolean {
-  return err instanceof CiUnverifiedError || err instanceof AwaitingCiError;
+  return err instanceof CiUnverifiedError || err instanceof AwaitingCiError || err instanceof BaseCiPendingError;
 }
 
 const MAX_MERGE_ATTEMPTS = 5;
@@ -287,6 +253,7 @@ export async function landOpenPullRequest(opts: {
   signal?: AbortSignal;
   /** #3325: hand a merge-main conflict on real paths back as a LandConflictError carrying `rebuild`. */
   rebuildOnConflict?: boolean;
+  baseGate?: { check: (wait?: boolean) => Promise<void>; record: () => Promise<void> };
 }): Promise<void> {
   const {
     octokit,
@@ -444,6 +411,7 @@ export async function landOpenPullRequest(opts: {
   const mergeVerifiedHead = async (): Promise<boolean> => {
     for (let attempt = 1; ; attempt++) {
       try {
+        await opts.baseGate?.check();
         const outcome = await withLock(async () => {
           // Whatever we read before taking the lock (or before the backoff sleep) may be stale,
           // so the attempt decides from a fresh read.
@@ -459,16 +427,25 @@ export async function landOpenPullRequest(opts: {
               log('warn', `ready-for-review flip failed for PR #${prNumber}: ${errorDetail(err)}`),
             );
           }
+          await opts.baseGate?.check(false);
           await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber, {
             admin: adminMerge,
             run,
             sha: verifiedSha,
             signal: opts.signal,
           });
+          await opts.baseGate
+            ?.record()
+            .catch((err: unknown) => log('warn', `could not record merge commit: ${String(err)}`));
           return 'merged' as const;
         });
         return outcome === 'merged';
       } catch (err: any) {
+        if (err instanceof BaseCiPendingError) {
+          err.prNumber = prNumber;
+          log('land', err.message);
+          throw err;
+        }
         if (err instanceof CiFailedError || err instanceof LandConflictError || opts.signal?.aborted) throw err;
         if (verifiedSha && isHeadModifiedMergeError(err)) {
           const msg = `PR #${prNumber} head moved past CI-verified commit ${verifiedSha} — refusing to merge an unverified head`;

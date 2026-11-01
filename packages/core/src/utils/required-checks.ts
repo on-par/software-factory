@@ -4,6 +4,7 @@ import type { Octokit } from '@octokit/rest';
 
 export interface RequiredChecksVerdict {
   green: boolean;
+  state?: 'green' | 'pending' | 'failed';
   reason: string;
   /** Set when green; what the verdict was based on. */
   basis?: string;
@@ -24,16 +25,22 @@ export function evaluateRequiredChecks(
 ): RequiredChecksVerdict {
   const contexts = [...new Set(required)];
   if (contexts.length === 0) return { green: false, reason: 'no required checks configured', noCodeHealthChecks: true };
+  const failed = contexts.flatMap((ctx) =>
+    runs
+      .filter((r) => r.name === ctx && r.status === 'completed' && r.conclusion !== 'success')
+      .map((r) => ({ ctx, run: r })),
+  )[0];
+  if (failed)
+    return { green: false, state: 'failed', reason: `${failed.ctx} ${failed.run.conclusion ?? 'incomplete'}` };
   for (const ctx of contexts) {
     const matching = runs.filter((r) => r.name === ctx);
-    if (matching.length === 0) return { green: false, reason: `missing ${ctx}` };
-    for (const run of matching) {
-      if (run.status !== 'completed') return { green: false, reason: `${ctx} pending` };
-      if (run.conclusion !== 'success') return { green: false, reason: `${ctx} ${run.conclusion ?? 'incomplete'}` };
-    }
+    if (matching.length === 0) return { green: false, state: 'pending', reason: `missing ${ctx}` };
+    if (matching.some((r) => r.status !== 'completed'))
+      return { green: false, state: 'pending', reason: `${ctx} pending` };
   }
   return {
     green: true,
+    state: 'green',
     reason: `all ${contexts.length} required checks succeeded`,
     basis: `required checks: ${contexts.join(', ')}`,
   };
@@ -41,13 +48,14 @@ export function evaluateRequiredChecks(
 
 /** Green only when there is at least one push-triggered check run and every one completed with `success` (#3195). */
 export function evaluatePushChecks(runs: readonly CheckRunLike[]): RequiredChecksVerdict {
-  if (runs.length === 0) return { green: false, reason: 'no push-triggered checks' };
-  for (const run of runs) {
-    if (run.status !== 'completed') return { green: false, reason: `${run.name} pending` };
-    if (run.conclusion !== 'success') return { green: false, reason: `${run.name} ${run.conclusion ?? 'incomplete'}` };
-  }
+  if (runs.length === 0) return { green: false, state: 'pending', reason: 'no push-triggered checks' };
+  const failed = runs.find((r) => r.status === 'completed' && r.conclusion !== 'success');
+  if (failed) return { green: false, state: 'failed', reason: `${failed.name} ${failed.conclusion ?? 'incomplete'}` };
+  const pending = runs.find((r) => r.status !== 'completed');
+  if (pending) return { green: false, state: 'pending', reason: `${pending.name} pending` };
   return {
     green: true,
+    state: 'green',
     reason: `all ${runs.length} push-triggered checks succeeded`,
     basis: `push checks: ${[...new Set(runs.map((r) => r.name))].join(', ')}`,
   };
@@ -79,8 +87,8 @@ export function classifyRequiredChecks(
   for (const ctx of new Set(required)) {
     const matching = runs.filter((r) => r.name === ctx);
     if (matching.length === 0) result.missing.push(ctx);
+    else if (matching.some((r) => r.status === 'completed' && r.conclusion !== 'success')) result.failed.push(ctx);
     else if (matching.some((r) => r.status !== 'completed')) result.pending.push(ctx);
-    else if (matching.some((r) => r.conclusion !== 'success')) result.failed.push(ctx);
   }
   if (new Set(required).size === 0) return result;
   if (result.failed.length > 0) result.state = 'failed';
@@ -210,6 +218,15 @@ export async function fetchRequiredChecksVerdict(
     if (verdict.green && explicit.length > 0) verdict = { ...verdict, basis: `base health checks: ${set.join(', ')}` };
   } else if (fallback) {
     if (ciSuites.size === 0) {
+      const workflow = workflowRuns.find(isCi);
+      if (workflow) {
+        const failed = workflow.status === 'completed' && workflow.conclusion !== 'success';
+        return {
+          green: false,
+          state: failed ? 'failed' : 'pending',
+          reason: `CI ${failed ? (workflow.conclusion ?? 'incomplete') : 'pending'}`,
+        };
+      }
       return {
         green: false,
         reason:
