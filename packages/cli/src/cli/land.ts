@@ -24,6 +24,7 @@ import {
   publishRiskReceipt,
   releaseLaneClaim,
   resolveEffectiveConfig,
+  resolveBaseHealthChecks,
   resolveFilingPolicy,
   resolveTrustTier,
   withFileLock,
@@ -42,6 +43,7 @@ import {
   landOpenPullRequest,
 } from './land-pr.js';
 import type { LandLock } from './land-pr.js';
+import { landBaseGate } from './land-base-gate.js';
 import { enforceRiskAtLand } from './land-risk.js';
 import { isPrMerged, latestPrForBranch } from './land-merged.js';
 import { landRuntime } from './land-runtime.js';
@@ -240,6 +242,15 @@ export async function landIssue(
         signal: opts.signal,
         adminMerge: resolveMergePolicy(landFactoryConfig).admin,
         withLock: withLandLock,
+        baseGate: landBaseGate({
+          octokit,
+          owner,
+          repo: repoName,
+          prNumber,
+          state: paths.state,
+          checks: resolveBaseHealthChecks(repoConfig),
+          log,
+        }),
         ensureWorktree: async () => {
           if (!existsSync(worktree)) {
             await gitOps.setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, worktreeSandbox, log);

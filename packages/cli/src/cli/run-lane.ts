@@ -37,6 +37,7 @@ import { ClaimLostError, createClaimLease, laneRenewLogger, onClaimLost, withHea
 import { restackUnderHeartbeat } from './run-lane-restack.js';
 import type { RunLaneDeps } from './run-lane-deps.js';
 import { shipRuntime } from './ship-runtime.js';
+import { BaseCiPendingError } from './merge-base-gate.js';
 
 export type { RunLaneDeps };
 
@@ -383,6 +384,11 @@ export async function runLane(
         awaitingReview++;
         streak = null;
         await settle(issue, 'done');
+        continue;
+      }
+      if (err instanceof BaseCiPendingError) {
+        streak = null;
+        await settle(issue, 'queued');
         continue;
       }
       if (err instanceof AwaitMergeStoppedError) {

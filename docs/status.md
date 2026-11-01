@@ -27,3 +27,5 @@ What works today and what is experimental.
 PR risk receipts show the overall tier and matched rule reasons without paths. Walkthrough verification reports checker and manual evidence counts without plan claims. PR Proof reports TypeScript and non-test net lines (added minus deleted) against the PR base; non-test excludes test files and test or fixture directories. Failed diff counts are unavailable.
 
 See the [README](../README.md) for Quick Start, and [agents.md](agents.md) for the supported coding agent CLIs.
+
+Hosted code-health CI is checked on the base before landing. Failed CI leaves PRs open; pending CI waits up to 30 minutes. A failed base descended from a recorded merge pauses merges until hosted CI is green, emitting `red-main` once and `red-main-cleared` on recovery. Local base checks remain an additional gate.
