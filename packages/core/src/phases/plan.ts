@@ -49,10 +49,17 @@ import { applySteering, type ConsumedSteering, describeSteering } from '../steer
 import { archiveSpec, readSpec, writeSpec } from '../spec/index.js';
 import type { EscalateKind } from '../types/index.js';
 import { classifyEscalation } from './plan-escalation.js';
+import { routeStackSlice } from './plan-stack-slice.js';
 import type { Constitution, FailoverReason, ReadinessInfo } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
-import { OUTLINE_STEP, OUTLINE_TEMPLATE, RIGHT_SIZE_STEP, RIGHT_SIZE_STEP_GATE_PASSED } from './plan-steps.js';
+import {
+  OUTLINE_STEP,
+  OUTLINE_TEMPLATE,
+  RIGHT_SIZE_STEP,
+  RIGHT_SIZE_STEP_GATE_PASSED,
+  RIGHT_SIZE_STEP_STACK,
+} from './plan-steps.js';
 import { GITHUB_ISSUE_SOURCE, type GithubIssueParams } from '../work/github-issue.js';
 import { createDefaultWorkSourceRegistry, type WorkRequestSourceKind, type WorkSourceRegistry } from '../work/index.js';
 
@@ -95,6 +102,7 @@ export interface PlanPromptOpts {
   runnableRoutes?: readonly BuildRouteName[];
   /** Pre-flight size-gate verdict (#3275). passed && enforced drops step 4's size ESCALATE. */
   sizeGate?: { passed: boolean; reason?: string; enforced: boolean };
+  stackSizeGate?: boolean;
   /** Rendered "## Previous attempt" note (#3373); empty or absent = first run. */
   previousAttempt?: string;
 }
@@ -142,7 +150,7 @@ ${opts.previousAttempt ? `${opts.previousAttempt}\n\n` : ''}Steps:
 ${routeBullets}
    A pinned build worker's harness always wins over your judgment: the factory forces the
    route to match it after PLAN. Default to route: ${fallbackRoute} when genuinely unsure.${runnableNote}
-${opts.sizeGate?.passed && opts.sizeGate.enforced ? RIGHT_SIZE_STEP_GATE_PASSED : RIGHT_SIZE_STEP}
+${opts.stackSizeGate ? RIGHT_SIZE_STEP_STACK : opts.sizeGate?.passed && opts.sizeGate.enforced ? RIGHT_SIZE_STEP_GATE_PASSED : RIGHT_SIZE_STEP}
 ${constitutionCtx ? '5. The constitution above defines the standards for this product. Your spec MUST satisfy every standard.' : '5. No constitution loaded — use your best judgment.'}
 6. RISKY-CHANGE FIELDS. If the plan changes a dispatch, switch, or match; a default branch
    or fallthrough; or the flags passed to an external tool, you MUST fill the design fields
@@ -488,26 +496,29 @@ async function planPhaseImpl(opts: {
   const sliceIssue =
     source.kind === GITHUB_ISSUE_SOURCE ? (source.params as GithubIssueParams).issue : issueNumberOf(issue);
   const sliceRepo = source.kind === GITHUB_ISSUE_SOURCE ? (source.params as GithubIssueParams).repo : repo;
+  const sliceDeps = {
+    issue: sliceIssue,
+    repo: sliceRepo,
+    maxSlices: opts.maxSlices ?? DEFAULT_MAX_SLICES,
+    store: opts.slicePlanStore,
+    worktree,
+    router,
+    octokit,
+    log,
+    timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
+    onProviderFailure,
+  };
   let planningSlice = false;
   let sliceLabel = '';
   let plannedSlice: PlanResult['slice'];
   if (enforceSizeGate && stackMode && sliceGateOn && !opts.parkOverBudget) {
     const gate = await resolveSliceGate({
-      issue: sliceIssue,
-      repo: sliceRepo,
+      ...sliceDeps,
       title: issueTitle,
       body: issueBody,
       // #3350: issue prose never slices; only an existing trusted slice plan selects a slice here.
       oversized: false,
-      maxSlices: opts.maxSlices ?? DEFAULT_MAX_SLICES,
       ...(opts.sliceIndex !== undefined ? { sliceIndex: opts.sliceIndex } : {}),
-      store: opts.slicePlanStore,
-      worktree,
-      router,
-      octokit,
-      log: (type, msg) => log(type, msg),
-      timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
-      onProviderFailure,
     });
     const park = (reason: string): PlanResult => ({
       ok: false,
@@ -558,6 +569,18 @@ async function planPhaseImpl(opts: {
     );
   }
 
+  const stackSlice = (scope: string, sizeReason: string, fileReason: string) =>
+    routeStackSlice({
+      ...sliceDeps,
+      title: issueTitle,
+      body: issueBody,
+      oversized: true,
+      sizeReason,
+      planningSlice,
+      sliceLabel,
+      scope,
+      fileReason,
+    });
   const sizeGate =
     readiness.template === 'factory-task'
       ? {
@@ -649,6 +672,7 @@ async function planPhaseImpl(opts: {
         agentMemoryCtx,
         runnableRoutes,
         sizeGate,
+        stackSizeGate: stackMode && enforceSizeGate && !opts.parkOverBudget,
         previousAttempt: opts.previousAttempt,
       }),
       steering,
@@ -695,13 +719,18 @@ async function planPhaseImpl(opts: {
         const escalateLine = escalationLine(result.output);
         const escalateKind = classifyEscalation(escalateLine);
         log('escalate', escalateLine ?? 'plan escalated', escalateKind ? { escalateKind } : undefined);
+        const outcome =
+          escalateKind === 'split' && stackMode && enforceSizeGate && sliceGateOn && !opts.parkOverBudget
+            ? await stackSlice(escalateLine ?? 'planner requested a split', escalateLine ?? '', escalateLine ?? '')
+            : undefined;
         return {
           ok: false,
           route: failureRoute,
           specPath,
           model: result.model,
-          escalate: escalateLine,
+          escalate: outcome?.reason ?? escalateLine,
           designArtifact: null,
+          ...(outcome?.sliceCount === undefined ? {} : { sliced: { sliceCount: outcome.sliceCount } }),
         };
       }
 
@@ -800,41 +829,12 @@ async function planPhaseImpl(opts: {
         }
         // ADR-0147: in stack mode the post-plan gate slices a whole issue; a slice is never sliced again.
         if (stackMode) {
-          if (planningSlice) {
-            const reason = `${sliceLabel} exceeds the bounded-build budget (${scope}) — parked; a slice is never sliced again`;
-            log('size-gate-escalated', reason);
-            return park(reason);
-          }
-          const gate = await resolveSliceGate({
-            issue: sliceIssue,
-            repo: sliceRepo,
-            title: issueTitle,
-            body: issueBody,
-            oversized: true,
-            sizeReason: `plan scope exceeds the bounded-build budget: ${scope}`,
-            maxSlices: opts.maxSlices ?? DEFAULT_MAX_SLICES,
-            store: opts.slicePlanStore,
-            worktree,
-            router,
-            octokit,
-            log: (type, msg) => log(type, msg),
-            timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
-            onProviderFailure,
-          });
-          // #3351: slices that mostly edit the same files keep the issue whole; PLAN continues.
-          if (gate.kind !== 'cohesive') {
-            if (gate.kind === 'slice') {
-              const reason = `plan scope exceeds the bounded-build budget (${scope}) — sliced into ${gate.plan.slices.length} slice(s); the next run plans slice ${gate.slice.index}`;
-              return { ...park(reason), sliced: { sliceCount: gate.plan.slices.length } };
-            }
-            if (gate.kind === 'over-cap' || gate.kind === 'unsliceable') {
-              log('size-gate-escalated', gate.reason);
-              return park(gate.reason);
-            }
-            const reason = gate.kind === 'park' ? gate.reason : fileReason;
-            log('escalate', reason);
-            return park(reason);
-          }
+          const outcome = await stackSlice(scope, `plan scope exceeds the bounded-build budget: ${scope}`, fileReason);
+          if (outcome)
+            return {
+              ...park(outcome.reason),
+              ...(outcome.sliceCount === undefined ? {} : { sliced: { sliceCount: outcome.sliceCount } }),
+            };
         } else {
           log('size-gate-escalated', fileReason);
           return park(fileReason);

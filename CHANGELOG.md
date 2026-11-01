@@ -10,6 +10,7 @@ section to `## X.Y.Z - date`. See
 ### Fixed
 
 - Honor hosted base CI before starting work or merging, and pause merges after a factory merge leaves the base red (#3856).
+- Stack mode routes planner requests to split an oversized issue through the slice gate; missing information and contradictions still park (#3855).
 
 ## 0.9.25 - 2026-10-30
 

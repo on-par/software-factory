@@ -33,7 +33,7 @@
   "packages/core/src/phases/check.test.ts": 2763,
   "packages/core/src/phases/check.ts": 827,
   "packages/core/src/phases/plan.test.ts": 3603,
-  "packages/core/src/phases/plan.ts": 953,
+  "packages/core/src/phases/plan.ts": 922,
   "packages/core/src/phases/ship.test.ts": 2349,
   "packages/core/src/phases/ship.ts": 680,
   "packages/core/src/public-api.test.ts": 910,
