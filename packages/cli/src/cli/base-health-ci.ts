@@ -7,6 +7,7 @@ type RequiredChecksVerdict = Awaited<ReturnType<typeof fetchRequiredChecksVerdic
 
 interface BaseChecksOptions {
   checks?: readonly string[];
+  branch?: string;
   events?: string;
   lane?: string;
 }
@@ -31,7 +32,7 @@ export function baseChecksVerdict(
   return (sha) =>
     fetchRequiredChecksVerdict(
       octokit,
-      { owner, repo, branch: 'main', sha },
+      { owner, repo, branch: opts.branch ?? 'main', sha },
       {
         pushFallback: true,
         checks: opts.checks,

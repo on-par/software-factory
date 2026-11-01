@@ -3,9 +3,11 @@
 
 import type { EventTraits } from './event-traits.js';
 
-export type ConfigEventKind = 'config_unknown_key' | 'config_invalid_value';
+export type ConfigEventKind = 'config_unknown_key' | 'config_invalid_value' | 'red-main' | 'red-main-cleared';
 
 export const CONFIG_EVENT_TRAITS: Record<ConfigEventKind, EventTraits> = {
+  'red-main': { severity: 'warn', isPark: false, isTerminal: false },
+  'red-main-cleared': { severity: 'info', isPark: false, isTerminal: false },
   // An unknown nested config key stripped by the runtime schema, warned once per key at run start (#3568).
   config_unknown_key: { severity: 'warn', isPark: false, isTerminal: false },
   // A known config key with an unsupported value, ignored with a warning at run start (#3829, ADR-0160).

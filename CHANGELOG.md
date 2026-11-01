@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Fixed
+
+- Honor hosted base CI before starting work or merging, and pause merges after a factory merge leaves the base red (#3856).
+
 ## 0.9.25 - 2026-10-30
 
 One stack engine for `run-issue` and `run-brief` (`--size-gate` takes `off` or `stack`, `file` and `slice` are deprecated aliases for `stack`, and `--run-children` is removed), PR bodies whose risk receipt no longer lists changed paths or internal plan names, and Codex running with no sandbox by default (#3832, #3817, #3824).

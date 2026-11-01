@@ -148,10 +148,18 @@ export function defaultOctokit() {
       rateLimit: { get: vi.fn(async () => ({ data: { resources: { core: { limit: 5000, remaining: 5000 } } } })) },
       pulls: {
         list: vi.fn(async ({ state, head }: any) => ({ data: state === 'open' ? [openPrFixture(head)] : [] })),
-        get: vi.fn(async () => ({ data: { head: { sha: 'abc123' } } })),
+        get: vi.fn(async () => ({
+          data: { head: { sha: 'abc123' }, base: { ref: 'main' }, merge_commit_sha: 'merged' },
+        })),
         merge: vi.fn(async () => ({})),
       },
       git: { deleteRef: vi.fn(async () => ({})) },
+      repos: {
+        getBranch: vi.fn(async () => ({ data: { commit: { sha: 'base' } } })),
+        getStatusChecksProtection: vi.fn(async () => ({ data: { contexts: [] } })),
+        getBranchRules: vi.fn(async () => ({ data: [] })),
+      },
+      actions: { listWorkflowRunsForRepo: vi.fn(async () => ({ data: { workflow_runs: [] } })) },
       checks: { listForRef: vi.fn(async () => ({ data: { check_runs: [] } })) },
       search: { issuesAndPullRequests: vi.fn(async () => ({ data: { items: [] } })) },
     },

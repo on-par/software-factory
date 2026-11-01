@@ -69,6 +69,29 @@ describe('checkBaseHealth', () => {
     expect(arg.failing).toEqual(BASE_HEALTH_CHECKERS.map((checker) => ({ checker, result: 'FAIL', details: '' })));
   });
 
+  it('reports hosted CI failure even when local checks are green', async () => {
+    const runBaseline = vi.fn<typeof runBaselineCheckers>(async () => report({}));
+    const res = await checkBaseHealth(
+      opts(
+        { runBaseline },
+        {
+          requiredChecksVerdict: async () => ({ green: false, state: 'failed', reason: 'browser failure' }),
+        },
+      ),
+    );
+    expect(res).toMatchObject({ kind: 'red', failingChecks: ['hosted-ci'], reason: 'browser failure' });
+    expect(messages().some((m) => m.includes('browser failure'))).toBe(true);
+  });
+
+  it.each([
+    { green: false, state: 'pending' as const, reason: 'running' },
+    { green: false, noCodeHealthChecks: true as const, reason: 'none' },
+  ])('keeps the local green verdict when hosted CI is undecided', async (verdict) => {
+    const runBaseline = vi.fn<typeof runBaselineCheckers>(async () => report({}));
+    const result = await checkBaseHealth(opts({ runBaseline }, { requiredChecksVerdict: async () => verdict }));
+    expect(result.kind).toBe('green');
+  });
+
   it('red: names the checkers that fail on base', async () => {
     const runBaseline = vi.fn<typeof runBaselineCheckers>(async () => report({ tests: 'fails-on-base' }));
     const res = await checkBaseHealth(opts({ runBaseline }));
@@ -360,13 +383,13 @@ describe('checkBaseHealth compile timeout (#3186)', () => {
     }
   });
 
-  it('a non-timeout compile failure stays red and never calls the required-checks lookup', async () => {
+  it('a non-timeout compile failure stays red with the required-checks lookup', async () => {
     const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
     const { res, cached, dir } = await run({ timedOut: false }, { requiredChecksVerdict });
     try {
       expect(res).toMatchObject({ kind: 'red', failingChecks: ['compile'] });
       expect(res.awaitingCi).toBeUndefined();
-      expect(requiredChecksVerdict).not.toHaveBeenCalled();
+      expect(requiredChecksVerdict).toHaveBeenCalled();
       expect(cached?.result).toBe('FAIL');
     } finally {
       await rm(dir, { recursive: true, force: true });
