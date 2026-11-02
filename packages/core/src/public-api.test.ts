@@ -311,8 +311,8 @@ const INTERNAL_API_KEYS = [
   ...'describeChecksProbe holdRunConfigSnapshot'.split(' '), // #3600
   // `factory init --detect-checks`: heuristics, agent prompt and reply, shell-free tokenizer
   ...'CHECK_KINDS buildDetectChecksPrompt detectCheckHeuristics heuristicProposal parseDetectedChecks'.split(' '),
-  'tokenizeEvidenceCommand',
-  ...'BaselineCache resolveBaselineCacheTtlHours'.split(' '), // #3540
+  ...'tokenizeEvidenceCommand coverageRatchetEvidence'.split(' '), // #1957
+  ...'BaselineCache resolveBaselineCacheTtlHours buildTierEvidence formatTierEvidence'.split(' '), // #3540, #1957
   ...'openCodeVersion allProvidersDownReleasePayload'.split(' '), // #3340
   'fetchRequiredChecksVerdict', // #3186 CI lookup for a timed-out compile; base health (#2339) follows
   'BASE_HEALTH_CHECKERS',

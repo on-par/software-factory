@@ -1,8 +1,9 @@
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 import type { CoverageMetrics } from '@on-par/factory-core/internal';
 import {
   checkScopedRatchetDrift,
+  coverageRatchetEvidence,
   DEFAULT_RATCHET_SLACK,
   parseCoverageSummaryScopes,
   renderRatchetReport,
@@ -13,6 +14,7 @@ import vitestConfig from '../vitest.config.js';
 interface Args {
   summary: string;
   slack: number;
+  out?: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -20,6 +22,7 @@ function parseArgs(argv: string[]): Args {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--summary') args.summary = argv[++i] ?? args.summary;
+    else if (arg === '--out') args.out = argv[++i];
     else if (arg === '--slack') args.slack = Number(argv[++i]);
     else throw new Error(`unknown flag: ${arg}`);
   }
@@ -54,6 +57,10 @@ const result = checkScopedRatchetDrift(measured, committedThresholds, args.slack
 const report = renderRatchetReport(result, args.slack);
 
 console.log(report);
+
+if (args.out) {
+  writeFileSync(args.out, `${JSON.stringify(coverageRatchetEvidence(result.ok, new Date()))}\n`);
+}
 
 if (process.env.GITHUB_STEP_SUMMARY) {
   appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n${report}\n`);

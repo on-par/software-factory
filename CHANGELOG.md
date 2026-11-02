@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- `factory classifier report` (and `--json` as `tier`) shows trust-tier promotion evidence: configured tier, coverage ratchet, per-package mutation vs floor, human-intervention rate with a caveat, rule-of-three slips and `eligibleFor` with the unmet criteria; missing or stale evidence is `unknown`, never 0%; `npm run coverage-ratchet -- --out coverage-ratchet.json` writes the coverage evidence (#1957).
+
 ### Fixed
 
 - Land no longer stalls when a required check only runs on pull requests: a required context with no run on the base head is treated as no hosted base signal, merges proceed after a short grace and one warn event names the context (#3870).
