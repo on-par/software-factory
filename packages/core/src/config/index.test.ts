@@ -940,12 +940,15 @@ describe('resolveSizeGateMode (#2048)', () => {
   });
 
   it.each(['SLICE', 'OFF', ' off ', '', 'STACK', ' stack '])(
-    'resolves unknown mode %j to stack without a warning',
+    'resolves unknown mode %j to stack with one warning naming it (#3850)',
     (mode) => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       try {
         expect(resolveSizeGateMode(withMode(mode))).toBe('stack');
-        expect(warn).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(
+          `factory: unknown size gate mode '${mode}' runs as stack; allowed values: off, stack`,
+        );
       } finally {
         warn.mockRestore();
       }
