@@ -176,3 +176,20 @@ describe('computeReviewVerdict', () => {
     expect(i).toEqual(before);
   });
 });
+
+describe('checker verdicts', () => {
+  it.each(['compile', 'tests', 'lint', 'links', 'accessibility'])('blocks a failure from %s', (checker) => {
+    expect(computeReviewVerdict(input([fail(checker, 'failed')]))).toEqual({
+      verdict: 'request changes',
+      reasons: [`checker ${checker} failed: failed`],
+    });
+  });
+
+  it('treats a non-deterministic failure as advisory and its pass as clean', () => {
+    expect(computeReviewVerdict(input([fail('custom', 'detail')]))).toEqual({
+      verdict: 'approve with comments',
+      reasons: ['advisory: checker custom failed: detail'],
+    });
+    expect(computeReviewVerdict(input([pass('custom')]))).toEqual({ verdict: 'approve', reasons: [] });
+  });
+});

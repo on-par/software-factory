@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- `npm run mutation` now mutates the merge-gating review modules (`floor`, `risk`, `verdict`, `routing`) on Stryker 10.1.1, which runs mutants correctly under Vitest 5.
+
 ### Removed
 
 - Removed the experimental discovery exports from `@on-par/factory-core`.

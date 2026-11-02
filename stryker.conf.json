@@ -8,5 +8,17 @@
     "Revisit when @stryker-mutator/core's TSConfigPreprocessor supports typescript >= 7: then point tsconfigFile at ./tsconfig.json (or delete both keys — but note the option DEFAULTS to 'tsconfig.json', which exists here, so merely deleting tsconfigFile today re-triggers the crash)."
   ],
   "tsconfigFile": "stryker-tsconfig-rewrite-disabled.json",
-  "mutate": []
+  "mutate": [
+    "packages/core/src/review/floor.ts",
+    "packages/core/src/review/risk.ts",
+    "packages/core/src/review/verdict.ts",
+    "packages/core/src/review/routing.ts"
+  ],
+  "vitest": { "configFile": "vitest.config.ts", "related": true },
+  "coverageAnalysis": "perTest",
+  "reporters": ["clear-text", "progress", "html", "json"],
+  "htmlReporter": { "fileName": "reports/mutation/mutation.html" },
+  "jsonReporter": { "fileName": "reports/mutation/mutation.json" },
+  "concurrency": 4,
+  "timeoutMS": 60000
 }

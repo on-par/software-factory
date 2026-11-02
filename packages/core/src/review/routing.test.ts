@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { DiffRunner } from '../checkers/design-smells.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from './floor.js';
 import {
   classifierGateReason,
@@ -15,6 +18,8 @@ import {
 } from './routing.js';
 
 const rules = DEFAULT_REVIEW_FLOOR_RULES;
+const tempDirs = createTempDirs();
+afterEach(() => tempDirs.cleanup());
 
 describe('parseNumstat', () => {
   it('parses added/removed/path and skips blank lines', () => {
@@ -176,6 +181,56 @@ describe('readReviewFloorChanges', () => {
     await expect(readReviewFloorChanges('/w', { run })).rejects.toThrow(/no base ref/);
   });
 
+  it.each([
+    { parent: true, ok: true, output: '  abc123\n', expected: 'abc123' },
+    { parent: true, ok: true, output: '  \n', expected: 'slice-1' },
+    { parent: true, ok: false, output: 'ignored', expected: 'slice-1' },
+    { parent: false, ok: true, output: '  abc123\n', expected: 'abc123' },
+    { parent: false, ok: true, output: '  \n', expected: 'origin/main' },
+    { parent: false, ok: false, output: 'ignored', expected: 'origin/main' },
+  ])('chooses base $expected for parent=$parent, ok=$ok', async ({ parent, ok, output, expected }) => {
+    const ref = parent ? 'slice-1' : 'origin/main';
+    const { run, calls } = fakeRun({
+      [`git rev-parse --verify --quiet ${ref}`]: { ok: true },
+      [`git merge-base ${ref} HEAD`]: { ok, stdout: output },
+      [`git diff --numstat --no-renames ${expected}`]: { ok: true, stdout: '1\t0\tdocs/a.md\n' },
+      'git ls-files --others --exclude-standard': { ok: true },
+    });
+    expect(
+      await readReviewFloorChanges('/w', {
+        run,
+        fallbackBaseRef: 'fallback',
+        ...(parent ? { parentBaseRef: ref } : {}),
+      }),
+    ).toEqual([{ path: 'docs/a.md', added: 1, removed: 0 }]);
+    expect(calls.filter((call) => call.includes('fallback'))).toEqual([]);
+  });
+
+  it('rejects an unresolved fallback ref', async () => {
+    const { run, calls } = fakeRun({});
+    await expect(readReviewFloorChanges('/w', { run, fallbackBaseRef: 'missing' })).rejects.toThrow(
+      'no base ref for review floor (tried origin/main, origin/master, build diff base)',
+    );
+    expect(calls.filter((call) => call.includes('missing'))).toEqual([
+      'git rev-parse --verify --quiet missing^{commit}',
+    ]);
+  });
+
+  it('reads untracked files by default and skips blank listing lines', async () => {
+    const dir = await tempDirs.make('review-floor-');
+    writeFileSync(join(dir, 'trailing.txt'), 'one\ntwo\n');
+    writeFileSync(join(dir, 'plain.txt'), 'one\ntwo');
+    const { run } = fakeRun({
+      'git rev-parse --verify --quiet origin/main': { ok: true },
+      'git diff --numstat --no-renames origin/main': { ok: true },
+      'git ls-files --others --exclude-standard': { ok: true, stdout: '\ntrailing.txt\n  \nplain.txt\n' },
+    });
+    expect(await readReviewFloorChanges(dir, { run })).toEqual([
+      { path: 'trailing.txt', added: 2, removed: 0 },
+      { path: 'plain.txt', added: 2, removed: 0 },
+    ]);
+  });
+
   it('throws when numstat fails', async () => {
     const { run } = fakeRun({ 'git rev-parse --verify --quiet origin/main': { ok: true } });
     await expect(readReviewFloorChanges('/w', { run })).rejects.toThrow(/numstat/);
@@ -325,5 +380,40 @@ describe('decideTrustTier (#1960)', () => {
 
   it('returns the routing untouched at T0 without a demotion', () => {
     expect(decideTrustTier(aFloor, { trustTier: 'T0', t1SampleRate: 1 }, input)).toStrictEqual(aFloor);
+  });
+});
+
+describe('trust routing edge cases', () => {
+  const input = { repo: 'o/r', issue: 7 };
+
+  it('does not sample an ungated B floor or an already gated A floor', () => {
+    const b: ReviewRouting = { floor: 'B', rules: [], gated: false };
+    const gatedA: ReviewRouting = { floor: 'A', rules: [], gated: true, reason: 'held' };
+    expect(decideT1Sample(b, { trustTier: 'T1', t1SampleRate: 1 }, input)).toBe(b);
+    expect(decideT1Sample(gatedA, { trustTier: 'T1', t1SampleRate: 1 }, input)).toBe(gatedA);
+  });
+
+  it('only issues a receipt for an ungated A floor at T2', () => {
+    const a: ReviewRouting = { floor: 'A', rules: [], gated: false };
+    const b: ReviewRouting = { floor: 'B', rules: [], gated: false };
+    const gatedA: ReviewRouting = { floor: 'A', rules: [], gated: true, reason: 'held' };
+    expect(decideTrustTier(a, { trustTier: 'T2', t1SampleRate: 0 }, input)).toEqual({
+      ...a,
+      trustTier: { configured: 'T2', effective: 'T2' },
+      receipt: 't2-auto',
+    });
+    expect(decideTrustTier(b, { trustTier: 'T2', t1SampleRate: 0 }, input)).toEqual({
+      ...b,
+      trustTier: { configured: 'T2', effective: 'T2' },
+    });
+    expect(decideTrustTier(gatedA, { trustTier: 'T2', t1SampleRate: 0 }, input)).toEqual({
+      ...gatedA,
+      trustTier: { configured: 'T2', effective: 'T2' },
+    });
+    expect(decideTrustTier(a, { trustTier: 'T0', t1SampleRate: 0 }, input)).toEqual(a);
+    expect(decideTrustTier(a, { trustTier: 'T9' as never, t1SampleRate: 0 }, input)).toEqual({
+      ...a,
+      trustTier: { configured: 'T9', effective: 'T0' },
+    });
   });
 });
