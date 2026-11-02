@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { cmdRunBrief, type RunBriefRuntime } from './run-brief.js';
 import { errored, h, installShipHarness, phases, runMainWith } from './test-support/ship-harness.js';
 
 installShipHarness();
@@ -17,6 +18,13 @@ function brief(): string {
 }
 
 describe('run-brief --base-branch (#3764)', () => {
+  it('rejects an empty list of brief files before accessing the runtime', async () => {
+    await expect(cmdRunBrief([], {}, {} as RunBriefRuntime)).rejects.toMatchObject({
+      message: expect.stringContaining('needs at least one brief file'),
+      code: 2,
+    });
+  });
+
   it('rejects a -prefixed --base-branch before resolving any brief', async () => {
     const res = await runMain('run-brief', brief(), '--base-branch=-x');
     expect(res).toEqual({ exited: true, code: 2 });

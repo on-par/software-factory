@@ -1,6 +1,6 @@
 # ADR-0078: SCBench workspaces carry a factory-authored generic constitution; briefs stay verbatim upstream
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-09-02
 
 ## Context

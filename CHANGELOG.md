@@ -7,6 +7,28 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- `npm run mutation` now mutates the merge-gating review modules (`floor`, `risk`, `verdict`, `routing`) on Stryker 10.1.1, which runs mutants correctly under Vitest 5.
+
+### Removed
+
+- Removed the experimental discovery exports from `@on-par/factory-core`.
+- Removed the unpublished dashboard and server packages; no shipped command used them.
+- Removed the experimental, flag-gated `factory hosted` commands and hosted control plane and runner exports; contained fork-PR review is unchanged.
+- `@on-par/factory-core` no longer exports `FactoryConfigV2Schema`, `factoryConfigV2JsonSchema`, `loadV2Config` and `parseV2Config`; no shipped command read them and repo config is unchanged (#3444).
+
+## 0.9.26 - 2026-11-01
+
+The factory never merges onto a red base: it honors hosted base CI before starting work or merging and pauses a repo's merges while its base is red, and stack mode sends a planner's split request to the stack splitter instead of parking the issue (#3856, #3855).
+All seven published `@on-par` packages move to 0.9.26 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Fixed
+
+- Honor hosted base CI before starting work or merging, and pause merges after a factory merge leaves the base red (#3856).
+- Stack mode routes planner requests to split an oversized issue through the slice gate; missing information and contradictions still park (#3855).
+
 ## 0.9.25 - 2026-10-30
 
 One stack engine for `run-issue` and `run-brief` (`--size-gate` takes `off` or `stack`, `file` and `slice` are deprecated aliases for `stack`, and `--run-children` is removed), PR bodies whose risk receipt no longer lists changed paths or internal plan names, and Codex running with no sandbox by default (#3832, #3817, #3824).

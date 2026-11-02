@@ -63,6 +63,15 @@ describe('runSteer', () => {
     expect((await readIssueRunState(file()))?.steers).toHaveLength(2);
   });
 
+  it('reports an invalid default actor without changing the run', async () => {
+    const before = await readFile(file(), 'utf8');
+    await expect(runSteer('42', { message: 'x' }, { ...deps, defaultActor: () => '' })).rejects.toMatchObject({
+      code: 'bad-input',
+      message: expect.stringContaining('actor'),
+    });
+    expect(await readFile(file(), 'utf8')).toBe(before);
+  });
+
   it('stores source bot and the given actor', async () => {
     await runSteer('42', { message: 'x', source: 'bot', actor: 'renovate[bot]', unblocked: true }, deps);
     expect((await readIssueRunState(file()))?.steers).toEqual([

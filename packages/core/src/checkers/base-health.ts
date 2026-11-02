@@ -261,6 +261,11 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
         }
       }
     }
+    const hosted = await ciVerdict();
+    if (hosted.state === 'failed' && !hosted.noCodeHealthChecks) {
+      failing.push('hosted-ci');
+      log('check', `base health: hosted CI failed on ${ref} ${baseSha}: ${hosted.reason}`);
+    }
     const cached = memoized || comparisons.some((c) => c.cached === true);
     if (cached) {
       log('check', `base health: cache hit for ${sha8} (${memoized ? 'shared with another lane' : 'baseline cache'})`);
@@ -273,6 +278,7 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
         baseSha,
         failingChecks: failing,
         cached,
+        ...(hosted.state === 'failed' && !hosted.noCodeHealthChecks ? { reason: hosted.reason } : {}),
         ...(awaitingCi ? { awaitingCi } : {}),
         ...(confirmedLocally ? { confirmedLocally: true } : {}),
       };

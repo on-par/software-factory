@@ -26,6 +26,17 @@ describe('cli status disk guard (#2284)', () => {
     expect(statusJsonSchema.parse(json)).toEqual(json);
   });
 
+  it('reports unavailable disk and draft data when factory configuration cannot be read', async () => {
+    const loadFactoryConfigForRepo = () => {
+      throw new Error('config unavailable');
+    };
+    await runMainWith({ loadFactoryConfigForRepo }, 'status', '--json');
+    const json = JSON.parse(logged().trim());
+    expect(json.disk).toBeNull();
+    expect(json.openFactoryDrafts).toBeNull();
+    expect(statusJsonSchema.parse(json)).toEqual(json);
+  });
+
   it('prints nothing new when the guard is disabled', async () => {
     vi.stubEnv('FACTORY_MIN_FREE_GB', '0');
     h.octokit.rest.pulls.list = vi.fn(async () => ({ data: [] })) as never;

@@ -8,16 +8,12 @@ import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
 import { ITERATE_INTERNAL_KEYS, KPIS_API_KEYS, TESTING_API_KEYS, WORK_KEY_API_KEYS } from './public-api-keys.js';
 const PUBLIC_API_KEYS = [
-  'FactoryConfigV2Schema',
-  'factoryConfigV2JsonSchema',
   'getConstitutionsDir',
   'getFactoryPaths',
   'loadFactoryConfig',
   'loadFactoryConfigForRepo',
   'loadModelsConfig',
   'loadRoutesConfig',
-  'loadV2Config',
-  'parseV2Config',
   'resolveAdrMandate',
   'resolveAutoFailover',
   'resolveDefectWindowDays',
@@ -92,33 +88,10 @@ const PUBLIC_API_KEYS = [
   'validateQueue',
   'DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS',
   'partitionLocalQueueByActivity', // Queue activity (#1342)
-  // Hosted execution (control plane)
-  'createHostedJobStore',
-  'createSqliteHostedJobStore',
-  'hostedExecEnabled',
   'laneContainerName',
   'provisionLaneContainer',
-  'resolveHostedJobStore',
-  'runContainerJob',
-  'runDockerRunner',
-  'runFakeRunner',
-  'runHostedSmoke',
-  'runWatchdogSweep',
-  'summarizeHostedJob',
-  'summarizeHostedJobs',
   'AUTHORITY_REDACTION_MASK',
   'redactSecrets',
-  'withAuthority',
-  'prepareGitHubAuthority',
-  'prototypeFallbackMint',
-  'redactGitHubCredential',
-  'resolveHostedAuthority',
-  'createHostedControlPlaneServer',
-  'handleHostedControlPlaneRequest',
-  'createHttpHostedControlPlaneClient',
-  'runOneJobRunner',
-  'createHttpHostedJobClient',
-  'queueAndTailJob',
   // Work requests
   'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',
@@ -271,23 +244,6 @@ const PUBLIC_API_KEYS = [
   'renderKpiDriftLine',
   'renderKpiReport',
   'renderKpiTrend',
-  // Discovery
-  'DEFAULT_MAX_CANDIDATES',
-  'runDiscoveryScan',
-  'authorDraftEpic',
-  'DEFAULT_OWNER_QUESTIONS',
-  'DISCOVERY_LABEL',
-  'EXPLORING_LABEL',
-  'ideaMarker',
-  'advanceDraftEpic',
-  'ARCHIVED_LABEL',
-  'classifyLifecycle',
-  'DEFAULT_MAX_STORIES',
-  'READY_LABEL',
-  'renderStoryBody',
-  'seedStories',
-  'VALIDATED_LABEL',
-  'WONTFIX_LABEL',
   // Ingest
   'issueFromFactoryBranch',
   'runAutoIngest',
@@ -662,9 +618,6 @@ const INTERNAL_API_KEYS = [
   // Green-and-ready PR reporting (#1000)
   'createOctokitGreenPrClient',
   'findUnmergedGreenPrs',
-  // Read-only GitHub ProjectV2 queue-intent polling (#847)
-  // Board-constrained local lane dispatch (#848)
-  // ProjectV2 queue-intent scheduler (#867)
   // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
   'wrapCommandInSandbox',
 ];

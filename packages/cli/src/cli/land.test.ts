@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { defaultOctokit } from './__fixtures__/land-octokit.js';
 import { openPrFixture } from './__fixtures__/open-pr.js';
 import { type CliDeps, cmdLand as cliCmdLand, main } from './index.js';
 
@@ -39,33 +40,6 @@ function paths() {
     events: join(state, 'events.ndjson'),
     mergeLock: join(state, 'merge.lock'),
     gitLock: join(state, 'git.lock'),
-  };
-}
-
-function defaultOctokit() {
-  return {
-    rest: {
-      issues: {
-        get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })),
-        listForRepo: vi.fn(async () => ({ data: [] })),
-        listLabelsOnIssue: vi.fn(async () => ({ data: [] })),
-        listComments: vi.fn(async () => ({ data: [] })),
-      },
-      users: { getAuthenticated: vi.fn(async () => ({ data: { id: 7 } })) },
-      pulls: {
-        list: vi.fn(async ({ state, head }: any) => ({ data: state === 'open' ? [openPrFixture(head)] : [] })),
-        get: vi.fn(async () => ({ data: { head: { sha: 'abc123' } } })),
-        merge: vi.fn(async () => ({})),
-      },
-      git: { deleteRef: vi.fn(async () => ({})) },
-      checks: { listForRef: vi.fn(async () => ({ data: { check_runs: [] } })) },
-      search: { issuesAndPullRequests: vi.fn(async () => ({ data: { items: [] } })) },
-    },
-    graphql: vi.fn(async (query: string) =>
-      query.trimStart().startsWith('query')
-        ? { repository: { pullRequest: { id: 'PR_ID', isDraft: false, mergeStateStatus: 'CLEAN' } } }
-        : {},
-    ),
   };
 }
 

@@ -1,6 +1,6 @@
 # ADR-0082: Benchmark GitHub isolation is confirmed only from retained run evidence, never from configuration intent
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-09-01
 
 ## Context

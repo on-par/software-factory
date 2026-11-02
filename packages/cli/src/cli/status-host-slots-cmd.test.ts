@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { installShipHarness, logged, runMainWith } from './test-support/ship-harness.js';
+import { h, installShipHarness, logged, runMainWith } from './test-support/ship-harness.js';
 
 installShipHarness();
 
@@ -40,6 +40,18 @@ describe('host slots (#3045)', () => {
     expect(out).toContain('on-par/b#22');
     expect(out).toContain('builds 2/2 in use');
     expect(out.indexOf('== Host slots ==')).toBeLessThan(out.indexOf('== Queue =='));
+  });
+
+  it('reports a host slot lookup error and continues displaying status', async () => {
+    let calls = 0;
+    const loadFactoryConfigForRepo = () => {
+      calls += 1;
+      if (calls === 3) throw new Error('config unavailable');
+      return h.factoryConfig;
+    };
+    await runMainWith({ loadFactoryConfigForRepo }, 'status');
+    expect(logged()).toContain('host slot lookup failed — config unavailable');
+    expect(logged()).toContain('== Queue ==');
   });
 
   it('status shows no host slots in use when the slot directory is empty or missing (#3045)', async () => {

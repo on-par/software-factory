@@ -9,66 +9,6 @@ import type { CliDeps, ProgramHandlers } from './index.js';
 import { cmdSelfUpdateApply } from './self-update-apply.js';
 
 export function registerAdvancedCommands(program: Command, handlers: ProgramHandlers, deps: CliDeps): void {
-  const hosted = program
-    .command('hosted')
-    .description('Experimental remote-runner execution (needs FACTORY_HOSTED_EXEC=1)');
-  hosted
-    .command('smoke')
-    .description('Local end-to-end hosted-exec smoke: create → lease → Docker run → result → cleanup')
-    .option('--repo <slug>', 'owner/repo to clone and run against', 'on-par/software-factory')
-    .option('--image <image>', 'Container image for the smoke run', 'node:20-alpine')
-    .action(async (opts: { repo?: string; image?: string }) => {
-      await handlers.cmdHostedSmoke(opts);
-    });
-  hosted
-    .command('runner')
-    .description('Register capabilities with the local control plane and lease one compatible job, then exit')
-    .option('--url <url>', 'Control-plane base URL', 'http://127.0.0.1:8799')
-    .option('--runner-id <id>', 'Runner identity (default runner-<pid>)')
-    .option('--capabilities <csv>', 'Comma-separated capability list', 'git,node')
-    .option('--timeout <ms>', 'Bounded wait window for a compatible job, in ms', '30000')
-    .option('--poll-interval <ms>', 'Delay between poll attempts, in ms', '2000')
-    .option('--lease-ttl <ms>', 'Lease TTL, in ms', '300000')
-    .option('--heartbeat-interval <ms>', 'Expected heartbeat interval, in ms', '30000')
-    .action(
-      async (opts: {
-        url?: string;
-        runnerId?: string;
-        capabilities?: string;
-        timeout?: string;
-        pollInterval?: string;
-        leaseTtl?: string;
-        heartbeatInterval?: string;
-      }) => {
-        await handlers.cmdHostedRunner(opts);
-      },
-    );
-  hosted
-    .command('queue')
-    .description('Queue one job to the local control plane, tail it to terminal, print the result')
-    .option('--url <url>', 'Control-plane base URL', 'http://127.0.0.1:8799')
-    .option('--repo <slug>', 'owner/repo the job runs against', 'on-par/software-factory')
-    .option('--task <text>', 'Opaque task payload')
-    .option('--capabilities <csv>', 'Comma-separated required capabilities', 'git,node')
-    .option('--authority <authority>', 'Required authority', 'repo:read')
-    .option('--timeout <ms>', 'Bounded wait for a terminal result, in ms', '120000')
-    .option('--poll-interval <ms>', 'Delay between summary polls, in ms', '1000')
-    .option('--job-id <id>', 'Explicit job id (default server-generated)')
-    .action(
-      async (opts: {
-        url?: string;
-        repo?: string;
-        task?: string;
-        capabilities?: string;
-        authority?: string;
-        timeout?: string;
-        pollInterval?: string;
-        jobId?: string;
-      }) => {
-        await handlers.cmdHostedQueue(opts);
-      },
-    );
-
   program
     .command('local-small-dry-run <issue>')
     .description('Create a bounded local-small step plan and first context pack without changing source files')

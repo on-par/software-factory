@@ -9,8 +9,16 @@
   ],
   "tsconfigFile": "stryker-tsconfig-rewrite-disabled.json",
   "mutate": [
-    "packages/scbench-adapter/src/**/*.ts",
-    "!packages/scbench-adapter/src/**/*.test.ts",
-    "!packages/scbench-adapter/src/manifest-fixture.ts"
-  ]
+    "packages/core/src/review/floor.ts",
+    "packages/core/src/review/risk.ts",
+    "packages/core/src/review/verdict.ts",
+    "packages/core/src/review/routing.ts"
+  ],
+  "vitest": { "configFile": "vitest.config.ts", "related": true },
+  "coverageAnalysis": "perTest",
+  "reporters": ["clear-text", "progress", "html", "json"],
+  "htmlReporter": { "fileName": "reports/mutation/mutation.html" },
+  "jsonReporter": { "fileName": "reports/mutation/mutation.json" },
+  "concurrency": 4,
+  "timeoutMS": 60000
 }

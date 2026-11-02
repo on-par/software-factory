@@ -1,6 +1,6 @@
 # ADR-0046: SSE resume IDs are monotonic per attached repository
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-08-25
 
 ## Context

@@ -277,8 +277,9 @@ describe('OpenCode doctor auth probe', () => {
     },
   };
   const doctorRegistry = new ModelRegistry(doctorConfig);
+  const beforeReview = () => new Date('2026-10-01T00:00:00Z');
   // Single-model registry so a probe-call assertion only sees the model under test.
-  const diagnose = (id: string, probes: Parameters<typeof diagnoseModels>[1]) =>
+  const diagnose = (id: string, p: Parameters<typeof diagnoseModels>[1], probes = { now: beforeReview, ...p }) =>
     diagnoseModels(new ModelRegistry({ ...doctorConfig, models: { [id]: doctorConfig.models[id] } }), probes, true)[0];
   const hasOpencode = (cmd: string) => cmd === 'opencode';
 
@@ -338,7 +339,7 @@ describe('OpenCode doctor auth probe', () => {
     });
     const diags = diagnoseModels(
       doctorRegistry,
-      { commandAvailable: hasOpencode, envPresent: () => false, opencodeLoggedIn },
+      { commandAvailable: hasOpencode, envPresent: () => false, opencodeLoggedIn, now: beforeReview },
       true,
     ).filter((d) => d.model.startsWith('keyed-model'));
     expect(diags).toHaveLength(2);

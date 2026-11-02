@@ -1,6 +1,6 @@
 # ADR-0038: The status board's lane set is derived only from the live event stream, never from a snapshot
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-08-19
 
 ## Context

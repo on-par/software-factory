@@ -27,6 +27,7 @@ vitest-blob/
 # Stryker mutation-testing HTML/JSON output (#884). Anchored to repo root —
 # unanchored `reports/` would also shadow the tracked packages/core/src/reports/.
 /reports/
+.stryker-tmp/
 
 # Raw SCBench run outputs (scbench.run.yaml's save_dir, repo-root relative).
 # Multi-gigabyte and never baseline evidence — collect-trial copies the

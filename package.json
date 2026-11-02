@@ -1,6 +1,6 @@
 {
   "name": "@on-par/software-factory",
-  "version": "0.9.25",
+  "version": "0.9.26",
   "private": true,
   "description": "Multi-agent software factory monorepo \u2014 boss-worker-checker orchestration with multi-provider model routing and per-product constitutions.",
   "type": "module",
@@ -11,7 +11,7 @@
     "qs": "6.16.0"
   },
   "scripts": {
-    "build": "tsc -b && npm run copy-assets --workspace @on-par/factory-config && npm run build --workspace @on-par/factory-dashboard",
+    "build": "tsc -b && npm run copy-assets --workspace @on-par/factory-config",
     "dev": "npm run dev --workspace @on-par/factory-cli",
     "lint": "oxlint --type-aware --deny-warnings .",
     "typecheck": "tsc -b && npm run typecheck --workspaces",
@@ -27,7 +27,6 @@
     "eval": "tsx scripts/eval.ts",
     "local-small-scoreboard": "tsx scripts/local-small-scoreboard.ts",
     "sandbox-ab-report": "tsx scripts/sandbox-ab-report.ts",
-    "scbench": "tsx packages/scbench-adapter/src/cli.ts launch",
     "eval-history": "tsx scripts/eval-history.ts",
     "slowest-tests": "tsx scripts/slowest-tests.ts",
     "test-budget": "tsx scripts/test-budget.ts",
@@ -40,8 +39,8 @@
   "license": "MIT",
   "devDependencies": {
     "@oxlint/plugins": "1.88.0",
-    "@stryker-mutator/core": "^10.0.0",
-    "@stryker-mutator/vitest-runner": "^10.0.0",
+    "@stryker-mutator/core": "^10.1.1",
+    "@stryker-mutator/vitest-runner": "^10.1.1",
     "@types/node": "^26.6.5",
     "@vitest/coverage-v8": "^5.0.3",
     "jsdom": "^30.1.2",
