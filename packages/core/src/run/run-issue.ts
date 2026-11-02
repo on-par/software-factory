@@ -1037,6 +1037,7 @@ async function runIssueOnce(
           failingChecks: env.failingChecks,
           ...(failed.failureSignature !== undefined ? { failureSignature: failed.failureSignature } : {}),
           ...(preserve ? { buildPreserved: true } : {}),
+          ...(env.confirmedLocally ? { confirmedLocally: true } : {}),
         };
       }
       const verdict = classifyCheckFailure(failed, opts);

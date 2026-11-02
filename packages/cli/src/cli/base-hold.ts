@@ -25,6 +25,8 @@ export interface BaseHold {
   ciRecheckAfter?: string;
   /** A fresh local re-run failed while CI was green (#3287); CI green never clears it. */
   confirmedLocally?: true;
+  /** Issue released by the CHECK environment pause that wrote the hold (#3851). */
+  issue?: number;
 }
 
 /** Backoff between strict CI re-checks of a ci-awaiting hold (#3186). */
@@ -39,6 +41,7 @@ export function writeBaseHold(file: string, hold: BaseHold): void {
     since: hold.since,
     ...(hold.ciRecheckAfter !== undefined ? { ciRecheckAfter: hold.ciRecheckAfter } : {}),
     ...(hold.confirmedLocally === true ? { confirmedLocally: true as const } : {}),
+    ...(hold.issue !== undefined && Number.isInteger(hold.issue) && hold.issue > 0 ? { issue: hold.issue } : {}),
   };
   writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
 }
@@ -53,7 +56,10 @@ export function readBaseHold(file: string): BaseHold | null {
     return null;
   }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
-  const { repo, baseSha, failingChecks, since, ciRecheckAfter, confirmedLocally } = raw as Record<string, unknown>;
+  const { repo, baseSha, failingChecks, since, ciRecheckAfter, confirmedLocally, issue } = raw as Record<
+    string,
+    unknown
+  >;
   if (typeof repo !== 'string' || typeof baseSha !== 'string' || typeof since !== 'string') return null;
   if (!Array.isArray(failingChecks) || !failingChecks.every((c) => typeof c === 'string')) return null;
   const recheck =
@@ -65,6 +71,7 @@ export function readBaseHold(file: string): BaseHold | null {
     since,
     ...recheck,
     ...(confirmedLocally === true ? { confirmedLocally: true as const } : {}),
+    ...(typeof issue === 'number' && Number.isInteger(issue) && issue > 0 ? { issue } : {}),
   };
 }
 
@@ -127,6 +134,9 @@ export function formatBaseHoldStatus(hold: BaseHold): string[] {
     `  since: ${hold.since}`,
   ];
   if (hold.confirmedLocally === true) lines.push('  confirmedLocally: true');
+  if (hold.issue !== undefined) {
+    lines.push(`  waiting: #${hold.issue} is waiting on red base ${hold.baseSha.slice(0, 8)} (${checks})`);
+  }
   return lines;
 }
 

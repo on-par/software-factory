@@ -14,6 +14,7 @@ section to `## X.Y.Z - date`. See
 
 ### Fixed
 
+- A CHECK environment release whose fresh base re-run fails while GitHub CI is green now writes a `confirmedLocally` base hold, so the lane no longer re-claims and rebuilds the issue every poll; `factory status` names the waiting issue (#3851).
 - Land no longer stalls when a required check only runs on pull requests: a required context with no run on the base head is treated as no hosted base signal, merges proceed after a short grace and one warn event names the context (#3870).
 - The base CI gate and base health treat a `skipped` or `neutral` required check as passing, like GitHub, so a skipped check on main no longer writes a permanent merge pause or marks `hosted-ci` failing; an existing pause clears on the next check (#3871).
 

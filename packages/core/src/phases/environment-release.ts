@@ -17,6 +17,12 @@ export function renderEnvironmentReleaseComment(failure: EnvironmentFailure): st
     '',
     `Every failing checker also fails on base \`${failure.baseSha}\`, so no rework was run. This issue was released back to \`factory:queued\` and the lane is paused until the base is fixed.`,
     '',
+    ...(failure.confirmedLocally
+      ? [
+          `A fresh local re-run on the base failed while GitHub CI is green, so this issue is waiting on a red base: the factory will not claim it again until origin/main moves off \`${failure.baseSha}\` and the new base is green.`,
+          '',
+        ]
+      : []),
     'Failing checkers:',
     ...failure.failingChecks.map((c) => `- \`${c}\``),
     '',

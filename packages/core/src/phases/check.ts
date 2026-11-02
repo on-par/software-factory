@@ -65,6 +65,8 @@ export interface EnvironmentFailure {
   cause: BaseFailureCause;
   /** Full-output log files from round 1 plus the base-run log dir; empty when logsDir is unset. */
   logPaths: string[];
+  /** Base FAIL confirmed by a fresh local run while CI is green (#3851). */
+  confirmedLocally?: true;
 }
 
 export interface CheckPhaseResult {
@@ -465,6 +467,7 @@ async function checkPhaseImpl(opts: {
       failingChecks: failingCheckerNames(summary),
       cause: classifyBaseFailureCause(summary),
       logPaths: environmentLogPaths(summary, checkBaseDir),
+      ...(baseline.confirmedLocally ? { confirmedLocally: true as const } : {}),
     };
     log(
       'check',

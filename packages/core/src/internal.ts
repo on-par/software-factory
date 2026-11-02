@@ -417,6 +417,7 @@ export { createCheckResumeStore, createPlanReuseStore } from './run/resume-conte
 export type { CheckResumeRecord, CheckResumeStore, PlanReuseRecord, PlanReuseStore } from './run/resume-context.js';
 // Pre-PLAN base health (#2339)
 export { BaselineCache } from './checkers/baseline-cache.js';
+export { runBaselineCheckers } from './checkers/baseline.js';
 export { BASE_HEALTH_CHECKERS, checkBaseHealth, fetchRequiredChecksVerdict } from './checkers/base-health.js';
 export type { BaseHealthOptions, BaseHealthResult, RequiredChecksVerdict } from './checkers/base-health.js';
 // Codex ChatGPT session freshness for doctor (#2509)
