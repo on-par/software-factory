@@ -17,6 +17,7 @@ import {
   exitSpy,
   h,
   installCliCommandsHarness,
+  checkResumeBaseDrift,
   logged,
   logSpy,
   ops,
@@ -84,6 +85,29 @@ describe('cli commands (via main dispatch)', () => {
         reworkModel: 'kept-model',
       });
       expect(existsSync(recordPath())).toBe(false);
+    });
+
+    it('resume --from check refuses when origin/main moved past the kept base, without running CHECK or touching labels', async () => {
+      const kept = join(h.repoRoot, 'kept-worktree');
+      mkdirSync(kept, { recursive: true });
+      writeRecord(kept);
+      const from = 'a'.repeat(40);
+      const to = 'b'.repeat(40);
+      checkResumeBaseDrift.mockResolvedValueOnce({ kind: 'moved', ref: 'origin/main', from, to });
+      const res = await runMain('resume', '5', '--from', 'check');
+      expect(res).toEqual({ exited: true, code: 2 });
+      const output = `${logged()}\n${errored()}`;
+      expect(output).toContain(from);
+      expect(output).toContain(to);
+      expect(output).toContain('factory run-issue 5');
+      expect(phases.checkPhase).not.toHaveBeenCalled();
+      const issues = h.octokit.rest.issues;
+      for (const fn of [issues.addLabels, issues.removeLabel, issues.setLabels]) {
+        if (fn) expect(fn).not.toHaveBeenCalled();
+      }
+      if (existsSync(paths().events))
+        expect(readFileSync(paths().events, 'utf-8')).not.toContain('environment-released');
+      expect(existsSync(recordPath())).toBe(true);
     });
 
     it.each([

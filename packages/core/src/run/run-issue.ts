@@ -997,6 +997,7 @@ async function runIssueOnce(
               branch: request.branch,
               worktree: ports.workspace.path,
               diffBase: buildDiffBase,
+              baseSha: env.baseSha,
               route: builtRoute,
               model: builtModel,
               buildMinutes,

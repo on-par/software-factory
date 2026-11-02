@@ -230,6 +230,8 @@ import {
   findSlicePlanComment,
   listBlockedBy,
   aliasDeprecatedSizeGateMode,
+  checkResumeBaseDrift,
+  formatBaseMovedRefusal,
 } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
 import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
@@ -387,10 +389,10 @@ function resolveConfigLoaders(overrides: Partial<ConfigLoaders>, base: ConfigLoa
   };
 }
 
-export type GitOpKey = 'setupWorktree' | 'cleanupWorktree' | 'gitFetch';
+export type GitOpKey = 'setupWorktree' | 'cleanupWorktree' | 'gitFetch' | 'checkResumeBaseDrift';
 type GitOps = Required<Pick<CliDeps, GitOpKey>>;
 
-const DEFAULT_GIT_OPS: GitOps = { setupWorktree, cleanupWorktree, gitFetch };
+const DEFAULT_GIT_OPS: GitOps = { setupWorktree, cleanupWorktree, gitFetch, checkResumeBaseDrift };
 
 /** Git worktree/fetch ops for the current main() or cmdLand invocation; DEFAULT_GIT_OPS outside them. */
 let gitOps: GitOps = DEFAULT_GIT_OPS;
@@ -401,6 +403,7 @@ function resolveGitOps(overrides: Partial<GitOps>, base: GitOps = gitOps): GitOp
     setupWorktree: overrides.setupWorktree ?? base.setupWorktree,
     cleanupWorktree: overrides.cleanupWorktree ?? base.cleanupWorktree,
     gitFetch: overrides.gitFetch ?? base.gitFetch,
+    checkResumeBaseDrift: overrides.checkResumeBaseDrift ?? base.checkResumeBaseDrift,
   };
 }
 
@@ -3909,6 +3912,7 @@ export interface CliDeps {
   setupWorktree?: typeof setupWorktree;
   cleanupWorktree?: typeof cleanupWorktree;
   gitFetch?: typeof gitFetch;
+  checkResumeBaseDrift?: typeof checkResumeBaseDrift;
   /** factory-core/internal ops (CI watch, costs, worktree GC, reconcile reaps, local-small). Each defaults to the export of the same name. */
   watchChecks?: typeof watchChecks;
   createLocalSmallDryRun?: typeof createLocalSmallDryRun;
@@ -4047,6 +4051,10 @@ async function resumeFromCheck(issueNum: number): Promise<void> {
       `factory: no preserved build for #${issueNum} — nothing to resume; run factory run-issue ${issueNum}`,
       2,
     );
+  }
+  const drift = await gitOps.checkResumeBaseDrift({ repoRoot, record });
+  if (drift.kind !== 'current') {
+    throw new CliExitError(`factory: ${formatBaseMovedRefusal({ issue: workKeyFromIssue(issueNum), drift })}`, 2);
   }
 
   await withRepoRunLock(

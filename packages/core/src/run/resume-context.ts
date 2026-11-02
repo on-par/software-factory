@@ -6,7 +6,7 @@
 // It also builds the #2583 park message for a config-caused CHECK failure.
 
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
@@ -17,6 +17,8 @@ import type { EnvironmentFailure } from '../phases/check.js';
 import type { PlanResult } from '../phases/plan.js';
 import { readSpec } from '../spec/index.js';
 import type { CheckSummary, Constitution } from '../types/index.js';
+import { defaultRemoteBase, gitFetch } from '../utils/index.js';
+import { execGit } from '../utils/git-exec.js';
 import type { BuildRoutePin } from '../config/repo.js';
 import type { WorkKey } from '../work/work-key.js';
 
@@ -109,6 +111,8 @@ export interface CheckResumeRecord {
   worktree: string;
   /** build.diffBase from the original run (undefined when BUILD reported none). */
   diffBase?: string;
+  /** Base SHA the failing baseline ran on (EnvironmentFailure.baseSha) (#3852). */
+  baseSha?: string;
   route: BuildRoutePin;
   /** build.model of the original run, reused as CHECK's reworkModel. */
   model: string;
@@ -174,7 +178,65 @@ export function formatPreservedBuildMessage(opts: {
   buildMinutes: number;
   fixTarget: string;
 }): string {
-  return `${opts.buildMinutes} min of build preserved at ${opts.branch}; fix ${opts.fixTarget} then run factory resume ${opts.issue} --from check`;
+  return `${opts.buildMinutes} min of build preserved at ${opts.branch}; fix ${opts.fixTarget} — if the fix lands on the default branch, run factory run-issue ${opts.issue} (resume refuses once the base moves); if it was local to this machine, run factory resume ${opts.issue} --from check`;
+}
+
+/** How a kept build's branch relates to the current origin default branch (#3852). */
+export type CheckResumeBaseDrift =
+  | { kind: 'current'; ref: string; sha: string }
+  | { kind: 'moved'; ref: string; from: string; to: string }
+  | { kind: 'unknown'; reason: string };
+
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** Fetches origin and checks that the kept branch already contains origin's default branch. */
+export async function checkResumeBaseDrift(opts: {
+  repoRoot: string;
+  record: Pick<CheckResumeRecord, 'worktree' | 'baseSha' | 'diffBase'>;
+  fetch?: (repoRoot: string) => Promise<void>;
+}): Promise<CheckResumeBaseDrift> {
+  const { repoRoot, record, fetch = gitFetch } = opts;
+  try {
+    await fetch(repoRoot);
+  } catch (err) {
+    return { kind: 'unknown', reason: `git fetch origin failed: ${errMessage(err)}` };
+  }
+  let ref: string;
+  let to: string;
+  try {
+    ref = await defaultRemoteBase(repoRoot);
+    to = (await execGit(['rev-parse', '--verify', '-q', `${ref}^{commit}`], { cwd: repoRoot })).stdout.trim();
+  } catch (err) {
+    return { kind: 'unknown', reason: `could not resolve the default branch: ${errMessage(err)}` };
+  }
+  try {
+    await execGit(['merge-base', '--is-ancestor', to, 'HEAD'], { cwd: record.worktree });
+    return { kind: 'current', ref, sha: to };
+  } catch (err) {
+    const code = (err as { code?: unknown }).code;
+    if (code !== 1) return { kind: 'unknown', reason: `git merge-base failed: ${errMessage(err)}` };
+  }
+  let from = record.baseSha ?? record.diffBase;
+  if (!from) {
+    from = await execGit(['merge-base', 'HEAD', to], { cwd: record.worktree }).then(
+      (r) => r.stdout.trim() || 'unknown',
+      () => 'unknown',
+    );
+  }
+  return { kind: 'moved', ref, from, to };
+}
+
+export function formatBaseMovedRefusal(opts: {
+  issue: WorkKey;
+  drift: Exclude<CheckResumeBaseDrift, { kind: 'current' }>;
+}): string {
+  const { issue, drift } = opts;
+  if (drift.kind === 'moved') {
+    return `base moved from ${drift.from} to ${drift.to} (${drift.ref}) since this build was kept — resume --from check would re-check it on the old base; run a fresh build: factory run-issue ${issue}`;
+  }
+  return `could not verify the kept build's base against origin (${drift.reason}) — nothing was resumed; retry, or run a fresh build: factory run-issue ${issue}`;
 }
 
 /** The file:line (or description) the user must fix before resuming CHECK. */
@@ -202,7 +264,7 @@ export function preservedFixTarget(
     const idx = lines.findIndex((l) => /^\s*checkers\s*:/.test(l));
     return idx >= 0 ? `${display}:${idx + 1}` : display;
   }
-  return failure.logPaths?.[0] ?? `the base (failing: ${failure.failingChecks.join(', ')})`;
+  return failure.logPaths?.find((p) => existsSync(p)) ?? `the base (failing: ${failure.failingChecks.join(', ')})`;
 }
 
 /** Park message for a config-caused CHECK failure (#2583): file:line, the fix, and how to re-queue. */
