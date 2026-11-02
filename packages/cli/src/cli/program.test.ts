@@ -15,8 +15,8 @@ import { registerSetupCommands } from './program-setup.js';
 const countCommands = (cmd: Command): number => cmd.commands.reduce((n, c) => n + 1 + countCommands(c), 0);
 
 describe('buildProgram', () => {
-  it('buildProgram registers 64 commands', () => {
-    expect(countCommands(buildProgram(PROGRAM_HANDLERS, {}))).toBe(64);
+  it('buildProgram registers 65 commands', () => {
+    expect(countCommands(buildProgram(PROGRAM_HANDLERS, {}))).toBe(65);
   });
 
   it('each help-group registrar registers exactly its HELP_GROUPS commands', () => {

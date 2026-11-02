@@ -378,6 +378,16 @@ export {
 export * from './readiness/internal-exports.js';
 export type { IssueRunState, RunStatus } from './types/index.js';
 export {
+  acknowledgeTierDemotions,
+  effectiveTrustTier,
+  findSlipDemotions,
+  MERGED_UNDER_TIER_PATTERN,
+  parseTierDemotions,
+  serializeTierDemotions,
+  tierDemotionComment,
+  type TierDemotionRecord,
+} from './kpis/tier-demotion.js';
+export {
   runStateFile,
   writeIssueRunState,
   readIssueRunState,
@@ -401,6 +411,7 @@ export {
   formatSteerabilityReport,
   type SteerabilityReport,
 } from './kpis/steerability.js';
+export { buildTierEvidence, coverageRatchetEvidence, formatTierEvidence } from './kpis/tier-evidence.js';
 export { restackAfterSquashMerge, type StackRestackOutcome } from './run/stack-restack.js';
 export { createCheckResumeStore, createPlanReuseStore } from './run/resume-context.js';
 export type { CheckResumeRecord, CheckResumeStore, PlanReuseRecord, PlanReuseStore } from './run/resume-context.js';
