@@ -34,9 +34,6 @@
       "path": "packages/product/tsconfig.build.json"
     },
     {
-      "path": "packages/server/tsconfig.build.json"
-    },
-    {
       "path": "packages/scbench-adapter/tsconfig.build.json"
     }
   ]

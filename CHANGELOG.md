@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Removed
+
+- Removed the unpublished dashboard and server packages; no shipped command used them.
+
 ## 0.9.26 - 2026-11-01
 
 The factory never merges onto a red base: it honors hosted base CI before starting work or merging and pauses a repo's merges while its base is red, and stack mode sends a planner's split request to the stack splitter instead of parking the issue (#3856, #3855).
