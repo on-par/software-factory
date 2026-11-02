@@ -1,6 +1,6 @@
 # ADR-0099: An absent usage reading renders as explicitly unavailable, never as zero and never as an armed watchdog
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-09-12
 
 ## Context

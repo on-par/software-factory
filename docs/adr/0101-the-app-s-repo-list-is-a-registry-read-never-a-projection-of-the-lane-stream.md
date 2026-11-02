@@ -1,6 +1,6 @@
 # ADR-0101: The app's repo list is a registry read, never a projection of the lane stream
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-09-12
 
 ## Context

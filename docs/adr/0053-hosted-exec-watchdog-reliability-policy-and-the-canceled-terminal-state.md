@@ -1,6 +1,6 @@
 # ADR-0053: Hosted-exec watchdog reliability policy and the canceled terminal state
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-08-26
 
 ## Context

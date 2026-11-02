@@ -26,9 +26,6 @@
     },
     {
       "path": "packages/cli/tsconfig.build.json"
-    },
-    {
-      "path": "packages/server/tsconfig.build.json"
     }
   ]
 }

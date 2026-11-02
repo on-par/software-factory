@@ -60,6 +60,51 @@ async function awaitingCiLane(capHours?: number) {
 }
 
 describe('runLane awaiting-ci (#3208)', () => {
+  it.each([false, true])('continues after reap and sweep failures when park release fails: %s', async (failRelease) => {
+    const dir = dirs.makeSync('lane-awaiting-ci-errors-');
+    const paths = getFactoryPaths(dir);
+    const emitEvent = vi.fn();
+    const releaseIssue = vi.fn(async () => {
+      if (failRelease) throw new Error('label unavailable');
+    });
+    const reapWorktree = vi.fn(async () => {
+      throw new Error('reap failed');
+    });
+    const sweepFinished = vi.fn(async () => {
+      throw new Error('sweep failed');
+    });
+    await runLane('app', [], '/repo', 'o/r', paths, {
+      pathExists: () => false,
+      emitEvent,
+      releaseIssue,
+      reapWorktree,
+      sweepFinished,
+      recheckAwaitingCi: async ({ park }) => {
+        await park(
+          { issue: 9, prNumber: 3, branch: 'b', headSha: 's', firstSeenAt: 0, attempts: 1, nextRecheckAt: 0 },
+          'ci-never-started',
+          'no CI',
+        );
+      },
+    });
+    expect(reapWorktree).toHaveBeenCalledWith(9);
+    expect(sweepFinished).toHaveBeenCalledWith(9);
+    expect(releaseIssue).toHaveBeenCalledWith(9, 'parked');
+    expect(emitEvent).toHaveBeenCalledWith(
+      paths.events,
+      failRelease ? 'fail' : 'parked',
+      9,
+      expect.any(String),
+      expect.any(Object),
+    );
+    expect(emitEvent).toHaveBeenCalledWith(
+      paths.events,
+      'lane-done',
+      'app',
+      expect.stringContaining(failRelease ? '0 parked' : '1 parked'),
+      { lane: 'app' },
+    );
+  });
   it('a PR whose CI never started waits as awaiting-ci and merges when CI arrives late', async () => {
     const lane = await awaitingCiLane();
     expect(lane.parkedIssues).toEqual([]);

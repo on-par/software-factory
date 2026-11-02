@@ -88,9 +88,6 @@ export default defineConfig({
         // Types-only module (all `export type`/`export interface`, no executable
         // statements) — reports 0% and would only dilute the gate.
         'packages/core/src/types/**',
-        // DOM bootstrap entry (createRoot side effect) — not exercisable in unit
-        // tests; the page itself is covered via App.test.tsx.
-        'packages/dashboard/src/main.tsx',
         // CLI bin shim — a single runEntry(loader) call; runEntry is covered by entry.test.ts.
         'packages/cli/src/cli.ts',
         // Test-only fixture kit (throwaway repos, fake Octokit) exercised by the
@@ -124,9 +121,7 @@ export default defineConfig({
             // branches: measured 88.72 on main both with and without the integration
             // suites — this floor was already unmet before #755 touched anything, and
             // moving the integration suites to nightly does not change any metric here.
-            'packages/cli/src/**/*.{ts,tsx}': { lines: 97, functions: 92, branches: 91, statements: 96.9 },
-            'packages/dashboard/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
-            'packages/server/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
+            'packages/cli/src/**/*.{ts,tsx}': { lines: 97, functions: 93, branches: 91, statements: 96.9 },
             'scripts/pack-hygiene.ts': { lines: 100, functions: 100, branches: 100, statements: 100 },
           },
     },
