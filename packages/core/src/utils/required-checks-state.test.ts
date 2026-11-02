@@ -11,4 +11,12 @@ describe('hosted check states', () => {
     expect(evaluatePushChecks([pending]).state).toBe('pending');
     expect(evaluatePushChecks([green]).state).toBe('green');
   });
+
+  it('skipped and neutral required and push runs are green (#3871)', () => {
+    for (const conclusion of ['skipped', 'neutral']) {
+      const r = { name: 'ci', status: 'completed', conclusion };
+      expect(evaluateRequiredChecks(['ci'], [r])).toMatchObject({ state: 'green', green: true });
+      expect(evaluatePushChecks([r]).state).toBe('green');
+    }
+  });
 });
