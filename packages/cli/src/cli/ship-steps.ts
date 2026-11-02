@@ -42,7 +42,6 @@ import {
   resolveHermeticGit,
   resolveReviewFloorRules,
   resolveT1SampleRate,
-  resolveTrustTier,
   withFileLock,
   withGitLock,
 } from '@on-par/factory-core/internal';
@@ -50,6 +49,7 @@ import { recordGitPushes, resolveGitHubMode, GITHUB_STUB_CALLS_FILE } from './gi
 import type { CliDeps, ConfigLoaderKey, GitOpKey } from './index.js';
 import { baseRemoteRef } from './ship-options.js';
 import { shipRuntime } from './ship-runtime.js';
+import { resolveEffectiveTrustTier } from './tier-demotion.js';
 
 // Captures the message of the last terminal event runIssue emits (ready/fail/
 // escalate/held/conflict/ci-failed/timeout) so the LaneParkError the ship adapter
@@ -373,7 +373,7 @@ export function buildRunRequest({
           rules: resolveReviewFloorRules(repoConfig),
           gateLabel: resolveFilingPolicy(factoryConfig).selfFixLabel,
           modelPin: repoConfig?.models?.pins?.classifier,
-          trustTier: resolveTrustTier(repoConfig),
+          trustTier: resolveEffectiveTrustTier(repoConfig, paths.tierDemotions),
           t1SampleRate: resolveT1SampleRate(repoConfig),
         }
       : undefined,

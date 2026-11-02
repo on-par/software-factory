@@ -378,6 +378,16 @@ export {
 export * from './readiness/internal-exports.js';
 export type { IssueRunState, RunStatus } from './types/index.js';
 export {
+  acknowledgeTierDemotions,
+  effectiveTrustTier,
+  findSlipDemotions,
+  MERGED_UNDER_TIER_PATTERN,
+  parseTierDemotions,
+  serializeTierDemotions,
+  tierDemotionComment,
+  type TierDemotionRecord,
+} from './kpis/tier-demotion.js';
+export {
   runStateFile,
   writeIssueRunState,
   readIssueRunState,

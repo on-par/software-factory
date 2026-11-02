@@ -10,6 +10,7 @@ section to `## X.Y.Z - date`. See
 ### Added
 
 - `factory classifier report` (and `--json` as `tier`) shows trust-tier promotion evidence: configured tier, coverage ratchet, per-package mutation vs floor, human-intervention rate with a caveat, rule-of-three slips and `eligibleFor` with the unmet criteria; missing or stale evidence is `unknown`, never 0%; `npm run coverage-ratchet -- --out coverage-ratchet.json` writes the coverage evidence (#1957).
+- A post-merge defect on a PR auto-merged under trust tier T1 or T2 records a tier demotion, lowers the effective tier one step, and comments once on the defect issue; `factory classifier ack-demotion` restores the configured tier (#1959).
 
 ### Fixed
 
