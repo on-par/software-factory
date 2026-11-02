@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Removed
+
+- `@on-par/factory-core` no longer exports `FactoryConfigV2Schema`, `factoryConfigV2JsonSchema`, `loadV2Config` and `parseV2Config`; no shipped command read them and repo config is unchanged (#3444).
+
 ## 0.9.26 - 2026-11-01
 
 The factory never merges onto a red base: it honors hosted base CI before starting work or merging and pauses a repo's merges while its base is red, and stack mode sends a planner's split request to the stack splitter instead of parking the issue (#3856, #3855).
