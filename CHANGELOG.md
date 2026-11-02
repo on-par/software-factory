@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Fixed
+
+- An unknown `sizeGate.mode` value (`Off`, `none`, a typo) now warns at run start and as a non-failing `factory doctor` row naming the value and the allowed `off`/`stack`; it still runs as `stack` (#3850).
+
 ### Changed
 
 - `npm run mutation` now mutates the merge-gating review modules (`floor`, `risk`, `verdict`, `routing`) on Stryker 10.1.1, which runs mutants correctly under Vitest 5.
