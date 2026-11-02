@@ -662,9 +662,6 @@ const INTERNAL_API_KEYS = [
   // Green-and-ready PR reporting (#1000)
   'createOctokitGreenPrClient',
   'findUnmergedGreenPrs',
-  // Read-only GitHub ProjectV2 queue-intent polling (#847)
-  // Board-constrained local lane dispatch (#848)
-  // ProjectV2 queue-intent scheduler (#867)
   // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
   'wrapCommandInSandbox',
 ];
