@@ -161,13 +161,16 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
   const cachedOutputs: CheckerOutput[] = [];
   const toRun: string[] = [];
   let ciLookup: Promise<RequiredChecksVerdict> | undefined;
-  const lookupCi = (): Promise<RequiredChecksVerdict> => {
-    ciLookup ??= requiredChecksVerdict!(baseSha).catch((err: unknown) => ({
-      green: false,
-      reason: `CI lookup failed: ${err instanceof Error ? err.message : String(err)}`,
-    }));
-    return ciLookup;
-  };
+  const lookup = requiredChecksVerdict;
+  const lookupCi = lookup
+    ? (): Promise<RequiredChecksVerdict> => {
+        ciLookup ??= lookup(baseSha).catch((err: unknown) => ({
+          green: false,
+          reason: `CI lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+        }));
+        return ciLookup;
+      }
+    : undefined;
   for (const name of runnable) {
     let hit: CheckerOutput | undefined;
     try {
@@ -175,7 +178,7 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
     } catch {
       hit = undefined; // a cache read error is a miss
     }
-    if (hit?.result === 'FAIL' && hit.timedOut !== true && requiredChecksVerdict) {
+    if (hit?.result === 'FAIL' && hit.timedOut !== true && lookupCi) {
       const verdict = await lookupCi();
       if (verdict.green) {
         await cache?.delete(baseSha, envHash, name).catch(() => false);
@@ -237,7 +240,7 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
       checkers: markCached(compareBaseline(failing, [...cachedOutputs, ...fresh]), cachedNames),
     };
     const freshFails = fresh.some((o) => o.result === 'FAIL' && o.timedOut !== true);
-    if (freshFails && requiredChecksVerdict && (await lookupCi()).green) report.confirmedLocally = true;
+    if (freshFails && lookupCi && (await lookupCi()).green) report.confirmedLocally = true;
     return report;
   } catch (e: any) {
     return {

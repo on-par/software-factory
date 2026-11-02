@@ -41,7 +41,7 @@ export function writeBaseHold(file: string, hold: BaseHold): void {
     since: hold.since,
     ...(hold.ciRecheckAfter !== undefined ? { ciRecheckAfter: hold.ciRecheckAfter } : {}),
     ...(hold.confirmedLocally === true ? { confirmedLocally: true as const } : {}),
-    ...(Number.isInteger(hold.issue) && hold.issue! > 0 ? { issue: hold.issue } : {}),
+    ...(hold.issue !== undefined && Number.isInteger(hold.issue) && hold.issue > 0 ? { issue: hold.issue } : {}),
   };
   writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
 }
