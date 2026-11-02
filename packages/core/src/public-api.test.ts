@@ -8,16 +8,12 @@ import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
 import { ITERATE_INTERNAL_KEYS, KPIS_API_KEYS, TESTING_API_KEYS, WORK_KEY_API_KEYS } from './public-api-keys.js';
 const PUBLIC_API_KEYS = [
-  'FactoryConfigV2Schema',
-  'factoryConfigV2JsonSchema',
   'getConstitutionsDir',
   'getFactoryPaths',
   'loadFactoryConfig',
   'loadFactoryConfigForRepo',
   'loadModelsConfig',
   'loadRoutesConfig',
-  'loadV2Config',
-  'parseV2Config',
   'resolveAdrMandate',
   'resolveAutoFailover',
   'resolveDefectWindowDays',
@@ -639,9 +635,6 @@ const INTERNAL_API_KEYS = [
   // Green-and-ready PR reporting (#1000)
   'createOctokitGreenPrClient',
   'findUnmergedGreenPrs',
-  // Read-only GitHub ProjectV2 queue-intent polling (#847)
-  // Board-constrained local lane dispatch (#848)
-  // ProjectV2 queue-intent scheduler (#867)
   // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
   'wrapCommandInSandbox',
 ];

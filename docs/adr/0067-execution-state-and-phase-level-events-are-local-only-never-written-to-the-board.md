@@ -1,6 +1,6 @@
 # ADR-0067: Execution state and phase-level events are local-only, never written to the board
 
-- Status: Accepted
+- Status: Superseded by ADR-0172
 - Date: 2026-08-30
 
 ## Context
