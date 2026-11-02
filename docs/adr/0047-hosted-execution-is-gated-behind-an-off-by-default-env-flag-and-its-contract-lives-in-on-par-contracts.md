@@ -1,6 +1,6 @@
 # ADR-0047: Hosted execution is gated behind an off-by-default env flag and its contract lives in @on-par/contracts
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-08-26
 
 ## Context

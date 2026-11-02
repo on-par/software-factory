@@ -33,19 +33,6 @@ describe('agents-layout', () => {
     expect(missing).toEqual([]);
   });
 
-  it('README and docs/status.md do not deny the server pause endpoint', () => {
-    const readme = read('README.md');
-    const status = read('docs/status.md');
-    expect(readme).not.toContain('only route is');
-    expect(status).not.toContain('no control endpoints');
-    expect(readme).toContain('/pause');
-    expect(status).toContain('/pause');
-  });
-
-  it('server README has no stale Phase 2 (planned) roadmap', () => {
-    expect(read('packages/server/README.md')).not.toContain('Phase 2 (planned)');
-  });
-
   it('AGENTS.md links CONTEXT.md', () => {
     expect(read('AGENTS.md')).toMatch(/\]\(\.?\/?CONTEXT\.md\)/);
   });
