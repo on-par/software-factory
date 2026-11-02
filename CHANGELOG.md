@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Removed
 
+- Removed the experimental discovery exports from `@on-par/factory-core`.
 - Removed the unpublished dashboard and server packages; no shipped command used them.
 - Removed the experimental, flag-gated `factory hosted` commands and hosted control plane and runner exports; contained fork-PR review is unchanged.
 - `@on-par/factory-core` no longer exports `FactoryConfigV2Schema`, `factoryConfigV2JsonSchema`, `loadV2Config` and `parseV2Config`; no shipped command read them and repo config is unchanged (#3444).

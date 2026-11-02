@@ -22,19 +22,10 @@
       "path": "packages/core/tsconfig.build.json"
     },
     {
-      "path": "packages/grade/tsconfig.build.json"
-    },
-    {
       "path": "packages/tui/tsconfig.build.json"
     },
     {
       "path": "packages/cli/tsconfig.build.json"
-    },
-    {
-      "path": "packages/product/tsconfig.build.json"
-    },
-    {
-      "path": "packages/scbench-adapter/tsconfig.build.json"
     }
   ]
 }

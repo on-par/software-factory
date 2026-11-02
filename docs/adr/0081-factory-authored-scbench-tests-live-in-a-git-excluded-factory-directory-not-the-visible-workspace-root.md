@@ -1,6 +1,6 @@
 # ADR-0081: Factory-authored SCBench tests live in a git-excluded factory directory, not the visible workspace root
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-09-03
 
 ## Context

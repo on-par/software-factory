@@ -17,7 +17,6 @@
   "packages/core/src/config/repo.ts": 938,
   "packages/core/src/constitutions/index.test.ts": 580,
   "packages/core/src/daemon/factoryd-http.test.ts": 1094,
-  "packages/core/src/discovery/promote.test.ts": 519,
   "packages/core/src/environment/index.test.ts": 1002,
   "packages/core/src/filing/index.test.ts": 616,
   "packages/core/src/harness/claude-cli.test.ts": 596,
@@ -55,10 +54,6 @@
   "packages/core/src/utils/index.test.ts": 1041,
   "packages/core/src/utils/lock.test.ts": 667,
   "packages/core/src/utils/worktree-gc.test.ts": 2494,
-  "packages/scbench-adapter/src/baseline.test.ts": 1422,
-  "packages/scbench-adapter/src/baseline.ts": 861,
-  "packages/scbench-adapter/src/cli-run.test.ts": 1531,
-  "packages/scbench-adapter/src/cli-run.ts": 577,
   "packages/tui/src/components/App.test.tsx": 1086,
   "packages/tui/src/components/App.tsx": 568
 }

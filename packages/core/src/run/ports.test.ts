@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { readPortLeases } from '../environment/index.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
-import { createSimWorkspace } from '../fakes/workspace.js';
+import { createSimWorkspace } from '../testing/sim/workspace.js';
 import type { WorktreeSandbox } from '../utils/microvm.js';
 import type { LocalOnlyPolicy } from '../work/local-only.js';
 import {

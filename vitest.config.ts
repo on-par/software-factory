@@ -88,12 +88,8 @@ export default defineConfig({
         // Types-only module (all `export type`/`export interface`, no executable
         // statements) — reports 0% and would only dilute the gate.
         'packages/core/src/types/**',
-        // Product bin shim — a single runEntry(main) call; runEntry is covered by entry.test.ts.
-        'packages/product/src/cli.ts',
         // CLI bin shim — a single runEntry(loader) call; runEntry is covered by entry.test.ts.
         'packages/cli/src/cli.ts',
-        // scbench-adapter bin shim — a single runEntry(main) call; runEntry is covered by entry.test.ts.
-        'packages/scbench-adapter/src/cli.ts',
         // Test-only fixture kit (throwaway repos, fake Octokit) exercised by the
         // integration suites; it is scaffolding, not product code, and its fake
         // branches would only dilute the gate.
@@ -126,9 +122,6 @@ export default defineConfig({
             // suites — this floor was already unmet before #755 touched anything, and
             // moving the integration suites to nightly does not change any metric here.
             'packages/cli/src/**/*.{ts,tsx}': { lines: 97, functions: 93, branches: 91, statements: 96.9 },
-            'packages/product/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 98, statements: 99 },
-            'packages/grade/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 98 },
-            'packages/scbench-adapter/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 96, statements: 98 },
             'scripts/pack-hygiene.ts': { lines: 100, functions: 100, branches: 100, statements: 100 },
           },
     },
