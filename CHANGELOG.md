@@ -7,15 +7,21 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.27 - 2026-11-02
+
+A smaller factory: the unpublished dashboard and server packages, the experimental hosted execution commands, the discovery exports, the unused ProjectV2 board-queue stack and the unused v2 config schema exports are gone, with no change to shipped commands or repo config (#3862, #3863, #3864, #3865, #3866, #3867).
+All seven published `@on-par` packages move to 0.9.27 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Changed
 
-- `npm run mutation` now mutates the merge-gating review modules (`floor`, `risk`, `verdict`, `routing`) on Stryker 10.1.1, which runs mutants correctly under Vitest 5.
+- `npm run mutation` now mutates the merge-gating review modules (`floor`, `risk`, `verdict`, `routing`) on Stryker 10.1.1, which runs mutants correctly under Vitest 5 (#3867).
 
 ### Removed
 
-- Removed the experimental discovery exports from `@on-par/factory-core`.
-- Removed the unpublished dashboard and server packages; no shipped command used them.
-- Removed the experimental, flag-gated `factory hosted` commands and hosted control plane and runner exports; contained fork-PR review is unchanged.
+- Removed the experimental discovery exports from `@on-par/factory-core` (#3866).
+- Removed the unpublished dashboard and server packages; no shipped command used them (#3865).
+- Removed the experimental, flag-gated `factory hosted` commands and hosted control plane and runner exports; contained fork-PR review is unchanged (#3864).
 - `@on-par/factory-core` no longer exports `FactoryConfigV2Schema`, `factoryConfigV2JsonSchema`, `loadV2Config` and `parseV2Config`; no shipped command read them and repo config is unchanged (#3444).
 
 ## 0.9.26 - 2026-11-01
