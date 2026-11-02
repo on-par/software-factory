@@ -12,6 +12,8 @@ export function landBaseGate(opts: {
   state: string;
   checks?: readonly string[];
   log: (kind: EventKind, message: string) => void;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 }) {
   const { octokit, owner, repo, prNumber } = opts;
   let branch = 'main';
@@ -19,6 +21,8 @@ export function landBaseGate(opts: {
     file: join(opts.state, 'merge-base-health.json'),
     repo: `${owner}/${repo}`,
     log: opts.log,
+    now: opts.now,
+    sleep: opts.sleep,
     head: async () => {
       const pr = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
       branch = pr.data.base.ref;

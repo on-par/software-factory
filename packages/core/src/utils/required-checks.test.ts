@@ -58,6 +58,31 @@ describe('evaluateRequiredChecks', () => {
     });
   });
 
+  it('sets missing only when absent contexts are the sole non-green cause (#3870)', () => {
+    expect(evaluateRequiredChecks(['a'], [])).toMatchObject({ state: 'pending', reason: 'missing a', missing: ['a'] });
+    expect(evaluateRequiredChecks(['a', 'b', 'a'], [run('c', 'completed', 'success')])).toMatchObject({
+      reason: 'missing a',
+      missing: ['a', 'b'],
+    });
+    expect(evaluateRequiredChecks(['a', 'b'], [run('a', 'completed', 'success')])).toMatchObject({
+      reason: 'missing b',
+      missing: ['b'],
+    });
+  });
+
+  it('does not set missing when a run is in progress, failed, or all are green (#3870)', () => {
+    const mixed = evaluateRequiredChecks(['a', 'b'], [run('b', 'in_progress', null)]);
+    expect(mixed).toMatchObject({ state: 'pending', reason: 'missing a' });
+    expect(mixed).not.toHaveProperty('missing');
+    const pendingFirst = evaluateRequiredChecks(['b', 'a'], [run('b', 'in_progress', null)]);
+    expect(pendingFirst.reason).toBe('b pending');
+    expect(pendingFirst).not.toHaveProperty('missing');
+    const failed = evaluateRequiredChecks(['a', 'b'], [run('b', 'completed', 'failure')]);
+    expect(failed).toMatchObject({ state: 'failed', reason: 'b failure' });
+    expect(failed).not.toHaveProperty('missing');
+    expect(evaluateRequiredChecks(['a'], [run('a', 'completed', 'success')])).not.toHaveProperty('missing');
+  });
+
   it('any non-success among duplicate runs fails', () => {
     const runs = [run('a', 'completed', 'success'), run('a', 'completed', 'failure')];
     expect(evaluateRequiredChecks(['a'], runs).green).toBe(false);

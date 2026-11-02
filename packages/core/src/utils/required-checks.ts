@@ -10,6 +10,8 @@ export interface RequiredChecksVerdict {
   basis?: string;
   /** Set when not green because nothing decides code health (no deciding set); a moved base can never turn green (#3620). */
   noCodeHealthChecks?: true;
+  /** Set on a pending verdict whose only non-green cause is required contexts with zero runs on the commit (#3870). */
+  missing?: string[];
 }
 
 interface CheckRunLike {
@@ -32,12 +34,21 @@ export function evaluateRequiredChecks(
   )[0];
   if (failed)
     return { green: false, state: 'failed', reason: `${failed.ctx} ${failed.run.conclusion ?? 'incomplete'}` };
+  const missing: string[] = [];
+  let incomplete = false;
+  let firstReason: string | undefined;
   for (const ctx of contexts) {
     const matching = runs.filter((r) => r.name === ctx);
-    if (matching.length === 0) return { green: false, state: 'pending', reason: `missing ${ctx}` };
-    if (matching.some((r) => r.status !== 'completed'))
-      return { green: false, state: 'pending', reason: `${ctx} pending` };
+    if (matching.length === 0) {
+      missing.push(ctx);
+      firstReason ??= `missing ${ctx}`;
+    } else if (matching.some((r) => r.status !== 'completed')) {
+      incomplete = true;
+      firstReason ??= `${ctx} pending`;
+    }
   }
+  if (incomplete && firstReason) return { green: false, state: 'pending', reason: firstReason };
+  if (missing.length > 0) return { green: false, state: 'pending', reason: `missing ${missing[0]}`, missing };
   return {
     green: true,
     state: 'green',

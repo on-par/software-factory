@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Fixed
+
+- Land no longer stalls when a required check only runs on pull requests: a required context with no run on the base head is treated as no hosted base signal, merges proceed after a short grace and one warn event names the context (#3870).
+
 ### Changed
 
 - `npm run mutation` now mutates the merge-gating review modules (`floor`, `risk`, `verdict`, `routing`) on Stryker 10.1.1, which runs mutants correctly under Vitest 5.
