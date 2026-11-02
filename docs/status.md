@@ -27,4 +27,4 @@ PR risk receipts show the overall tier and matched rule reasons without paths. W
 
 See the [README](../README.md) for Quick Start, and [agents.md](agents.md) for the supported coding agent CLIs.
 
-Hosted code-health CI is checked on the base before landing. Failed CI leaves PRs open; pending CI waits up to 30 minutes. A failed base descended from a recorded merge pauses merges until hosted CI is green, emitting `red-main` once and `red-main-cleared` on recovery. Local base checks remain an additional gate.
+Hosted code-health CI is checked on the base before landing. Failed CI leaves PRs open; pending CI waits up to 30 minutes. A failed base descended from a recorded merge pauses merges until hosted CI is green, emitting `red-main` once and `red-main-cleared` on recovery. A required check that is `skipped` or `neutral` counts as passing, as in GitHub branch protection. Local base checks remain an additional gate.

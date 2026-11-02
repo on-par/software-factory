@@ -35,11 +35,12 @@ describe('evaluateRequiredChecks', () => {
     });
   });
 
-  it.each(['skipped', 'failure', 'cancelled', 'neutral', 'timed_out', 'action_required', 'stale'])(
-    'skipped, failed, cancelled, neutral, in-progress or missing required checks are not green (%s)',
+  it.each(['failure', 'cancelled', 'timed_out', 'action_required', 'stale', 'startup_failure'])(
+    'failed, cancelled, in-progress or missing required checks are not green (%s)',
     (conclusion) => {
       expect(evaluateRequiredChecks(['a'], [run('a', 'completed', conclusion)])).toMatchObject({
         green: false,
+        state: 'failed',
         reason: `a ${conclusion}`,
       });
     },
@@ -138,9 +139,9 @@ describe('fetchRequiredChecksVerdict', () => {
   it('uses protection contexts and checks when rulesets are 404', async () => {
     const { octokit } = fake({
       protection: { contexts: ['a'], checks: [{ context: 'b' }] },
-      runs: [run('a', 'completed', 'success'), run('b', 'completed', 'skipped')],
+      runs: [run('a', 'completed', 'success'), run('b', 'completed', 'cancelled')],
     });
-    expect(await fetchRequiredChecksVerdict(octokit, args)).toMatchObject({ green: false, reason: 'b skipped' });
+    expect(await fetchRequiredChecksVerdict(octokit, args)).toMatchObject({ green: false, reason: 'b cancelled' });
   });
 
   it('treats a 403 on protection as no contexts from that source', async () => {
@@ -326,7 +327,7 @@ describe('evaluatePushChecks', () => {
   it('is not green when empty, pending or not success', () => {
     expect(evaluatePushChecks([])).toMatchObject({ green: false, reason: 'no push-triggered checks' });
     expect(evaluatePushChecks([run('a', 'in_progress', null)]).reason).toBe('a pending');
-    expect(evaluatePushChecks([run('a', 'completed', 'skipped')]).reason).toBe('a skipped');
+    expect(evaluatePushChecks([run('a', 'completed', 'failure')]).reason).toBe('a failure');
     expect(evaluatePushChecks([run('a', 'completed', null)]).reason).toBe('a incomplete');
   });
 
@@ -360,10 +361,10 @@ describe('classifyRequiredChecks', () => {
     ).toEqual(['a', 'b']);
   });
 
-  it('lists completed runs whose conclusion is not success as failed', () => {
+  it('lists completed runs whose conclusion is not passing as failed', () => {
     const rs = classifyRequiredChecks(
       ['a', 'b', 'c'],
-      [run('a', 'completed', 'failure'), run('b', 'completed', 'skipped'), run('c', 'completed', null)],
+      [run('a', 'completed', 'failure'), run('b', 'completed', 'cancelled'), run('c', 'completed', null)],
     );
     expect(rs).toEqual({ state: 'failed', missing: [], pending: [], failed: ['a', 'b', 'c'] });
   });
