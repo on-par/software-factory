@@ -78,12 +78,14 @@ export interface FactoryDefaults {
   readiness: { updateIssueBody: boolean };
   /** BUILD policy (#1867). publishFromBuild: true lets the claude BUILD worker push and open a PR before CHECK; default false = commit-only, SHIP publishes. contextCeiling is the per-harness Codex auto-compact token limit for BUILD/rework, 0 = off (#3327). */
   build: { publishFromBuild: boolean; contextCeiling: Record<string, number> };
-  /** Size gate policy (ADR-0147). file: gates file child issues / park (ADR-0043); slice: keep an oversized issue whole and ship it as slice PRs, never filing issues (ADR-0156); off: skip both gates. maxSlices (1-20): cap on a not-yet-started slice plan; over it the plan is recorded and the run parks. tokenBudget / maxFiles (#3350): the post-plan gate splits only when the plan's estimated tokens exceed tokenBudget or its changed files exceed maxFiles; a plan changing 3 files or fewer never splits. */
-  sizeGate: { mode: 'file' | 'slice' | 'off' | 'stack'; maxSlices: number; tokenBudget: number; maxFiles: number };
+  /** Size gate policy (ADR-0147). mode unset runs as stack (ADR-0161), a stacked PR set; file and slice are deprecated aliases for stack (#3832); off: skip both gates. maxSlices (1-20): cap on a not-yet-started slice plan; over it the plan is recorded and the run parks. tokenBudget / maxFiles (#3350): the post-plan gate splits only when the plan's estimated tokens exceed tokenBudget or its changed files exceed maxFiles; a plan changing 3 files or fewer never splits. */
+  sizeGate: { mode?: 'file' | 'slice' | 'off' | 'stack'; maxSlices: number; tokenBudget: number; maxFiles: number };
   sandbox: {
     enabled: boolean;
     runtime: 'auto' | 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
     codexFullAccessTasks?: string[];
+    /** Codex sandbox mode (#3829); unset = today's behavior. Not read yet. */
+    codexSandbox?: 'danger-full-access' | 'workspace-write';
     /** Extra directories the sandbox may write (#3454): absolute or `~/…`; not `/`, `~`, or the repo. */
     writablePaths?: string[];
     network: { allow: string[]; blockTelemetry?: boolean; mode?: 'report' | 'enforce' };
@@ -670,7 +672,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
    */
   build: { publishFromBuild: false, contextCeiling: { 'codex-cli': 120000 } },
   /** Size gates on: an oversized issue files child issues or parks (ADR-0043). Slice cap 10 (ADR-0156). */
-  sizeGate: { mode: 'file', maxSlices: 10, tokenBudget: 150000, maxFiles: 12 },
+  sizeGate: { maxSlices: 10, tokenBudget: 150000, maxFiles: 12 },
   sandbox: {
     enabled: true,
     runtime: 'auto',
@@ -680,7 +682,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
     resources: { cpuMs: 300000, memMb: 4096 },
     docker: { rolloutPercent: 0 },
     comment:
-      'Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open in report mode. Set sandbox.runtime (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime; auto probes the host. docker-sandbox is reserved for the microVM runtime and does not contain anything yet (#653). sandbox.docker.rolloutPercent (0-100) deterministically promotes that percentage of unpinned lanes into the docker-sandbox cohort for A/B evidence (#655). sandbox.network.blockTelemetry (default false) makes the egress proxy refuse known telemetry hosts (e.g. *.datadoghq.com) with 403, even if allowlisted; it only takes effect where the egress proxy runs (sandbox-exec with a non-empty allowlist) (#2667). sandbox.network.mode (report|enforce, default report; FACTORY_SANDBOX_NETWORK overrides) — enforce on sandbox-exec denies direct outbound connections and makes the egress proxy refuse hosts not on network.allow with 403 (#2215). sandbox.writablePaths (default []) adds directories BUILD/CHECK may write, e.g. ["~/.nuget"]; entries must be absolute or start with ~/, and may not be /, ~, the home dir, or a path equal to or containing the repo checkout (#3454).',
+      'Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open in report mode. Set sandbox.runtime (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime; auto probes the host. docker-sandbox is reserved for the microVM runtime and does not contain anything yet (#653). sandbox.docker.rolloutPercent (0-100) deterministically promotes that percentage of unpinned lanes into the docker-sandbox cohort for A/B evidence (#655). sandbox.network.blockTelemetry (default false) makes the egress proxy refuse known telemetry hosts (e.g. *.datadoghq.com) with 403, even if allowlisted; it only takes effect where the egress proxy runs (sandbox-exec with a non-empty allowlist) (#2667). sandbox.network.mode (report|enforce, default report; FACTORY_SANDBOX_NETWORK overrides) — enforce on sandbox-exec denies direct outbound connections and makes the egress proxy refuse hosts not on network.allow with 403 (#2215). sandbox.writablePaths (default []) adds directories BUILD/CHECK may write, e.g. ["~/.nuget"]; entries must be absolute or start with ~/, and may not be /, ~, the home dir, or a path equal to or containing the repo checkout (#3454). sandbox.codexSandbox (danger-full-access|workspace-write, default unset = danger-full-access) picks Codex\'s own sandbox; unset or danger-full-access runs codex with --sandbox danger-full-access like Claude (#3824); workspace-write restores Codex\'s workspace-write sandbox with the network allowlist and writable roots, and sandbox.codexFullAccessTasks then grants listed tasks full access; any other value is ignored with a warning and will be an error in a later release (#3829).',
   },
   discovery: {
     enabled: true,
@@ -707,7 +709,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
     lane: 'auto',
     maxPerCycle: 20,
     comment:
-      'Always-on auto-ingest. When enabled, `factory supervise` polls each cycle for open issues carrying `label` and appends new ones (deduped against the queue and open factory/* PRs, legacy ship-it branches included) to the queue under `lane`. Enable per-run with FACTORY_AUTO_INGEST=1; disable with =0.',
+      'Always-on auto-ingest. When enabled, `factory supervise` polls each cycle for open issues carrying `label` and appends new ones (deduped against the queue and open factory/* PRs) to the queue under `lane`. Enable per-run with FACTORY_AUTO_INGEST=1; disable with =0.',
   },
   intake: { enforce: 'warn' },
   environment: {

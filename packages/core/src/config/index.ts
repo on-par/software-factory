@@ -33,7 +33,7 @@ import { FACTORY_RUNTIME_CONFIG_KEYS } from './runtime-config-keys.js';
 import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS, retiredHarnessReplacement } from '../harness/catalog.js';
 import type { FailoverReason } from '../types/index.js';
-import { SandboxConfigSchema } from './sandbox-schema.js';
+import { SandboxConfigSchema, warnCodexSandboxOnce } from './sandbox-schema.js';
 import { ModelEffortsSchema } from './effort.js';
 import { resolvePrecedence, type ConfigSource } from './precedence.js';
 import { HarnessDeclarationSchema, type HarnessDeclaration } from './harness-declaration.js';
@@ -146,7 +146,7 @@ export const FactoryConfigSchema = z.object({
     compile_seconds: z.number().default(120),
   }),
   merge: z.object({ auto: z.boolean(), admin: z.boolean().default(false), comment: z.string() }),
-  /** `run.merge.*` mirrors FactoryConfigV2Schema's `run.merge` naming and, when present,
+  /** `run.merge.*` mirrors the `run.merge` shape of RepoFactoryConfigV2Schema in `config/repo.ts` and, when present,
    *  is authoritative over the legacy top-level `merge.*` fields above (see
    *  `resolveMergePolicy`). Left optional with no defaults so "unset" survives parsing
    *  and is distinguishable from an explicit `false`. */
@@ -190,15 +190,15 @@ export const FactoryConfigSchema = z.object({
       contextCeiling: z.record(z.string(), z.number().int().nonnegative()).default({ 'codex-cli': 120000 }),
     })
     .default({ publishFromBuild: false, contextCeiling: { 'codex-cli': 120000 } }),
-  // Plain string on purpose: an unknown mode must load and resolve to `file`, not throw.
+  // Plain string on purpose: an unknown mode must load and resolve to `stack`, not throw.
   sizeGate: z
     .object({
-      mode: z.string().default('file'),
+      mode: z.string().optional(),
       maxSlices: z.number().int().min(1).max(SLICE_CAP_CEILING).optional(),
       tokenBudget: z.number().int().positive().optional(),
       maxFiles: z.number().int().positive().optional(),
     })
-    .default({ mode: 'file' }),
+    .default({}),
   kpis: z
     .object({ defectWindowDays: z.number().int().positive().default(14), comment: z.string().optional() })
     .default({ defectWindowDays: 14 }),
@@ -467,6 +467,7 @@ export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
   if (!isPlainObject(raw)) {
     throw new Error(`Invalid ${configPath}: expected a JSON object`);
   }
+  warnCodexSandboxOnce(configPath, raw);
 
   const result = FactoryConfigSchema.safeParse(mergeRuntimeOverlay(raw));
   if (!result.success) {
@@ -516,21 +517,15 @@ export function resolveCiWatchDeadlineMs(config: { ci?: { watchMinutes?: number 
   return typeof m === 'number' && Number.isFinite(m) && m > 0 ? Math.round(m * 60_000) : DEFAULT_CI_DEADLINE_MS;
 }
 
-/**
- * sizeGate.mode values this build understands (ADR-0147). `slice` keeps an oversized issue whole and ships it as slice PRs.
- * `stack` (ADR-0161) will ship a stacked PR set; until that is built the size gate runs it as `slice`. */
-export const SIZE_GATE_MODES = ['file', 'slice', 'off', 'stack'] as const;
-export type SizeGateMode = (typeof SIZE_GATE_MODES)[number];
-
-/** Exact match against SIZE_GATE_MODES; anything else is undefined. */
-export function parseSizeGateMode(raw: unknown): SizeGateMode | undefined {
-  return (SIZE_GATE_MODES as readonly unknown[]).includes(raw) ? (raw as SizeGateMode) : undefined;
-}
-
-/** sizeGate.mode from the factory config; missing or unknown resolves to `file`. */
-export function resolveSizeGateMode(config: FactoryConfig): SizeGateMode {
-  return parseSizeGateMode(config.sizeGate?.mode) ?? 'file';
-}
+export {
+  SIZE_GATE_MODES,
+  type SizeGateMode,
+  aliasDeprecatedSizeGateMode,
+  isExplicitStackMode,
+  parseSizeGateMode,
+  resolveSizeGateMode,
+  sizeGateDeprecationLine,
+} from './size-gate.js';
 
 /** --max-slices value: a whole number from 1 to SLICE_CAP_CEILING, else undefined (ADR-0156). */
 export function parseMaxSlices(raw: string): number | undefined {
@@ -835,13 +830,3 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string, env: NodeJ
 export function getConstitutionsDir(): string {
   return resolveConfigPath('constitutions');
 }
-
-// ---------- Unified v2 config schema (additive; v1 loaders above are untouched) ----------
-
-export {
-  FactoryConfigV2Schema,
-  factoryConfigV2JsonSchema,
-  loadV2Config,
-  parseV2Config,
-  type FactoryConfigV2,
-} from './v2.js';

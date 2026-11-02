@@ -1,6 +1,7 @@
 // packages/cli/src/cli/run-brief.ts — the factory run-brief handler, moved out of index.ts (#3762)
 
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
@@ -15,13 +16,15 @@ import {
   readEvents,
   resolveArtifactsDir,
   resolveLocalOnlyPolicy,
+  runStack,
   workKeyFromIssue,
   type LocalBriefParams,
   type LocalOnlyPolicy,
   type RunOutcome,
+  type SizeGateMode,
   type WorkRequest,
 } from '@on-par/factory-core';
-import { logEvent } from '@on-par/factory-core/internal';
+import { fileSlicePlanStore, logEvent, type SlicePlanStore } from '@on-par/factory-core/internal';
 
 import { CliExitError } from './errors.js';
 import { availableAgentClis, missingAgentCliMessage, notInitializedMessage } from './first-run.js';
@@ -29,6 +32,7 @@ import { withRepoRunLock } from './repo-run-lock.js';
 import { recordDraftPrFlag } from './run-flags.js';
 import { shipIssue } from './ship.js';
 import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
+import { consoleStackLog, printStackResult, runSliceStack } from './stack-run.js';
 
 /** index.ts bindings the handler needs; index.ts passes them so this module never imports it at runtime. */
 export interface RunBriefRuntime {
@@ -38,13 +42,6 @@ export interface RunBriefRuntime {
   getOctokit: () => Octokit;
   branchPrefixOrExit: (raw: string | undefined, configPath: string) => string;
   errorDetail: (err: unknown) => string;
-}
-
-interface BriefRunResult {
-  file: string;
-  status: 'ready' | 'failed';
-  prNumber?: number;
-  detail?: string;
 }
 
 /** Deterministic run number for a brief, derived from its content digest.
@@ -66,6 +63,8 @@ export interface RunBriefOptions {
   branchPrefix?: string;
   baseBranch?: string;
   draftPr?: boolean;
+  /** --stack (#3763): brief N+1 bases on brief N's PR head branch; stops at the first failure or missing PR. */
+  stack?: boolean;
 }
 
 /** Runs each brief through the one-shot pipeline in argv order with the same flags. The checks that
@@ -87,35 +86,37 @@ export async function cmdRunBrief(files: readonly string[], opts: RunBriefOption
     );
   }
   const env = await prepareRunBrief(opts, rt);
+  if (files.length === 1 && opts.stack) {
+    await runStackedBrief(files[0], opts, env, rt);
+    return;
+  }
   if (files.length === 1) {
     await runOneBrief(files[0], opts, env, rt);
     return;
   }
 
   console.log(styleText('cyan', `run-brief: ${files.length} briefs — running them in order`));
-  const results: BriefRunResult[] = [];
-  for (const [i, file] of files.entries()) {
-    console.log(styleText('cyan', `run-brief: [${i + 1}/${files.length}] ${file}`));
-    try {
-      const outcome = await runOneBrief(file, opts, env, rt);
-      results.push({
-        file,
-        status: 'ready',
-        prNumber: outcome && 'prNumber' in outcome ? outcome.prNumber : undefined,
-      });
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      console.error(styleText('red', detail));
-      results.push({ file, status: 'failed', detail });
-    }
+  if (opts.stack) {
+    console.log(styleText('cyan', "run-brief: --stack — each brief bases on the previous brief's PR head"));
   }
-  const ok = results.every((r) => r.status === 'ready');
-  for (const line of formatBriefRunSummary(results)) {
-    console.log(ok ? styleText('green', line) : styleText('yellow', line));
-  }
-  if (!ok) {
-    throw new CliExitError('Run failed for one or more briefs (listed above)', 1);
-  }
+  const result = await runStack(
+    files.map((file) => ({
+      title: file,
+      run: async (base) => {
+        const o = await runOneBrief(
+          file,
+          opts.stack ? { ...opts, baseBranch: base, sizeGate: 'off' as const } : opts,
+          env,
+          rt,
+        );
+        return (
+          o && { prNumber: 'prNumber' in o ? o.prNumber : undefined, branch: 'branch' in o ? o.branch : undefined }
+        );
+      },
+    })),
+    { base: opts.baseBranch, chain: opts.stack === true, prefix: 'run-brief', noun: 'brief', log: consoleStackLog },
+  );
+  printStackResult(result, 'Run failed for one or more briefs (listed above)');
 }
 
 /** The run-brief pre-flight shared by every brief in one invocation; any failure here exits 2. */
@@ -133,6 +134,9 @@ async function prepareRunBrief(opts: RunBriefOptions, rt: RunBriefRuntime) {
   baseBranchOrExit(opts.baseBranch);
   const conflict = baseBranchConflict({ baseBranch: opts.baseBranch, workspace: opts.workspace });
   if (conflict) throw new CliExitError(conflict, 2);
+  if (opts.stack && opts.workspace !== undefined) {
+    throw new CliExitError('factory: --stack needs factory worktrees and PRs — drop --workspace or drop --stack', 2);
+  }
 
   let localOnly: LocalOnlyPolicy | undefined;
   if (opts.workspace !== undefined) {
@@ -164,21 +168,32 @@ async function prepareRunBrief(opts: RunBriefOptions, rt: RunBriefRuntime) {
   return { repoRoot, paths, branchPrefix, localOnly, artifactsDir, ghRepo, workSources };
 }
 
-/** One brief through the one-shot pipeline under its own per-brief lock. Throws CliExitError(2) when
- *  the brief cannot be resolved (no worktree or PR exists yet) and CliExitError(1) on a pipeline failure. */
-async function runOneBrief(
-  briefPath: string,
-  opts: RunBriefOptions,
-  env: Awaited<ReturnType<typeof prepareRunBrief>>,
-  rt: RunBriefRuntime,
-): Promise<RunOutcome | undefined> {
-  const { repoRoot, paths, branchPrefix, localOnly, artifactsDir, ghRepo, workSources } = env;
+type BriefEnv = Awaited<ReturnType<typeof prepareRunBrief>>;
 
-  // Pre-flight: resolve the brief through the canonical work-request seam
-  // BEFORE any worktree or PR exists — a malformed brief exits here, so BUILD never starts.
+/** `run-brief <file> --stack` (#3813): an over-budget brief is sliced and its slices build as a stack in
+ *  this one run; the slice plan lives in the run's state file, not on any issue. */
+async function runStackedBrief(file: string, opts: RunBriefOptions, env: BriefEnv, rt: RunBriefRuntime): Promise<void> {
+  const { runNum } = await resolveBrief(file, env, rt);
+  const store = fileSlicePlanStore(join(env.paths.state, 'slice-plans', `${runNum}.md`));
+  await runSliceStack({ prefix: 'run-brief', label: file, failLabel: `brief ${file}` }, opts.baseBranch, {
+    readSlicePlan: async () => {
+      const lookup = await store.find();
+      return lookup.status === 'found' ? lookup.plan : undefined;
+    },
+    ship: async (base, onOutcome) => {
+      const outcome = await runOneBrief(file, { ...opts, baseBranch: base, sizeGate: 'stack' }, env, rt, {
+        slicePlanStore: store,
+      });
+      if (outcome) onOutcome(outcome);
+    },
+  });
+}
+
+/** Resolves the brief through the canonical work-request seam BEFORE any worktree or PR exists. */
+async function resolveBrief(briefPath: string, env: BriefEnv, rt: RunBriefRuntime) {
   let work: WorkRequest;
   try {
-    work = await workSources.resolve(LOCAL_BRIEF_SOURCE, { path: briefPath } satisfies LocalBriefParams);
+    work = await env.workSources.resolve(LOCAL_BRIEF_SOURCE, { path: briefPath } satisfies LocalBriefParams);
   } catch (err) {
     if (err instanceof InvalidWorkRequestInputError) {
       throw new CliExitError(`factory: ${err.message}`, 2);
@@ -189,7 +204,22 @@ async function runOneBrief(
     );
   }
   const digest = work.reference?.externalId ?? '';
-  const runNum = briefRunNumber(digest);
+  return { work, digest, runNum: briefRunNumber(digest) };
+}
+
+/** One brief through the one-shot pipeline under its own per-brief lock. Throws CliExitError(2) when
+ *  the brief cannot be resolved (no worktree or PR exists yet) and CliExitError(1) on a pipeline failure. */
+async function runOneBrief(
+  briefPath: string,
+  opts: RunBriefOptions & { sizeGate?: SizeGateMode },
+  env: BriefEnv,
+  rt: RunBriefRuntime,
+  extra?: { slicePlanStore?: SlicePlanStore },
+): Promise<RunOutcome | undefined> {
+  const { repoRoot, paths, branchPrefix, localOnly, artifactsDir, ghRepo } = env;
+
+  // Pre-flight: a malformed brief exits here, so BUILD never starts.
+  const { work, digest, runNum } = await resolveBrief(briefPath, env, rt);
 
   let outcome: RunOutcome | undefined;
   await withRepoRunLock(
@@ -227,6 +257,7 @@ async function runOneBrief(
             workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
             localOnly,
             artifactsDir,
+            slicePlanStore: extra?.slicePlanStore,
             onOutcome: (o) => {
               outcome = o;
             },
@@ -239,19 +270,4 @@ async function runOneBrief(
     { scope: { kind: 'issue', key: workKeyFromIssue(runNum) } },
   );
   return outcome;
-}
-
-/** Renders the per-brief summary lines in run order; the caller colours and prints them. */
-function formatBriefRunSummary(results: readonly BriefRunResult[]): string[] {
-  const lines = ['Briefs:'];
-  for (const r of results) {
-    if (r.status === 'ready') {
-      lines.push(r.prNumber !== undefined ? `  ${r.file} → PR #${r.prNumber}` : `  ${r.file} → done (no PR)`);
-    } else {
-      lines.push(r.detail ? `  ${r.file} → failed: ${r.detail}` : `  ${r.file} → failed`);
-    }
-  }
-  const done = results.filter((r) => r.status === 'ready').length;
-  lines.push(`${done}/${results.length} briefs succeeded`);
-  return lines;
 }

@@ -1,9 +1,6 @@
 // packages/core/src/readiness/size.ts — the INVEST "small" rule, applied to a raw
-// factory-task issue body (#605). Deliberately duplicates the thresholds in
-// packages/product/src/decompose/invest.ts (MAX_IN_SCOPE / MAX_ACCEPTANCE_CRITERIA):
-// core must not depend on the private @on-par/product package, and checkInvest()
-// needs a parsed Story that does not exist at readiness-scoring time. Change both
-// files together. The 5/5 counts now only produce a `size_hint` and no longer gate PLAN (#3350).
+// factory-task issue body (#605). The 5/5 counts only produce a `size_hint`
+// and no longer gate PLAN (#3350).
 // Only top-level list items count (nested sub-bullets elaborate their parent), and a
 // `spike`-labeled issue is exempt (#748).
 

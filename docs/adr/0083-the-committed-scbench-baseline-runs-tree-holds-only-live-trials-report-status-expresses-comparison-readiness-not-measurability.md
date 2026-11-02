@@ -1,6 +1,6 @@
 # ADR-0083: The committed SCBench baseline runs tree holds only live trials; report status expresses comparison-readiness, not measurability
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-09-01
 
 ## Context

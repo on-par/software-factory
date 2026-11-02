@@ -13,7 +13,7 @@ export interface StackPosition {
   /** 1-based slice index. */
   index: number;
   count: number;
-  /** Branch the PR opens against: `main` for slice 1, the parent slice branch otherwise. */
+  /** Branch the PR opens against: the parent base ref (slice 1's `--base-branch`, or the parent slice branch), else `main`. */
   base: string;
   /** PR number of the parent slice, when the slice plan records one. */
   basePr?: number;
@@ -26,7 +26,7 @@ function errorMessage(err: unknown): string {
 
 export function stackPositionFor(plan: SlicePlan, index: number, parentBaseRef: string | undefined): StackPosition {
   const count = plan.slices.length;
-  const base = index === 1 || parentBaseRef === undefined ? STACK_BASE_BRANCH : parentBaseRef.replace(/^origin\//, '');
+  const base = parentBaseRef === undefined ? STACK_BASE_BRANCH : parentBaseRef.replace(/^origin\//, '');
   const basePr = plan.slices.find((s) => s.index === index - 1)?.prNumber;
   return {
     index,

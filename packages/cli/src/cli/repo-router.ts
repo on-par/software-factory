@@ -32,9 +32,9 @@ export function newRepoRouter(repoRoot: string, loaders: RepoRouterLoaders, Rout
     effective.allowExperimental,
     effective.localOnly,
   );
-  router.setCodexFullAccessTasks?.(
-    loaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox.codexFullAccessTasks,
-  );
+  const sandbox = loaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox;
+  router.setCodexFullAccessTasks?.(sandbox.codexFullAccessTasks);
+  router.setCodexSandbox?.(sandbox.codexSandbox);
   router.setLocalAuthSink?.(recordLocalAuthFailure);
   return router;
 }

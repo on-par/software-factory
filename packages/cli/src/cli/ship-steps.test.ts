@@ -30,7 +30,7 @@ it('passes the resolved factory state and primary git directory to Codex', () =>
     product: undefined,
     runStartedAt: '2026-10-19T00:00:00Z',
     lane: undefined,
-    opts: {},
+    opts: { parkOverBudget: true },
     autoRework: false,
     planApprovalEnabled: false,
     factoryConfig: { sandbox: {} } as FactoryConfig,
@@ -53,6 +53,7 @@ it('passes the resolved factory state and primary git directory to Codex', () =>
     primaryRepoRoot: repoRoot,
     writableRoots: [paths.state, `${repoRoot}/.git`],
   });
+  expect(request.parkOverBudget).toBe(true);
   expect(request.specPath.startsWith(`${paths.state}/plans/`)).toBe(true);
 });
 
@@ -120,38 +121,12 @@ it('retains runtime none for harnesses while --no-sandbox still disables it', ()
   expect(logSandboxPolicy({}, policy, log)).toBe(policy);
   expect(log).toHaveBeenCalledWith(
     'sandbox',
-    'outer sandbox off; harness sandbox in use (codex --sandbox workspace-write; harnesses without their own sandbox run unwrapped)',
+    'outer sandbox off; codex runs without its own sandbox unless sandbox.codexSandbox is workspace-write; harnesses without their own sandbox run unwrapped',
   );
   expect(log.mock.calls.flat().join(' ')).not.toContain('running uncontained');
   const consoleError = vi.spyOn(console, 'error').mockImplementationOnce(() => {});
   expect(logSandboxPolicy({ sandbox: false }, policy, vi.fn())).toBeUndefined();
   consoleError.mockRestore();
-});
-
-it('finishOutcome returns the branch without throwing for a stack-wait release (#3367)', () => {
-  const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
-  try {
-    const branch = finishOutcome({
-      outcome: {
-        state: 'released',
-        reason: 'stack-wait',
-        branch: 'factory/9-slice-2',
-        reworkRounds: 0,
-        prNumber: 101,
-        slice: { index: 1, count: 3 },
-      },
-      opts: {},
-      paths: getFactoryPaths('/tmp/primary', '/tmp/relocated-factory'),
-      issueNum: 9,
-      worktree: '/tmp/wt',
-      terminalMessage: undefined,
-      log: () => {},
-    });
-    expect(branch).toBe('factory/9-slice-2');
-    expect(spy.mock.calls.join('\n')).toContain('waiting for approval or merge of slice 1/3 PR #101');
-  } finally {
-    spy.mockRestore();
-  }
 });
 
 it('finishOutcome returns the branch without throwing for a file-overlap release (#3576)', () => {
@@ -219,7 +194,7 @@ it('findSliceIndex in stack mode returns the lowest pending slice (#3367)', asyn
   } as never;
   const args = { ctx: undefined, work, octokit, ghRepo: 'o/r', issueNum: 9 };
   expect(await findSliceIndex({ ...args, sizeGateMode: 'stack' })).toBe(2);
-  expect(await findSliceIndex({ ...args, sizeGateMode: 'slice' })).toBe(1);
+  expect(await findSliceIndex({ ...args, sizeGateMode: 'off' })).toBeUndefined();
 });
 
 describe('logSandboxPolicy egress enforcement (#2215)', () => {

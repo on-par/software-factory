@@ -173,3 +173,103 @@ describe('decideRiskMerge', () => {
     }
   });
 });
+
+describe('risk edge cases', () => {
+  it('normalizes paths and preserves embedded dot segments', () => {
+    const rules = { rules: [{ id: 'path', tier: 'low' as const, globs: ['docs/**'] }] };
+    expect(evaluateRisk({ paths: ['  ./docs\\a.txt  ', 'docs/./b.txt'], rules })).toEqual({
+      tier: 'low',
+      rules: [{ id: 'path', tier: 'low', paths: ['docs/a.txt', 'docs/./b.txt'] }],
+    });
+  });
+
+  it('reports empty, whitespace and non-string paths exactly', () => {
+    const bad: unknown[] = ['', '  ', 42];
+    expect(evaluateRisk({ paths: bad as string[], rules: { rules: [] } })).toEqual({
+      tier: 'high',
+      rules: [{ id: 'invalid-input', tier: 'high', paths: ['', '  ', ''] }],
+    });
+  });
+
+  it('defaults absent matchers and allowlist and matches patterns case-insensitively', () => {
+    const rules = {
+      rules: [
+        { id: 'pattern', tier: 'low' as const, patterns: ['^docs/'] },
+        { id: 'glob', tier: 'high' as const, globs: ['secure/*'] },
+        { id: 'empty', tier: 'low' as const },
+      ],
+    };
+    expect(evaluateRisk({ paths: ['DOCS/a', 'other'], rules })).toEqual({
+      tier: 'med',
+      rules: [
+        { id: 'pattern', tier: 'low', paths: ['DOCS/a'] },
+        { id: 'unmatched', tier: 'med', paths: ['other'] },
+      ],
+    });
+  });
+
+  it('reports one predicate error per path even when multiple rules throw', () => {
+    const fail = () => {
+      throw new Error('failure');
+    };
+    const rules = {
+      rules: [
+        { id: 'first', tier: 'low' as const, predicate: fail },
+        { id: 'second', tier: 'low' as const, predicate: fail },
+      ],
+    };
+    expect(evaluateRisk({ paths: ['a.ts'], rules })).toEqual({
+      tier: 'high',
+      rules: [
+        { id: 'unmatched', tier: 'med', paths: ['a.ts'] },
+        { id: 'predicate-error', tier: 'high', paths: ['a.ts'] },
+      ],
+    });
+  });
+
+  it.each([
+    {
+      tier: 'low' as RiskTier,
+      trustTier: 'T0' as TrustTier,
+      labels: [],
+      expected: { merge: true, addLabels: [], notify: false, reason: 'risk low' },
+    },
+    {
+      tier: 'med' as RiskTier,
+      trustTier: 'T2' as TrustTier,
+      labels: [],
+      expected: { merge: true, addLabels: [], notify: false, reason: 'risk med on T2' },
+    },
+    {
+      tier: 'med' as RiskTier,
+      trustTier: 'T1' as TrustTier,
+      labels: [],
+      expected: { merge: false, addLabels: ['risk:med'], notify: false, reason: 'risk med: trust tier T1 is not T2' },
+    },
+    {
+      tier: 'med' as RiskTier,
+      trustTier: 'T2' as TrustTier,
+      labels: ['needs-human'],
+      expected: { merge: false, addLabels: ['risk:med'], notify: false, reason: 'risk med: needs-human is set' },
+    },
+    {
+      tier: 'high' as RiskTier,
+      trustTier: 'T2' as TrustTier,
+      labels: [],
+      expected: { merge: false, addLabels: ['risk:high', 'needs-human'], notify: true, reason: 'risk high' },
+    },
+    {
+      tier: 'bogus' as RiskTier,
+      trustTier: 'T2' as TrustTier,
+      labels: [],
+      expected: {
+        merge: false,
+        addLabels: ['risk:high', 'needs-human'],
+        notify: true,
+        reason: 'unknown risk tier bogus treated as high',
+      },
+    },
+  ])('returns the complete merge decision for $tier on $trustTier', ({ tier, trustTier, labels, expected }) => {
+    expect(decideRiskMerge({ tier, trustTier, labels })).toEqual(expected);
+  });
+});

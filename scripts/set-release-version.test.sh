@@ -25,6 +25,8 @@ for f in "$ROOT"/packages/*/package.json; do
   mkdir -p "$REPO/packages/$d"
   cp "$f" "$REPO/packages/$d/package.json"
 done
+mkdir -p "$REPO/packages/private-fixture"
+printf '%s\n' '{"name":"@on-par/private-fixture","version":"0.0.0","private":true,"dependencies":{"@on-par/factory-core":"^0.0.1"}}' >"$REPO/packages/private-fixture/package.json"
 SET="$REPO/scripts/set-release-version.sh"
 
 # pkg <dir> <node expression on j>: evaluates against packages/<dir>/package.json.
@@ -42,7 +44,7 @@ CURRENT="$(bash "$SET" --current)"
 
 # Every dependency field is rewritten; non-@on-par deps and private packages are not.
 edit tui 'j.devDependencies={...j.devDependencies,"@on-par/contracts":"^0.0.1"};j.peerDependencies={"@on-par/adr-kit":"*"};j.optionalDependencies={"@on-par/repo-context":"^0.0.1"}'
-DASH_BEFORE="$(cat "$REPO/packages/dashboard/package.json")"
+PRIVATE_BEFORE="$(cat "$REPO/packages/private-fixture/package.json")"
 LOCK_DEP="$(pkg core 'j.dependencies["@octokit/rest"]')"
 
 out="$(bash "$SET" 0.9.0-next.3)"
@@ -59,7 +61,7 @@ done
 [ "$(pkg tui 'j.optionalDependencies["@on-par/repo-context"]')" = 0.9.0-next.3 ] || fail "optionalDependencies not pinned"
 [ "$(pkg tui 'j.devDependencies["@on-par/contracts"]')" = 0.9.0-next.3 ] || fail "devDependencies not pinned"
 [ "$(pkg core 'j.dependencies["@octokit/rest"]')" = "$LOCK_DEP" ] || fail "a third-party range changed"
-[ "$(cat "$REPO/packages/dashboard/package.json")" = "$DASH_BEFORE" ] || fail "a private package changed"
+[ "$(cat "$REPO/packages/private-fixture/package.json")" = "$PRIVATE_BEFORE" ] || fail "a private package changed"
 [ "$(bash "$SET" --current)" = 0.9.0-next.3 ] || fail "--current after set"
 
 # Lockstep drift: one package ahead fails and is named, for both forms.

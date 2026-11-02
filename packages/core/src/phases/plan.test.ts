@@ -1,7 +1,6 @@
 import { workKeyFromIssue } from '../work/work-key.js';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { LaneLifecycleEventSchema } from '@on-par/contracts';
@@ -9,7 +8,8 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createLifecycleBus } from '../bus/index.js';
-import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import type { RoutesConfig } from '../config/index.js';
+import { createPhaseTestSetup, fakeOctokit, stubModel, stubModelsConfig } from '../test-support/index.js';
 import { composeEnrichedIssueBody } from '../readiness/enrich.js';
 import { parseDecompositionOutput } from '../readiness/decompose.js';
 import { renderSlicePlanComment, slicePlanFromDecomposition, withSliceState } from '../readiness/slice-plan.js';
@@ -19,36 +19,10 @@ import { UnsupportedWorkSourceError, WorkSourceRegistry } from '../work/index.js
 import { buildPlanPrompt, defaultBuildRoute, planPhase, runnableBuildRoutes } from './plan.js';
 import { specWithDesign, StubModelExecutor, withImplementation } from './plan-test-helpers.js';
 
-const models: ModelsConfig = {
-  version: 1,
-  models: {
-    'stub-model': {
-      provider: 'custom',
-      tier: 'boss',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-    },
-    'pinned-model': {
-      provider: 'custom',
-      tier: 'boss',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-    },
-  },
-  tiers: { boss: ['stub-model', 'pinned-model'] },
-  failover: {
-    triggers: ['rate_limit', 'unavailable', 'auth'],
-    maxRetries: 2,
-    cooldownMs: 0,
-  },
-  routingRules: {},
-};
+const models = stubModelsConfig(
+  { 'stub-model': stubModel(), 'pinned-model': stubModel() },
+  { boss: ['stub-model', 'pinned-model'] },
+);
 
 const routes: RoutesConfig = {
   version: 1,
@@ -59,12 +33,9 @@ const routes: RoutesConfig = {
   },
 };
 
-const tempDirs = new Set<string>();
+const setup = createPhaseTestSetup();
 
-afterEach(async () => {
-  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
-});
+afterEach(() => setup.cleanup());
 
 describe('buildPlanPrompt', () => {
   const riskyPrompt = () =>
@@ -301,8 +272,7 @@ ${Array.from(
 `;
 
   it('bypasses the boss model only for a ready, bounded fast-path issue', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-493.md');
     const body = `## Problem statement
 Status output has an extra blank line.
@@ -314,8 +284,7 @@ Status output has an extra blank line.
 - [ ] Status has no blank line.
 ## Verification
 npm test`;
-    const stub = new StubModelExecutor({ scripts: {} });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(models, routes, undefined, new StubModelExecutor({ scripts: {} }));
 
     const result = await planPhase({
       issue: workKeyFromIssue(493),
@@ -324,7 +293,7 @@ npm test`;
       specPath,
       router,
       constitution: null,
-      octokit: { rest: { issues: { get: async () => ({ data: { title: 'Fix status output', body } }) } } } as any,
+      octokit: fakeOctokit({ 'issues.get': { data: { title: 'Fix status output', body } } }).octokit,
       log: () => {},
       enforceReadiness: true,
       fastPath: true,
@@ -337,8 +306,7 @@ npm test`;
   });
 
   it('fast path is unaffected by blockUnresolvedRegressions (#1819)', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-493.md');
     const body = `## Problem statement
 Status output has an extra blank line.
@@ -350,8 +318,7 @@ Status output has an extra blank line.
 - [ ] Status has no blank line.
 ## Verification
 npm test`;
-    const stub = new StubModelExecutor({ scripts: {} });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(models, routes, undefined, new StubModelExecutor({ scripts: {} }));
     const logs: string[] = [];
 
     const result = await planPhase({
@@ -361,7 +328,7 @@ npm test`;
       specPath,
       router,
       constitution: null,
-      octokit: { rest: { issues: { get: async () => ({ data: { title: 'Fix status output', body } }) } } } as any,
+      octokit: fakeOctokit({ 'issues.get': { data: { title: 'Fix status output', body } } }).octokit,
       log: (type) => logs.push(type),
       enforceReadiness: true,
       fastPath: true,
@@ -374,8 +341,7 @@ npm test`;
   });
 
   it('skips the fast path when the build route is pinned to claude, and honors the pin after model PLAN (#1367)', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-1367.md');
     const body = `## Problem statement
 Status output has an extra blank line.
@@ -387,12 +353,16 @@ Status output has an extra blank line.
 - [ ] Status has no blank line.
 ## Verification
 npm test`;
-    const stub = new StubModelExecutor({
-      scripts: {
-        plan: [{ output: withImplementation('route: codex') }],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: {
+          plan: [{ output: withImplementation('route: codex') }],
+        },
+      }),
+    );
     const logs: Array<{ type: string; msg: string }> = [];
 
     const result = await planPhase({
@@ -402,7 +372,7 @@ npm test`;
       specPath,
       router,
       constitution: null,
-      octokit: { rest: { issues: { get: async () => ({ data: { title: 'Fix status output', body } }) } } } as any,
+      octokit: fakeOctokit({ 'issues.get': { data: { title: 'Fix status output', body } } }).octokit,
       log: (type, msg) => {
         logs.push({ type, msg });
       },
@@ -421,8 +391,7 @@ npm test`;
   });
 
   it('enriches an incomplete GitHub factory task before a single PLAN call', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-492.md');
     const updatedBodies: string[] = [];
     const completeBody = `## Problem statement
@@ -439,24 +408,24 @@ Changing the queue API.
 
 ## Verification
 npm run test`;
-    const stub = new StubModelExecutor({
-      scripts: {
-        readiness_enrich: [{ output: completeBody }],
-        plan: [{ output: specWithDesign('Spec') }],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: {
+          readiness_enrich: [{ output: completeBody }],
+          plan: [{ output: specWithDesign('Spec') }],
+        },
+      }),
+    );
     const costs: { task: string }[] = [];
     router.setCostSink((entry) => costs.push(entry));
     const readinessEvents: any[] = [];
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'Repair import queue', body: '' } }),
-          update: async ({ body }: { body: string }) => updatedBodies.push(body),
-        },
-      },
-    };
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'Repair import queue', body: '' } }),
+      'issues.update': async ({ body }: { body: string }) => updatedBodies.push(body),
+    }).octokit;
 
     const result = await planPhase({
       issue: workKeyFromIssue(492),
@@ -499,25 +468,24 @@ Changing the queue API.
 npm run test`;
 
     async function run(opts: { original: string; updateIssueBodyOnEnrich?: boolean; enrichOutput?: string }) {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const updates: any[] = [];
       const logs: { type: string; msg: string }[] = [];
-      const stub = new StubModelExecutor({
-        scripts: {
-          readiness_enrich: [{ output: opts.enrichOutput ?? completeBody }],
-          plan: [{ output: specWithDesign('Spec') }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Repair import queue', body: opts.original } }),
-            update: async (args: unknown) => updates.push(args),
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            readiness_enrich: [{ output: opts.enrichOutput ?? completeBody }],
+            plan: [{ output: specWithDesign('Spec') }],
           },
-        },
-      };
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Repair import queue', body: opts.original } }),
+        'issues.update': async (args: unknown) => updates.push(args),
+      }).octokit;
       const result = await planPhase({
         issue: workKeyFromIssue(492),
         repo: 'on-par/software-factory',
@@ -578,8 +546,7 @@ npm run test`;
   });
 
   it('retries enrichment naming the missing heading(s) and succeeds without parking', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const updatedBodies: string[] = [];
     const incompleteBody = `## Problem statement
 Queue stalls.
@@ -599,13 +566,17 @@ API changes.
 - [ ] Queue works.
 ## Verification
 npm run test`;
-    const stub = new StubModelExecutor({
-      scripts: {
-        readiness_enrich: [{ output: incompleteBody }, { output: completeBody }],
-        plan: [{ output: specWithDesign('Spec') }],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: {
+          readiness_enrich: [{ output: incompleteBody }, { output: completeBody }],
+          plan: [{ output: specWithDesign('Spec') }],
+        },
+      }),
+    );
 
     const result = await planPhase({
       issue: workKeyFromIssue(492),
@@ -614,14 +585,10 @@ npm run test`;
       specPath: join(worktree, 'issue-492.md'),
       router,
       constitution: null,
-      octokit: {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Repair import queue', body: '' } }),
-            update: async ({ body }: { body: string }) => updatedBodies.push(body),
-          },
-        },
-      } as any,
+      octokit: fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Repair import queue', body: '' } }),
+        'issues.update': async ({ body }: { body: string }) => updatedBodies.push(body),
+      }).octokit,
       log: () => {},
       enforceReadiness: true,
     });
@@ -634,12 +601,15 @@ npm run test`;
   });
 
   it('escalates only after enrichment retries are exhausted', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
-    const stub = new StubModelExecutor({
-      scripts: { readiness_enrich: [{ output: 'not a factory task' }, { output: 'not a factory task' }] },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
+    const worktree = await setup.worktree('plan-phase-test-');
+    const { router, stub } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: { readiness_enrich: [{ output: 'not a factory task' }, { output: 'not a factory task' }] },
+      }),
+    );
     let updates = 0;
     const result = await planPhase({
       issue: workKeyFromIssue(492),
@@ -648,14 +618,10 @@ npm run test`;
       specPath: join(worktree, 'issue-492.md'),
       router,
       constitution: null,
-      octokit: {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Repair import queue', body: '' } }),
-            update: async () => updates++,
-          },
-        },
-      } as any,
+      octokit: fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Repair import queue', body: '' } }),
+        'issues.update': async () => updates++,
+      }).octokit,
       log: () => {},
       enforceReadiness: true,
     });
@@ -667,8 +633,7 @@ npm run test`;
   });
 
   it('does not call PLAN when persisting a valid enrichment fails', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const validBody = `## Problem statement
 Queue stalls.
 ## In scope
@@ -679,8 +644,12 @@ API changes.
 - [ ] Queue works.
 ## Verification
 npm run test`;
-    const stub = new StubModelExecutor({ scripts: { readiness_enrich: [{ output: validBody }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({ scripts: { readiness_enrich: [{ output: validBody }] } }),
+    );
     const result = await planPhase({
       issue: workKeyFromIssue(492),
       repo: 'on-par/software-factory',
@@ -688,16 +657,12 @@ npm run test`;
       specPath: join(worktree, 'issue-492.md'),
       router,
       constitution: null,
-      octokit: {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Repair import queue', body: '' } }),
-            update: async () => {
-              throw new Error('GitHub unavailable');
-            },
-          },
+      octokit: fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Repair import queue', body: '' } }),
+        'issues.update': async () => {
+          throw new Error('GitHub unavailable');
         },
-      } as any,
+      }).octokit,
       log: () => {},
       enforceReadiness: true,
     });
@@ -707,8 +672,7 @@ npm run test`;
   });
 
   it('skips enrichment for an already-ready factory task', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const readyBody = `## Problem statement
 Queue stalls.
 ## In scope
@@ -719,8 +683,12 @@ API changes.
 - [ ] Queue works.
 ## Verification
 npm run test`;
-    const stub = new StubModelExecutor({ scripts: { plan: [{ output: specWithDesign('Spec') }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({ scripts: { plan: [{ output: specWithDesign('Spec') }] } }),
+    );
     let updates = 0;
     const result = await planPhase({
       issue: workKeyFromIssue(492),
@@ -729,14 +697,10 @@ npm run test`;
       specPath: join(worktree, 'issue-492.md'),
       router,
       constitution: null,
-      octokit: {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Repair import queue', body: readyBody } }),
-            update: async () => updates++,
-          },
-        },
-      } as any,
+      octokit: fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Repair import queue', body: readyBody } }),
+        'issues.update': async () => updates++,
+      }).octokit,
       log: () => {},
       enforceReadiness: true,
     });
@@ -770,114 +734,22 @@ npm run test`;
       ],
     });
 
-    it('parks a plan whose design artifact exceeds the bounded-build budget when filing yields no children', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+    it('parks an over-budget plan without filing child issues when no slice or stack mode is set', async () => {
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-901.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }],
-          decompose: [{ output: validDecomposition }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const createComment = vi.fn().mockResolvedValue({});
-      const events: string[] = [];
-
-      const result = await planPhase({
-        issue: workKeyFromIssue(901),
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit: {
-          rest: {
-            issues: {
-              get: async () => ({
-                data: {
-                  title: 'Mega slice',
-                  body: '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
-                },
-              }),
-              createComment,
-            },
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }],
+            decompose: [{ output: validDecomposition }],
           },
-        } as any,
-        log: (type) => events.push(type),
-      });
-
-      expect(result.ok).toBe(false);
-      expect(result.escalate).toMatch(/bounded-build budget/);
-      expect(result.decomposed).toBeUndefined();
-      expect(stub.calls.map((call) => call.task)).toContain('decompose');
-      expect(createComment).toHaveBeenCalledTimes(1);
-      expect(events).toContain('size-gate-escalated');
-      expect(events).toContain('decompose_comment_posted');
-    });
-
-    it('parks an over-budget design artifact the same way in explicit file mode when filing yields no children', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
-      const specPath = join(worktree, 'issue-901.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }],
-          decompose: [{ output: validDecomposition }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const createComment = vi.fn().mockResolvedValue({});
-      const events: string[] = [];
-
-      const result = await planPhase({
-        issue: workKeyFromIssue(901),
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit: {
-          rest: {
-            issues: {
-              get: async () => ({
-                data: {
-                  title: 'Mega slice',
-                  body: '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
-                },
-              }),
-              createComment,
-            },
-          },
-        } as any,
-        log: (type) => events.push(type),
-        sizeGateMode: 'file',
-      });
-
-      expect(result.ok).toBe(false);
-      expect(result.escalate).toMatch(/bounded-build budget/);
-      expect(result.decomposed).toBeUndefined();
-      expect(result.sliced).toBeUndefined();
-      expect(stub.calls.map((call) => call.task)).toContain('decompose');
-      expect(createComment).toHaveBeenCalledTimes(1);
-      expect(events).toContain('size-gate-escalated');
-      expect(events).toContain('decompose_comment_posted');
-    });
-
-    it('files sub-issues and returns decomposed when an over-budget plan trips the post-plan gate in file mode (#2662)', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
-      const specPath = join(worktree, 'issue-901.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }],
-          decompose: [{ output: validDecomposition }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
+        }),
+      );
       const createComment = vi.fn().mockResolvedValue({});
       const create = vi.fn().mockResolvedValue({ data: { number: 902, id: 9902 } });
-      const request = vi.fn().mockResolvedValue({ data: [] });
       const events: string[] = [];
 
       const result = await planPhase({
@@ -900,23 +772,66 @@ npm run test`;
               create,
             },
           },
-          request,
+          request: vi.fn().mockResolvedValue({ data: [] }),
         } as any,
         log: (type) => events.push(type),
       });
 
       expect(result.ok).toBe(false);
-      expect(result.decomposed).toEqual({ childIssues: [902] });
-      expect(result.escalate).toMatch(/bounded-build budget.*decomposed into #902/);
+      expect(result.escalate).toContain('parked for decomposition');
+      expect('decomposed' in result).toBe(false);
+      expect(create).not.toHaveBeenCalled();
+      expect(stub.calls.map((call) => call.task)).not.toContain('decompose');
+      expect(events).toContain('size-gate-escalated');
+    });
+
+    it('parks an over-budget design artifact the same way in off mode without decomposing', async () => {
+      const worktree = await setup.worktree('plan-phase-test-');
+      const specPath = join(worktree, 'issue-901.md');
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }],
+            decompose: [{ output: validDecomposition }],
+          },
+        }),
+      );
+      const createComment = vi.fn().mockResolvedValue({});
+      const events: string[] = [];
+
+      const result = await planPhase({
+        issue: workKeyFromIssue(901),
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit: fakeOctokit({
+          'issues.get': async () => ({
+            data: {
+              title: 'Mega slice',
+              body: '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
+            },
+          }),
+          'issues.createComment': createComment,
+        }).octokit,
+        log: (type) => events.push(type),
+        sizeGateMode: 'off',
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.escalate).toContain('parked for decomposition');
       expect(result.sliced).toBeUndefined();
-      expect(events).toContain('decompose_filed');
-      expect(events).toContain('size-gate-decomposed');
-      expect(events).not.toContain('size-gate-escalated');
+      expect(stub.calls.map((call) => call.task)).not.toContain('decompose');
+      expect(createComment).not.toHaveBeenCalled();
+      expect(events).toContain('size-gate-escalated');
     });
 
     it('leaves a bounded design artifact alone (no decompose, plan proceeds)', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-902.md');
       const smallYaml = `design:
   restatedProblem: Small.
@@ -945,12 +860,16 @@ npm run test`;
   riskBlastRadius: One file.
   openQuestions: []
 `;
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: `---\nroute: codex\n${smallYaml}---\n# Spec\n` }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: `---\nroute: codex\n${smallYaml}---\n# Spec\n` }],
+          },
+        }),
+      );
       const createComment = vi.fn().mockResolvedValue({});
       const events: string[] = [];
 
@@ -961,19 +880,15 @@ npm run test`;
         specPath,
         router,
         constitution: null,
-        octokit: {
-          rest: {
-            issues: {
-              get: async () => ({
-                data: {
-                  title: 'Small slice',
-                  body: '## Problem statement\nSmall.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
-                },
-              }),
-              createComment,
+        octokit: fakeOctokit({
+          'issues.get': async () => ({
+            data: {
+              title: 'Small slice',
+              body: '## Problem statement\nSmall.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
             },
-          },
-        } as any,
+          }),
+          'issues.createComment': createComment,
+        }).octokit,
         log: (type) => events.push(type),
       });
 
@@ -1041,83 +956,11 @@ npm run test`;
       ],
     });
 
-    const investFailingDecomposition = JSON.stringify({
-      epic: { title: 'Epic', why: 'why', doneWhen: ['done'], children: ['Story one'] },
-      stories: [
-        {
-          title: 'Story one',
-          role: 'operator',
-          want: 'the thing works',
-          soThat: 'value',
-          problemStatement: 'problem',
-          inScope: ['in scope item'],
-          outOfScope: ['persistent storage'],
-          acceptanceCriteria: [
-            {
-              name: 'works',
-              given: [],
-              when: ['run'],
-              then: ['works'],
-              tracesTo: ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'],
-            },
-          ],
-          verification: [{ command: 'npm test', passWhen: 'passes' }],
-        },
-      ],
-    });
-
     // #3350: counts never split; an over-budget design artifact (14 changed files > 12) does, post-plan.
     const megaPlan = () => [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }];
 
-    it('decomposes and parks a complete oversized factory-task by default', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
-      const specPath = join(worktree, 'issue-607.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          decompose: [{ output: validDecomposition }],
-          plan: megaPlan(),
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const createComment = vi.fn().mockResolvedValue({});
-      const events: string[] = [];
-
-      const result = await planPhase({
-        issue: workKeyFromIssue(607),
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit: {
-          rest: {
-            issues: {
-              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
-              createComment,
-            },
-          },
-        } as any,
-        log: (type) => events.push(type),
-      });
-
-      expect(result.ok).toBe(false);
-      expect(result.escalate).toMatch(/bounded-build budget/);
-      expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose']);
-      expect(createComment).toHaveBeenCalledTimes(1);
-      expect(createComment).toHaveBeenCalledWith({
-        owner: 'on-par',
-        repo: 'software-factory',
-        issue_number: 607,
-        body: expect.stringContaining('## Proposed epic: Harden the import queue'),
-      });
-      expect(events).toContain('size-gate-escalated');
-      expect(events).toContain('decompose_comment_posted');
-    });
-
     it('scores the size gate on the factory:enriched sections of an already-enriched body (5 -> 8 ACs) (#2660)', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-2660.md');
       const acs = (n: number) => Array.from({ length: n }, (_, i) => `- [ ] Criterion ${i + 1}`).join('\n');
       const original = `## Problem statement
@@ -1146,13 +989,17 @@ ${acs(8)}
 ## Verification
 npm run test`;
       const body = composeEnrichedIssueBody(original, enriched);
-      const stub = new StubModelExecutor({
-        scripts: {
-          decompose: [{ output: validDecomposition.replace(',"P6"', '') }],
-          plan: megaPlan(),
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            decompose: [{ output: validDecomposition.replace(',"P6"', '') }],
+            plan: megaPlan(),
+          },
+        }),
+      );
       const logs: Array<{ type: string; msg: string; extra: any }> = [];
 
       const result = await planPhase({
@@ -1177,66 +1024,28 @@ npm run test`;
         log: (type: any, msg: any, extra: any) => logs.push({ type, msg, extra }),
       });
 
-      expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose']);
+      expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
       const hint = logs.find((l) => l.type === 'size_hint');
       expect(hint?.msg).toMatch(/8 acceptance criteria/);
       expect(hint?.extra.readiness.sizeOk).toBe(false);
-      expect(logs.some((l) => l.type === 'size-gate-decomposed')).toBe(true);
-      expect(logs.some((l) => l.type === 'size-gate-escalated')).toBe(false);
+      expect(logs.some((l) => l.type === 'size-gate-escalated')).toBe(true);
       expect(result.ok).toBe(false);
-      expect(result.decomposed).toEqual({ childIssues: [2700] });
-    });
-
-    it('parks with size-gate-escalated even when the decomposition fails INVEST', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
-      const specPath = join(worktree, 'issue-607.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          decompose: [{ output: investFailingDecomposition }, { output: investFailingDecomposition }],
-          plan: megaPlan(),
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const createComment = vi.fn().mockResolvedValue({});
-      const events: string[] = [];
-
-      const result = await planPhase({
-        issue: workKeyFromIssue(607),
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit: {
-          rest: {
-            issues: {
-              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
-              createComment,
-            },
-          },
-        } as any,
-        log: (type) => events.push(type),
-      });
-
-      expect(result.ok).toBe(false);
-      expect(result.escalate).toMatch(/bounded-build budget/);
-      expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose', 'decompose']);
-      expect(createComment).not.toHaveBeenCalled();
-      expect(events).toContain('decompose_failed');
-      expect(events).toContain('size-gate-escalated');
+      expect(result.escalate).toMatch(/parked for decomposition/);
     });
 
     it('proceeds to PLAN when enforceSizeGate is false', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-607.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: specWithDesign('Spec') }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: specWithDesign('Spec') }],
+          },
+        }),
+      );
       const createComment = vi.fn().mockResolvedValue({});
       const events: string[] = [];
 
@@ -1247,14 +1056,10 @@ npm run test`;
         specPath,
         router,
         constitution: null,
-        octokit: {
-          rest: {
-            issues: {
-              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
-              createComment,
-            },
-          },
-        } as any,
+        octokit: fakeOctokit({
+          'issues.get': async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
+          'issues.createComment': createComment,
+        }).octokit,
         log: (type) => events.push(type),
         enforceSizeGate: false,
       });
@@ -1265,103 +1070,16 @@ npm run test`;
       expect(createComment).not.toHaveBeenCalled();
       expect(events).not.toContain('size-gate-escalated');
     });
-
-    it('files real sub-issues and returns them on decomposed.childIssues when filing succeeds (#823)', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
-      const specPath = join(worktree, 'issue-607.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          decompose: [{ output: validDecomposition }],
-          plan: megaPlan(),
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const createComment = vi.fn().mockResolvedValue({});
-      let nextIssue = 700;
-      const create = vi.fn().mockImplementation(() => {
-        nextIssue += 1;
-        return Promise.resolve({ data: { number: nextIssue, id: 6000 + nextIssue } });
-      });
-      const request = vi.fn().mockResolvedValue({ data: [] });
-      const events: string[] = [];
-
-      const result = await planPhase({
-        issue: workKeyFromIssue(607),
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit: {
-          rest: {
-            issues: {
-              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
-              createComment,
-              create,
-            },
-          },
-          request,
-        } as any,
-        log: (type) => events.push(type),
-      });
-
-      expect(result.ok).toBe(false);
-      expect(result.decomposed).toEqual({ childIssues: [701] });
-      expect(result.escalate).toMatch(/decomposed into #701/);
-      expect(create).toHaveBeenCalledTimes(1);
-      expect(request).toHaveBeenCalledTimes(2); // GET duplicate check + POST sub-issue link
-      expect(events).toContain('decompose_filed');
-      expect(events).toContain('size-gate-decomposed');
-      expect(events).not.toContain('size-gate-escalated');
-    });
-
-    it('leaves decomposed unset and keeps the parked-for-decomposition message when filing yields no children', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
-      const specPath = join(worktree, 'issue-607.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          decompose: [{ output: validDecomposition }],
-          plan: megaPlan(),
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const createComment = vi.fn().mockResolvedValue({});
-      const events: string[] = [];
-
-      const result = await planPhase({
-        issue: workKeyFromIssue(607),
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit: {
-          rest: {
-            issues: {
-              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
-              createComment,
-              // no `create` — filing fails, degrading to the park-and-comment path
-            },
-          },
-        } as any,
-        log: (type) => events.push(type),
-      });
-
-      expect(result.ok).toBe(false);
-      expect(result.decomposed).toBeUndefined();
-      expect(result.escalate).toMatch(/parked for decomposition/);
-      expect(events).toContain('decompose_file_failed');
-      expect(events).toContain('size-gate-escalated');
-    });
   });
 
   it('stops before PLAN when the enrichment router fails', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
-    const stub = new StubModelExecutor({ scripts: { readiness_enrich: [{ fail: 'error' }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const worktree = await setup.worktree('plan-phase-test-');
+    const { router, stub } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({ scripts: { readiness_enrich: [{ fail: 'error' }] } }),
+    );
     const events: string[] = [];
     const result = await planPhase({
       issue: workKeyFromIssue(492),
@@ -1370,7 +1088,7 @@ npm run test`;
       specPath: join(worktree, 'issue-492.md'),
       router,
       constitution: null,
-      octokit: { rest: { issues: { get: async () => ({ data: { title: 'Repair import queue', body: '' } }) } } } as any,
+      octokit: fakeOctokit({ 'issues.get': { data: { title: 'Repair import queue', body: '' } } }).octokit,
       log: (type) => events.push(type),
       enforceReadiness: true,
     });
@@ -1381,30 +1099,29 @@ npm run test`;
   });
 
   it('passes timeoutSeconds through to the router', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-36.md');
     let captured: number | undefined;
-    const stub = new StubModelExecutor({
-      scripts: {
-        plan: [
-          {
-            output: withImplementation('route: codex'),
-            effect: (ctx) => {
-              captured = ctx.timeoutSeconds;
+    const { router } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: {
+          plan: [
+            {
+              output: withImplementation('route: codex'),
+              effect: (ctx) => {
+                captured = ctx.timeoutSeconds;
+              },
             },
-          },
-        ],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+          ],
         },
-      },
-    };
+      }),
+    );
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    }).octokit;
 
     await planPhase({
       issue: workKeyFromIssue(36),
@@ -1422,26 +1139,25 @@ npm run test`;
   });
 
   it('routes to the default tier-order model when no modelOverride is given', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-40.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        plan: [
-          {
-            output: withImplementation('route: codex'),
-          },
-        ],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    const { router, stub } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: {
+          plan: [
+            {
+              output: withImplementation('route: codex'),
+            },
+          ],
         },
-      },
-    };
+      }),
+    );
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    }).octokit;
 
     await planPhase({
       issue: workKeyFromIssue(40),
@@ -1458,26 +1174,25 @@ npm run test`;
   });
 
   it('pins the plan model via modelOverride, bypassing default tier order', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-41.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        plan: [
-          {
-            output: withImplementation('route: codex'),
-          },
-        ],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    const { router, stub } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: {
+          plan: [
+            {
+              output: withImplementation('route: codex'),
+            },
+          ],
         },
-      },
-    };
+      }),
+    );
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    }).octokit;
 
     const result = await planPhase({
       issue: workKeyFromIssue(41),
@@ -1496,26 +1211,25 @@ npm run test`;
   });
 
   it('parses a quoted codex route from frontmatter', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-36.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        plan: [
-          {
-            output: '---\nroute: "codex"\n---\n# Spec\n',
-          },
-        ],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    const { router } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: {
+          plan: [
+            {
+              output: '---\nroute: "codex"\n---\n# Spec\n',
+            },
+          ],
         },
-      },
-    };
+      }),
+    );
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    }).octokit;
 
     const result = await planPhase({
       issue: workKeyFromIssue(36),
@@ -1532,26 +1246,25 @@ npm run test`;
   });
 
   it('trims incidental whitespace inside a quoted route value', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-37.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        plan: [
-          {
-            output: '---\nroute: "codex "\n---\n# Spec\n',
-          },
-        ],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    const { router } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: {
+          plan: [
+            {
+              output: '---\nroute: "codex "\n---\n# Spec\n',
+            },
+          ],
         },
-      },
-    };
+      }),
+    );
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    }).octokit;
 
     const result = await planPhase({
       issue: workKeyFromIssue(37),
@@ -1568,28 +1281,27 @@ npm run test`;
   });
 
   it('archives a pre-existing spec before writing the fresh plan output', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-38.md');
     await writeFile(specPath, '---\nroute: claude\n---\n# Stale Spec\n');
 
-    const stub = new StubModelExecutor({
-      scripts: {
-        plan: [
-          {
-            output: specWithDesign('Fresh Spec'),
-          },
-        ],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'Refresh stale plan', body: 'Do not reuse old specs.' } }),
+    const { router } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: {
+          plan: [
+            {
+              output: specWithDesign('Fresh Spec'),
+            },
+          ],
         },
-      },
-    };
+      }),
+    );
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'Refresh stale plan', body: 'Do not reuse old specs.' } }),
+    }).octokit;
     const logs: Array<{ type: string; msg: string }> = [];
 
     const result = await planPhase({
@@ -1700,21 +1412,24 @@ npm run test`;
     async function run(opts: {
       decompose?: string[];
       maxSlices?: number;
-      mode?: 'slice' | 'stack';
+      mode?: 'off' | 'stack';
       comments?: { id: number; user: { id: number }; body: string }[];
       /** PLAN output; default is a small design. megaPlan trips the post-plan gate (14 changed files > 12). */
       plan?: string;
       labels?: string[];
     }) {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
-      const stub = new StubModelExecutor({
-        scripts: {
-          decompose: (opts.decompose ?? []).map((output) => ({ output })),
-          plan: [{ output: opts.plan ?? PLAN_OUTPUT }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
+      const worktree = await setup.worktree('plan-phase-test-');
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            decompose: (opts.decompose ?? []).map((output) => ({ output })),
+            plan: [{ output: opts.plan ?? PLAN_OUTPUT }],
+          },
+        }),
+      );
       const createComment = vi.fn().mockResolvedValue({ data: { id: 9999 } });
       const updateComment = vi.fn().mockResolvedValue({ data: {} });
       const create = vi.fn().mockResolvedValue({ data: { number: 701, id: 6701 } });
@@ -1746,7 +1461,7 @@ npm run test`;
           request,
         } as any,
         log: (type) => events.push(type),
-        sizeGateMode: opts.mode ?? 'slice',
+        sizeGateMode: opts.mode ?? 'stack',
         maxSlices: opts.maxSlices,
       });
       return { result, stub, events, createComment, create, update };
@@ -1833,7 +1548,6 @@ npm run test`;
       expect(body).toContain('<!-- factory:slice-plan v1 -->');
       expect(body).not.toContain('## Proposed epic');
       expect(body.match(/^- \[ \] \d+\/6\./gm)).toHaveLength(6);
-      expect(result.decomposed).toBeUndefined();
       expect(result.escalate).toContain('6 slices');
       expect(result.escalate).toContain('cap 5');
       expect(result.escalate).toContain('--max-slices 6');
@@ -1900,15 +1614,18 @@ npm run test`;
         listCommentsError?: Error;
         maxSlices?: number;
       }) {
-        const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-        tempDirs.add(worktree);
-        const stub = new StubModelExecutor({
-          scripts: {
-            decompose: (opts.decompose ?? []).map((output) => ({ output })),
-            plan: [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }],
-          },
-        });
-        const router = new ModelRouter(models, routes, false, stub);
+        const worktree = await setup.worktree('plan-phase-test-');
+        const { router, stub } = setup.router(
+          models,
+          routes,
+          undefined,
+          new StubModelExecutor({
+            scripts: {
+              decompose: (opts.decompose ?? []).map((output) => ({ output })),
+              plan: [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }],
+            },
+          }),
+        );
         const createComment = vi.fn().mockResolvedValue({ data: { id: 9999 } });
         const updateComment = vi.fn().mockResolvedValue({ data: {} });
         const create = vi.fn().mockResolvedValue({ data: { number: 701, id: 6701 } });
@@ -1940,7 +1657,7 @@ npm run test`;
             request: vi.fn().mockResolvedValue({ data: [] }),
           } as any,
           log: (type) => events.push(type),
-          sizeGateMode: 'slice',
+          sizeGateMode: 'stack',
           maxSlices: opts.maxSlices,
         });
         return { result, stub, events, createComment, updateComment, create };
@@ -2033,22 +1750,25 @@ npm run test`;
 `;
 
     it('writes .design.json and .design.md, populates result.designArtifact, and logs design_artifact_emitted', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-422.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [
-            {
-              output: `---\nroute: codex\n${validDesignYaml}  openQuestions: []\n---\n# Spec\n`,
-            },
-          ],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'Design artifact', body: 'Body.' } }) } },
-      };
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [
+              {
+                output: `---\nroute: codex\n${validDesignYaml}  openQuestions: []\n---\n# Spec\n`,
+              },
+            ],
+          },
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Design artifact', body: 'Body.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       const result = await planPhase({
@@ -2076,19 +1796,20 @@ npm run test`;
     });
 
     it('coerces an unquoted list item that YAML reads as a map and logs one design_artifact_coerced (#2216)', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-2216.md');
       const text = 'a remote reusable workflow (`uses: org/repo/.github/workflows/x.yml@main`) — not followed';
       const quoted = Array.from({ length: 11 }, (_, i) => `    - 'item ${i}'\n`).join('');
       const yaml = `${validDesignYaml}  edgeInputs:\n${quoted}    - ${text}\n  openQuestions: []\n`;
-      const stub = new StubModelExecutor({
-        scripts: { plan: [{ output: `---\nroute: codex\n${yaml}---\n# Spec\n` }] },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'Design artifact', body: 'Body.' } }) } },
-      };
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({ scripts: { plan: [{ output: `---\nroute: codex\n${yaml}---\n# Spec\n` }] } }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Design artifact', body: 'Body.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       const result = await planPhase({
@@ -2119,15 +1840,18 @@ npm run test`;
   openQuestions: ${openQuestions}
 `;
       const run = async (openQuestions: string, block?: boolean, yaml?: string, issue = 1819) => {
-        const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-        tempDirs.add(worktree);
-        const stub = new StubModelExecutor({
-          scripts: { plan: [{ output: `---\nroute: codex\n${yaml ?? deltaYaml(openQuestions)}---\n# Spec\n` }] },
-        });
-        const router = new ModelRouter(models, routes, false, stub);
-        const octokit: any = {
-          rest: { issues: { get: async () => ({ data: { title: 'Regression', body: 'Body.' } }) } },
-        };
+        const worktree = await setup.worktree('plan-phase-test-');
+        const { router } = setup.router(
+          models,
+          routes,
+          undefined,
+          new StubModelExecutor({
+            scripts: { plan: [{ output: `---\nroute: codex\n${yaml ?? deltaYaml(openQuestions)}---\n# Spec\n` }] },
+          }),
+        );
+        const octokit = fakeOctokit({
+          'issues.get': async () => ({ data: { title: 'Regression', body: 'Body.' } }),
+        }).octokit;
         const logs: Array<{ type: string; msg: string }> = [];
         const result = await planPhase({
           issue: workKeyFromIssue(issue),
@@ -2193,15 +1917,19 @@ npm run test`;
 
     const planOnce = async (issue: number, extra: string) => {
       const worktree = await outlineTempDirs.make('plan-phase-test-');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: `---\nroute: codex\n${validDesignYaml}  openQuestions: []\n${extra}---\n# Spec\n` }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'Outline', body: 'Body.' } }) } },
-      };
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: `---\nroute: codex\n${validDesignYaml}  openQuestions: []\n${extra}---\n# Spec\n` }],
+          },
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Outline', body: 'Body.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
       const result = await planPhase({
         issue: workKeyFromIssue(issue),
@@ -2234,22 +1962,25 @@ npm run test`;
     });
 
     it('logs design_shallow when the design block carries no targetTypes, signatures, or callGraph', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-427.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [
-            {
-              output: `---\nroute: codex\n${validDesignYaml}  openQuestions: []\n---\n# Spec\n`,
-            },
-          ],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'Shallow design', body: 'Body.' } }) } },
-      };
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [
+              {
+                output: `---\nroute: codex\n${validDesignYaml}  openQuestions: []\n---\n# Spec\n`,
+              },
+            ],
+          },
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Shallow design', body: 'Body.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       const result = await planPhase({
@@ -2268,8 +1999,7 @@ npm run test`;
     });
 
     it('parses targetTypes, signatures, and callGraph, and logs counts with no design_shallow', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-480.md');
       const deepenedYaml = `design:
   restatedProblem: The problem statement, restated.
@@ -2300,15 +2030,19 @@ npm run test`;
   riskBlastRadius: Nothing breaks.
   openQuestions: []
 `;
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: `---\nroute: codex\n${deepenedYaml}---\n# Spec\n` }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'Deepened design', body: 'Body.' } }) } },
-      };
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: `---\nroute: codex\n${deepenedYaml}---\n# Spec\n` }],
+          },
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Deepened design', body: 'Body.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       const result = await planPhase({
@@ -2339,22 +2073,25 @@ npm run test`;
     });
 
     it('logs design_open_questions with the question text when openQuestions is non-empty', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-423.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [
-            {
-              output: `---\nroute: codex\n${validDesignYaml}  openQuestions:\n    - is X intended?\n---\n# Spec\n`,
-            },
-          ],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'Open questions', body: 'Body.' } }) } },
-      };
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [
+              {
+                output: `---\nroute: codex\n${validDesignYaml}  openQuestions:\n    - is X intended?\n---\n# Spec\n`,
+              },
+            ],
+          },
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Open questions', body: 'Body.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       const result = await planPhase({
@@ -2373,21 +2110,22 @@ npm run test`;
       expect(questionLog?.msg).toContain('is X intended?');
     });
     it('archives a pre-existing design artifact alongside a replanned spec', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-425.md');
       await writeFile(specPath, '---\nroute: claude\n---\n# Stale Spec\n');
       await writeFile(`${specPath.replace(/\.md$/, '')}.design.json`, JSON.stringify({ stale: true }));
 
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: '---\nroute: codex\n---\n# Fresh Spec\n' }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'Replan', body: 'Body.' } }) } },
-      };
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: '---\nroute: codex\n---\n# Fresh Spec\n' }],
+          },
+        }),
+      );
+      const octokit = fakeOctokit({ 'issues.get': async () => ({ data: { title: 'Replan', body: 'Body.' } }) }).octokit;
 
       await planPhase({
         issue: workKeyFromIssue(425),
@@ -2408,8 +2146,7 @@ npm run test`;
 
   describe('FACTORY_CODEX kill-switch', () => {
     it('forces route to codex when localOnly is set so builds use the local agent harness', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-79.md');
       const stub = new StubModelExecutor({
         scripts: {
@@ -2421,13 +2158,9 @@ npm run test`;
         },
       });
       const router = new ModelRouter(models, routes, false, stub, false, false);
-      const octokit: any = {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Use local models', body: 'Keep spend at zero.' } }),
-          },
-        },
-      };
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Use local models', body: 'Keep spend at zero.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       const result = await planPhase({
@@ -2456,19 +2189,20 @@ npm run test`;
     });
 
     it('reroutes a claude spec to codex when only codex can run on this machine (#2406)', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-80.md');
-      const stub = new StubModelExecutor({
-        scripts: { plan: [{ output: '---\nroute: claude\n---\n# Spec\n' }] },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({ scripts: { plan: [{ output: '---\nroute: claude\n---\n# Spec\n' }] } }),
+      );
       vi.spyOn(router, 'resolveAll').mockImplementation((task: string) =>
         task === 'build_claude' || task === 'build_opencode' || task === 'build_command' ? [] : ['stub-model'],
       );
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'Codex only', body: 'Do it.' } }) } },
-      };
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Codex only', body: 'Do it.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
       const prompts: string[] = [];
       const run = router.run.bind(router);
@@ -2501,26 +2235,25 @@ npm run test`;
     });
 
     it('forces route to claude and logs a warn when codex is disabled', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-79.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [
-            {
-              output: '---\nroute: codex\n---\n# Spec\n',
-            },
-          ],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Add kill-switch', body: 'Add FACTORY_CODEX=0.' } }),
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [
+              {
+                output: '---\nroute: codex\n---\n# Spec\n',
+              },
+            ],
           },
-        },
-      };
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Add kill-switch', body: 'Add FACTORY_CODEX=0.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       const result = await planPhase({
@@ -2546,26 +2279,25 @@ npm run test`;
     });
 
     it('keeps route codex when neither the env nor the opt disables codex', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-79.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [
-            {
-              output: '---\nroute: codex\n---\n# Spec\n',
-            },
-          ],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Add kill-switch', body: 'Add FACTORY_CODEX=0.' } }),
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [
+              {
+                output: '---\nroute: codex\n---\n# Spec\n',
+              },
+            ],
           },
-        },
-      };
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Add kill-switch', body: 'Add FACTORY_CODEX=0.' } }),
+      }).octokit;
 
       const result = await planPhase({
         issue: workKeyFromIssue(79),
@@ -2582,22 +2314,23 @@ npm run test`;
     });
 
     it('forces route to claude via the codexDisabled opt', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-79.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Repo-pinned kill-switch', body: 'Disable codex via repo config.' } }),
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
           },
-        },
-      };
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({
+          data: { title: 'Repo-pinned kill-switch', body: 'Disable codex via repo config.' },
+        }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       const result = await planPhase({
@@ -2620,22 +2353,21 @@ npm run test`;
   });
 
   it('emits a structured failover event when the router fails over to a different model', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-40.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        plan: [{ fail: 'timeout' }, { output: withImplementation('route: codex') }],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    const { router } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: {
+          plan: [{ fail: 'timeout' }, { output: withImplementation('route: codex') }],
         },
-      },
-    };
+      }),
+    );
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    }).octokit;
     const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
 
     await planPhase({
@@ -2655,8 +2387,7 @@ npm run test`;
   });
 
   it('omits the detail suffix from the failover log when the failed attempt carries no descriptive detail', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-42.md');
     let calls = 0;
     const executor = {
@@ -2667,13 +2398,9 @@ npm run test`;
       },
     };
     const router = new ModelRouter(models, routes, false, executor as any);
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
-        },
-      },
-    };
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    }).octokit;
     const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
 
     const result = await planPhase({
@@ -2695,22 +2422,21 @@ npm run test`;
   });
 
   it('returns not-ok and surfaces the ESCALATE line when the planner escalates', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-43.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        plan: [{ output: 'notes\nESCALATE: which auth provider should we use?\nmore text' }],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'Add auth', body: 'Add authentication.' } }),
+    const { router } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: {
+          plan: [{ output: 'notes\nESCALATE: which auth provider should we use?\nmore text' }],
         },
-      },
-    };
+      }),
+    );
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'Add auth', body: 'Add authentication.' } }),
+    }).octokit;
     const logs: Array<{ type: string; msg: string }> = [];
 
     const result = await planPhase({
@@ -2733,22 +2459,21 @@ npm run test`;
   });
 
   it('logs exactly one readiness event with a structured payload, including on the escalation path', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-44.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        plan: [{ output: 'notes\nESCALATE: which auth provider should we use?\nmore text' }],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'Add auth', body: 'Add authentication.' } }),
+    const { router } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: {
+          plan: [{ output: 'notes\nESCALATE: which auth provider should we use?\nmore text' }],
         },
-      },
-    };
+      }),
+    );
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'Add auth', body: 'Add authentication.' } }),
+    }).octokit;
     const logCalls: Array<[string, string, unknown]> = [];
 
     await planPhase({
@@ -2774,20 +2499,17 @@ npm run test`;
   });
 
   it('defaults a null issue body to an empty string instead of the literal "null"', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-44.md');
-    const stub = new StubModelExecutor({
-      scripts: { plan: [{ output: withImplementation('route: codex') }] },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'No body issue', body: null } }),
-        },
-      },
-    };
+    const { router, stub } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({ scripts: { plan: [{ output: withImplementation('route: codex') }] } }),
+    );
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'No body issue', body: null } }),
+    }).octokit;
 
     const result = await planPhase({
       issue: workKeyFromIssue(44),
@@ -2805,20 +2527,17 @@ npm run test`;
   });
 
   it('keeps the default claude route when frontmatter route is a non-string value', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-45.md');
-    const stub = new StubModelExecutor({
-      scripts: { plan: [{ output: withImplementation('route: 123') }] },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
-        },
-      },
-    };
+    const { router } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({ scripts: { plan: [{ output: withImplementation('route: 123') }] } }),
+    );
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    }).octokit;
 
     const result = await planPhase({
       issue: workKeyFromIssue(45),
@@ -2835,22 +2554,21 @@ npm run test`;
   });
 
   it('keeps the default claude route when frontmatter YAML is malformed', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-47.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        plan: [{ output: withImplementation('route: [unclosed') }],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    const { router } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: {
+          plan: [{ output: withImplementation('route: [unclosed') }],
         },
-      },
-    };
+      }),
+    );
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    }).octokit;
 
     const result = await planPhase({
       issue: workKeyFromIssue(47),
@@ -2868,30 +2586,29 @@ npm run test`;
   });
 
   it('skips writing the spec when the model already wrote it directly via file tools', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const specPath = join(worktree, 'issue-46.md');
     const output = withImplementation('route: codex', '# Written directly by the model');
-    const stub = new StubModelExecutor({
-      scripts: {
-        plan: [
-          {
-            output,
-            effect: async () => {
-              await writeFile(specPath, output);
+    const { router } = setup.router(
+      models,
+      routes,
+      undefined,
+      new StubModelExecutor({
+        scripts: {
+          plan: [
+            {
+              output,
+              effect: async () => {
+                await writeFile(specPath, output);
+              },
             },
-          },
-        ],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const octokit: any = {
-      rest: {
-        issues: {
-          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+          ],
         },
-      },
-    };
+      }),
+    );
+    const octokit = fakeOctokit({
+      'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+    }).octokit;
 
     const result = await planPhase({
       issue: workKeyFromIssue(46),
@@ -2910,22 +2627,21 @@ npm run test`;
 
   describe('plan-approval gate', () => {
     it('is unchanged when no approvalGate is passed (disabled default)', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-50.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: withImplementation('route: codex') }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: withImplementation('route: codex') }],
           },
-        },
-      };
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+      }).octokit;
       const gateCalled = false;
 
       const result = await planPhase({
@@ -2944,22 +2660,21 @@ npm run test`;
     });
 
     it('grants approval and returns ok, requesting a kind:"plan" approval with the frozen spec', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-51.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: withImplementation('route: codex', '# Spec v1') }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: withImplementation('route: codex', '# Spec v1') }],
           },
-        },
-      };
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
       let gateCalls = 0;
       let capturedRequest: any;
@@ -2988,22 +2703,21 @@ npm run test`;
     });
 
     it('re-plans on a redirect: applies steering to the next prompt and returns the revised spec', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-52.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: specWithDesign('Spec v1') }, { output: specWithDesign('Spec v2') }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: specWithDesign('Spec v1') }, { output: specWithDesign('Spec v2') }],
           },
-        },
-      };
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
       let gateCalls = 0;
       let drainCalls = 0;
@@ -3045,22 +2759,21 @@ npm run test`;
     });
 
     it('rejects without a redirect and escalates with the operator reason', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-53.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: withImplementation('route: codex') }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: withImplementation('route: codex') }],
           },
-        },
-      };
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       const result = await planPhase({
@@ -3087,26 +2800,25 @@ npm run test`;
     });
 
     it('bounds the redirect loop with maxReplans and escalates once exceeded', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-54.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [
-            { output: specWithDesign('Spec v1') },
-            { output: specWithDesign('Spec v2') },
-            { output: specWithDesign('Spec v3') },
-          ],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [
+              { output: specWithDesign('Spec v1') },
+              { output: specWithDesign('Spec v2') },
+              { output: specWithDesign('Spec v3') },
+            ],
           },
-        },
-      };
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       const result = await planPhase({
@@ -3134,8 +2846,7 @@ npm run test`;
 
   describe('ADR constraints (#481)', () => {
     it('injects status-less ADRs marked as Accepted and names skipped files with reasons (#2217)', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       await mkdir(join(worktree, 'docs', 'adr'), { recursive: true });
       await writeFile(
         join(worktree, 'docs', 'adr', '0001-html-only-report-output.md'),
@@ -3146,15 +2857,19 @@ npm run test`;
         join(worktree, 'docs', 'adr', '0003-old.md'),
         '# ADR-0003: Old\n\n- Status: Superseded\n- Date: 2026-07-20\n\n## Decision\n\nOld.\n',
       );
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: withImplementation('route: codex') }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'ADR reader', body: 'Body.' } }) } },
-      };
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: withImplementation('route: codex') }],
+          },
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'ADR reader', body: 'Body.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       await planPhase({
@@ -3176,8 +2891,7 @@ npm run test`;
     });
 
     it('injects Accepted ADRs into the prompt and omits Superseded ones', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       await mkdir(join(worktree, 'docs', 'adr'), { recursive: true });
       await writeFile(
         join(worktree, 'docs', 'adr', '0001-x.md'),
@@ -3189,13 +2903,15 @@ npm run test`;
       );
 
       const specPath = join(worktree, 'issue-481.md');
-      const stub = new StubModelExecutor({
-        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'ADR reader', body: 'Body.' } }) } },
-      };
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({ scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] } }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'ADR reader', body: 'Body.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string; extra?: { durationMs?: number } }> = [];
 
       await planPhase({
@@ -3221,16 +2937,17 @@ npm run test`;
     });
 
     it('plans without ADR constraints when the worktree has no docs/adr', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-481.md');
-      const stub = new StubModelExecutor({
-        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'No ADRs', body: 'Body.' } }) } },
-      };
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({ scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] } }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'No ADRs', body: 'Body.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       await planPhase({
@@ -3254,8 +2971,7 @@ npm run test`;
 
   describe('ADR drafts', () => {
     it('ignores an adr: block a planner still emits: no <spec>.adr.json and no adr draft logs', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-482.md');
       const adrYaml = `adr:
   - title: Record ADR drafts during PLAN
@@ -3263,15 +2979,19 @@ npm run test`;
     decision: SHIP materializes drafts as Accepted ADRs.
     consequences: Future PLAN runs can read prior decisions back.
 `;
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: withImplementation(`route: codex\n${adrYaml}`) }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'ADR drafts', body: 'Body.' } }) } },
-      };
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: withImplementation(`route: codex\n${adrYaml}`) }],
+          },
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'ADR drafts', body: 'Body.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       const result = await planPhase({
@@ -3293,22 +3013,21 @@ npm run test`;
 
   describe('work request resolution (#505)', () => {
     it('fails before any phase work when the source kind is unsupported', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-505.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: withImplementation('route: codex') }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: withImplementation('route: codex') }],
           },
-        },
-      };
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       let error: unknown;
@@ -3336,20 +3055,17 @@ npm run test`;
     });
 
     it('resolves a GitHub issue to a canonical work request and preserves the existing prompt mapping', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-505.md');
-      const stub = new StubModelExecutor({
-        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
-          },
-        },
-      };
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({ scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] } }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+      }).octokit;
       const logs: Array<{ type: string; msg: string }> = [];
 
       await planPhase({
@@ -3370,27 +3086,24 @@ npm run test`;
     });
 
     it('uses an injected workSources registry instead of octokit', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-505.md');
-      const stub = new StubModelExecutor({
-        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
+      const { router, stub } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({ scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] } }),
+      );
       let issuesGetCalled = false;
-      const octokit: any = {
-        rest: {
-          issues: {
-            get: async () => {
-              issuesGetCalled = true;
-              return { data: { title: 'Should not be used', body: 'Should not be used.' } };
-            },
-            update: async () => {
-              throw new Error('local briefs must not update GitHub');
-            },
-          },
+      const octokit = fakeOctokit({
+        'issues.get': async () => {
+          issuesGetCalled = true;
+          return { data: { title: 'Should not be used', body: 'Should not be used.' } };
         },
-      };
+        'issues.update': async () => {
+          throw new Error('local briefs must not update GitHub');
+        },
+      }).octokit;
       const workSources = new WorkSourceRegistry().register({
         kind: 'local-brief',
         resolve: async () => ({
@@ -3424,18 +3137,21 @@ npm run test`;
 
   describe('lifecycle events', () => {
     it('emits started then done on the success path, validated against the shared schema', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-591.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: withImplementation('route: codex') }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'Add eval runner', body: 'Body.' } }) } },
-      };
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: {
+            plan: [{ output: withImplementation('route: codex') }],
+          },
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Add eval runner', body: 'Body.' } }),
+      }).octokit;
       const bus = createLifecycleBus();
       const received: any[] = [];
       bus.on((e) => received.push(e));
@@ -3466,16 +3182,19 @@ npm run test`;
     });
 
     it('emits started then failed on the escalation path, with a non-empty detail', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-592.md');
-      const stub = new StubModelExecutor({
-        scripts: { plan: [{ output: 'notes\nESCALATE: which auth provider should we use?\nmore text' }] },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'Add auth', body: 'Add authentication.' } }) } },
-      };
+      const { router } = setup.router(
+        models,
+        routes,
+        undefined,
+        new StubModelExecutor({
+          scripts: { plan: [{ output: 'notes\nESCALATE: which auth provider should we use?\nmore text' }] },
+        }),
+      );
+      const octokit = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Add auth', body: 'Add authentication.' } }),
+      }).octokit;
       const bus = createLifecycleBus();
       const received: any[] = [];
       bus.on((e) => received.push(e));
@@ -3573,13 +3292,12 @@ describe('planPhase failure routes on a Claude-less machine', () => {
       resolveAll: (task: string) =>
         task.startsWith('build_') ? (task === 'build_codex' ? ['m'] : []) : router.resolveAll(task),
     }) as ModelRouter;
-  const octokit: any = {
-    rest: { issues: { get: async () => ({ data: { title: 'Add auth', body: 'Add authentication.' } }) } },
-  };
+  const octokit = fakeOctokit({
+    'issues.get': async () => ({ data: { title: 'Add auth', body: 'Add authentication.' } }),
+  }).octokit;
 
   it('PLAN escalation returns the runnable fallback route, not claude', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('plan-phase-test-');
     const stub = new StubModelExecutor({
       scripts: { plan: [{ output: 'notes\nESCALATE: which auth provider should we use?\nmore text' }] },
     });

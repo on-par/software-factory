@@ -32,9 +32,9 @@ describe('findAdoptablePr', () => {
     });
   });
 
-  it('finds a legacy ship-it branch under the factory prefix', async () => {
+  it('does not match a legacy ship-it branch under the factory prefix', async () => {
     const { octokit } = stub([[pr(8, 'ship-it/2253-x')]]);
-    expect(await find(octokit)).toMatchObject({ status: 'found', prNumber: 8, branch: 'ship-it/2253-x' });
+    expect(await find(octokit)).toEqual({ status: 'absent' });
   });
 
   it('ignores other issues and non-factory branches', async () => {
@@ -53,11 +53,11 @@ describe('findAdoptablePr', () => {
   });
 
   it('lists every match sorted when ambiguous', async () => {
-    const { octokit } = stub([[pr(9, 'factory/2253-b'), pr(4, 'ship-it/2253-a')]]);
+    const { octokit } = stub([[pr(9, 'factory/2253-b'), pr(4, 'factory/2253-a')]]);
     expect(await find(octokit)).toEqual({
       status: 'ambiguous',
       prs: [
-        { prNumber: 4, branch: 'ship-it/2253-a' },
+        { prNumber: 4, branch: 'factory/2253-a' },
         { prNumber: 9, branch: 'factory/2253-b' },
       ],
     });

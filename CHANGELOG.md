@@ -10,6 +10,94 @@ section to `## X.Y.Z - date`. See
 ### Added
 
 - `factory classifier report` (and `--json` as `tier`) shows trust-tier promotion evidence: configured tier, coverage ratchet, per-package mutation vs floor, human-intervention rate with a caveat, rule-of-three slips and `eligibleFor` with the unmet criteria; missing or stale evidence is `unknown`, never 0%; `npm run coverage-ratchet -- --out coverage-ratchet.json` writes the coverage evidence (#1957).
+
+### Fixed
+
+- Land no longer stalls when a required check only runs on pull requests: a required context with no run on the base head is treated as no hosted base signal, merges proceed after a short grace and one warn event names the context (#3870).
+- The base CI gate and base health treat a `skipped` or `neutral` required check as passing, like GitHub, so a skipped check on main no longer writes a permanent merge pause or marks `hosted-ci` failing; an existing pause clears on the next check (#3871).
+
+### Changed
+
+- `npm run mutation` now mutates the merge-gating review modules (`floor`, `risk`, `verdict`, `routing`) on Stryker 10.1.1, which runs mutants correctly under Vitest 5.
+
+### Removed
+
+- Removed the experimental discovery exports from `@on-par/factory-core`.
+- Removed the unpublished dashboard and server packages; no shipped command used them.
+- Removed the experimental, flag-gated `factory hosted` commands and hosted control plane and runner exports; contained fork-PR review is unchanged.
+- `@on-par/factory-core` no longer exports `FactoryConfigV2Schema`, `factoryConfigV2JsonSchema`, `loadV2Config` and `parseV2Config`; no shipped command read them and repo config is unchanged (#3444).
+
+## 0.9.26 - 2026-11-01
+
+The factory never merges onto a red base: it honors hosted base CI before starting work or merging and pauses a repo's merges while its base is red, and stack mode sends a planner's split request to the stack splitter instead of parking the issue (#3856, #3855).
+All seven published `@on-par` packages move to 0.9.26 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Fixed
+
+- Honor hosted base CI before starting work or merging, and pause merges after a factory merge leaves the base red (#3856).
+- Stack mode routes planner requests to split an oversized issue through the slice gate; missing information and contradictions still park (#3855).
+
+## 0.9.25 - 2026-10-30
+
+One stack engine for `run-issue` and `run-brief` (`--size-gate` takes `off` or `stack`, `file` and `slice` are deprecated aliases for `stack`, and `--run-children` is removed), PR bodies whose risk receipt no longer lists changed paths or internal plan names, and Codex running with no sandbox by default (#3832, #3817, #3824).
+All seven published `@on-par` packages move to 0.9.25 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Added
+
+- `sandbox.codexSandbox` config key (`danger-full-access` | `workspace-write`, unset by default); an unknown value is ignored with a run warning and a non-failing `factory doctor` row, and is not read yet (#3829).
+- `factory run-issue <n> --stack` (or `--size-gate stack`) builds every slice of an oversized issue in one run, each slice's PR based on the previous slice's PR head; the stack stops at the first failed slice, `--base-branch` sets slice 1's base, `--no-pr` is refused, and `run-brief --stack` runs through the same stack engine (#3798).
+- `factory run-brief <file> --stack` now slices an over-budget brief and builds the slices as stacked PRs in one run; the slice plan is kept in `.factory/state/slice-plans/` (#3813).
+- `run-issue --stack` builds open same-repository blocked-by issues in prerequisite order (#3814).
+
+### Changed
+
+- `SIZE_GATE_MODES` and the `SizeGateMode` type in `@on-par/factory-core` now list only `off` and `stack`; `file` and `slice` stay accepted as deprecated `--size-gate` / `sizeGate.mode` inputs that run as stack, and slice-only code paths were removed (#3835).
+- `factory status` no longer shows decomposed parents and landing a child no longer updates the parent's coverage comment; `status --json` keeps `decomposedParents` as a deprecated, always-empty array that a later release removes (#3834).
+- The run lane's "lane complete" event no longer prints an always-zero decomposed count, and the core queue's unused enqueueAfter was removed (#3841).
+- Codex now runs with --sandbox danger-full-access by default, like Claude; set sandbox.codexSandbox: workspace-write to keep Codex's own sandbox (#3824).
+- The size gate defaults to stack; `file` and `slice` (config or `--size-gate`) are deprecated aliases for stack that print one warning, and `run-issue --run-children` was removed and exits 2 (#3832).
+- PR receipts and verification summaries omit paths and plan evidence, and Proof reports TypeScript net line counts (#3817).
+
+### Removed
+
+- `@on-par/factory-core/internal` no longer re-exports 99 unused daemon and usage names, and the unused usage coordinator, grant ledger, lane scheduler, engine supervisor and run-repo modules are deleted (#3780).
+- `@on-par/factory-core/internal` no longer re-exports 112 unused queue, local-small and land names, and the unused prerequisite-order module, local-small patch step and ProjectV2 board poller are deleted (#3782).
+- `@on-par/factory-core/internal` no longer re-exports 64 unused filing, projects and garden names, and the unused ProjectV2 GraphQL poller module and filing-policy evaluator are deleted (#3783).
+- core: trim unused `@on-par/factory-core/internal` re-exports for utils, worktree, config, models and router (#3784).
+- `@on-par/factory-core/internal` no longer re-exports 89 unused harness, phases and readiness names (#3785).
+- `@on-par/factory-core/internal` no longer re-exports 113 unused run, environment, admission, types, metrics, design, failure, hosted, eval, sandbox, kpis, events, blockers and CI names, and the unused token-coverage module is deleted (#3786).
+
+## 0.9.24 - 2026-10-29
+
+PR text without changed files or brief ids, stacked `run-brief`, and the `ship-it/` prefix and simulator removed (#3792, #3763, #3771, #3770).
+All seven published `@on-par` packages move to 0.9.24 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Added
+
+- `factory run-brief <file> [file...] --stack` opens the briefs as a PR stack: each brief starts from and targets the previous brief's PR head branch; a failed brief or one with no PR (`--no-pr`) stops the stack and the rest are skipped and reported (#3763).
+
+### Changed
+
+- PR descriptions no longer list changed files: the collapsed diff stat is gone from the body, and the large-PR walkthrough drops its Main files list. The PR's Files tab already shows them.
+- PR titles and descriptions for `run-brief` work no longer say "local brief" or carry the brief's digest, path or a tracker-style id such as `ARA-12`. The Summary line is the brief's title, and when the PR is based on another open PR (`--stack` or `--base-branch`) it links that PR ("Builds on #N"). The leftover-output commit on a brief run no longer cites the run number as an issue, and the BUILD prompt asks for commit messages without brief ids.
+- The approval-gate diff stat and the walkthrough size check now diff against the PR's real base branch instead of always `origin/main`, so a stacked PR counts only its own changes.
+- Factory branch recognition no longer matches the legacy `ship-it/` prefix (`LEGACY_BRANCH_PREFIX` removed); `branchPrefixSlug()` and ingest now default to `factory`. The 11 stale remote `ship-it/*` branches are not deleted, and KPI history parsed from them is no longer counted (#3771).
+
+### Removed
+
+- The headless simulator (packages/core/src/sim/) and the `sim-monte-carlo` and `ship-phase-breakdown-report` npm scripts are gone, and `@on-par/factory-core/testing` no longer exports the simulator, Monte Carlo, jitter, regression-fixture or ship-phase-breakdown-report CLI symbols (`runSimulation`, `runMonteCarlo*`, `SimJitter*`, `SIM_*`, ...). `SimModelExecutor`, `createSimOctokit`, `createSimWorkspace`, `simCommitAll` and `simWorkspace` remain (#3770).
+
+## 0.9.23 - 2026-10-28
+
+`--base-branch` for ship/run-issue/run-brief, plus multi-file `run-brief` (#3764, #3762).
+All seven published `@on-par` packages move to 0.9.23 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Added
+
 - `factory ship`, `run-issue` and `run-brief` take `--base-branch <ref>`: the worktree starts from the freshly fetched `origin/<ref>`, the PR opens against `<ref>`, and pre-PLAN base health and CHECK compare against it; the run has the size gate off, and an empty or `-`-prefixed ref exits 2 before any worktree or PR (#3764).
 - `factory run-brief <file> [file...]` takes several Markdown briefs and runs them one after another in argv order, with the same flags for each (#3762). A failed brief, including a missing or empty path, does not stop the rest. A per-brief summary is printed at the end, and the exit code is 1 if any brief failed. Each brief takes its own run lock as before. `--artifacts` still takes exactly one brief.
 

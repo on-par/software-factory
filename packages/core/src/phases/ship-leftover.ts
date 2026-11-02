@@ -14,7 +14,8 @@ export async function commitLeftoverBuildOutput(o: {
   run: CommandRunner;
   worktree: string;
   branch: string;
-  issue: WorkKey;
+  /** Tracker issue the commit refers to; undefined for brief-driven work, whose run number is not an issue. */
+  issue?: WorkKey;
   statusLines: string[];
   log: (type: EventKind, msg: string) => void;
 }): Promise<{ ok: true } | { ok: false; reason: string }> {
@@ -34,9 +35,12 @@ export async function commitLeftoverBuildOutput(o: {
       const code = (err as { code?: unknown } | null | undefined)?.code;
       if (code !== 1) throw err;
     }
-    await o.run(`git commit -m ${shellEscape(`chore(ship): commit build output left after check (#${o.issue})`)}`, {
-      cwd: o.worktree,
-    });
+    await o.run(
+      `git commit -m ${shellEscape(`chore(ship): commit build output left after check${o.issue === undefined ? '' : ` (#${o.issue})`}`)}`,
+      {
+        cwd: o.worktree,
+      },
+    );
   } catch (err) {
     return { ok: false, reason: `could not commit leftover build output: ${shortDetail(err)}` };
   }

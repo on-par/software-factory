@@ -1,6 +1,6 @@
 # ADR-0007: SlopCodeBench baseline correctness derives only from retained native SCBench evidence
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-07-29
 
 ## Context

@@ -130,6 +130,15 @@ describe('renderChildIssueBody parent coverage line (#3105)', () => {
     const { stories } = decompose([[criterion('a', ['INT-PROBLEM-01'])]]);
     expect(renderChildIssueBody(stories[0], 606)).not.toContain('Covers parent criteria');
   });
+
+  it('with no parent issue (a brief slice, #3813) leaves out the "Decomposed from" line and the separator', () => {
+    const { stories } = decompose([[criterion('a', ['P1'])], [criterion('b', ['INT-PROBLEM-01'])]]);
+    const covered = renderChildIssueBody(stories[0]);
+    expect(covered).toMatch(/---\n\nCovers parent criteria: P1$/);
+    const bare = renderChildIssueBody(stories[1]);
+    expect(bare).not.toMatch(/Decomposed from|#\d|---/);
+    expect(bare.endsWith('passes when: passes')).toBe(true);
+  });
 });
 
 describe('decomposeOversizedIssue parent coverage (#3105)', () => {

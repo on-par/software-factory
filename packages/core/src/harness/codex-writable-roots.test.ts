@@ -50,6 +50,7 @@ async function commandFor(task: TaskType, overrides: Parameters<typeof makeContr
     worktree,
     primaryRepoRoot: repo,
     writableRoots: [state, join(repo, '.git')],
+    codexSandbox: 'workspace-write',
     ...overrides,
   });
   await harness.run(request).catch(() => {});

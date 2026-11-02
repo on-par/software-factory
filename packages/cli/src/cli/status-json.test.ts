@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { computeParentCoverage, readStopMarker } from '@on-par/factory-core/internal';
+import { readStopMarker } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -42,7 +42,7 @@ describe('buildStatusJson', () => {
       active: [{ lane: 'app', issue: 7, phase: 'build', ageSec: 125 }],
       update: null,
       openFactoryDrafts: { count: 2, oldestHours: 5 },
-      decomposedParents: null,
+      decomposedParents: [],
       disk: null,
       providers: [],
       activeAlerts: [],
@@ -85,7 +85,7 @@ describe('buildStatusJson', () => {
     expect(statusJsonSchema.parse(out)).toEqual(out);
   });
 
-  it('maps decomposedParents rows and defaults to null (#3108)', () => {
+  it('always emits an empty decomposedParents array (#3834)', () => {
     const base = {
       repo: 'o/r',
       product: null,
@@ -98,15 +98,7 @@ describe('buildStatusJson', () => {
       disk: null,
       now,
     };
-    expect(buildStatusJson(base).decomposedParents).toBeNull();
-    const c = computeParentCoverage({ number: 10, body: '## Acceptance criteria\n- [ ] one\n- [ ] two\n' }, [
-      { number: 11, body: 'Covers parent criteria: P1', merged: true },
-    ]);
-    const out = buildStatusJson({ ...base, decomposedParents: [c] });
-    expect(out.decomposedParents).toEqual([
-      { issue: 10, covered: 1, total: 2, fullyCovered: false, uncovered: [{ id: 'P2', text: 'two' }] },
-    ]);
-    expect(statusJsonSchema.parse(out)).toEqual(out);
+    expect(buildStatusJson(base).decomposedParents).toEqual([]);
   });
 
   it('maps a GitHub-label-queue row (lane, issue, phase, lastActivityAt) to an active row with ageSec (#3344)', () => {

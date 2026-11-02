@@ -15,7 +15,7 @@ const run = (name: string, status: string | null, conclusion: string | null) => 
 describe('evaluateRequiredChecks', () => {
   it('is green when every required check completed with success (duplicates collapsed)', () => {
     const runs = [run('a', 'completed', 'success'), run('b', 'completed', 'success'), run('x', 'completed', 'failure')];
-    expect(evaluateRequiredChecks(['a', 'b', 'a'], runs)).toEqual({
+    expect(evaluateRequiredChecks(['a', 'b', 'a'], runs)).toMatchObject({
       green: true,
       reason: 'all 2 required checks succeeded',
       basis: 'required checks: a, b',
@@ -28,18 +28,19 @@ describe('evaluateRequiredChecks', () => {
   });
 
   it('fails closed on an empty required set', () => {
-    expect(evaluateRequiredChecks([], [run('a', 'completed', 'success')])).toEqual({
+    expect(evaluateRequiredChecks([], [run('a', 'completed', 'success')])).toMatchObject({
       green: false,
       reason: 'no required checks configured',
       noCodeHealthChecks: true,
     });
   });
 
-  it.each(['skipped', 'failure', 'cancelled', 'neutral', 'timed_out', 'action_required', 'stale'])(
-    'skipped, failed, cancelled, neutral, in-progress or missing required checks are not green (%s)',
+  it.each(['failure', 'cancelled', 'timed_out', 'action_required', 'stale', 'startup_failure'])(
+    'failed, cancelled, in-progress or missing required checks are not green (%s)',
     (conclusion) => {
-      expect(evaluateRequiredChecks(['a'], [run('a', 'completed', conclusion)])).toEqual({
+      expect(evaluateRequiredChecks(['a'], [run('a', 'completed', conclusion)])).toMatchObject({
         green: false,
+        state: 'failed',
         reason: `a ${conclusion}`,
       });
     },
@@ -52,10 +53,35 @@ describe('evaluateRequiredChecks', () => {
   });
 
   it('names a missing check', () => {
-    expect(evaluateRequiredChecks(['a', 'b'], [run('a', 'completed', 'success')])).toEqual({
+    expect(evaluateRequiredChecks(['a', 'b'], [run('a', 'completed', 'success')])).toMatchObject({
       green: false,
       reason: 'missing b',
     });
+  });
+
+  it('sets missing only when absent contexts are the sole non-green cause (#3870)', () => {
+    expect(evaluateRequiredChecks(['a'], [])).toMatchObject({ state: 'pending', reason: 'missing a', missing: ['a'] });
+    expect(evaluateRequiredChecks(['a', 'b', 'a'], [run('c', 'completed', 'success')])).toMatchObject({
+      reason: 'missing a',
+      missing: ['a', 'b'],
+    });
+    expect(evaluateRequiredChecks(['a', 'b'], [run('a', 'completed', 'success')])).toMatchObject({
+      reason: 'missing b',
+      missing: ['b'],
+    });
+  });
+
+  it('does not set missing when a run is in progress, failed, or all are green (#3870)', () => {
+    const mixed = evaluateRequiredChecks(['a', 'b'], [run('b', 'in_progress', null)]);
+    expect(mixed).toMatchObject({ state: 'pending', reason: 'missing a' });
+    expect(mixed).not.toHaveProperty('missing');
+    const pendingFirst = evaluateRequiredChecks(['b', 'a'], [run('b', 'in_progress', null)]);
+    expect(pendingFirst.reason).toBe('b pending');
+    expect(pendingFirst).not.toHaveProperty('missing');
+    const failed = evaluateRequiredChecks(['a', 'b'], [run('b', 'completed', 'failure')]);
+    expect(failed).toMatchObject({ state: 'failed', reason: 'b failure' });
+    expect(failed).not.toHaveProperty('missing');
+    expect(evaluateRequiredChecks(['a'], [run('a', 'completed', 'success')])).not.toHaveProperty('missing');
   });
 
   it('any non-success among duplicate runs fails', () => {
@@ -113,14 +139,14 @@ describe('fetchRequiredChecksVerdict', () => {
   it('uses protection contexts and checks when rulesets are 404', async () => {
     const { octokit } = fake({
       protection: { contexts: ['a'], checks: [{ context: 'b' }] },
-      runs: [run('a', 'completed', 'success'), run('b', 'completed', 'skipped')],
+      runs: [run('a', 'completed', 'success'), run('b', 'completed', 'cancelled')],
     });
-    expect(await fetchRequiredChecksVerdict(octokit, args)).toEqual({ green: false, reason: 'b skipped' });
+    expect(await fetchRequiredChecksVerdict(octokit, args)).toMatchObject({ green: false, reason: 'b cancelled' });
   });
 
   it('treats a 403 on protection as no contexts from that source', async () => {
     const { octokit } = fake({ protection: httpError(403), rules: [{ type: 'required_status_checks' }] });
-    expect(await fetchRequiredChecksVerdict(octokit, args)).toEqual({
+    expect(await fetchRequiredChecksVerdict(octokit, args)).toMatchObject({
       green: false,
       reason: 'no required checks configured',
       noCodeHealthChecks: true,
@@ -129,7 +155,7 @@ describe('fetchRequiredChecksVerdict', () => {
 
   it('is not green when both sources are empty', async () => {
     const { octokit } = fake({ runs: [run('ci', 'completed', 'success')] });
-    expect(await fetchRequiredChecksVerdict(octokit, args)).toEqual({
+    expect(await fetchRequiredChecksVerdict(octokit, args)).toMatchObject({
       green: false,
       reason: 'no required checks configured',
       noCodeHealthChecks: true,
@@ -158,7 +184,7 @@ describe('fetchRequiredChecksVerdict', () => {
         ],
         workflowRuns: [{ check_suite_id: 1, name: 'CI' }],
       });
-      expect(await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).toEqual({
+      expect(await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).toMatchObject({
         green: true,
         reason: 'all 2 push-triggered checks succeeded',
         basis: 'push checks: ci, gitleaks',
@@ -173,7 +199,7 @@ describe('fetchRequiredChecksVerdict', () => {
         runs: [inSuite('ci', 'failure', 1)],
         workflowRuns: [{ check_suite_id: 1, name: 'CI' }],
       });
-      expect(await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).toEqual({
+      expect(await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).toMatchObject({
         green: false,
         reason: 'ci failure',
       });
@@ -181,7 +207,7 @@ describe('fetchRequiredChecksVerdict', () => {
 
     it('is not green with no push workflow runs or runs without a check suite', async () => {
       const { octokit } = fake({ runs: [inSuite('ci', 'success', 1), run('vercel', 'completed', 'success')] });
-      expect(await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).toEqual({
+      expect(await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).toMatchObject({
         green: false,
         reason: expect.stringContaining('no code-health checks'),
         noCodeHealthChecks: true,
@@ -219,7 +245,7 @@ describe('fetchRequiredChecksVerdict', () => {
       })();
       expect(
         await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true, checks: ['contract', 'ios'] }),
-      ).toEqual({ green: false, reason: 'contract failure' });
+      ).toMatchObject({ green: false, reason: 'contract failure' });
       expect(getProtection).not.toHaveBeenCalled();
       const ok = fake({ runs: [inSuite('contract', 'success', 1), inSuite('ios', 'success', 1)] });
       expect(
@@ -299,9 +325,9 @@ describe('fetchRequiredChecksVerdict', () => {
 
 describe('evaluatePushChecks', () => {
   it('is not green when empty, pending or not success', () => {
-    expect(evaluatePushChecks([])).toEqual({ green: false, reason: 'no push-triggered checks' });
+    expect(evaluatePushChecks([])).toMatchObject({ green: false, reason: 'no push-triggered checks' });
     expect(evaluatePushChecks([run('a', 'in_progress', null)]).reason).toBe('a pending');
-    expect(evaluatePushChecks([run('a', 'completed', 'skipped')]).reason).toBe('a skipped');
+    expect(evaluatePushChecks([run('a', 'completed', 'failure')]).reason).toBe('a failure');
     expect(evaluatePushChecks([run('a', 'completed', null)]).reason).toBe('a incomplete');
   });
 
@@ -335,10 +361,10 @@ describe('classifyRequiredChecks', () => {
     ).toEqual(['a', 'b']);
   });
 
-  it('lists completed runs whose conclusion is not success as failed', () => {
+  it('lists completed runs whose conclusion is not passing as failed', () => {
     const rs = classifyRequiredChecks(
       ['a', 'b', 'c'],
-      [run('a', 'completed', 'failure'), run('b', 'completed', 'skipped'), run('c', 'completed', null)],
+      [run('a', 'completed', 'failure'), run('b', 'completed', 'cancelled'), run('c', 'completed', null)],
     );
     expect(rs).toEqual({ state: 'failed', missing: [], pending: [], failed: ['a', 'b', 'c'] });
   });

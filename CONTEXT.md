@@ -18,7 +18,7 @@ One attempt to take one issue through PLAN → BUILD → CHECK → SHIP, ending 
 
 ### Run lock
 
-A fail-fast (never queued) lock that stops two processes from force-recreating the same per-issue worktree and branch. It has two tiers. The checkout tier is `.factory/run.lock`, taken by `run`, `supervise` and `local-small-overnight`, which pick issues dynamically. The issue tier is `.factory/locks/run/<WorkKey>`, taken by `ship`, `run-issue`, `run-brief`, `resume` and each `--run-children` child. Each tier refuses while a live holder of the other exists, so parallel one-shot CLI runs mean different issues, still bounded by claims and `host.maxBuilds` slots. See [docs/ops/run-lock.md](docs/ops/run-lock.md) and [packages/core/src/utils/run-lock.ts](packages/core/src/utils/run-lock.ts).
+A fail-fast (never queued) lock that stops two processes from force-recreating the same per-issue worktree and branch. It has two tiers. The checkout tier is `.factory/run.lock`, taken by `run`, `supervise` and `local-small-overnight`, which pick issues dynamically. The issue tier is `.factory/locks/run/<WorkKey>`, taken by `ship`, `run-issue`, `run-brief` and `resume`. Each tier refuses while a live holder of the other exists, so parallel one-shot CLI runs mean different issues, still bounded by claims and `host.maxBuilds` slots. See [docs/ops/run-lock.md](docs/ops/run-lock.md) and [packages/core/src/utils/run-lock.ts](packages/core/src/utils/run-lock.ts).
 
 ### Claim
 
@@ -39,7 +39,7 @@ Issues labeled `factory:needs-design` park as `held` after PLAN; see [approve-de
 
 ### Release
 
-Giving a claim back: `release(issue, outcome)` in [packages/core/src/queue/github-queue.ts](packages/core/src/queue/github-queue.ts) with a `QueueReleaseOutcome` of `queued`, `parked` or `done`. Stale claims are released by `releaseStaleClaims` in [packages/core/src/queue/stale-claims.ts](packages/core/src/queue/stale-claims.ts) ([ADR-0060](docs/adr/0060-a-stale-claim-is-one-whose-claimed-by-label-round-trips-to-this-host-and-whose-pid-is-dead.md), [ADR-0104](docs/adr/0104-claim-staleness-is-a-ttl-lease-with-heartbeat-not-host-pid-liveness.md)). Port leases are released by `releasePortLease` in [packages/core/src/run/ports.ts](packages/core/src/run/ports.ts).
+Giving a claim back: `release(issue, outcome)` in [packages/core/src/queue/github-queue.ts](packages/core/src/queue/github-queue.ts) with a `QueueReleaseOutcome` of `queued`, `parked` or `done`. Stale claims are released by `releaseStaleClaims` in [packages/core/src/queue/stale-claims.ts](packages/core/src/queue/stale-claims.ts) ([ADR-0104](docs/adr/0104-claim-staleness-is-a-ttl-lease-with-heartbeat-not-host-pid-liveness.md)). Port leases are released by `releasePortLease` in [packages/core/src/run/ports.ts](packages/core/src/run/ports.ts).
 
 ### Rework round
 

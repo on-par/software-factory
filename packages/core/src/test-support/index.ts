@@ -4,14 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import {
-  createSimOctokit,
-  createSimWorkspace,
-  simCommitAll,
-  type SimOctokit,
-  type SimRecordedCall,
-  type SimWorkspace,
-} from '../sim/index.js';
+import { createSimOctokit, type SimOctokit, type SimRecordedCall } from '../fakes/octokit.js';
+import { createSimWorkspace, simCommitAll, type SimWorkspace } from '../testing/sim/workspace.js';
 import { cleanupWorktree } from '../utils/index.js';
 import { withGitLock } from '../utils/lock.js';
 
@@ -140,3 +134,5 @@ export class PipelineTestKit {
     this.workspaces.length = 0;
   }
 }
+
+export * from './phase.js';

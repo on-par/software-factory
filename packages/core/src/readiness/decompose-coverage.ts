@@ -1,8 +1,7 @@
 // packages/core/src/readiness/decompose-coverage.ts — parent-criterion coverage for the size gate (#3105).
 //
 // A parent issue's checkbox acceptance criteria get stable ids (P1, P2, ...); child criteria trace to
-// them, and a decomposition that leaves one untraced is rejected. checkParentCriteriaCoverage is a port
-// of product's checkTraceability (packages/product/src/intent/trace.ts) — keep the two in step.
+// them, and a decomposition that leaves one untraced is rejected.
 
 import { formatParentCriterionId, isParentCriterionId } from '@on-par/contracts';
 import type { Story } from '@on-par/contracts';

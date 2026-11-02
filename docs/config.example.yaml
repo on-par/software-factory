@@ -185,7 +185,7 @@ version: 2
 # `--draft-pr` is set.
 # run:
   # Branch-name prefix for factory branches, slug-normalized; must contain a letter or digit. Unset:
-  # factory. --branch-prefix beats it. Legacy ship-it/ branches are always recognized.
+  # factory. --branch-prefix beats it.
   # branchPrefix: "factory"
   # merge:
     # Squash-merge eligible PRs. Unset: legacy merge.auto, then FACTORY_MERGE=1. --auto-merge /
@@ -237,18 +237,16 @@ build:
   publishFromBuild: false
   contextCeiling:
     codex-cli: 120000
-# Size gate policy at PLAN (ADR-0147, ADR-0156). mode: file (default) files child issues for an
-# oversized issue and parks when the post-plan gate trips; slice keeps the issue whole, never files
-# issues, records a slice plan comment and ships one slice per run; off skips both gates and sends
-# the whole issue to BUILD; stack (ADR-0161) ships one stacked slice PR per run and builds the next
-# slice only after the PR below is approved or merged. maxSlices (1-20, default 10) caps a slice
-# plan that has not started: an over-cap plan is recorded and parks, and `--max-slices <n>` beats it
-# for one run. tokenBudget (default 150000) and maxFiles (default 12) (#3350): the post-plan gate
-# splits only when the plan's estimated tokens exceed tokenBudget or its changed files exceed
-# maxFiles; a plan changing 3 files or fewer never splits. `factory run-issue --size-gate <mode>`
-# beats mode for one run.
+# Size gate policy at PLAN (ADR-0147, ADR-0156). mode: unset (default) or `stack` (ADR-0161) ships
+# an oversized issue as stacked slice PRs, one per run, building the next slice only after the PR
+# below is approved or merged; `file` and `slice` are deprecated aliases for stack and print a
+# warning; `off` skips both gates and sends the whole issue to BUILD. maxSlices (1-20, default 10)
+# caps a slice plan that has not started: an over-cap plan is recorded and parks, and `--max-slices
+# <n>` beats it for one run. tokenBudget (default 150000) and maxFiles (default 12) (#3350): the
+# post-plan gate splits only when the plan's estimated tokens exceed tokenBudget or its changed
+# files exceed maxFiles; a plan changing 3 files or fewer never splits. `factory run-issue
+# --size-gate <mode>` / `--stack` beats mode for one run.
 sizeGate:
-  mode: "file"
   maxSlices: 10
   tokenBudget: 150000
   maxFiles: 12
@@ -284,7 +282,12 @@ workspace:
 # outbound connections and makes the egress proxy refuse hosts not on network.allow with 403
 # (#2215). sandbox.writablePaths (default []) adds directories BUILD/CHECK may write, e.g.
 # ["~/.nuget"]; entries must be absolute or start with ~/, and may not be /, ~, the home dir, or a
-# path equal to or containing the repo checkout (#3454).
+# path equal to or containing the repo checkout (#3454). sandbox.codexSandbox
+# (danger-full-access|workspace-write, default unset = danger-full-access) picks Codex's own
+# sandbox; unset or danger-full-access runs codex with --sandbox danger-full-access like Claude
+# (#3824); workspace-write restores Codex's workspace-write sandbox with the network allowlist and
+# writable roots, and sandbox.codexFullAccessTasks then grants listed tasks full access; any other
+# value is ignored with a warning and will be an error in a later release (#3829).
 sandbox:
   enabled: true
   runtime: "auto"
@@ -360,9 +363,8 @@ queue:
   max_review_rework_runs: 2
   maxClockSkewMs: 60000
 # Always-on auto-ingest. When enabled, `factory supervise` polls each cycle for open issues carrying
-# `label` and appends new ones (deduped against the queue and open factory/* PRs, legacy ship-it
-# branches included) to the queue under `lane`. Enable per-run with FACTORY_AUTO_INGEST=1; disable
-# with =0.
+# `label` and appends new ones (deduped against the queue and open factory/* PRs) to the queue under
+# `lane`. Enable per-run with FACTORY_AUTO_INGEST=1; disable with =0.
 ingest:
   enabled: false
   label: "ready"

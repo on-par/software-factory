@@ -1,6 +1,6 @@
 {
   "name": "@on-par/factory-config",
-  "version": "0.9.22",
+  "version": "0.9.26",
   "description": "Shared configuration defaults and product constitutions for the Software Factory.",
   "type": "module",
   "main": "dist/index.js",
@@ -45,6 +45,6 @@
   },
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^26.6.5"
+    "@types/node": "^26.6.6"
   }
 }

@@ -5,10 +5,10 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { parseDecompositionOutput } from './decompose.js';
-import type { StackSliceGateReader } from '../phases/stack-approval.js';
 import { resolveSliceGate } from './slice-gate.js';
 import { SLICE_PLAN_MARKER, renderSlicePlanComment, slicePlanFromDecomposition, withSliceState } from './slice-plan.js';
 import type { SlicePlan } from './slice-plan.js';
+import type { SlicePlanStore } from './slice-plan-store.js';
 
 const BOT = 42;
 const repo = 'acme/widgets';
@@ -89,7 +89,14 @@ function fake(comments: { id: number; user: { id: number } | null; body?: string
   return { octokit, createComment, updateComment };
 }
 
-function setup(decompose: string[], f: ReturnType<typeof fake>, oversized = true, maxSlices = 10, sliceIndex?: number) {
+function setup(
+  decompose: string[],
+  f: ReturnType<typeof fake>,
+  oversized = true,
+  maxSlices = 10,
+  sliceIndex?: number,
+  store?: SlicePlanStore,
+) {
   const stub = new StubModelExecutor({ scripts: { decompose: decompose.map((output) => ({ output })) } });
   const router = new ModelRouter(models, routes, false, stub);
   const events: { type: string; msg: string }[] = [];
@@ -103,6 +110,7 @@ function setup(decompose: string[], f: ReturnType<typeof fake>, oversized = true
       sizeReason: 'too many items',
       maxSlices,
       sliceIndex,
+      store,
       worktree: '/tmp/wt',
       router,
       octokit: f.octokit,
@@ -141,14 +149,6 @@ describe('resolveSliceGate', () => {
     expect(await run()).toEqual({ kind: 'park', reason: 'slice plan lookup failed: github down' });
   });
 
-  it('parks without decomposing when the current slice already has an open PR', async () => {
-    const plan = withSliceState(planOf(2), 1, 'pr-open', 81);
-    const f = fake([{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(plan) }]);
-    const { stub, run } = setup([], f);
-    expect(await run()).toMatchObject({ kind: 'park', reason: expect.stringContaining('PR #81') });
-    expect(stub.calls).toEqual([]);
-  });
-
   describe('explicit sliceIndex (ADR-0161 stack mode)', () => {
     const found = (plan: SlicePlan) => fake([{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(plan) }]);
 
@@ -183,21 +183,8 @@ describe('resolveSliceGate', () => {
     });
   });
 
-  describe('stack mode reads the slice below the next pending slice (#3367)', () => {
-    const SELF = 7;
-    const reader = (o: {
-      state?: 'open' | 'merged' | 'closed';
-      reviews?: { reviewerId: number | null; state: string; commitId: string | null }[];
-      throws?: boolean;
-    }): StackSliceGateReader => ({
-      getPullState: async () => {
-        if (o.throws) throw new Error('github down');
-        return o.state ?? 'open';
-      },
-      getPullReviews: async () => ({ headSha: 'sha1', selfId: SELF, reviews: o.reviews ?? [] }),
-    });
-    const approved = [{ reviewerId: 9, state: 'APPROVED', commitId: 'sha1' }];
-    const run = (plan: SlicePlan, stackReader?: StackSliceGateReader) => {
+  describe("stack mode builds slice k once slice k-1's PR is open or merged (#3798)", () => {
+    const run = (plan: SlicePlan) => {
       const f = fake([{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(plan) }]);
       return resolveSliceGate({
         issue,
@@ -206,7 +193,6 @@ describe('resolveSliceGate', () => {
         body: 'b',
         oversized: false,
         maxSlices: 10,
-        stackReader,
         worktree: '/tmp/wt',
         router: new ModelRouter(models, routes, false, new StubModelExecutor({ scripts: {} })),
         octokit: f.octokit,
@@ -215,68 +201,30 @@ describe('resolveSliceGate', () => {
     };
     const slice1Open = () => withSliceState(planOf(3), 1, 'pr-open', 10, 'factory/5-slice-1');
 
-    it("selects slice 2 when slice 1's PR is approved", async () => {
-      const outcome = await run(slice1Open(), reader({ reviews: approved }));
+    it("selects slice 2 while slice 1's PR is still open and unapproved", async () => {
+      const outcome = await run(slice1Open());
       expect(outcome).toMatchObject({ kind: 'slice', created: false });
       expect(outcome.kind === 'slice' && outcome.slice.index).toBe(2);
     });
 
-    it("waits on slice 1's unapproved PR instead of parking", async () => {
-      const outcome = await run(slice1Open(), reader({}));
-      expect(outcome).toMatchObject({ kind: 'wait', prNumber: 10, index: 1 });
-    });
-
-    it('waits when changes are requested', async () => {
-      const outcome = await run(
-        slice1Open(),
-        reader({ reviews: [{ reviewerId: 9, state: 'CHANGES_REQUESTED', commitId: 'sha1' }] }),
-      );
-      expect(outcome).toMatchObject({ kind: 'wait', reason: expect.stringContaining('changes requested') });
-    });
-
-    it('selects slice 2 and folds in the merge when GitHub says slice 1 merged', async () => {
-      const outcome = await run(slice1Open(), reader({ state: 'merged' }));
-      expect(outcome.kind === 'slice' && outcome.slice.index).toBe(2);
-      expect(outcome.kind === 'slice' && outcome.plan.slices[0]).toMatchObject({ state: 'merged', prNumber: 10 });
-    });
-
-    it('selects slice 2 without a read when slice 1 is merged in the plan', async () => {
-      const outcome = await run(withSliceState(planOf(2), 1, 'merged', 10), reader({ throws: true }));
+    it('selects slice 2 when slice 1 is merged', async () => {
+      const outcome = await run(withSliceState(planOf(2), 1, 'merged', 10));
       expect(outcome.kind === 'slice' && outcome.slice.index).toBe(2);
     });
 
-    it('selects slice 1 of a fresh plan without a read', async () => {
-      const outcome = await run(planOf(2), reader({ throws: true }));
+    it('selects slice 1 of a fresh plan', async () => {
+      const outcome = await run(planOf(2));
       expect(outcome.kind === 'slice' && outcome.slice.index).toBe(1);
     });
 
-    it('parks when the reader throws', async () => {
-      const outcome = await run(slice1Open(), reader({ throws: true }));
-      expect(outcome).toMatchObject({ kind: 'park', reason: expect.stringContaining('stack approval lookup failed') });
-    });
-
-    it('parks out of order when a built slice sits above the pending one', async () => {
-      const plan = withSliceState(slice1Open(), 3, 'pr-open', 12, 'factory/5-slice-3');
-      const outcome = await run(plan, reader({ reviews: approved }));
-      expect(outcome).toMatchObject({ kind: 'park', reason: expect.stringContaining('out of order') });
-    });
-
     it('falls back to selectSlice when slice 1 is not built', async () => {
-      const plan = withSliceState(planOf(2), 1, 'not-built');
-      const outcome = await run(plan, reader({ throws: true }));
+      const outcome = await run(withSliceState(planOf(2), 1, 'not-built'));
       expect(outcome.kind === 'slice' && outcome.slice.index).toBe(1);
     });
 
     it('falls back to selectSlice when no slice is pending', async () => {
       const plan = withSliceState(withSliceState(planOf(2), 1, 'merged'), 2, 'merged');
-      expect(await run(plan, reader({}))).toMatchObject({
-        kind: 'park',
-        reason: expect.stringContaining('every slice'),
-      });
-    });
-
-    it('keeps the pr-open park without a reader', async () => {
-      expect(await run(slice1Open())).toMatchObject({ kind: 'park', reason: expect.stringContaining('PR #10') });
+      expect(await run(plan)).toMatchObject({ kind: 'park', reason: expect.stringContaining('every slice') });
     });
   });
 
@@ -417,5 +365,52 @@ describe('resolveSliceGate', () => {
     if (outcome.kind === 'slice') expect(outcome.created).toBe(true);
     expect(f.createComment).toHaveBeenCalledTimes(1);
     expect(events.map((e) => e.type)).toContain('size-gate-sliced');
+  });
+
+  it('uses an injected store: a found plan selects a slice without touching GitHub', async () => {
+    const f = fake([]);
+    const store: SlicePlanStore = {
+      find: async () => ({ status: 'found', plan: planOf(2), where: 'mem' }),
+      save: vi.fn(),
+    };
+    const { stub, run } = setup([], f, true, 10, undefined, store);
+
+    const outcome = await run();
+
+    expect(outcome).toMatchObject({ kind: 'slice', created: false });
+    expect(stub.calls).toEqual([]);
+    expect(store.save).not.toHaveBeenCalled();
+    expect(f.createComment).not.toHaveBeenCalled();
+  });
+
+  it('uses an injected store: an oversized issue with no plan saves there, not as a comment', async () => {
+    const f = fake([]);
+    const save = vi.fn(async () => ({ where: 'mem-file' }));
+    const store: SlicePlanStore = { find: async () => ({ status: 'not-found' }), save };
+    const { events, run } = setup([decompositionJson(2)], f, true, 10, undefined, store);
+
+    const outcome = await run();
+
+    expect(outcome).toMatchObject({ kind: 'slice', created: true });
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(f.createComment).not.toHaveBeenCalled();
+    expect(events.find((e) => e.type === 'size-gate-sliced')?.msg).toContain('slice plan mem-file');
+  });
+
+  it('parks with the store label when an injected store holds unreadable data', async () => {
+    const store: SlicePlanStore = {
+      find: async () => ({ status: 'invalid', where: 'plan.md', error: 'bad' }),
+      save: vi.fn(),
+    };
+    const { run } = setup([], fake([]), true, 10, undefined, store);
+    expect(await run()).toEqual({ kind: 'park', reason: 'slice plan plan.md is unreadable (bad) — parked' });
+  });
+
+  it('without a store the slice plan is still found and written as an issue comment', async () => {
+    const found = fake([{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(planOf(2)) }]);
+    expect(await setup([], found).run()).toMatchObject({ kind: 'slice', created: false });
+    const empty = fake([]);
+    expect(await setup([decompositionJson(2)], empty).run()).toMatchObject({ kind: 'slice', created: true });
+    expect(empty.createComment).toHaveBeenCalledTimes(1);
   });
 });

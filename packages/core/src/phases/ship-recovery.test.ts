@@ -75,6 +75,35 @@ async function ship(
 }
 
 describe('SHIP leftover-output recovery', () => {
+  it('commits leftover output for a brief run without a made-up issue reference', async () => {
+    const { octokit } = octokitFixture();
+    let committed = false;
+    const { run, commands } = makeRunner({
+      status: () => (committed ? '' : ' M packages/core/src/phases/ship.ts\n'),
+      probe: async () => {
+        throw Object.assign(new Error('diff found'), { code: 1 });
+      },
+      commit: async () => {
+        committed = true;
+        return { stdout: '' };
+      },
+    });
+    await shipPhase({
+      issue: workKeyFromIssue(9000123),
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-9000123',
+      branch: 'factory/9000123-brief',
+      octokit: octokit as never,
+      watchCI: false,
+      log: () => {},
+      run,
+      work: { id: 'local-brief:b.md#0123456789ab', kind: 'local-brief', title: 'ARA-3: Tidy logs' },
+    });
+    expect(commands.find((command) => command.startsWith('git commit -m'))).toBe(
+      "git commit -m 'chore(ship): commit build output left after check'",
+    );
+  });
+
   it('commits modified and untracked build output after a green check and proceeds to the PR', async () => {
     const { octokit, calls } = octokitFixture();
     const logs: Array<[string, string]> = [];

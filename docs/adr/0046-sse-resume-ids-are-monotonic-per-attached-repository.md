@@ -1,6 +1,6 @@
 # ADR-0046: SSE resume IDs are monotonic per attached repository
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-08-25
 
 ## Context
@@ -33,4 +33,4 @@ field to distinguish them and cannot treat the scalar cursor as a globally order
 ## References
 
 - [Issue #840 — Preserve multi-repository SSE resume semantics](https://github.com/on-par/software-factory/issues/840)
-- [ADR-0031 — SSE resume is a bounded in-process replay ring, not durable event history](https://github.com/on-par/software-factory/blob/main/docs/adr/0031-sse-resume-is-a-bounded-in-process-replay-ring-not-durable-event-history.md)
+- ADR-0031 (superseded by this ADR; removed)

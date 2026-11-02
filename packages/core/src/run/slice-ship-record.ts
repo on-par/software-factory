@@ -5,7 +5,7 @@ import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
 import { updateParentStackOrder } from '../phases/stack-order.js';
-import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
+import { issueCommentSlicePlanStore, type SlicePlanStore } from '../readiness/slice-plan-store.js';
 import { type SlicePlan, withSliceState } from '../readiness/slice-plan.js';
 import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 
@@ -19,30 +19,28 @@ export async function recordShippedSlice(opts: {
   index: number;
   ship: { prNumber?: number; alreadyDelivered?: boolean };
   stackMode: boolean;
+  /** Where the plan is saved; defaults to the issue's slice-plan comment. */
+  store?: SlicePlanStore;
   log: (type: EventKind, msg: string) => void;
 }): Promise<string | undefined> {
-  const { octokit, repo, key, branch, plan, index, ship, stackMode, log } = opts;
+  const { octokit, repo, key, branch, plan, index, ship, stackMode, store, log } = opts;
   const count = plan.slices.length;
   if (ship.prNumber === undefined) {
     log('ship', `slice ${index}/${count} shipped with no PR number — slice plan not updated`);
     return undefined;
   }
   const state = ship.alreadyDelivered ? 'merged' : 'pr-open';
+  // An injected store is a brief's slice-plan file (#3813); the default is the issue comment.
+  const where = store ? 'slice plan file' : 'slice plan comment';
   try {
-    await upsertSlicePlanComment({
-      octokit,
-      repo,
-      issue: issueNumberOf(key),
-      plan: withSliceState(plan, index, state, ship.prNumber, branch),
-    });
+    await (store ?? issueCommentSlicePlanStore({ octokit, repo, issue: issueNumberOf(key) })).save(
+      withSliceState(plan, index, state, ship.prNumber, branch),
+    );
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    return `slice ${index}/${count} PR #${ship.prNumber} opened but recording it in the slice plan comment failed: ${reason}`;
+    return `slice ${index}/${count} PR #${ship.prNumber} opened but recording it in the ${where} failed: ${reason}`;
   }
-  log(
-    'ship',
-    `recorded slice ${index}/${count} as ${state} (PR #${ship.prNumber}, branch ${branch}) in the slice plan comment`,
-  );
+  log('ship', `recorded slice ${index}/${count} as ${state} (PR #${ship.prNumber}, branch ${branch}) in the ${where}`);
   if (stackMode && !ship.alreadyDelivered) {
     await updateParentStackOrder({ octokit, repo, plan, index, prNumber: ship.prNumber, log });
   }

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { QueueGitHubClient } from './github-queue.js';
-import { orderByPrerequisites, runUnpark, UnparkError } from './unpark.js';
+import { runUnpark, UnparkError } from './unpark.js';
 import { readWorktreeKeeps, upsertWorktreeKeep } from '../worktree/worktree-keeps.js';
 import { fakeIssueComments } from './fake-issue-comments.js';
 
@@ -323,19 +323,6 @@ describe('runUnpark', () => {
       const res = await runUnpark({ ...base, client, issue: 200, readParkedOrder });
       expect(res.order).toBe(18);
       expect(readParkedOrder).not.toHaveBeenCalled();
-    });
-
-    it('prerequisite-ordered unparks land at the back, prerequisite first', async () => {
-      const labels = lane17();
-      labels.set(...parked(301));
-      labels.set(...parked(302));
-      const { client } = fakeClient(labels);
-      const sorted = orderByPrerequisites([302, 301], new Map([[302, [301]]]));
-      expect(sorted).toEqual({ ok: true, order: [301, 302] });
-      const ordered = sorted.ok ? sorted.order : [];
-      const orders: number[] = [];
-      for (const issue of ordered) orders.push((await runUnpark({ ...base, client, issue })).order);
-      expect(orders).toEqual([18, 19]);
     });
   });
 });

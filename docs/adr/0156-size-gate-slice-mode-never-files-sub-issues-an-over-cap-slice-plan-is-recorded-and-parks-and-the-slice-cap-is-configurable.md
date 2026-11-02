@@ -1,8 +1,9 @@
 # ADR-0156: Size-gate slice mode never files sub-issues; an over-cap slice plan is recorded and parks, and the slice cap is configurable
 
-- Status: Accepted
+- Status: Superseded by ADR-0161
 - Date: 2026-10-06
 - Amends: [ADR-0147](0147-size-gate-slice-mode-ships-an-oversized-issue-as-sequential-slice-prs-under-the-same-issue-instead-of-filing-sub-issues.md) (replaces the more-than-5-slices fallback to `file`; makes the slice cap configurable)
+- Update (#3835): stack ([ADR-0161](0161-size-gate-stack-mode-ships-an-oversized-issue-as-a-native-github-stacked-pr-set-built-in-one-run.md)) is now the only size gate mode besides `off`; `file` and `slice` are deprecated aliases for stack.
 
 ## Context
 

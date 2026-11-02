@@ -142,7 +142,7 @@ describe('classifyEscalation (#3275)', () => {
 });
 
 describe('planPhase size gate and escalateKind (#3275)', () => {
-  it('a passed size gate tells the planner so, and an over-budget plan is decomposed by the post-plan gate, not escalated (#3275)', async () => {
+  it('a passed size gate tells the planner so, and an over-budget plan is parked by the post-plan gate, not escalated (#3275)', async () => {
     const worktree = await temps.make('plan-phase-test-');
     const stub = new StubModelExecutor({
       scripts: {
@@ -174,9 +174,9 @@ describe('planPhase size gate and escalateKind (#3275)', () => {
     });
 
     expect(stub.calls.find((call) => call.task === 'plan')?.prompt).toContain('size gate passed');
-    expect(result.decomposed).toBeDefined();
-    expect(events).toContain('size-gate-decomposed');
-    expect(events).not.toContain('escalate');
+    expect(result.ok).toBe(false);
+    expect(result.escalate).toContain('parked for decomposition');
+    expect(events).toContain('size-gate-escalated');
   });
 
   it.each([

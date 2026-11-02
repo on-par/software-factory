@@ -6,6 +6,7 @@ import type { DeclaredHarnessProbe } from '@on-par/factory-core';
 import type { ConfigLintInput } from '@on-par/factory-core/internal';
 import {
   findConfigSchemaErrors,
+  findCodexSandboxWarnings,
   findUnknownConfigKeyWarnings,
   isTemplateToken,
   lintFactoryConfig,
@@ -76,12 +77,24 @@ export function modelsRegistryChecks(
 /** `config` rows from the shared pre-PLAN lint (#2612): one failing row per finding, so doctor fails exactly when
  *  the run preflight would escalate or park. A single ok row when clean. Read-only. */
 export function configLintChecks(input: ConfigLintInput, loadError?: string): DoctorCheck[] {
-  return [...configLintRows(input, loadError), ...unknownKeyRows(input)];
+  return [...configLintRows(input, loadError), ...unknownKeyRows(input), ...codexSandboxRows(input)];
 }
 
 /** Non-failing ⚠️ rows, one per nested config key this version ignores (#3568, ADR-0160 warn stage). */
 function unknownKeyRows(input: ConfigLintInput): DoctorCheck[] {
   return (input.configFile ? findUnknownConfigKeyWarnings(input.configFile) : []).map((f): DoctorCheck => ({
+    name: 'config',
+    ok: false,
+    optional: true,
+    section: REPO_SECTION,
+    detail: `${f.file}${f.line ? `:${f.line}` : ''}: ${f.message}`,
+    fix: f.fix,
+  }));
+}
+
+/** Non-failing ⚠️ row for an unknown sandbox.codexSandbox value, ignored by this version (#3829, ADR-0160 warn stage). */
+function codexSandboxRows(input: ConfigLintInput): DoctorCheck[] {
+  return (input.configFile ? findCodexSandboxWarnings(input.configFile) : []).map((f): DoctorCheck => ({
     name: 'config',
     ok: false,
     optional: true,

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadFactoryConfig } from '@on-par/factory-core';
-import { createRunSlotGate } from '@on-par/factory-core/internal';
+import { createDiskGuard, createRunSlotGate } from '@on-par/factory-core/internal';
 
 import { hostBuildSlotPort } from './host-slot.js';
 
@@ -73,6 +73,30 @@ describe('hostBuildSlotPort with a run gate (#3049)', () => {
 
 describe('hostBuildSlotPort with a disk guard (#2284)', () => {
   const hold = { kind: 'hold' as const, freeGb: 2, thresholdGb: 10, path: '/w', retryMs: 300_000 };
+
+  it('uses the default timer while waiting for disk recovery', async () => {
+    vi.useFakeTimers();
+    try {
+      const check = vi
+        .fn()
+        .mockReturnValueOnce({ ...hold, retryMs: 25 })
+        .mockReturnValue({ kind: 'claim' });
+      const log = vi.fn();
+      const fn = vi.fn(async () => 'built');
+      const config = loadFactoryConfig();
+      const guard = createDiskGuard(config, { repoRoot: dir, ghRepo: 'o/r', stateRoot: dir });
+      const port = hostBuildSlotPort(config, 'o/r', 7, log, undefined, { guard: { ...guard, check } });
+      const result = port('build', fn);
+      await vi.advanceTimersByTimeAsync(24);
+      expect(fn).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(result).resolves.toBe('built');
+      expect(check).toHaveBeenCalledTimes(2);
+      expect(log).toHaveBeenCalledWith('disk_low', expect.stringContaining('#7 build waiting:'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('waits at the check boundary while disk is low and runs fn only after recovery', async () => {
     const decisions = [hold, hold, { kind: 'claim' as const }];
