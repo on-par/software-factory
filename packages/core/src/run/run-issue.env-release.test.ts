@@ -144,4 +144,14 @@ describe('runIssue — environment release comment (#3440)', () => {
     expect(createComment).toHaveBeenCalledTimes(1);
     expect(updateComment).toHaveBeenCalledTimes(1);
   });
+
+  it('an environment release from a locally confirmed baseline returns confirmedLocally (#3851)', async () => {
+    vi.mocked(checkPhase).mockResolvedValue({
+      ...ENV_FAIL,
+      environment: { ...ENV_FAIL.environment!, confirmedLocally: true },
+    });
+    const outcome = await runIssue(request, policy, ports(vi.fn<Log>(), statefulOctokit().octokit));
+    expect(outcome).toMatchObject({ state: 'released', reason: 'environment' });
+    expect((outcome as { confirmedLocally?: true }).confirmedLocally).toBe(true);
+  });
 });

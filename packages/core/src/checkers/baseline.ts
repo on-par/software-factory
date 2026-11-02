@@ -40,6 +40,8 @@ export interface BaselineReport {
   checkers: BaselineCheckerComparison[];
   /** Set when the base worktree could not be created or the base run threw. */
   error?: string;
+  /** A fresh local base run FAILed while GitHub CI on baseSha is green (#3851). */
+  confirmedLocally?: true;
 }
 
 export interface BaselineDeps {
@@ -159,6 +161,13 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
   const cachedOutputs: CheckerOutput[] = [];
   const toRun: string[] = [];
   let ciLookup: Promise<RequiredChecksVerdict> | undefined;
+  const lookupCi = (): Promise<RequiredChecksVerdict> => {
+    ciLookup ??= requiredChecksVerdict!(baseSha).catch((err: unknown) => ({
+      green: false,
+      reason: `CI lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+    }));
+    return ciLookup;
+  };
   for (const name of runnable) {
     let hit: CheckerOutput | undefined;
     try {
@@ -167,11 +176,7 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
       hit = undefined; // a cache read error is a miss
     }
     if (hit?.result === 'FAIL' && hit.timedOut !== true && requiredChecksVerdict) {
-      ciLookup ??= requiredChecksVerdict(baseSha).catch((err: unknown) => ({
-        green: false,
-        reason: `CI lookup failed: ${err instanceof Error ? err.message : String(err)}`,
-      }));
-      const verdict = await ciLookup;
+      const verdict = await lookupCi();
       if (verdict.green) {
         await cache?.delete(baseSha, envHash, name).catch(() => false);
         onCacheInvalidated?.(name, `cached FAIL but GitHub CI is green (${verdict.reason})`);
@@ -227,7 +232,13 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
     );
     const fresh = summary.results.filter((o) => toRun.includes(o.checker));
     await cache?.set(baseSha, envHash, configHash, fresh).catch(() => {});
-    return { baseSha, checkers: markCached(compareBaseline(failing, [...cachedOutputs, ...fresh]), cachedNames) };
+    const report: BaselineReport = {
+      baseSha,
+      checkers: markCached(compareBaseline(failing, [...cachedOutputs, ...fresh]), cachedNames),
+    };
+    const freshFails = fresh.some((o) => o.result === 'FAIL' && o.timedOut !== true);
+    if (freshFails && requiredChecksVerdict && (await lookupCi()).green) report.confirmedLocally = true;
+    return report;
   } catch (e: any) {
     return {
       baseSha,

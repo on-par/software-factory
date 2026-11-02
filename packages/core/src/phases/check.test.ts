@@ -310,7 +310,7 @@ describe('rework cause environment (#1927)', () => {
 
   const runWithVerdict = async (
     verdict: 'fails-on-base' | 'clean-on-base',
-    extra: { logsDir?: string; priorFailureSignature?: string } = {},
+    extra: { logsDir?: string; priorFailureSignature?: string; confirmedLocally?: true } = {},
   ) => {
     const { worktree, specPath } = await makeFailingWorktree();
     const { router, stub } = makeRouter();
@@ -340,6 +340,7 @@ describe('rework cause environment (#1927)', () => {
           checkers: o.failing
             .filter((r) => r.result === 'FAIL')
             .map((r) => ({ checker: r.checker, verdict, baseResult: verdict === 'fails-on-base' ? 'FAIL' : 'PASS' })),
+          ...(extra.confirmedLocally ? { confirmedLocally: true } : {}),
         } as BaselineReport;
       },
     });
@@ -364,6 +365,13 @@ describe('rework cause environment (#1927)', () => {
       expect(result.environment?.failingChecks.length).toBeGreaterThan(0);
     },
   );
+
+  it('environment release carries confirmedLocally from the baseline (#3851)', { timeout: 120_000 }, async () => {
+    const { result } = await runWithVerdict('fails-on-base', { confirmedLocally: true });
+    expect(result.environment?.confirmedLocally).toBe(true);
+    const plain = await runWithVerdict('fails-on-base');
+    expect(plain.result.environment?.confirmedLocally).toBeUndefined();
+  });
 
   it(
     'classifies an unknown-checker failure that also fails on base as cause=config (#2581)',
@@ -617,6 +625,19 @@ describe('rework cause environment (#1927)', () => {
         expect(body).toContain(needle);
       }
       expect(body).not.toContain('No log paths were recorded');
+    });
+
+    it('environment release comment says a confirmedLocally issue waits on the red base (#3851)', () => {
+      const failure: EnvironmentFailure = {
+        baseSha: 'abc1234567890def',
+        failingChecks: ['links'],
+        cause: 'environment',
+        logPaths: [],
+      };
+      const body = renderEnvironmentReleaseComment({ ...failure, confirmedLocally: true });
+      expect(body).toContain('waiting on a red base');
+      expect(body).toContain('abc1234567890def');
+      expect(renderEnvironmentReleaseComment(failure)).not.toContain('waiting on a red base');
     });
 
     it('says so when no log paths were recorded', () => {
