@@ -157,6 +157,31 @@ describe('stack approval gate (#3366)', () => {
     expect(result).toEqual({ kind: 'build' });
   });
 
+  it('parks an auto-merge slice when PR refs cannot be read', async () => {
+    const watch = vi.fn();
+    const result = await preflightQueuedIssue(
+      { number: 7, labels: [] },
+      stackDeps({
+        autoMergeStack: true,
+        getPullRefs: async () => {
+          throw new Error('refs unavailable');
+        },
+        watch,
+      }),
+    );
+    expect(result).toEqual({ kind: 'park', reason: 'slice 1/3 PR #501 ref lookup failed: refs unavailable' });
+    expect(watch).not.toHaveBeenCalled();
+  });
+
+  it('parks an auto-merge slice when its CI watch fails', async () => {
+    const watch = vi.fn(async () => {
+      throw new Error('CI unavailable');
+    });
+    const result = await preflightQueuedIssue({ number: 7, labels: [] }, stackDeps({ autoMergeStack: true, watch }));
+    expect(result).toEqual({ kind: 'park', reason: 'CI watch for slice 1/3 PR #501 failed: CI unavailable' });
+    expect(watch).toHaveBeenCalledWith('s');
+  });
+
   it('reads PR reviews, paginated, with the factory identity', async () => {
     const listReviews = vi.fn(async (o: any) => ({
       data:

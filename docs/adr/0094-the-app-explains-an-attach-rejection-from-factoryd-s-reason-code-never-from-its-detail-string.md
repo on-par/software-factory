@@ -1,6 +1,6 @@
 # ADR-0094: The app explains an attach rejection from factoryd's reason code, never from its detail string
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-09-12
 
 ## Context

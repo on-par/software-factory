@@ -103,7 +103,7 @@ describe('decomposeOversizedIssue #728 guard', () => {
     const { octokit, createComment, create } = makeOctokit({ state: 'closed' });
     const { log, events } = makeLog();
 
-    const result = await decomposeOversizedIssue({ ...base, router, octokit, log, fileSubIssues: true });
+    const result = await decomposeOversizedIssue({ ...base, router, octokit, log });
 
     expect(run).not.toHaveBeenCalled();
     expect(createComment).not.toHaveBeenCalled();

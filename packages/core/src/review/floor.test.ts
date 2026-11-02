@@ -5,6 +5,7 @@ import {
   computeReviewFloor,
   DEFAULT_REVIEW_FLOOR_RULES,
   globToRegExp,
+  parseNumstat,
   type ReviewFloorPathChange,
   type ReviewFloorRuleSet,
 } from './floor.js';
@@ -202,5 +203,154 @@ describe('globToRegExp', () => {
     const re = globToRegExp('**/*.md');
     expect(re.test('a/b/C.MD')).toBe(true);
     expect(re.test('a.mdx')).toBe(false);
+  });
+});
+
+describe('review floor edge cases', () => {
+  it.each([
+    'package.json',
+    'npm-shrinkwrap.json',
+    'yarn.lock',
+    'pnpm-lock.yaml',
+    'bun.lockb',
+    'go.mod',
+    'go.sum',
+    'Cargo.toml',
+    'Cargo.lock',
+    'requirements.txt',
+    'poetry.lock',
+    'Pipfile',
+    'Pipfile.lock',
+    'pyproject.toml',
+    'Gemfile',
+    'Gemfile.lock',
+  ])('classifies nested %s as a dependency', (name) => {
+    const path = `nested/${name}`;
+    expect(floorOf(path)).toEqual({
+      floor: 'C',
+      rules: [
+        { id: 'dependencies', class: 'C', paths: [path] },
+        { id: 'outside-a-scope', class: 'B', paths: [path] },
+      ],
+    });
+  });
+
+  it('matches the docs prefix independently of the markdown suffix', () => {
+    expect(floorOf('docs/image.png')).toEqual({
+      floor: 'A',
+      rules: [{ id: 'docs-only', class: 'A', paths: ['docs/image.png'] }],
+    });
+  });
+
+  it('normalizes whitespace, separators and only a leading dot slash', () => {
+    expect(floorOf('  ./docs\\guide.txt  ', 'docs/./other.txt')).toEqual({
+      floor: 'A',
+      rules: [{ id: 'docs-only', class: 'A', paths: ['docs/guide.txt', 'docs/./other.txt'] }],
+    });
+  });
+
+  it('distinguishes recursive and single-segment globs', () => {
+    const rules: ReviewFloorRuleSet = {
+      maxLines: 500,
+      rules: [
+        { id: 'recursive', class: 'A', globs: ['src/**/file.ts'] },
+        { id: 'single', class: 'A', globs: ['lib/*.ts'] },
+      ],
+    };
+    expect(
+      computeReviewFloor({
+        rules,
+        changes: ['src/file.ts', 'src/a/b/file.ts', 'lib/a.ts', 'lib/a/b.ts'].map((p) => change(p)),
+      }),
+    ).toEqual({
+      floor: 'B',
+      rules: [{ id: 'outside-a-scope', class: 'B', paths: ['lib/a/b.ts'] }],
+    });
+    expect(globToRegExp('src/**/file.ts').test('src/a/b/file.ts')).toBe(true);
+    expect(globToRegExp('lib/*.ts').test('lib/a/b.ts')).toBe(false);
+  });
+
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, '1'])('rejects invalid added and removed counts %s', (count) => {
+    for (const field of ['added', 'removed'] as const) {
+      const bad = { ...change('docs/a.md'), [field]: count } as ReviewFloorPathChange;
+      expect(computeReviewFloor({ changes: [bad] })).toEqual({
+        floor: 'C',
+        rules: [{ id: 'invalid-input', class: 'C', paths: ['docs/a.md'] }],
+      });
+    }
+  });
+
+  it('reports a non-string path as an empty invalid path', () => {
+    const bad = { ...change('docs/a.md'), path: 42 as number | string } as ReviewFloorPathChange;
+    expect(computeReviewFloor({ changes: [bad] })).toEqual({
+      floor: 'C',
+      rules: [{ id: 'invalid-input', class: 'C', paths: [''] }],
+    });
+  });
+
+  it('matches custom patterns without regard to case', () => {
+    const rules: ReviewFloorRuleSet = { maxLines: 500, rules: [{ id: 'pattern', class: 'C', pattern: '^secure/' }] };
+    expect(computeReviewFloor({ changes: [change('SECURE/a')], rules })).toEqual({
+      floor: 'C',
+      rules: [
+        { id: 'pattern', class: 'C', paths: ['SECURE/a'] },
+        { id: 'outside-a-scope', class: 'B', paths: ['SECURE/a'] },
+      ],
+    });
+  });
+
+  it('reports both rules when equal classes fire', () => {
+    const rules: ReviewFloorRuleSet = {
+      maxLines: 500,
+      rules: [
+        { id: 'first', class: 'C', prefixes: ['src/'] },
+        { id: 'second', class: 'C', suffixes: ['.ts'] },
+      ],
+    };
+    expect(computeReviewFloor({ changes: [change('src/a.ts')], rules })).toEqual({
+      floor: 'C',
+      rules: [
+        { id: 'first', class: 'C', paths: ['src/a.ts'] },
+        { id: 'second', class: 'C', paths: ['src/a.ts'] },
+        { id: 'outside-a-scope', class: 'B', paths: ['src/a.ts'] },
+      ],
+    });
+  });
+
+  it('keeps or replaces A rules according to the override', () => {
+    const base: ReviewFloorRuleSet = {
+      maxLines: 10,
+      rules: [
+        { id: 'human', class: 'C', prefixes: ['secure/'] },
+        { id: 'docs', class: 'A', prefixes: ['docs/'] },
+      ],
+    };
+    expect(applyReviewFloorOverrides({ maxDiffLines: 5 }, base)).toEqual({ ...base, maxLines: 5 });
+    expect(applyReviewFloorOverrides({ autoEligible: [] }, base)).toEqual({ rules: [base.rules[0]], maxLines: 10 });
+    const rules = applyReviewFloorOverrides({ autoEligible: ['site/', '**/*.txt'] }, base);
+    expect(rules).toEqual({
+      maxLines: 10,
+      rules: [
+        base.rules[0],
+        {
+          id: 'repo-auto-eligible',
+          class: 'A',
+          prefixes: ['site/'],
+          globs: ['**/*.txt'],
+        },
+      ],
+    });
+    expect(computeReviewFloor({ rules, changes: [change('site/a.html')] })).toEqual({
+      floor: 'A',
+      rules: [{ id: 'repo-auto-eligible', class: 'A', paths: ['site/a.html'] }],
+    });
+  });
+
+  it('parses whitespace, embedded tabs, missing counts and binary counts', () => {
+    expect(parseNumstat('\n  \n2\t3\tdir/a\tb.txt\n-\t-\timage.png\n7\n')).toEqual([
+      { path: 'dir/a\tb.txt', added: 2, removed: 3 },
+      { path: 'image.png', added: Number.NaN, removed: Number.NaN },
+      { path: '', added: 7, removed: 0 },
+    ]);
   });
 });

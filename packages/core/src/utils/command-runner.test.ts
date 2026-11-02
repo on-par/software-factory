@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { KillOutcome } from '../environment/process-groups.js';
-import { describeCommandFailure, runCommand } from './command-runner.js';
+import { runCommand } from './command-runner.js';
 
 const tempDirs = new Set<string>();
 
@@ -239,64 +239,6 @@ describe('runCommand parentEnv', () => {
     expect(env.KEEP).toBe('1');
     expect(env.ADDED).toBe('2');
     expect(env.FOO_SECRET).toBeUndefined();
-  });
-});
-
-describe('describeCommandFailure', () => {
-  it('prefers stderr', () => {
-    const details = describeCommandFailure({
-      command: ['x'],
-      stdout: 'out',
-      stderr: 'err',
-      exitCode: 1,
-      killed: false,
-      timedOut: false,
-      ok: false,
-    });
-
-    expect(details).toBe('err');
-  });
-
-  it('falls back to stdout when stderr is empty', () => {
-    const details = describeCommandFailure({
-      command: ['x'],
-      stdout: 'out',
-      stderr: '',
-      exitCode: 1,
-      killed: false,
-      timedOut: false,
-      ok: false,
-    });
-
-    expect(details).toBe('out');
-  });
-
-  it('falls back to a timed out note when both are empty and timedOut', () => {
-    const details = describeCommandFailure({
-      command: ['x'],
-      stdout: '',
-      stderr: '',
-      exitCode: -1,
-      killed: true,
-      timedOut: true,
-      ok: false,
-    });
-
-    expect(details).toBe('timed out');
-  });
-
-  it('falls back to an exit code note when both are empty and not timed out', () => {
-    const details = describeCommandFailure({
-      command: ['x'],
-      stdout: '',
-      stderr: '',
-      exitCode: 7,
-      killed: false,
-      timedOut: false,
-      ok: false,
-    });
-
-    expect(details).toBe('exit code 7');
   });
 });
 

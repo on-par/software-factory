@@ -18,14 +18,13 @@ import {
   factoryBranchPrefixes,
   getIssueTitle,
   isAutoMergeBlocked,
-  LEGACY_BRANCH_PREFIX,
   logEvent,
   lookupOpenPrByBranch,
   lookupOpenPrByIssue,
   publishRiskReceipt,
-  refreshParentCoverageAfterMerge,
   releaseLaneClaim,
   resolveEffectiveConfig,
+  resolveBaseHealthChecks,
   resolveFilingPolicy,
   withFileLock,
   withGitLock,
@@ -44,6 +43,7 @@ import {
   landOpenPullRequest,
 } from './land-pr.js';
 import type { LandLock } from './land-pr.js';
+import { landBaseGate } from './land-base-gate.js';
 import { enforceRiskAtLand } from './land-risk.js';
 import { isPrMerged, latestPrForBranch } from './land-merged.js';
 import { landRuntime } from './land-runtime.js';
@@ -92,7 +92,6 @@ export async function landIssue(
   // lives on (same failure mode fixed for waitForMerge in #51). Guess the
   // branch from the current title first, but fall back to matching the open
   // PR that references this issue directly and use its real head branch.
-  // Legacy-prefix (LEGACY_BRANCH_PREFIX) branches are guessed too, after the resolved prefix (#1708).
   const repoConfig = configLoaders.loadRepoConfig(repoRoot);
   const resolved =
     branchPrefix ??
@@ -190,12 +189,7 @@ export async function landIssue(
     log('warn', `could not publish the risk receipt on PR #${prNumber}: ${errorDetail(err)}`);
   }
 
-  const worktree = worktreePathFor(
-    repoRoot,
-    ghRepo,
-    issueNum,
-    branch.startsWith(`${LEGACY_BRANCH_PREFIX}/`) ? LEGACY_BRANCH_PREFIX : resolved,
-  );
+  const worktree = worktreePathFor(repoRoot, ghRepo, issueNum, resolved);
   const landSandboxPolicy = resolveSandboxPolicy(landFactoryConfig.sandbox, {
     worktree,
     repoRoot,
@@ -248,6 +242,15 @@ export async function landIssue(
         signal: opts.signal,
         adminMerge: resolveMergePolicy(landFactoryConfig).admin,
         withLock: withLandLock,
+        baseGate: landBaseGate({
+          octokit,
+          owner,
+          repo: repoName,
+          prNumber,
+          state: paths.state,
+          checks: resolveBaseHealthChecks(repoConfig),
+          log,
+        }),
         ensureWorktree: async () => {
           if (!existsSync(worktree)) {
             await gitOps.setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, worktreeSandbox, log);
@@ -261,7 +264,6 @@ export async function landIssue(
       throw err;
     }
     log('merged', `squash-merged PR #${prNumber}`);
-    await refreshParentCoverageAfterMerge({ octokit, repo: ghRepo, childIssue: issueNum, log });
     await releaseLandedClaim(paths, ghRepo, issueNum, log);
     await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
   } catch (err: any) {
@@ -356,8 +358,6 @@ export type WaitForMergeDeps = {
   listIssueLabels?: (octokit: Octokit, owner: string, repo: string, issue: number) => Promise<string[]>;
   sleep?: (ms: number) => Promise<void>;
   emitEvent?: typeof logEvent;
-  /** #3108: refreshes the parent coverage comment when a human merged the child. */
-  refreshParentCoverage?: typeof refreshParentCoverageAfterMerge;
   mergeEnabled?: () => boolean;
   writeLine?: (line: string) => void;
   /** Injectable clock so the wall-clock failure budget is testable. Default `() => Date.now()`. */
@@ -386,7 +386,6 @@ export async function waitForMerge(
     listIssueLabels = defaultListIssueLabels,
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     emitEvent = logEvent,
-    refreshParentCoverage = refreshParentCoverageAfterMerge,
     mergeEnabled,
     writeLine = (line) => console.log(line),
     now = () => Date.now(),
@@ -438,12 +437,6 @@ export async function waitForMerge(
     }
     if (merged) {
       emitEvent(paths.events, 'landed', issue, 'PR merged');
-      await refreshParentCoverage({
-        octokit,
-        repo: ghRepo,
-        childIssue: issue,
-        log: (type, msg) => emitEvent(paths.events, type, issue, msg),
-      });
       return;
     }
 

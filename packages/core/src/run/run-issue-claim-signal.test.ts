@@ -59,7 +59,7 @@ const request: RunRequest = {
   efficiency: { maxReworkRounds: 1, fastPath: false },
   processGroupGraceMs: 50,
   readinessUpdateIssueBody: true,
-  sizeGateMode: 'file',
+  sizeGateMode: 'stack',
   worktreeKeepsPath: keepsFile,
 };
 

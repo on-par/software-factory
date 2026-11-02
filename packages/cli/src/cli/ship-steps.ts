@@ -1,7 +1,6 @@
 // packages/cli/src/cli/ship-steps.ts — named steps of the ship flow: sandbox logging, workspace setup, RunRequest builder (#2788)
 
 import { exec as execCb } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify, styleText } from 'node:util';
@@ -31,7 +30,6 @@ import {
   resolveReadinessUpdateIssueBody,
   resolveCiWatchDeadlineMs,
   resolveSizeGateBudget,
-  rewriteQueueForDecomposition,
   worktreeWorkspace,
 } from '@on-par/factory-core';
 import type { CheckResumeRecord, ProviderOrder, WorktreeSandbox } from '@on-par/factory-core/internal';
@@ -49,6 +47,7 @@ import {
 } from '@on-par/factory-core/internal';
 import { recordGitPushes, resolveGitHubMode, GITHUB_STUB_CALLS_FILE } from './github-stub.js';
 import type { CliDeps, ConfigLoaderKey, GitOpKey } from './index.js';
+import { baseRemoteRef } from './ship-options.js';
 import { shipRuntime } from './ship-runtime.js';
 import { resolveEffectiveTrustTier } from './tier-demotion.js';
 
@@ -107,7 +106,7 @@ export function logSandboxPolicy(
     activeSandboxPolicy = sandboxPolicy;
     log(
       'sandbox',
-      'outer sandbox off; harness sandbox in use (codex --sandbox workspace-write; harnesses without their own sandbox run unwrapped)',
+      'outer sandbox off; codex runs without its own sandbox unless sandbox.codexSandbox is workspace-write; harnesses without their own sandbox run unwrapped',
     );
     logConfiguredWritablePaths(sandboxPolicy, log);
   } else if (sandboxPolicy.runtime === 'docker-sandbox') {
@@ -142,6 +141,7 @@ export async function setupRunWorkspace({
   ghName,
   git,
   paths,
+  startPoint,
 }: {
   ctx?: { localOnly?: LocalOnlyPolicy; resumeFrom?: CheckResumeRecord };
   repoRoot: string;
@@ -154,6 +154,8 @@ export async function setupRunWorkspace({
   ghName: string;
   git: Required<Pick<CliDeps, GitOpKey>>;
   paths: ReturnType<typeof getFactoryPaths>;
+  /** Remote-tracking ref the worktree starts from (#3764); undefined = the default base. */
+  startPoint?: string;
 }): Promise<Workspace> {
   let workspace: Workspace;
   if (ctx?.resumeFrom) {
@@ -166,6 +168,7 @@ export async function setupRunWorkspace({
       worktreePath: worktree,
       log,
       sandbox: worktreeSandbox,
+      startPoint,
       findOpenPr: (br) => findOpenPR(octokit, ghOwner, ghName, br),
       keepsFile: paths.worktreeKeeps,
       setup: (root, br, wt, sp, sandbox, setupLog, setupOpts) =>
@@ -185,35 +188,6 @@ export async function setupRunWorkspace({
     log('workspace', `local-only: using caller-provided workspace ${worktree} (no factory worktree created)`);
   }
   return workspace;
-}
-
-/** Rewrites the queue for a decomposed issue, then throws so the lane moves on to the children. */
-export function decomposeQueue({
-  issueNum,
-  childIssues,
-  paths,
-  planLog,
-}: {
-  issueNum: number;
-  childIssues: number[];
-  paths: ReturnType<typeof getFactoryPaths>;
-  planLog: (type: EventKind, msg: string) => void;
-}): never {
-  const { readTextFileOrEmpty, errorDetail, IssueDecomposedError } = shipRuntime();
-  const childList = childIssues.map((n) => `#${n}`).join(', ');
-  try {
-    const before = readTextFileOrEmpty(paths.queue);
-    const rewrite = rewriteQueueForDecomposition(before, { issue: issueNum, childIssues });
-    if (rewrite.changed) {
-      writeFileSync(paths.queue, rewrite.content);
-      planLog('decompose_filed', `queue entry for #${issueNum} replaced with ${childList}`);
-    } else {
-      planLog('decompose_filed', `#${issueNum} had no queue entry to replace — continuing the lane with ${childList}`);
-    }
-  } catch (err) {
-    planLog('decompose_file_failed', `queue rewrite for #${issueNum} failed: ${errorDetail(err)}`);
-  }
-  throw new IssueDecomposedError(`issue #${issueNum} decomposed into ${childList}`, childIssues);
 }
 
 /** Maps the core RunOutcome to the shipped branch name, or throws the park/pause error the lane expects. */
@@ -251,16 +225,6 @@ export function finishOutcome({
       console.log(styleText('green', `✅ Issue #${issueNum} → ${terminalMessage ?? 'ready'}`));
     }
     return outcome.branch;
-  }
-
-  if (outcome.state === 'released' && outcome.reason === 'stack-wait') {
-    console.log(
-      styleText(
-        'yellow',
-        `⏸ Issue #${issueNum} → waiting for approval or merge of slice ${outcome.slice.index}/${outcome.slice.count} PR #${outcome.prNumber}; released, not parked`,
-      ),
-    );
-    return outcome.branch ?? '';
   }
 
   if (outcome.state === 'released' && outcome.reason === 'file-overlap') {
@@ -316,7 +280,7 @@ export interface RunRequestInput {
   product: string | undefined;
   runStartedAt: string;
   lane: string | undefined;
-  opts: { interactive?: boolean; sandbox?: boolean; pr?: boolean };
+  opts: { interactive?: boolean; sandbox?: boolean; pr?: boolean; baseBranch?: string; parkOverBudget?: boolean };
   ctx?: {
     blockedBehind?: number[];
     workSource?: { kind: WorkRequestSourceKind; params: unknown };
@@ -393,12 +357,14 @@ export function buildRunRequest({
     },
     localOnly: Boolean(ctx?.localOnly),
     noPr: opts.pr === false,
+    ...(opts.baseBranch !== undefined ? { parentBaseRef: baseRemoteRef(opts.baseBranch) } : {}),
     blockUnresolvedRegressions: resolveDesignRegressionBlock(factoryConfig),
     hermeticGit: resolveHermeticGit(repoConfig),
     baselineCacheTtlHours: resolveBaselineCacheTtlHours(repoConfig),
     readinessUpdateIssueBody: resolveReadinessUpdateIssueBody(factoryConfig),
     publishFromBuild: resolveBuildPublish(factoryConfig),
     sizeGateMode,
+    parkOverBudget: opts.parkOverBudget,
     maxSlices,
     sizeBudget: resolveSizeGateBudget(factoryConfig),
     reviewFloorRules: resolveReviewFloorRules(repoConfig),

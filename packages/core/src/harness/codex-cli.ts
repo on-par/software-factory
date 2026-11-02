@@ -155,6 +155,7 @@ export class CodexCliHarness implements CodingHarness {
   private readonly now: () => number;
   private readonly timeZone: string;
   private readonly loggedFullAccess = new Set<string>();
+  private loggedLegacyNoEffect = false;
   private readonly loggedRefusals = new Set<string>();
   private readonly loggedWorkspace = new Set<string>();
   private readonly loggedRejectedRoots = new Set<string>();
@@ -229,20 +230,39 @@ export class CodexCliHarness implements CodingHarness {
         compactFlags = ` -c ${shellEscape(`model_auto_compact_token_limit=${ceiling.limit}`)} -c ${shellEscape(`experimental_compact_prompt_file=${compactFile}`)}`;
       }
 
-      // Codex always contains its own writes, even without an outer sandbox policy (#834).
-      const fullAccessOptIn = request.codexFullAccessTasks?.includes(request.task) === true;
-      if (fullAccessOptIn && !this.loggedFullAccess.has(request.task)) {
+      // sandbox.codexSandbox picks Codex's own sandbox; unset means none, like Claude (#3824).
+      const workspaceWrite = request.codexSandbox === 'workspace-write';
+      const listed = request.codexFullAccessTasks?.includes(request.task) === true;
+      const fullAccess = !workspaceWrite || listed;
+      if (!workspaceWrite) {
+        if (!this.loggedFullAccess.has(request.task)) {
+          this.loggedFullAccess.add(request.task);
+          this.log(
+            request.codexSandbox === undefined
+              ? `codex: --sandbox danger-full-access for task ${request.task} (Codex runs without its own sandbox by default; set sandbox.codexSandbox: workspace-write to opt in)`
+              : `codex: --sandbox danger-full-access for task ${request.task} (sandbox.codexSandbox: danger-full-access)`,
+          );
+        }
+        const legacyTasks = (request.codexFullAccessTasks?.length ?? 0) > 0;
+        const legacyEnv = codexFullAccessOptIn(this.envSource);
+        if ((legacyTasks || legacyEnv) && !this.loggedLegacyNoEffect) {
+          this.loggedLegacyNoEffect = true;
+          this.log(
+            'codex: sandbox.codexFullAccessTasks and FACTORY_CODEX_FULL_ACCESS have no effect while full access is the default (sandbox.codexSandbox unset or danger-full-access)',
+          );
+        }
+      } else if (listed && !this.loggedFullAccess.has(request.task)) {
         this.loggedFullAccess.add(request.task);
         this.log(
           `codex: --sandbox danger-full-access for task ${request.task} (config sandbox.codexFullAccessTasks opt-in)`,
         );
-      } else if (codexFullAccessOptIn(this.envSource) && !fullAccessOptIn && !this.loggedRefusals.has(request.task)) {
+      } else if (codexFullAccessOptIn(this.envSource) && !listed && !this.loggedRefusals.has(request.task)) {
         this.loggedRefusals.add(request.task);
         this.log(
           `codex: refused --sandbox danger-full-access for task ${request.task}: not opted in by config (sandbox.codexFullAccessTasks)`,
         );
       }
-      const codexSandbox = fullAccessOptIn ? 'danger-full-access' : 'workspace-write';
+      const codexSandbox = fullAccess ? 'danger-full-access' : 'workspace-write';
       const { roots, rejected } = codexWritableRoots(request.writableRoots, worktree, request.primaryRepoRoot);
       if (rejected && !this.loggedRejectedRoots.has(request.task)) {
         this.loggedRejectedRoots.add(request.task);
@@ -254,7 +274,7 @@ export class CodexCliHarness implements CodingHarness {
       const allowlistNetwork = !githubNetwork && taskRequiresAgenticHarness(request.task) && sandbox !== undefined;
       const network = githubNetwork ? 'github' : allowlistNetwork ? 'allowlist' : 'off';
       const osOwnsNetwork = sandbox?.runtime === 'sandbox-exec' || sandbox?.runtime === 'firejail';
-      const networkFlags = fullAccessOptIn
+      const networkFlags = fullAccess
         ? ''
         : network === 'off'
           ? ' -c sandbox_workspace_write.network_access=false'
@@ -262,10 +282,10 @@ export class CodexCliHarness implements CodingHarness {
             ? ''
             : ` ${codexNetworkConfigFlags(githubNetwork ? [...(sandbox?.allowHosts ?? []), ...CODEX_GITHUB_HOSTS] : (sandbox?.allowHosts ?? []))}`;
       const rootFlags =
-        fullAccessOptIn || roots.length === 0
+        fullAccess || roots.length === 0
           ? ''
           : ` -c ${shellEscape(`sandbox_workspace_write.writable_roots=${JSON.stringify(roots)}`)}`;
-      if (!fullAccessOptIn && !this.loggedWorkspace.has(request.task)) {
+      if (!fullAccess && !this.loggedWorkspace.has(request.task)) {
         this.loggedWorkspace.add(request.task);
         this.log(
           `codex: workspace-write for task ${request.task} (network ${network}, writable roots: ${roots.join(', ') || '(none)'})`,

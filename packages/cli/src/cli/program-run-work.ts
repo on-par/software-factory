@@ -1,10 +1,12 @@
 // packages/cli/src/cli/program-run-work.ts — registers the Run work help-group commands (#2793)
 
 import type { Command } from 'commander';
-import { LEGACY_BRANCH_PREFIX } from '@on-par/factory-core/internal';
 import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION, BRANCH_PREFIX_OPTION_DESCRIPTION } from './branch-prefix.js';
 import type { ProgramHandlers } from './index.js';
 import type { SteerOptions } from './steer.js';
+
+const BASE_BRANCH_OPTION_DESCRIPTION =
+  'Start from the freshly fetched origin/<ref> instead of the default branch, and open the PR against <ref>; runs with the size gate off';
 
 export function registerRunWorkCommands(program: Command, handlers: ProgramHandlers): void {
   program
@@ -27,6 +29,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     )
     .option('--no-draft-pr', 'Mark the PR ready for review after CI, overriding run.pr.draft in the repo config')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
+    .option('--base-branch <ref>', BASE_BRANCH_OPTION_DESCRIPTION)
     .action(async (issueNum, opts) => {
       await handlers.cmdShip(handlers.parseIssueArg(issueNum), opts);
     });
@@ -49,25 +52,29 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     )
     .option('--no-draft-pr', 'Mark the PR ready for review after CI, overriding run.pr.draft in the repo config')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
-    .option(
-      '--run-children',
-      'File mode only: when the size gate files child issues, run them (slice mode never files issues)',
-    )
+    .option('--base-branch <ref>', BASE_BRANCH_OPTION_DESCRIPTION)
+    .option('--run-children', 'Removed: exits 2 — oversized issues stack with --stack')
     .option(
       '--size-gate <mode>',
-      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs under the same issue; never files issues), off (skip both gates) or stack (stacked PR set, ADR-0161; runs as slice until stacks are built); beats sizeGate.mode in the config',
+      'Size gate mode for this run: stack (default; stacked PR set built in one run; same as --stack) or off (skip both gates); file and slice are deprecated aliases for stack; beats sizeGate.mode in the config',
+    )
+    .option(
+      '--stack',
+      "Build an oversized issue as a stacked PR set in one run: each slice's PR bases on the previous slice's PR head, the stack stops at the first failed slice; same as --size-gate stack",
     )
     .option(
       '--max-slices <count>',
-      'Slice mode: most slices a not-yet-started slice plan may have (1-20); an over-cap plan is recorded and parks; beats sizeGate.maxSlices (default 10)',
+      'Stack mode: most slices a not-yet-started slice plan may have (1-20); an over-cap plan is recorded and parks; beats sizeGate.maxSlices (default 10)',
     )
     .action(async (issueNum, opts) => {
       await handlers.cmdRunIssue(handlers.parseIssueArg(issueNum), opts);
     });
 
   program
-    .command('run-brief <file>')
-    .description('Like run-issue, but the work comes from a local Markdown brief instead of a GitHub issue')
+    .command('run-brief <file> [files...]')
+    .description(
+      'Like run-issue, but the work comes from local Markdown briefs; several run in order with the same flags, a failed one does not stop the rest, and any failure exits non-zero',
+    )
     .option('--product <name>', 'Override active product constitution')
     .option('--no-auto-rework', 'Disable automatic rework loop')
     .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
@@ -91,8 +98,13 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
       'Local-only: write a versioned benchmark artifact manifest (manifest.json, request.json, events.ndjson, diff.patch) to this directory; requires --workspace',
     )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
-    .action(async (file, opts) => {
-      await handlers.cmdRunBrief(file, opts);
+    .option('--base-branch <ref>', BASE_BRANCH_OPTION_DESCRIPTION)
+    .option(
+      '--stack',
+      "Several briefs: open them as a PR stack — each brief starts from and targets the previous brief's PR head branch; a failure or missing PR (e.g. --no-pr) stops the stack and skips the rest. One brief: an over-budget brief is sliced and built as a stacked PR set in one run",
+    )
+    .action(async (file: string, files: string[], opts) => {
+      await handlers.cmdRunBrief([file, ...files], opts);
     });
 
   program
@@ -112,7 +124,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
   program
     .command('resume-approved')
     .description(
-      `Land open factory PRs (factory/*, plus legacy ${LEGACY_BRANCH_PREFIX}/*) whose review is now approved; skip the rest`,
+      'Land open factory PRs (factory/* or the configured prefix) whose review is now approved; skip the rest',
     )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(async (opts) => {

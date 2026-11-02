@@ -226,7 +226,7 @@ describe('fetchHumanEventSources', () => {
     };
   }
 
-  it('matches both the resolved prefix and legacy ship-it/ branches', async () => {
+  it('matches the resolved prefix but not legacy ship-it/ branches', async () => {
     const client = makeClient({
       list: vi.fn().mockResolvedValue({
         data: [
@@ -239,7 +239,7 @@ describe('fetchHumanEventSources', () => {
 
     const sources = await fetchHumanEventSources(client, 'owner', 'repo', new Set(['1', '2', '3']), 'factory');
 
-    expect(sources.map((s) => s.issue).sort()).toEqual(['1', '2']);
+    expect(sources.map((s) => s.issue).sort()).toEqual(['1']);
   });
 
   it('returns every factory-branch PR when the issue filter is null', async () => {
@@ -255,15 +255,15 @@ describe('fetchHumanEventSources', () => {
 
     const sources = await fetchHumanEventSources(client, 'owner', 'repo', null, 'factory');
 
-    expect(sources.map((s) => s.issue).sort()).toEqual(['1', '2']);
+    expect(sources.map((s) => s.issue).sort()).toEqual(['1']);
   });
 
-  it('filters to ship-it/<n>- branches within the issue set', async () => {
+  it('filters to factory/<n>- branches within the issue set', async () => {
     const client = makeClient({
       list: vi.fn().mockResolvedValue({
         data: [
-          { number: 1, head: { ref: 'ship-it/1-do-thing' }, state: 'open', merged_at: null, closed_at: null },
-          { number: 2, head: { ref: 'ship-it/2-other-thing' }, state: 'open', merged_at: null, closed_at: null },
+          { number: 1, head: { ref: 'factory/1-do-thing' }, state: 'open', merged_at: null, closed_at: null },
+          { number: 2, head: { ref: 'factory/2-other-thing' }, state: 'open', merged_at: null, closed_at: null },
           { number: 3, head: { ref: 'not-a-factory-branch' }, state: 'open', merged_at: null, closed_at: null },
         ],
       }),
@@ -279,7 +279,7 @@ describe('fetchHumanEventSources', () => {
   it('maps commit author login/name and the author date, and approvals filtered to APPROVED', async () => {
     const client = makeClient({
       list: vi.fn().mockResolvedValue({
-        data: [{ number: 1, head: { ref: 'ship-it/1-do-thing' }, state: 'open', merged_at: null, closed_at: null }],
+        data: [{ number: 1, head: { ref: 'factory/1-do-thing' }, state: 'open', merged_at: null, closed_at: null }],
       }),
       listCommits: vi.fn().mockResolvedValue({
         data: [
@@ -311,12 +311,12 @@ describe('fetchHumanEventSources', () => {
         data: [
           {
             number: 1,
-            head: { ref: 'ship-it/1-do-thing' },
+            head: { ref: 'factory/1-do-thing' },
             state: 'closed',
             merged_at: '2026-07-20T01:00:00.000Z',
             closed_at: '2026-07-20T01:00:00.000Z',
           },
-          { number: 2, head: { ref: 'ship-it/2-other' }, state: 'open', merged_at: null, closed_at: null },
+          { number: 2, head: { ref: 'factory/2-other' }, state: 'open', merged_at: null, closed_at: null },
         ],
       }),
       get: getMock,
@@ -338,7 +338,7 @@ describe('fetchHumanEventSources', () => {
         data: [
           {
             number: 1,
-            head: { ref: 'ship-it/1-do-thing' },
+            head: { ref: 'factory/1-do-thing' },
             state: 'closed',
             merged_at: null,
             closed_at: '2026-07-20T01:00:00.000Z',
@@ -364,10 +364,10 @@ describe('fetchHumanEventSources', () => {
 });
 
 describe('kpiBranchPrefixes (#2342)', () => {
-  it('returns the configured slug, factory and ship-it, deduped', () => {
-    expect(kpiBranchPrefixes()).toEqual(['ship-it', 'factory']);
-    expect(kpiBranchPrefixes('factory')).toEqual(['factory', 'ship-it']);
-    expect(kpiBranchPrefixes('sf')).toEqual(['sf', 'factory', 'ship-it']);
+  it('returns the configured slug and factory, deduped', () => {
+    expect(kpiBranchPrefixes()).toEqual(['factory']);
+    expect(kpiBranchPrefixes('factory')).toEqual(['factory']);
+    expect(kpiBranchPrefixes('sf')).toEqual(['sf', 'factory']);
   });
 });
 
@@ -394,11 +394,11 @@ describe('fetchHumanEventSources prefix matching (#2342)', () => {
   const issuesFor = async (prefixes?: string | readonly string[]) =>
     (await fetchHumanEventSources(makeClient(), 'o', 'r', null, prefixes)).map((s) => s.issue).sort();
 
-  it('fetchHumanEventSources matches factory/, ship-it/ and the configured prefix (#2342)', async () => {
-    expect(await issuesFor('sf')).toEqual(['1', '2', '3']);
-    expect(await issuesFor()).toEqual(['1', '2']);
-    expect(await issuesFor([])).toEqual(['1', '2']);
-    expect(await issuesFor(['sf'])).toEqual(['2', '3']);
+  it('fetchHumanEventSources matches factory/ and the configured prefix, not ship-it/ (#2342)', async () => {
+    expect(await issuesFor('sf')).toEqual(['1', '3']);
+    expect(await issuesFor()).toEqual(['1']);
+    expect(await issuesFor([])).toEqual(['1']);
+    expect(await issuesFor(['sf'])).toEqual(['3']);
   });
 });
 

@@ -1,5 +1,6 @@
 // packages/cli/src/cli/notify.test.ts — opt-in --notify command tests (#3512)
 
+import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -46,6 +47,32 @@ describe('resolveNotifyCommand', () => {
 });
 
 describe('createNotifier', () => {
+  it('reports a child process error and settles', async () => {
+    const onError = vi.fn();
+    const spawnMissing = new Proxy(spawn, { apply: () => spawn('/nonexistent/factory-notify-test') });
+    const notifier = createNotifier('notify', { spawn: spawnMissing, onError });
+    expect(notifier).toBeDefined();
+    notifier?.notify(drainSummary);
+    await notifier?.settle();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('ENOENT'));
+  });
+
+  it('reports an stdin error once even when the child later fails', async () => {
+    const onError = vi.fn();
+    const spawnChild = new Proxy(spawn, {
+      apply: () => {
+        const child = spawn(process.execPath, ['-e', 'process.exit(2)']);
+        queueMicrotask(() => child.stdin.emit('error', new Error('broken pipe')));
+        return child;
+      },
+    });
+    const notifier = createNotifier('notify', { spawn: spawnChild, onError });
+    notifier?.notify(drainSummary);
+    await notifier?.settle();
+    expect(onError).toHaveBeenCalledExactlyOnceWith("notify command 'notify' failed: stdin: broken pipe");
+  });
+
   it('returns undefined and never spawns when no command is configured', () => {
     const spawn = vi.fn();
     for (const cmd of [undefined, '', '   ']) expect(createNotifier(cmd, { spawn: spawn as never })).toBeUndefined();

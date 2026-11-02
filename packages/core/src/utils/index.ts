@@ -26,7 +26,7 @@ import type {
   RemoteBranchRecord,
   ReworkInfo,
 } from '../types/index.js';
-import { branchPrefixSlug, LEGACY_BRANCH_PREFIX, slugify } from './branch-slug.js';
+import { branchPrefixSlug, slugify } from './branch-slug.js';
 import { levelForType } from './format.js';
 import { execGit } from './git-exec.js';
 import { moveLaneBranchAside } from './lane-branch-aside.js';
@@ -36,7 +36,7 @@ import { ensureWorktreeParentExcluded } from './worktree-location.js';
 
 export type { WorktreeSandbox } from './microvm.js';
 
-export { colorEnabled, formatEventLine, levelForType } from './format.js';
+export { colorEnabled, formatEventLine } from './format.js';
 
 // ---------- Event Logging ----------
 
@@ -176,6 +176,15 @@ export async function setupWorktree(
   // The base of record is the freshly fetched remote-tracking ref — never local
   // branch state, which can be stale, dirty, or ahead (#1167).
   await gitFetch(repoRoot);
+  if (startPoint) {
+    try {
+      await execGit(['rev-parse', '--verify', '-q', `${startPoint}^{commit}`], { cwd: repoRoot });
+    } catch {
+      throw new Error(
+        `base ref ${startPoint} does not resolve after git fetch origin — check the branch exists on origin`,
+      );
+    }
+  }
   // An earlier run's push (#1868) is recorded and reported here. When an open PR's head is
   // this branch and the caller gave no start point, the lane continues on it (#3099), so
   // SHIP pushes fast-forward to that PR. Otherwise it is never adopted or discarded here.
@@ -421,15 +430,14 @@ export async function reapCleanShipWorktree(
   return { outcome: 'removed', branch, branchDeleted };
 }
 
-export { branchPrefixSlug, LEGACY_BRANCH_PREFIX, slugify };
+export { branchPrefixSlug, slugify };
 
-/** Prefixes recognized as factory branches: the resolved slug first, then the legacy one, deduped. */
+/** Prefixes recognized as factory branches: the resolved slug only. */
 export function factoryBranchPrefixes(prefix?: string): string[] {
-  const resolved = branchPrefixSlug(prefix);
-  return resolved === LEGACY_BRANCH_PREFIX ? [resolved] : [resolved, LEGACY_BRANCH_PREFIX];
+  return [branchPrefixSlug(prefix)];
 }
 
-/** Issue number of a `<prefix>/<n>-…` factory branch on any recognized prefix; null otherwise. */
+/** Issue number of a `<prefix>/<n>-…` factory branch on the resolved prefix; null otherwise. */
 export function factoryBranchIssue(branch: string, prefix?: string): number | null {
   for (const p of factoryBranchPrefixes(prefix)) {
     const match = new RegExp(`^${p}/(\\d+)-`).exec(branch); // slugs are [a-z0-9-] only

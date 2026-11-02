@@ -55,10 +55,10 @@ describe('addBranchPrefixOption', () => {
 });
 
 describe('BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION', () => {
-  it('tells the user legacy ship-it/ branches are included', () => {
-    expect(BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION).toContain('ship-it/');
+  it('does not mention legacy ship-it/ branches', () => {
+    expect(BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION).not.toContain('ship-it');
     expect(BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION).toBe(
-      'Branch-name prefix of factory branches to act on; legacy ship-it/ branches are always included (default: run.branchPrefix, else factory)',
+      'Branch-name prefix of factory branches to act on (default: run.branchPrefix, else factory)',
     );
   });
 });

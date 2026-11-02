@@ -13,8 +13,6 @@ import type { OrderCollision } from './order-collision.js';
 import type { OrderCollisionRepair } from './order-repair.js';
 
 export type { OrderCollision };
-export * from './prerequisite-order.js';
-export * from './orphan-drafts.js';
 
 export type UnparkErrorCode = 'not-parked' | 'lane-required' | 'unpark-failed';
 

@@ -122,11 +122,11 @@ describe('runAutoIngest', () => {
     expect(writes[QUEUE_FILE]).toBeUndefined();
   });
 
-  it('skips an issue with an open ship-it/<n>-... PR', async () => {
+  it('skips an issue with an open factory/<n>-... PR', async () => {
     const { deps } = makeDeps({
       runOpts: {
         issues: [{ number: 200, title: 'In flight', updatedAt: '2026-07-19T00:00:00.000Z' }],
-        prHeadRefs: ['ship-it/200-in-flight'],
+        prHeadRefs: ['factory/200-in-flight'],
       },
       queueContent: '',
     });
@@ -140,7 +140,25 @@ describe('runAutoIngest', () => {
     expect(result.skippedInFlight).toEqual([200]);
   });
 
-  it('skips issues with open PRs on the configured prefix or legacy ship-it, but not other branches', async () => {
+  it('defaults the in-flight PR prefix to factory when no branchPrefix is given', async () => {
+    const { deps } = makeDeps({
+      runOpts: {
+        issues: [{ number: 200, title: 'In flight', updatedAt: '2026-07-19T00:00:00.000Z' }],
+        prHeadRefs: ['factory/200-in-flight'],
+      },
+      queueContent: '',
+    });
+
+    const result = await runAutoIngest(
+      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE },
+      deps,
+    );
+
+    expect(result.appended).toEqual([]);
+    expect(result.skippedInFlight).toEqual([200]);
+  });
+
+  it('skips issues with open PRs on the configured prefix, but not legacy ship-it or other branches', async () => {
     const { deps } = makeDeps({
       runOpts: {
         issues: [
@@ -158,8 +176,8 @@ describe('runAutoIngest', () => {
       deps,
     );
 
-    expect(result.skippedInFlight).toEqual([200, 201]);
-    expect(result.appended).toEqual([202]);
+    expect(result.skippedInFlight).toEqual([200]);
+    expect(result.appended).toEqual([201, 202]);
   });
 
   it('skips a stale issue (updatedAt <= prevWatermark) and advances the watermark to the max updatedAt seen', async () => {

@@ -1,6 +1,6 @@
 # ADR-0100: The attached-repo roster is a one-shot read of the persisted registry; lane state stays a pure SSE projection
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-09-12
 
 ## Context

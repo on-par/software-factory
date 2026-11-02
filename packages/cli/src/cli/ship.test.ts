@@ -67,16 +67,60 @@ describe('shipIssue (direct)', () => {
     it('builds slice 2 on the -s2- branch when slice 1 is merged', async () => {
       const setup = custom();
       const fake = sliceOctokit(async () => ({ data: [{ id: 1, user: { id: 7 }, body: planComment }] }));
-      await shipIssue(5, { sizeGate: 'slice' }, ctx(), { setupWorktree: setup, octokit: () => fake });
+      await shipIssue(5, { sizeGate: 'stack' }, ctx(), { setupWorktree: setup, octokit: () => fake });
       expect(setup.mock.calls[0]?.[1]).toBe('factory/5-s2-fix-the-bug');
     });
 
-    it('does not look up the slice plan in file mode', async () => {
+    it('keeps a chain member whole and passes the stack gate with a base', async () => {
       const setup = custom();
-      const fake = sliceOctokit(async () => ({ data: [] }));
-      await shipIssue(5, { sizeGate: 'file' }, ctx(), { setupWorktree: setup, octokit: () => fake });
+      const fake = sliceOctokit(async () => ({ data: [{ id: 1, user: { id: 7 }, body: planComment }] }));
+      await shipIssue(5, { sizeGate: 'stack', baseBranch: 'main', parkOverBudget: true }, ctx(), {
+        setupWorktree: setup,
+        octokit: () => fake,
+      });
       expect(fake.rest.issues.listComments).not.toHaveBeenCalled();
       expect(setup.mock.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
+      expect(phases.planPhase.mock.calls[0]?.[0]).toMatchObject({ sizeGateMode: 'stack', parkOverBudget: true });
+    });
+
+    it('does not look up the slice plan in off mode', async () => {
+      const setup = custom();
+      const fake = sliceOctokit(async () => ({ data: [] }));
+      await shipIssue(5, { sizeGate: 'off' }, ctx(), { setupWorktree: setup, octokit: () => fake });
+      expect(fake.rest.issues.listComments).not.toHaveBeenCalled();
+      expect(setup.mock.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
+    });
+
+    describe('open factory PR adoption with the default stack (#3832)', () => {
+      const openPr = () => {
+        const fake = defaultOctokit() as any;
+        fake.rest.pulls.list = vi.fn(async ({ state }: any) => ({
+          data:
+            state === 'open'
+              ? [{ number: 77, head: { ref: 'factory/5-old-title', sha: 'abc', repo: { full_name: h.ghRepo } } }]
+              : [],
+        }));
+        return fake;
+      };
+      const branchFor = async (opts: Parameters<typeof shipIssue>[1], mode?: string) => {
+        const setup = custom();
+        h.factoryConfig = { ...h.factoryConfig, sizeGate: mode === undefined ? {} : { mode } };
+        const fake = openPr();
+        await shipIssue(5, opts, ctx(), { setupWorktree: setup, octokit: () => fake });
+        return setup.mock.calls[0]?.[1];
+      };
+
+      it.each([undefined, 'file', 'slice'])('adopts the open PR branch when sizeGate.mode is %s', async (mode) => {
+        expect(await branchFor({}, mode)).toBe('factory/5-old-title');
+      });
+
+      it('keeps a fresh branch for an explicit --stack', async () => {
+        expect(await branchFor({ sizeGate: 'stack', explicitStack: true })).toBe('factory/5-fix-the-bug');
+      });
+
+      it('keeps a fresh branch when the config says stack', async () => {
+        expect(await branchFor({}, 'stack')).toBe('factory/5-fix-the-bug');
+      });
     });
 
     it('parks before creating a worktree when the slice plan lookup throws', async () => {
@@ -85,7 +129,7 @@ describe('shipIssue (direct)', () => {
         throw new Error('network down');
       });
       await expect(
-        shipIssue(5, { sizeGate: 'slice' }, ctx(), { setupWorktree: setup, octokit: () => fake }),
+        shipIssue(5, { sizeGate: 'stack' }, ctx(), { setupWorktree: setup, octokit: () => fake }),
       ).rejects.toBeInstanceOf(LaneParkError);
       expect(setup).not.toHaveBeenCalled();
     });

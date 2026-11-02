@@ -63,12 +63,20 @@ function makeOctokit(files: string[], labels: string[] = []) {
               }
             : { data: [] },
         ),
-        get: vi.fn(async () => ({ data: { head: { sha: 'abc123' }, body: 'Closes #5' } })),
+        get: vi.fn(async () => ({
+          data: { head: { sha: 'abc123' }, base: { ref: 'main' }, merge_commit_sha: 'merged', body: 'Closes #5' },
+        })),
         listFiles: vi.fn(async () => ({ data: files.map((filename) => ({ filename })) })),
         update: vi.fn(async () => ({})),
         merge: vi.fn(async () => ({})),
       },
       git: { deleteRef: vi.fn(async () => ({})) },
+      repos: {
+        getBranch: vi.fn(async () => ({ data: { commit: { sha: 'base' } } })),
+        getStatusChecksProtection: vi.fn(async () => ({ data: { contexts: [] } })),
+        getBranchRules: vi.fn(async () => ({ data: [] })),
+      },
+      actions: { listWorkflowRunsForRepo: vi.fn(async () => ({ data: { workflow_runs: [] } })) },
       checks: { listForRef: vi.fn(async () => ({ data: { check_runs: [] } })) },
       search: { issuesAndPullRequests: vi.fn(async () => ({ data: { items: [] } })) },
     },

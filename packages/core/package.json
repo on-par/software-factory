@@ -1,6 +1,6 @@
 {
   "name": "@on-par/factory-core",
-  "version": "0.9.22",
+  "version": "0.9.26",
   "description": "Core engine: model router, constitutions, checkers, and pipeline phases for the Software Factory.",
   "type": "module",
   "main": "dist/index.js",
@@ -54,18 +54,18 @@
     "prepack": "node ../../scripts/pack-hygiene-cli.ts prepack"
   },
   "dependencies": {
-    "@on-par/adr-kit": "^0.9.22",
-    "@on-par/contracts": "^0.9.22",
-    "@on-par/factory-config": "^0.9.22",
-    "@on-par/repo-context": "^0.9.22",
+    "@on-par/adr-kit": "^0.9.26",
+    "@on-par/contracts": "^0.9.26",
+    "@on-par/factory-config": "^0.9.26",
+    "@on-par/repo-context": "^0.9.26",
     "@octokit/rest": "^22.0.0",
-    "execa": "^10.1.0",
+    "execa": "^10.2.1",
     "gray-matter": "^4.0.3",
     "yaml": "^2.9.0",
     "zod": "^4.6.5"
   },
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^26.6.5"
+    "@types/node": "^26.6.6"
   }
 }

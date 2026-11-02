@@ -17,6 +17,11 @@ export const RIGHT_SIZE_STEP_GATE_PASSED = `4. RIGHT-SIZE THE SLICE. The factory
    "ESCALATE: missing-info: <question>" or "ESCALATE: contradiction: <what conflicts>";
    then do not write the spec file.`;
 
+export const RIGHT_SIZE_STEP_STACK = RIGHT_SIZE_STEP_GATE_PASSED.replace(
+  "The factory's deterministic size gate passed this issue: size is\n   the gate's call",
+  "Size is the factory's call",
+);
+
 // Vertical-slice outline (#3622): prompt step 8 and its design-block template.
 export const OUTLINE_STEP = `8. VERTICAL-SLICE OUTLINE. Break the work into an ordered outline of at least one vertical
    slice. Each step ends in one testable result and names:

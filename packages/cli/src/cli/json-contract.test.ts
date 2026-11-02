@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import type { FactoryEvent } from '@on-par/factory-core';
 import { createLogger, loadFactoryConfig } from '@on-par/factory-core';
 import { createTempDirs } from '@on-par/factory-core/testing';
-import { computeParentCoverage } from '@on-par/factory-core/internal';
 import type { QueueSnapshot } from '@on-par/factory-core/internal';
 import type { EnqueueResult } from '@on-par/factory-core/internal';
 import { unparkClient } from './test-support/unpark-client.js';
@@ -68,12 +67,7 @@ const statusInput = {
     draining: { since: '2026-01-01T00:05:00.000Z', target: '0.9.5', stopFiles: ['/tmp/lane-a/STOP'] },
   },
   openFactoryDrafts: { count: 3, oldestHours: 30 },
-  decomposedParents: [
-    computeParentCoverage(
-      { number: 12, body: '## Acceptance criteria\n- [ ] first thing\n- [ ] second thing\n- [ ] third thing\n' },
-      [{ number: 13, body: 'Covers parent criteria: P1, P2', merged: true }],
-    ),
-  ],
+  decomposedParents: [],
   disk: { freeGb: 42.5, thresholdGb: 10, low: false },
   now: fixedNow,
 };

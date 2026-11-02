@@ -31,7 +31,7 @@ import { renderEnvironmentReleaseComment } from '../phases/environment-release.j
 import type { SizeBudget } from '../readiness/size.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
-import { unknownConfigKeyMessages } from '../config/config-schema-lint.js';
+import { codexSandboxWarningMessages, unknownConfigKeyMessages } from '../config/config-schema-lint.js';
 import { planPhase as planPhaseDefault, type PlanResult } from '../phases/plan.js';
 import { planConfigParkMessage } from '../phases/plan-spec-guards.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
@@ -63,18 +63,19 @@ import {
 } from './stage-blocked.js';
 import { reportFlakeRerun } from './flaky-tests.js';
 import { finishWithoutShip } from './local-finish.js';
-import { enterStackSlice, stackWaitOutcome } from './stack-slice-entry.js';
+import { enterStackSlice } from './stack-slice-entry.js';
+import type { SlicePlanStore } from '../readiness/slice-plan-store.js';
 import { recordShippedSlice } from './slice-ship-record.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
 import {
-  CLASSIFIER_PROMPT_VERSION,
-  classifierPolicyVersion,
   classifyPrShadow,
   toClassificationRecord,
   type PrShadowInput,
   type PrShadowVerdict,
 } from '../review/classifier.js';
-import { decideT1Sample, resolveReviewRouting, type ReviewRouting, type T1SampleConfig } from '../review/routing.js';
+import { shadowErrorVerdict } from './shadow-fallback.js';
+import { decideTrustTier, resolveReviewRouting, type ReviewRouting, type TrustTierConfig } from '../review/routing.js';
+import { logTrustTier } from './trust-tier-log.js';
 import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings, SizeGateMode } from '../config/index.js';
@@ -111,7 +112,6 @@ import {
 } from './resume-context.js';
 import type { Environment, Workspace } from './ports.js';
 import { safeRecordRunState, terminalRunStateUpdate, thrownRunStateUpdate } from './run-state-record.js';
-import { isDecomposeSignal } from './run-state-record.js';
 import { runStatusForPhase, type RunStateUpdate } from './state.js';
 import { type ParkedPrDisposition, settleParkedPullRequest } from './park-pr.js';
 import { runParkSteward } from './park-steward.js';
@@ -166,8 +166,9 @@ export interface RunRequest extends ReworkRequestFields {
   readinessUpdateIssueBody?: boolean;
   /** build.publishFromBuild resolved (#1867); undefined = off (commit-only BUILD on every route). */
   publishFromBuild?: boolean;
-  /** sizeGate.mode resolved (ADR-0147, #2048); undefined = file (both size gates on). */
+  /** sizeGate.mode resolved (ADR-0147, #2048, #3837); undefined = both size gates on, no stack slicing. */
   sizeGateMode?: SizeGateMode;
+  parkOverBudget?: boolean;
   /** sizeGate.maxSlices or --max-slices resolved (ADR-0156); undefined = DEFAULT_MAX_SLICES. */
   maxSlices?: number;
   /** sizeGate.tokenBudget / maxFiles resolved (#3350); undefined = defaults. */
@@ -176,7 +177,7 @@ export interface RunRequest extends ReworkRequestFields {
   stewardEnabled?: boolean;
   /** Review floor rules for CHECK's design critic class-A skip (#3374); set regardless of the classifier gate. */
   reviewFloorRules?: ReviewFloorRuleSet;
-  prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string } & T1SampleConfig;
+  prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string } & TrustTierConfig;
   timeouts: { plan: number; build: number; check: number; approval: number; tests: number; compile?: number };
   modelPins: EffectiveModelPins;
   codexDisabled: boolean;
@@ -219,6 +220,8 @@ export interface RunRequest extends ReworkRequestFields {
  *  layout, approvals/steering directories, report/artifact destinations) are the caller's
  *  responsibility to wire — runIssue only calls the closures it is handed. */
 export interface RunPorts extends CiReworkPorts {
+  /** Run-state slice-plan store for briefs (#3813); absent = the issue's slice-plan comment. */
+  slicePlanStore?: SlicePlanStore;
   /** ADR-0161 stack mode: creates a slice branch in the worktree. Defaults to createStackSliceBranch. */
   createSliceBranch?: (opts: { worktree: string; branch: string; startPoint: string }) => Promise<void>;
   /** Stuck-run steward seams (#2124). Used only when request.stewardEnabled is true and detectStuck fires
@@ -256,10 +259,6 @@ export interface RunPorts extends CiReworkPorts {
    *  `laneClaimStaleness` (#3063) lets it reap provably finished holders; undefined = never reap. */
   laneFileGuard?: LaneFileGuard;
   laneClaimStaleness?: LaneClaimStalenessProbe;
-  /** PLAN's pre-flight size gate decomposed this issue into filed sub-issues. The hook
-   *  owns the (path-bound) queue rewrite and is expected to throw to signal the caller;
-   *  if it returns normally, runIssue treats the decomposition as an escalation. */
-  onDecomposed?: (childIssues: number[]) => void | Promise<void>;
   writeLocalRunReport?: (info: RunReportInfo) => Promise<string | undefined>;
   writeBenchmarkArtifacts?: (info: RunReportInfo) => Promise<void>;
   /** Records the truthful current phase for downstream connectors (#1325) — called once
@@ -314,7 +313,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, rawPorts:
   try {
     outcome = await runIssueOnce(request, policy, ports, observed);
   } catch (err) {
-    const update = thrownRunStateUpdate(isDecomposeSignal(err), request.branch, observed.checkSummary);
+    const update = thrownRunStateUpdate(request.branch, observed.checkSummary);
     await safeRecordRunState(ports.recordRunState, log, update);
     throw err;
   }
@@ -563,6 +562,7 @@ async function runIssueOnce(
     // Unknown nested config keys are stripped by the runtime schema; warn once per key, never block (#3568, ADR-0160).
     if (request.repoConfigFile) {
       for (const m of unknownConfigKeyMessages(request.repoConfigFile)) log('config_unknown_key', m);
+      for (const m of codexSandboxWarningMessages(request.repoConfigFile)) log('config_invalid_value', m);
     }
 
     // Pre-PLAN base health (#2339): a red origin/main releases the issue before any model spend;
@@ -574,6 +574,7 @@ async function runIssueOnce(
           constitution,
           router: ports.router,
           env: laneEnv(appPort, process.env, appBaseUrl, ports.workspace.path, runId),
+          ...(request.parentBaseRef !== undefined ? { baseRef: request.parentBaseRef } : {}),
           cachePath: request.baselineCachePath,
           cacheTtlHours: request.baselineCacheTtlHours,
           timeoutSeconds: request.timeouts.check,
@@ -588,7 +589,7 @@ async function runIssueOnce(
       if (health?.kind === 'red' && health.baseSha !== undefined) {
         log(
           'environment-released',
-          `origin/main ${health.baseSha.slice(0, 8)} fails ${health.failingChecks.join(', ')} before PLAN — no model calls, releasing #${workKey} to queued`,
+          `${request.parentBaseRef ?? 'origin/main'} ${health.baseSha.slice(0, 8)} fails ${health.failingChecks.join(', ')} before PLAN — no model calls, releasing #${workKey} to queued`,
         );
         return {
           state: 'released',
@@ -682,9 +683,11 @@ async function runIssueOnce(
           workSource: request.workSource,
           enforceReadiness: true,
           fastPath: request.efficiency.fastPath,
-          enforceSizeGate: !request.noPr && (request.sizeGateMode ?? 'file') !== 'off',
+          enforceSizeGate: !request.noPr && request.sizeGateMode !== 'off',
           sizeGateMode: request.sizeGateMode,
+          parkOverBudget: request.parkOverBudget,
           sliceIndex: request.sliceIndex,
+          slicePlanStore: ports.slicePlanStore,
           maxSlices: request.maxSlices,
           sizeBudget: request.sizeBudget,
           blockUnresolvedRegressions: request.blockUnresolvedRegressions,
@@ -695,13 +698,6 @@ async function runIssueOnce(
       const plan = reused ?? (await runStage('plan', planAt));
       route = plan.route;
       if (!plan.ok) {
-        if (plan.stackWait) return stackWaitOutcome(plan.stackWait, request.branch, route);
-        const decomposedChildren = plan.decomposed?.childIssues ?? [];
-        if (decomposedChildren.length > 0) {
-          await ports.onDecomposed?.(decomposedChildren);
-          const childList = decomposedChildren.map((n) => `#${n}`).join(', ');
-          return { state: 'escalated', reason: `issue #${workKey} decomposed into ${childList}`, route };
-        }
         if (plan.sliced) {
           return await terminalEscalated(
             `issue #${workKey} sliced into ${plan.sliced.sliceCount} slice(s): ${plan.escalate ?? 'slice plan recorded'}`,
@@ -1086,7 +1082,8 @@ async function runIssueOnce(
         rules: request.prClassifier.rules,
         readChanges: ports.readReviewFloorChanges,
       });
-      reviewRouting = decideT1Sample(reviewRouting, request.prClassifier, request);
+      reviewRouting = decideTrustTier(reviewRouting, request.prClassifier, request);
+      logTrustTier(reviewRouting, 'demotion', log);
       if (reviewRouting.gated) {
         const label = request.prClassifier.gateLabel;
         const [owner, repoName] = request.repo.split('/');
@@ -1105,6 +1102,7 @@ async function runIssueOnce(
           `${reviewRouting.reason} — applied ${label}; auto-merge held for a human${reviewRouting.error ? ` (${reviewRouting.error})` : ''}`,
         );
       }
+      logTrustTier(reviewRouting, 'receipt', log);
 
       // Shadow model verdict (#1725, ADR-0121): recorded only. It runs after the gate is fully
       // decided, so it cannot change the label or merge routing.
@@ -1126,22 +1124,7 @@ async function runIssueOnce(
       try {
         shadow = await (ports.classifyPr ?? classifyPrShadow)(shadowInput);
       } catch (err) {
-        shadow = {
-          modelClass: null,
-          floorClass: reviewRouting.floor,
-          finalClass: reviewRouting.floor,
-          model: null,
-          promptVersion: CLASSIFIER_PROMPT_VERSION,
-          policyVersion: classifierPolicyVersion(request.prClassifier.rules),
-          diffSha: null,
-          adrIds: [],
-          costUsd: null,
-          claims: [],
-          unsupportedClaims: [],
-          notInspected: [],
-          droppedClaims: 0,
-          reason: `classifier error: ${errorMessage(err)}`,
-        };
+        shadow = shadowErrorVerdict(reviewRouting.floor, request.prClassifier.rules, errorMessage(err));
       }
       reviewRouting = { ...reviewRouting, shadow };
       log(
@@ -1186,7 +1169,10 @@ async function runIssueOnce(
         plan: planSlice.plan,
         index: planSlice.index,
         ship,
-        stackMode: request.sizeGateMode === 'stack',
+        // Brief PRs carry no stack-order line (shipPhase ignores the stack for inline work), so skip
+        // the parent-PR update: its branch names hold the brief's stand-in number (#3813).
+        stackMode: request.work.kind !== LOCAL_BRIEF_SOURCE,
+        store: ports.slicePlanStore,
         log,
       });
       if (failure !== undefined) return await terminalParked('fail', failure);
@@ -1211,7 +1197,7 @@ async function runIssueOnce(
       ...(planSlice ? { slice: { index: planSlice.index, count: planSlice.plan.slices.length } } : {}),
     };
   } catch (err) {
-    if (isDecomposeSignal(err) || ports.claimSignal?.aborted) throw err;
+    if (ports.claimSignal?.aborted) throw err;
     if ((err as { reason?: unknown } | null | undefined)?.reason === 'local_auth') {
       log(
         'environment_warning',

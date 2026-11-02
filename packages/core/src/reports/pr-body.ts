@@ -1,6 +1,7 @@
 // src/reports/pr-body.ts — the PR description SHIP opens with. It is short: a 1-3 sentence summary
 // of the frozen spec's Goal and approach, a one-line proof (checker counts, rework rounds), an
-// optional risk line, the collapsed diff stat, the Closes / Part of line, and a configurable footer.
+// optional risk line, the Closes / Part of line, and a configurable footer. It never lists changed
+// files: the PR's own Files tab already shows them.
 
 import { type WorkKey } from '../work/work-key.js';
 import { defaultFactoryConfig } from '@on-par/factory-config';
@@ -21,7 +22,6 @@ export interface PrBodyInput {
   summaryLine: string;
   /** Frozen spec body with the frontmatter stripped; intent sections are omitted when absent. */
   specBody?: string;
-  diffStat: string;
   checkSummary?: CheckSummary;
   /** Issue the PR closes; omitted for a non-github work source. */
   /** Rework rounds CHECK ran; undefined renders as 0. */
@@ -35,6 +35,33 @@ export interface PrBodyInput {
   stackOrder?: string;
   /** Large-PR walkthrough markdown (#3623), rendered as a Walkthrough section; omitted when undefined. */
   walkthrough?: string;
+  typescriptLines?: { net: number; nonTest: number } | 'unavailable';
+}
+
+const KEY = String.raw`[A-Z][A-Z0-9]{1,9}-\d+`;
+const LEADING_KEY = new RegExp(String.raw`^\s*(?:[\[(]${KEY}[\])]|${KEY}(?=\s*(?:[:\-–—|]|$)))\s*[:\-–—|]?\s*`);
+const TRAILING_KEY = new RegExp(String.raw`\s*[\[(]${KEY}[\])]\s*$`);
+const LOCAL_BRIEF = /[^.\n]*\blocal[ -]brief\b[^.\n]*(?:\.|$)/gim;
+
+/** A brief's title with its tracker-style id (`ARA-12: …`, `[ARA-12] …`, `… (ARA-12)`) and any "local brief"
+ *  mention removed, for PR titles and bodies: reviewers cannot look those ids up. Plain words like UTF-8 stay. */
+export function stripBriefIds(text: string): string {
+  const stripped = text
+    .replace(LOCAL_BRIEF, '')
+    .replace(LEADING_KEY, '')
+    .replace(TRAILING_KEY, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped.length > 0 ? stripped : 'Untitled change';
+}
+
+/** Summary line for brief-driven work: what it covers (the brief's title) and the open PR it builds on. Never the brief's id, digest or path. */
+export function briefSummaryLine(title: string, basePr?: number): string {
+  const what = stripBriefIds(title)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.!?…]+$/, '');
+  return `${what}.${basePr === undefined ? '' : ` Builds on #${basePr}.`}`;
 }
 
 export interface SpecIntent {
@@ -50,16 +77,22 @@ export function renderPrBody(input: PrBodyInput): string {
   const proof = input.checkSummary
     ? `Checkers: ${input.checkSummary.passes} pass, ${input.checkSummary.failures} fail, ${input.checkSummary.skips} skip · Rework rounds: ${rounds}`
     : `Checkers: not run · Rework rounds: ${rounds}`;
+  const counts = input.typescriptLines;
+  const lineCounts =
+    counts === undefined
+      ? ''
+      : counts === 'unavailable'
+        ? '\nTypeScript net lines: unavailable · TypeScript non-test net lines: unavailable'
+        : `\nTypeScript net lines: ${counts.net} · TypeScript non-test net lines: ${counts.nonTest}`;
   const risk = input.risk?.replace(/\s+/g, ' ').trim();
 
   return [
     section('Summary', input.summaryLine),
     input.stackOrder,
     whatChanged === undefined ? undefined : section('What changed', whatChanged),
-    section('Proof', proof),
+    section('Proof', proof + lineCounts),
     risk ? `**Risk:** ${risk}` : undefined,
     input.walkthrough ? section('Walkthrough', input.walkthrough) : undefined,
-    ['<details>', '<summary>Changed files</summary>', '', '```', input.diffStat, '```', '', '</details>'].join('\n'),
     input.closes !== undefined
       ? `Closes #${input.closes}`
       : input.partOf !== undefined

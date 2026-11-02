@@ -23,7 +23,7 @@ describe('worktreeDirName', () => {
   it('leaves custom prefixes unchanged', () => {
     expect(worktreeDirName('main', workKeyFromIssue(5), 'ship-it')).toBe('main-factory-ship-it-5');
     expect(worktreeDirName('main', workKeyFromIssue(5), 'sf')).toBe('main-factory-sf-5');
-    expect(worktreeDirName('main', workKeyFromIssue(5), undefined)).toBe('main-factory-ship-it-5');
+    expect(worktreeDirName('main', workKeyFromIssue(5), undefined)).toBe('main-factory-5');
     expect(worktreeDirName('software-factory', workKeyFromIssue(7), 'ship-it')).toBe('software-factory-ship-it-7');
   });
 

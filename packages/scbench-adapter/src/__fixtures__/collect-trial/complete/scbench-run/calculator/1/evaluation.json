@@ -1,8 +1,0 @@
-{
-  "problem_name": "calculator",
-  "checkpoint_name": "1",
-  "pass_counts": { "Core": 3 },
-  "total_counts": { "Core": 3 },
-  "pytest_exit_code": 0,
-  "infrastructure_failure": false
-}

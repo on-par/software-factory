@@ -94,7 +94,6 @@ describe('filesLikelyTouched (#3351)', () => {
       router,
       octokit,
       log: (type, msg) => events.push({ type, msg }),
-      fileSubIssues: true,
     });
 
     expect(result.cohesive?.cohesive).toBe(true);

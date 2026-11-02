@@ -7,7 +7,6 @@ import type {
   ConfigLoaderKey,
   CoreOpKey,
   GitOpKey,
-  IssueDecomposedError,
   IssueSkippedError,
   LaneEnvironmentPauseError,
   LaneParkError,
@@ -53,7 +52,6 @@ export interface ShipRuntime {
   LaneParkError: typeof LaneParkError;
   LaneEnvironmentPauseError: typeof LaneEnvironmentPauseError;
   IssueSkippedError: typeof IssueSkippedError;
-  IssueDecomposedError: typeof IssueDecomposedError;
 }
 
 let get: (() => ShipRuntime) | undefined;

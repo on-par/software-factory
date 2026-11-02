@@ -34,14 +34,13 @@ import {
   resolveSizeGateMode,
   ReworkHistory,
   runIssue,
-  type SizeGateMode,
   summarizeEvent,
   touchLastEvent,
   touchRunActivity,
 } from '@on-par/factory-core';
 import { shipHostBuildSlot } from './host-slot.js';
 import { claimReworkRequests } from './ship-review-rework.js';
-import type { CheckResumeRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
+import type { CheckResumeRecord, SlicePlanStore, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   createCheckResumeStore,
   createGithubLaneClaimStalenessProbe,
@@ -49,6 +48,7 @@ import {
   egressHostMessage,
   egressSummaryMessage,
   holdRunConfigSnapshot,
+  isExplicitStackMode,
   logCost,
   logEvent,
   readIssueRunState,
@@ -73,13 +73,13 @@ import { maybeWriteBenchmarkArtifacts, maybeWriteLocalRunReport } from './ship-r
 import { applyMeteredGuard, modelOverrideMessages, resolveProviderOrder } from './model-override-messages.js';
 import {
   buildRunRequest,
-  decomposeQueue,
   finishOutcome,
   logSandboxPolicy,
   setupRunWorkspace,
   stubAwareShipPhase,
   TERMINAL_EVENT_KINDS,
 } from './ship-steps.js';
+import { baseRemoteRef, type ShipIssueOptions } from './ship-options.js';
 
 type ShipArgs = Parameters<typeof shipIssueFrom> extends [string, ...infer Rest] ? Rest : never;
 
@@ -104,24 +104,7 @@ export async function shipIssue(
 async function shipIssueFrom(
   repoRoot: string,
   issueNum: number,
-  opts: {
-    product?: string;
-    autoRework?: boolean;
-    interactive?: boolean;
-    sandbox?: boolean;
-    approvePlan?: boolean;
-    branchPrefix?: string;
-    /** `run-issue --size-gate` (ADR-0147); undefined defers to sizeGate.mode in the config. */
-    sizeGate?: SizeGateMode;
-    /** run-issue --max-slices (ADR-0156); undefined defers to sizeGate.maxSlices. */
-    maxSlices?: number;
-    /** `--pr-classifier` / `--no-pr-classifier` (#1724); undefined defers to config/env. */
-    prClassifier?: boolean;
-    /** --draft-pr / --no-draft-pr (#3449); undefined defers to run.pr.draft. */
-    draftPr?: boolean;
-    /** `--no-pr` sets false: stop after a clean CHECK with no GitHub writes; undefined = ship as usual. */
-    pr?: boolean;
-  },
+  opts: ShipIssueOptions,
   ctx?: {
     repoRoot: string;
     ghRepo: string;
@@ -132,7 +115,7 @@ async function shipIssueFrom(
     blockedBehind?: number[];
     workRequest?: WorkRequest;
     /** Receives the core RunOutcome before shipIssue maps it to a return/throw — lets
-     *  `run-issue --run-children` read the PR number as data (#1747). */
+     *  stacked runs and the run lane read the PR number as data (#1747). */
     onOutcome?: (outcome: RunOutcome) => void;
     /** Input source for planPhase to resolve; defaults inside planPhase to this run's GitHub issue. */
     workSource?: { kind: WorkRequestSourceKind; params: unknown };
@@ -146,6 +129,8 @@ async function shipIssueFrom(
     /** Aborts when the lane loses this issue's claim lease (#3146); becomes RunPorts.claimSignal. */
     signal?: AbortSignal;
     rebuild?: { branch: string }; // #3325: a fresh branch off origin/main, built from the frozen spec with no PLAN
+    /** Run-state slice-plan store for a stacked brief (#3813); becomes RunPorts.slicePlanStore. */
+    slicePlanStore?: SlicePlanStore;
   },
   deps: Pick<
     CliDeps,
@@ -225,6 +210,7 @@ async function shipIssueFrom(
     policy.effective.localOnly,
   );
   router.setCodexFullAccessTasks?.(policy.sandbox.codexFullAccessTasks);
+  router.setCodexSandbox?.(policy.sandbox.codexSandbox);
   router.setContextCeilings?.(factoryConfig.build.contextCeiling);
   router.setLocalAuthSink?.(recordLocalAuthFailure);
   router.setProviderHold?.((p) => breaker.isHeldUntilCredentialsChange(p));
@@ -256,12 +242,23 @@ async function shipIssueFrom(
       issue: issueNum,
     } satisfies GithubIssueParams));
   const issueTitle = work.title;
-  const noPr = opts.pr === false; // --no-pr never files child issues or slice PRs: size gate off
-  const sizeGateMode = noPr ? 'off' : (opts.sizeGate ?? resolveSizeGateMode(factoryConfig));
+  const noPr = opts.pr === false; // --no-pr never files child issues or slice PRs: size gate off; --base-branch keeps stack mode
+  const gateOff = noPr || (opts.baseBranch !== undefined && opts.sizeGate !== 'stack');
+  const sizeGateMode = gateOff ? 'off' : (opts.sizeGate ?? resolveSizeGateMode(factoryConfig));
+  const explicitStack =
+    sizeGateMode === 'stack' &&
+    (opts.sizeGate !== undefined ? opts.explicitStack === true : isExplicitStackMode(factoryConfig));
   const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
   const { branchPrefix } = policy.effective;
-  const claim = { issueNum, issueTitle, ghRepo, sizeGateMode, work, ctx, octokit };
-  const branch = await resolveRunBranch({ ...claim, branchPrefix, noPr, eventsFile: paths.events });
+  const claim = { issueNum, issueTitle, ghRepo, sizeGateMode, work, ctx, octokit, baseBranch: opts.baseBranch };
+  const branch = await resolveRunBranch({
+    ...claim,
+    branchPrefix,
+    explicitStack,
+    noPr,
+    parkOverBudget: opts.parkOverBudget,
+    eventsFile: paths.events,
+  });
   const worktree = ctx?.resumeFrom
     ? ctx.resumeFrom.worktree
     : ctx?.localOnly
@@ -329,6 +326,7 @@ async function shipIssueFrom(
     ghName,
     git,
     paths,
+    startPoint: baseRemoteRef(opts.baseBranch),
   });
 
   const planApprovalEnabled = opts.approvePlan ?? resolvePlanApproval(factoryConfig);
@@ -426,6 +424,7 @@ async function shipIssueFrom(
     laneClaimStaleness: createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: policy.effective.branchPrefix }),
     recordPhase: phaseRecorder(paths.runs, issueNum),
     claimSignal: ctx?.signal,
+    ...(ctx?.slicePlanStore ? { slicePlanStore: ctx.slicePlanStore } : {}),
     recordRunState: runStateRecorder(paths.runs, {
       issue: issueNum,
       lane: lane ?? '',
@@ -436,7 +435,6 @@ async function shipIssueFrom(
     }),
     onActivity: () =>
       touchRunActivity(phaseSnapshotFile(paths.runs, workKeyFromIssue(issueNum)), new Date().toISOString()),
-    onDecomposed: (childIssues) => void decomposeQueue({ issueNum, childIssues, paths, planLog: mkLog('plan') }),
     writeLocalRunReport: (info) =>
       maybeWriteLocalRunReport({
         issueNum,

@@ -21,7 +21,7 @@ What works today (this table matches the code on main):
 | `factory supervise` (multi-window unattended runs)    | ✅ Working | Waits for usage headroom, runs the queue, repeats until drained                                                  |
 | Cost tracking (`factory cost`)                        | ✅ Working | Per-task tokens and cost logged to `.factory/state/costs.jsonl`                                                  |
 
-The full matrix, including model harnesses, prompt evals, the server, and experimental local (Ollama) models, is in [docs/status.md](docs/status.md).
+The full matrix, including model harnesses, prompt evals and experimental local (Ollama) models, is in [docs/status.md](docs/status.md).
 
 ## Monorepo structure
 
@@ -34,12 +34,7 @@ packages/
 ├── config/           @on-par/factory-config     typed defaults + constitutions in TypeScript (zero deps)
 ├── contracts/        @on-par/contracts          shared zod schemas (Issue/Epic/Story/Design)
 ├── core/             @on-par/factory-core       engine: router, phases, checkers
-├── dashboard/        @on-par/factory-dashboard  (private) web dashboard, Vite + React
-├── grade/            @on-par/factory-grade      (private) read-only grader for recorded runs
-├── product/          @on-par/product            (private) proposer: brain-dump to engineering-ready issues
 ├── repo-context/     @on-par/repo-context       read-only repo reader port (zero deps)
-├── scbench-adapter/  @on-par/scbench-adapter    (private) SlopCodeBench adapter
-├── server/           @on-par/factory-server     (private) loopback SSE events + lane pause endpoint
 └── tui/              @on-par/factory-tui        read-only Ink TUI for a live run
 ```
 
@@ -88,7 +83,7 @@ While SHIP waits for CI, a PR with no checks reported yet counts as pending. `fa
 You can also run one factory command (`run-issue <n>`, `ship <n>` or `doctor`) on a GitHub-hosted runner. Call the reusable workflow from your own repo, pinned to a release tag, and pass your own secrets (`FACTORY_GITHUB_TOKEN` plus the selected provider's key):
 
 ```yaml
-uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.22
+uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.26
 ```
 
 The full caller, inputs, providers and secrets are in [docs/runbooks/github-actions-run.md](docs/runbooks/github-actions-run.md).
@@ -98,9 +93,9 @@ The full caller, inputs, providers and secrets are in [docs/runbooks/github-acti
 To run unattended, the factory starts agent CLIs with their permission prompts turned off:
 
 - Claude Code runs as `claude -p ... --permission-mode bypassPermissions` (the same mode as `--dangerously-skip-permissions`).
-- Codex runs as `codex exec ... -c approval_policy=never` with `--sandbox workspace-write` by default. Tasks listed in `sandbox.codexFullAccessTasks` use `--sandbox danger-full-access` and are logged.
+- Codex runs as `codex exec ... -c approval_policy=never` with `--sandbox danger-full-access` by default, like Claude. Set `sandbox.codexSandbox: workspace-write` to opt in to Codex's own sandbox; under it, tasks listed in `sandbox.codexFullAccessTasks` still use `--sandbox danger-full-access` and are logged.
 
-Each build runs in a separate git worktree (under `~/.factory/worktrees/<owner>/<repo>/` on a `factory/` branch; set `worktree.parent` to move it and `--branch-prefix` to change the prefix), never in your main checkout. Where available, agent runs are wrapped in an OS sandbox (`sandbox-exec` on macOS, `firejail` on Linux). The sandbox denies agent reads of `~/.ssh`, `~/.aws`, `~/.gnupg` and `~/.config/gh`. The files agents need to sign in stay readable: `~/.claude`, `~/.claude.json`, a `CLAUDE_CONFIG_DIR` profile, `~/.codex` and the macOS keychain. git over ssh, gpg signing and `gh` therefore do not work inside the sandbox. `factory doctor` warns when no sandbox runtime is found; its `codex installed` line then reports the preflight result: Codex still runs with `--sandbox workspace-write`. To opt in to full access, list tasks under `sandbox.codexFullAccessTasks`. The agents still run as you, with your file permissions and your GitHub token, and builds run the target repo's tests and install its dependencies. Only point the factory at repos and issues you trust. Which hosts agents may reach, the registry hosts pre-allowed per ecosystem, and telemetry handling are in [docs/egress.md](docs/egress.md).
+Each build runs in a separate git worktree (under `~/.factory/worktrees/<owner>/<repo>/` on a `factory/` branch; set `worktree.parent` to move it and `--branch-prefix` to change the prefix), never in your main checkout. Where available, agent runs are wrapped in an OS sandbox (`sandbox-exec` on macOS, `firejail` on Linux). The sandbox denies agent reads of `~/.ssh`, `~/.aws`, `~/.gnupg` and `~/.config/gh`. The files agents need to sign in stay readable: `~/.claude`, `~/.claude.json`, a `CLAUDE_CONFIG_DIR` profile, `~/.codex` and the macOS keychain. git over ssh, gpg signing and `gh` therefore do not work inside the sandbox. `factory doctor` warns when no sandbox runtime is found; its `codex installed` line then reports the preflight result: Codex runs without its own sandbox (`--sandbox danger-full-access`) by default. To opt in to Codex's `--sandbox workspace-write` sandbox, set `sandbox.codexSandbox: workspace-write`; under it, list tasks under `sandbox.codexFullAccessTasks` to grant full access. The agents still run as you, with your file permissions and your GitHub token, and builds run the target repo's tests and install its dependencies. Only point the factory at repos and issues you trust. Which hosts agents may reach, the registry hosts pre-allowed per ecosystem, and telemetry handling are in [docs/egress.md](docs/egress.md).
 
 The factory never merges by default. `factory ship` and `factory run-issue` never merge; they stop at the PR, which is marked ready for review once CI passes. `factory run` and `factory supervise` merge only if you turn auto-merge on (`FACTORY_MERGE=1`, `run.merge.auto: true`, or `--auto-merge`). The GitHub Actions wrapper (`factory-run.yml`) sets `FACTORY_MERGE=1` and runs `factory land <N>` after a successful `run-issue` or `ship`; see [docs/runbooks/github-actions-run.md](docs/runbooks/github-actions-run.md#merging). `FACTORY_MERGE_ADMIN=1` lets the token merge through unmet branch protection; set it only when you mean to. Full rules: [docs/config.example.yaml](docs/config.example.yaml).
 
@@ -126,7 +121,7 @@ factory self-update --to <version>          # install that exact stable version 
 
 `factory self-update --to` installs the version next to the running Node, runs `factory doctor`, restarts factoryd, and rolls back if the install or doctor fails. factoryd installed from npm runs the same update on its own when a new stable release appears. Update modes, opting out, and manual rollback are in [docs/ops/updating.md](docs/ops/updating.md). Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
-The `version` fields in this repo's `package.json` files stay at the last committed version (0.9.22). The publish job writes the release or prerelease version at build time and never commits it, so use `factory --version` or `npm view @on-par/factory-cli dist-tags` to see real versions.
+The `version` fields in this repo's `package.json` files stay at the last committed version (0.9.26). The publish job writes the release or prerelease version at build time and never commits it, so use `factory --version` or `npm view @on-par/factory-cli dist-tags` to see real versions.
 
 ## CLI commands
 
@@ -136,7 +131,11 @@ The most-used commands, by the group `factory --help` lists them under. Run `fac
 # Run work
 factory ship <N>                    Plan → build → check one issue and open a ready-for-review PR; never merges
 factory run-issue <N>               Like ship, but loads the issue first and exits 2 if it cannot be found
-factory run-issue <N> --run-children Also run the child issues the size gate files when it splits <N>
+factory run-issue <N> --stack        Build an oversized <N> as a stacked PR set in one run (the size gate default)
+factory run-issue <N> --base-branch <ref>  Start from origin/<ref> and open the PR against <ref> (also ship, run-brief)
+factory run-brief a.md b.md --stack   Open the briefs as a PR stack (each on the previous brief's PR head)
+factory run-brief big.md --stack       Slice an over-budget brief and build the slices as a PR stack in one run
+factory run-issue 42 --stack        Build open same-repo prerequisites in order as a PR stack; otherwise stack an oversized issue's slices
 factory run                         Claim queued issues and ship them, lanes in parallel; merges only when auto-merge is on
 factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
 factory land <N>                    Squash-merge the issue's open PR once CI is green, then remove its worktree
@@ -171,29 +170,18 @@ factory usage                       Report 5-hour subscription usage
 
 `factory draft` exits 0 when the draft is factory-ready, 1 when it is not, 2 on a model or input error, and 3 when it would split.
 
-### `factory run-issue --run-children`
+### Size gate: stack by default
 
-When the size gate decides an issue is too big, it files child issues and stops the run. Without the flag, `run-issue` exits 1, names the children, and suggests re-running with `--run-children`. Each child's criteria trace to the parent's criteria (`P1`, `P2`, ...), the child body lists the ones it covers, and a split that leaves a parent criterion uncovered is rejected. With the flag, it runs those children itself:
-
-- **Order.** Children run one at a time, in the build order the size gate filed them, each under its own issue run lock, inside the parent's.
-- **Nested splits.** If a child is decomposed again, its new children replace it and run before the remaining siblings. No issue runs twice.
-- **Closed children** are skipped.
-- **Failures don't stop the run.** A child that fails or escalates is recorded, and the next child still runs.
-- **`.factory/state/STOP`** is checked before each child starts. Once it is present, no further child starts, and the file is left in place (ADR-0111). A child already running finishes.
-- **Summary.** At the end, `run-issue` prints one line per child: its PR, or why it failed, was skipped, or did not run.
-- **No labels, no merge.** Like `ship`, it never touches the queue's `factory:*` labels and never merges. Each successful child ends at its own ready-for-review PR.
-
-Exit codes: `0` when every child reached ready-for-review, was skipped as closed, or was replaced by its own children. `1` when any child failed or was not started because of STOP, or when the issue was decomposed and `--run-children` was not passed. `2` when the parent issue cannot be resolved, before any worktree or PR exists. If the issue is not decomposed, the flag changes nothing.
+Oversized issues stack by default: `factory run-issue <N>` (or `--stack`) ships an oversized issue as stacked slice PRs. `run-issue --run-children` was removed and exits 2. `--size-gate file|slice` and `sizeGate.mode: file|slice` are deprecated aliases for stack that print one warning naming `--stack`. `--size-gate` accepts `stack` or `off`; `off` skips both gates.
 
 ## Root npm scripts
 
-| Script                                                            | What it does                                                                                                                                                                                                                                 | Runs in                                                                   |
-| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `npm run test`                                                    | Vitest with coverage thresholds (the full-suite gate).                                                                                                                                                                                       | `verify.sh` (both paths), CI                                              |
-| `npm run test:integration`                                        | Pipeline integration suites.                                                                                                                                                                                                                 | Nightly workflow, on demand                                               |
-| `npm run sim-monte-carlo -- [options]`                            | Headless simulator Monte Carlo runs: synthetic issues through fake PLAN→BUILD→CHECK→SHIP, no model or GitHub calls. Prints shipped/parked/escalated rates and exits 1 on a breached `--max-*-rate` threshold. `-- --help` lists the options. | On demand                                                                 |
-| `npm run sandbox-ab-report -- [--costs <file>] [--events <file>]` | Docker-sandbox vs baseline A/B comparison over `.factory/state/costs.jsonl` and `.factory/state/events.ndjson` (defaults from `getFactoryPaths`), with a go/no-go recommendation (#656).                                                     | On demand                                                                 |
-| `npm run mutation`                                                | Stryker mutation testing (`stryker.conf.json`).                                                                                                                                                                                              | On demand only. Not part of `scripts/verify.sh` and not run by CI (#805). |
+| Script                                                            | What it does                                                                                                                                                                             | Runs in                                                                   |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `npm run test`                                                    | Vitest with coverage thresholds (the full-suite gate).                                                                                                                                   | `verify.sh` (both paths), CI                                              |
+| `npm run test:integration`                                        | Pipeline integration suites.                                                                                                                                                             | Nightly workflow, on demand                                               |
+| `npm run sandbox-ab-report -- [--costs <file>] [--events <file>]` | Docker-sandbox vs baseline A/B comparison over `.factory/state/costs.jsonl` and `.factory/state/events.ndjson` (defaults from `getFactoryPaths`), with a go/no-go recommendation (#656). | On demand                                                                 |
+| `npm run mutation`                                                | Stryker mutation testing (`stryker.conf.json`).                                                                                                                                          | On demand only. Not part of `scripts/verify.sh` and not run by CI (#805). |
 
 The commit gate is `bash scripts/verify.sh` (see [.claude/skills/verify/SKILL.md](.claude/skills/verify/SKILL.md)).
 
@@ -232,7 +220,7 @@ Checker commands (compile, tests, lint, evidence, `app_smoke`) inherit only an a
 
 **What's OSS (this repo):** `packages/cli`, `packages/core`, and `packages/config` are the open-source core. The full local pipeline (router, constitutions, checkers, phases) runs from this repo alone, MIT-licensed.
 
-**What isn't published:** `packages/dashboard` (web dashboard, Vite + React walking skeleton), `packages/product` (the proposer: brain-dump to engineering-ready issues), `packages/server` and `packages/scbench-adapter` (SlopCodeBench adapter) live in this monorepo as private workspaces and are not published to npm. A hosted multi-tenant control plane is not part of this codebase. `packages/server` is a small local server. It serves `GET /events`, an SSE relay of the lane lifecycle bus, and `POST /repos/:owner/:repo/lanes/:laneId/pause`, which pauses a lane. Both are unauthenticated and loopback-only.
+**What isn't published:** A hosted multi-tenant control plane is not part of this codebase.
 
 For the safety note (agent permissions, worktrees, and when the factory merges), see [Safety](#safety) under Quick start.
 

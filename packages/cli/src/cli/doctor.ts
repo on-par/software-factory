@@ -36,7 +36,7 @@ import {
 import { npmCheck, resolveVerifyCommands, verifyCommandChecks, withPathResults } from './doctor-verify.js';
 import { configLintChecks, declaredHarnessChecks, modelsRegistryChecks } from './doctor-config.js';
 import { failoverProviderChecks } from './doctor-failover-providers.js';
-import { codexSandboxDetail } from './doctor-codex-sandbox.js';
+import { codexSandboxNote } from './doctor-codex-sandbox.js';
 import { agentMemoryChecks } from './doctor-agent-memory.js';
 import { factoryIgnoredChecks } from './doctor-factory-ignored.js';
 import {
@@ -123,6 +123,8 @@ export interface DoctorEnvProbes {
   commandHarnesses?: () => ConfiguredCommandHarness[];
   /** Tasks in the repo's sandbox.codexFullAccessTasks (#3082); absent or [] means none. */
   codexFullAccessTasks?: () => string[];
+  /** Repo sandbox.codexSandbox (#3824); undefined = unset. */
+  codexSandbox?: () => 'danger-full-access' | 'workspace-write' | undefined;
 }
 
 /** Section for rows about repo-configured command harnesses (#2691). */
@@ -498,7 +500,7 @@ export function agentCliChecks(probes: DoctorEnvProbes): DoctorCheck[] {
           detail: `no coding agent CLI on PATH (claude, codex, opencode or pi); ${configured.map(describe).join('; ')}`,
           fix: installFix(configured[0]!),
         };
-  const codexSandbox = codexSandboxDetail(probes, safeOr(probes.codexFullAccessTasks, []));
+  const codexSandbox = codexSandboxNote(probes);
   const checks: DoctorCheck[] = [
     agents.length > 0 ? { name: 'coding agent', ok: true, detail: `found ${agents.join(', ')}` } : missingRow,
     ...harnessInstallChecks(commandAvailable, tryExec).map((c) =>
@@ -922,6 +924,8 @@ export async function cmdDoctor(
     repoRoot = null;
   }
   const harnessView = repoRoot === null ? null : resolveDoctorHarnesses(rt.configLoaders, repoRoot);
+  const repoSandbox = () =>
+    repoRoot === null ? undefined : rt.configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox;
 
   const checks = runDoctorChecks({
     commandAvailable: rt.coreOps.isCommandAvailable,
@@ -953,11 +957,8 @@ export async function cmdDoctor(
     localAuthFailure: (agent) => localAuthFailureSinceLogin(agent),
     opencodeLoggedIn: () => hasOpencodeLoginEvidence(),
     commandHarnesses: () => (harnessView?.merged ? repoCommandHarnesses(harnessView.merged, harnessView.registry) : []),
-    codexFullAccessTasks: () =>
-      repoRoot === null
-        ? []
-        : (rt.configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox.codexFullAccessTasks ??
-          []),
+    codexFullAccessTasks: () => repoSandbox()?.codexFullAccessTasks ?? [],
+    codexSandbox: () => repoSandbox()?.codexSandbox,
   });
   checks.push(...failoverProviderChecks(rt, repoRoot));
 

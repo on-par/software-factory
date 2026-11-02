@@ -1,6 +1,6 @@
 # ADR-0006: Proposer export is pure; GitHub filing goes through an injected port
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-07-29
 
 ## Context

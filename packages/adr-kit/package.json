@@ -1,6 +1,6 @@
 {
   "name": "@on-par/adr-kit",
-  "version": "0.9.22",
+  "version": "0.9.26",
   "description": "Pure ADR kernel: parse, serialize, Nygard template, numbering, and index-table helpers.",
   "type": "module",
   "main": "dist/index.js",
@@ -40,6 +40,6 @@
   },
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^26.6.5"
+    "@types/node": "^26.6.6"
   }
 }

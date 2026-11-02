@@ -129,6 +129,7 @@ describe('CodexCliHarness workspace-write network mapping', () => {
           registry,
           prompt: 'build it',
           sandbox: { ...sandboxPolicy, runtime, allowHosts },
+          codexSandbox: 'workspace-write',
           task: 'plan',
         }),
       )

@@ -1,6 +1,6 @@
 # ADR-0028: The story-map backbone is a fixed journey-stage catalog, and the walking skeleton is chosen by span-then-size
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-08-19
 
 ## Context

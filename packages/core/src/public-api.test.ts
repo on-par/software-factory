@@ -2,21 +2,18 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import * as publicApi from './index.js';
+import { SIZE_GATE_MODES } from './index.js';
 import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
 import { ITERATE_INTERNAL_KEYS, KPIS_API_KEYS, TESTING_API_KEYS, WORK_KEY_API_KEYS } from './public-api-keys.js';
 const PUBLIC_API_KEYS = [
-  'FactoryConfigV2Schema',
-  'factoryConfigV2JsonSchema',
   'getConstitutionsDir',
   'getFactoryPaths',
   'loadFactoryConfig',
   'loadFactoryConfigForRepo',
   'loadModelsConfig',
   'loadRoutesConfig',
-  'loadV2Config',
-  'parseV2Config',
   'resolveAdrMandate',
   'resolveAutoFailover',
   'resolveDefectWindowDays',
@@ -91,33 +88,10 @@ const PUBLIC_API_KEYS = [
   'validateQueue',
   'DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS',
   'partitionLocalQueueByActivity', // Queue activity (#1342)
-  // Hosted execution (control plane)
-  'createHostedJobStore',
-  'createSqliteHostedJobStore',
-  'hostedExecEnabled',
   'laneContainerName',
   'provisionLaneContainer',
-  'resolveHostedJobStore',
-  'runContainerJob',
-  'runDockerRunner',
-  'runFakeRunner',
-  'runHostedSmoke',
-  'runWatchdogSweep',
-  'summarizeHostedJob',
-  'summarizeHostedJobs',
   'AUTHORITY_REDACTION_MASK',
   'redactSecrets',
-  'withAuthority',
-  'prepareGitHubAuthority',
-  'prototypeFallbackMint',
-  'redactGitHubCredential',
-  'resolveHostedAuthority',
-  'createHostedControlPlaneServer',
-  'handleHostedControlPlaneRequest',
-  'createHttpHostedControlPlaneClient',
-  'runOneJobRunner',
-  'createHttpHostedJobClient',
-  'queueAndTailJob',
   // Work requests
   'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',
@@ -150,6 +124,7 @@ const PUBLIC_API_KEYS = [
   'worktreeWorkspace',
   // Run composition (#675)
   'runIssue',
+  'runStack',
   // Run phase snapshot (#1325, #1326, #1327)
   'phaseSnapshotFile',
   'readPhaseSnapshot',
@@ -269,23 +244,6 @@ const PUBLIC_API_KEYS = [
   'renderKpiDriftLine',
   'renderKpiReport',
   'renderKpiTrend',
-  // Discovery
-  'DEFAULT_MAX_CANDIDATES',
-  'runDiscoveryScan',
-  'authorDraftEpic',
-  'DEFAULT_OWNER_QUESTIONS',
-  'DISCOVERY_LABEL',
-  'EXPLORING_LABEL',
-  'ideaMarker',
-  'advanceDraftEpic',
-  'ARCHIVED_LABEL',
-  'classifyLifecycle',
-  'DEFAULT_MAX_STORIES',
-  'READY_LABEL',
-  'renderStoryBody',
-  'seedStories',
-  'VALIDATED_LABEL',
-  'WONTFIX_LABEL',
   // Ingest
   'issueFromFactoryBranch',
   'runAutoIngest',
@@ -319,19 +277,17 @@ const PUBLIC_API_KEYS = [
   'watchUsage',
   'fetchSubscriptionUsage',
 ];
-const JOB_KEYS = 'resolveHostMaxAgentJobs hostAgentJobsDir withHostAgentJobLease findStatelessLaneIssues'.split(' ');
+const JOB_KEYS = 'resolveHostMaxAgentJobs hostAgentJobsDir withHostAgentJobLease'.split(' ');
 const TAIL =
-  'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince rotateEventLog listEventSegmentPaths findEventSegmentByIno acknowledgeTierDemotions effectiveTrustTier findSlipDemotions MERGED_UNDER_TIER_PATTERN mergedUnderTier parseTierDemotions serializeTierDemotions tierDemotionComment'.split(
+  'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince listEventSegmentPaths acknowledgeTierDemotions effectiveTrustTier findSlipDemotions MERGED_UNDER_TIER_PATTERN parseTierDemotions serializeTierDemotions tierDemotionComment'.split(
     ' ',
   );
-const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError parseSteerEvent appendSteerEvent listSteerEvents'.split(' '); // #3400
-const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSteerabilityReport fileBug'.split(' '); // #3403
-const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
-const STACK = 'nextStackSlice restackAfterSquashMerge listRepoLaneLabels listStatelessLaneIssues'.split(' ');
+const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError appendSteerEvent'.split(' '); // #3400
+const STEERED = 'collectMergedPrSteers summarizeSteerability formatSteerabilityReport fileBug'.split(' '); // #3403
+const MORE = ['readStackSliceGate']; // #3366
+const STACK = 'nextStackSlice restackAfterSquashMerge listStatelessLaneIssues'.split(' ');
 const POLICY = 'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy resolveConfiguredWritablePaths'.split(' '); // #2215, #3449, #3454
-const PO =
-  'resolveRoleModel isOpenCodeZenModel subscriptionProviderOf PROVIDER_ORDER_ROLES SUBSCRIPTION_PROVIDERS'.split(' '); // #3334
-const PO2 = 'OPENCODE_GO_DEFAULT_MODEL subscriptionLogin filterRefusedProviders sweepOrphanClaimLabels'.split(' '); // #3335, #1623
+const PO2 = 'OPENCODE_GO_DEFAULT_MODEL filterRefusedProviders sweepOrphanDrafts'.split(' '); // #3335, #1623
 const GATE = ['allProvidersDown', 'stageBlocked', 'PROVIDER_LEVEL_REASONS', 'TIMED_BREAKER_REASONS']; // #3226
 const EXTRA_INTERNAL_KEYS = [
   ...JOB_KEYS,
@@ -341,24 +297,23 @@ const EXTRA_INTERNAL_KEYS = [
   ...STEERED,
   ...STACK,
   ...POLICY,
-  ...PO,
   ...PO2,
   ...GATE,
   ...ITERATE_INTERNAL_KEYS,
 ];
 const INTERNAL_API_KEYS = [
+  'listBlockedBy',
+  'aliasDeprecatedSizeGateMode', // #3832
+  'isExplicitStackMode',
   ...'AGENT_MEMORY_DIR AGENT_MEMORY_MAX_BYTES agentMemoryPath readAgentMemory'.split(' '), // #3624
-  ...'renderAgentMemory scanAgentMemory loadAgentMemoryCtx checkerParentEnv'.split(' '),
-  ...'resolveCompileCommand resolveLintCommands resolveTestsCommand CHECKER_ENV_ALLOWLIST'.split(' '), // #3473, #1590
-  ...'describeChecksProbe holdRunConfigSnapshot CHECKER_ENV_ALLOW_VAR'.split(' '), // #3600
+  ...'renderAgentMemory scanAgentMemory loadAgentMemoryCtx'.split(' '),
+  ...'resolveCompileCommand resolveLintCommands resolveTestsCommand'.split(' '), // #3473, #1590
+  ...'describeChecksProbe holdRunConfigSnapshot'.split(' '), // #3600
   // `factory init --detect-checks`: heuristics, agent prompt and reply, shell-free tokenizer
   ...'CHECK_KINDS buildDetectChecksPrompt detectCheckHeuristics heuristicProposal parseDetectedChecks'.split(' '),
-  'tokenizeEvidenceCommand',
-  ...'BaselineCache resolveBaselineCacheTtlHours'.split(' '), // #3540
-  ...'openCodeVersion DEFAULT_CI_DEADLINE_MS allProvidersDownReleasePayload'.split(' '), // #3340
-  'DEFAULT_CI_NO_CHECKS_GRACE_MS',
-  'noChecksVerdictMs',
-  'resolveCiNoChecksGraceMs',
+  ...'tokenizeEvidenceCommand coverageRatchetEvidence'.split(' '), // #1957
+  ...'BaselineCache resolveBaselineCacheTtlHours buildTierEvidence formatTierEvidence'.split(' '), // #3540, #1957
+  ...'openCodeVersion allProvidersDownReleasePayload'.split(' '), // #3340
   'fetchRequiredChecksVerdict', // #3186 CI lookup for a timed-out compile; base health (#2339) follows
   'BASE_HEALTH_CHECKERS',
   'checkBaseHealth',
@@ -366,38 +321,24 @@ const INTERNAL_API_KEYS = [
   'hasClaudeLoginEvidence',
   // #3214
   'detectClaudePlan',
-  'codexHasApiKey',
-  'detectProviderPlan',
   'meteredPrimaryRouteWarnings',
   'providerPlan',
   'claudeStoredSessionState',
   // Last run-time local_auth failure per agent (#2733)
-  'localAuthAgentFor',
-  'localAuthCredentialPath',
   'localAuthFailureSinceLogin',
-  'localAuthRecordPath',
   'recordLocalAuthFailure',
   'hasOpencodeLoginEvidence',
   // Persisted per-issue run state (#2271)
   'readIssueRunState',
   'nextIssueRunState',
   // Open factory draft PR count (#3553)
-  'summarizeOpenFactoryDrafts',
   'readOpenFactoryDrafts',
   'formatOpenFactoryDraftsLine',
   'runStateFile',
-  'runStatusForPhase',
-  'terminalRunStatus',
   'writeIssueRunState',
   'createPlanReuseStore',
-  'issueBodyHash',
-  'planReusePath',
   // Check-resume record (#2564)
-  'checkResumePath',
   'createCheckResumeStore',
-  'formatPreservedBuildMessage',
-  'preservedFixTarget',
-  'configParkMessage',
   // Garden harvest (#2083)
   'DEFAULT_GARDEN_MAX_CLUSTERS',
   'DEFAULT_GARDEN_SINCE',
@@ -406,16 +347,12 @@ const INTERNAL_API_KEYS = [
   'findAdoptablePr',
   'parseGardenDuration',
   'renderGardenJson',
-  'clusterCheckFailures',
   'clusterGarden',
   'readHarvestEvents',
   'renderGardenReport',
   // Garden dedup (#2102)
   'dedupGardenClusters',
   'filterGardenOnlyNew', // --only-new (#2104)
-  'findGardenTrackingIssue',
-  'gardenClusterFingerprint',
-  'gardenKeyMarker',
   'markGardenTrackingUnknown',
   // Readiness deep check (#1732)
   'buildDecompositionPrompt',
@@ -423,47 +360,22 @@ const INTERNAL_API_KEYS = [
   // Command-run summary (#3328)
   'summarizeCommandRun',
   'parseCommandCounts',
-  ...Object.keys(await import('./run/pr-lookup.js')), // open-PR lookup (#3439)
-  ...(await Promise.all([import('./blockers/index.js'), import('./queue/unpark.js')])).flatMap(Object.keys), // blockers (#2316), unpark (#2318)
-  'READINESS_INPUT_CAP',
-  'READINESS_PROMPT_VERSION',
-  'ReadinessVerdictSchema',
-  'buildReadinessJudgePrompt',
-  'buildReadinessJudgeRepairPrompt',
-  'detectEpic',
+  ...'lookupOpenPrByIssue lookupOpenPrByBranch'.split(' '), // open-PR lookup (#3439)
+  ...'findDeclaredPrerequisites createOctokitBlockedParkStore pollBlockedParks'.split(' '), // blockers (#2316)
+  ...Object.keys(await import('./queue/unpark.js')), // unpark (#2318)
   'judgeReadiness',
-  'parseReadinessVerdict',
-  'prepareReadinessInput',
-  'readCachedVerdict',
-  'readinessCacheKey',
-  'writeCachedVerdict',
   // Slice plan model (ADR-0147)
-  'DEFAULT_MAX_SLICES',
-  'SLICE_CAP_CEILING',
-  'overCapReason',
-  'sliceCapExceeded',
-  'SLICE_PLAN_MARKER',
   'STATE_ROOT_ENV',
   'currentSlice',
+  'fileSlicePlanStore',
   'findSlicePlanComment',
-  'markSliceMerged',
-  'parseSlicePlanComment',
-  'publishDecomposition',
   'publishParkComment',
   'recordSliceMerged',
   'renderSlicePlanComment',
-  'resolveSliceGate',
   'resolveStateRoot',
-  'slicePlanFromDecomposition',
   'upsertSlicePlanComment',
   'withSliceState',
-  'withSlicesAffected',
-  'withSlicesNotBuilt',
-  'parentRefForSlice',
-  'stackSliceBranch',
-  'withSliceBranchCreated',
   // Worktree location (#1758)
-  'ensureWorktreeParentExcluded',
   'formatWorktreeLocation',
   'laneWorktreePath',
   'resolveWorktreeRoot',
@@ -489,12 +401,12 @@ const INTERNAL_API_KEYS = [
   'describeConstitutionSource',
   'listBuiltInCheckers',
   'findUnknownConstitutionCheckers',
-  'findTemplateTokens',
   'isTemplateToken',
   'harnessCliCommand',
   'isHarnessCliPresent',
   'lintFactoryConfig',
   'findConfigSchemaErrors',
+  'findCodexSandboxWarnings',
   'findUnknownConfigKeyWarnings',
   'formatUnknownCheckerMessage',
   'describePullRequestAccessError',
@@ -504,76 +416,17 @@ const INTERNAL_API_KEYS = [
   'resolvePullRequestReference',
   'REVIEW_ACCESS_ERROR_EXIT_CODE',
   // Local queue reprioritization audit records (#869)
-  'createQueueRationaleAuditor',
-  // Daemon-ready ProjectV2 queue intent projection (#866)
-  'createProjectQueuePoller',
-  'DEFAULT_PROJECT_QUEUE_POLL_MS',
-  // gh-authenticated ProjectV2 queue GraphQL client + live poller (#1046)
-  'createGithubProjectQueuePoller',
-  'createOctokitGraphqlClient',
-  // Single-poller cached subscription-usage snapshot (#1029)
-  'createUsageCoordinator',
-  'DEFAULT_USAGE_POLL_MS',
-  'defaultUsageStatePath',
-  'loadUsageState',
-  'writeUsageState',
-  // UsageCoordinator admission-control acquire() API and grant ledger (#1030)
-  'defaultGrantLedgerPath',
-  'DEFAULT_GRANT_TTL_MS',
-  'isCappedModel',
-  'loadGrantLedger',
-  'pruneGrants',
-  'USAGE_ADMISSION_CEILING_PCT',
-  'USAGE_GRANT_RESERVATION_PCT',
-  'writeGrantLedger',
-  // Engine lane parks and resumes on acquire denial (#1032)
-  'createLaneScheduler',
-  // Standalone local UsageCoordinator fallback (#1033)
-  'createLocalUsageCoordinator',
-  'selectUsageCoordinator',
-  // Coarse ProjectV2 status publishing (#868) and writing (#849)
-  'createProjectStatusWriter',
-  'createProjectBoardStatusWriter',
   // Failure fingerprint & evidence
-  'captureFailure',
-  'fingerprintFailure',
-  'normalizeFailureMessage',
   // Auto-file a fingerprinted bug (#373)
   'createOctokitFilingClient',
   'DEFAULT_BUG_LABELS',
   'partitionGithubClaimsByActivity',
-  'findIssueByMarker',
-  'findMatchingIssue',
-  'fingerprintMarker',
-  'renderBugBody',
-  'renderOccurrenceComment',
-  'renderUpstreamOccurrenceComment',
   // Evidence sanitizer for untrusted text (#1841, #1852)
   'stripHiddenContent',
-  'REDACTION_PLACEHOLDERS',
-  'redactText',
   'buildUpstreamReport',
-  'factoryStackFrames',
-  'UPSTREAM_TITLE_PREFIX',
   'upstreamInputFromEvidence',
-  'upstreamReportMarker',
-  // Send upstream reports with outbox fallback (#1860)
-  'classifyUpstreamSendError',
-  'defaultUpstreamLedgerPath',
-  'defaultUpstreamOutboxDir',
-  'sendUpstreamReports',
-  'writeUpstreamOutbox',
-  'resolveTargetRepo',
   // Filing policy: when to file, caps, and self-fix labeling (#374)
-  'DEFAULT_FILING_POLICY',
-  'emptyLedger',
-  'evaluateFilingPolicy',
   'isAutoMergeBlocked',
-  'labelsFor',
-  'recordFiled',
-  'recordPark',
-  'rollDay',
-  'touchesSensitiveScope',
   // Config
   'resolveFilingPolicy',
   'resolveHermeticGit',
@@ -604,51 +457,32 @@ const INTERNAL_API_KEYS = [
   'resolveEffectiveConfig',
   'resolveExperimental',
   'resolveLocalOnly',
-  ...'resolveHostMaxBuilds resolveQueueClaimSettleMs evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL CLOCK_SKEW_CACHE_TTL_MS DEFAULT_MAX_CLOCK_SKEW_MS createClockSkewCache defaultClockSkewCache githubServerDate isClockSkewExcessive measureClockSkew measureGithubClockSkew parseHttpDateMs resolveQueueMaxClockSkewMs'.split(
+  ...'resolveHostMaxBuilds resolveQueueClaimSettleMs evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL DEFAULT_MAX_CLOCK_SKEW_MS measureGithubClockSkew resolveQueueMaxClockSkewMs'.split(
     ' ',
   ), // #3380, #3381, #3149
   ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles publishRiskReceipt renderRiskReceipt'.split(' '), // #3386
   ...'upsertRiskReceipt riskPolicyConfigFile loadRiskPolicy formatRiskPolicy'.split(' '), // #3387
   ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad resolveBaseHealthChecks'.split(' '), // #3048, #3290
-  ...'hostBuildSlotsDir listHostSlots syncLandBranch isValidIssueRunState listIssueRuns'.split(' '), // syncLandBranch: #1886; run readers: #3448
-  ...'withHostBuildSlot createRunSlotGate withRunAndHostBuildSlot readDiskFree formatDiskHold'.split(' '), // #3049, #2284
-  ...'BYTES_PER_GB DISK_ALERT_INTERVAL_MS claimDiskAlert createDiskGuard evaluateDiskGuard'.split(' '), // #2284
-  ...'FACTORY_RUNTIME_CONFIG_KEYS isTrustedApprover resolveDiskGuard hostDiskAlertFile'.split(' '),
+  ...'hostBuildSlotsDir listHostSlots syncLandBranch listIssueRuns'.split(' '), // syncLandBranch: #1886; run readers: #3448
+  ...'createRunSlotGate withRunAndHostBuildSlot formatDiskHold'.split(' '), // #3049, #2284
+  ...'claimDiskAlert createDiskGuard'.split(' '), // #2284
+  ...'FACTORY_RUNTIME_CONFIG_KEYS hostDiskAlertFile'.split(' '),
   'createOctokitCollaboratorPermissionClient',
-  ...'CONFIG_EXAMPLE_OMITTED_KEYS renderConfigExample resolveT1SampleRate'.split(' '),
+  ...'renderConfigExample resolveT1SampleRate'.split(' '),
   'resolveEvidenceAllowlist',
   'runEvidencePlan',
   // Design artifact (#422)
-  'DesignArtifactSchema',
-  'parseDesignArtifact',
-  'readDesignArtifact',
-  'renderDesignArtifact',
   // Concrete coding harnesses
   'classifyFailure',
   'runHarnessCheck',
   'classifyOpenCodeErrorType',
-  'ClaudeCliHarness',
-  'CodexCliHarness',
-  'buildHarnessCommand',
-  'CommandHarness',
-  'isAgenticHarness',
-  'isRetryableFailure',
-  'NON_RETRYABLE_FAILURE_REASONS',
-  'OllamaAgenticHarness',
-  'PATCH_PROPOSAL_SCHEMA',
-  'OllamaHttpHarness',
-  'OpenCodeHarness',
-  'PiHarness',
   'parseOpenCodeJson',
-  'parsePiJson',
   // Hosted execution: Docker container engine adapter (#899)
   'createDockerEngine',
   // Hosted execution: orphan sf-job-* container scan + reap (#1527)
   'listOrphanContainers',
   'reapOrphanContainers',
   // Router, phase helpers, triage prompt and queue normalization (#1650, #2981)
-  'CliModelExecutor',
-  'buildPlanPrompt',
   'buildTriagePrompt',
   'dropQueuedIssues',
   'normalizeTriageQueue',
@@ -658,10 +492,8 @@ const INTERNAL_API_KEYS = [
   'fetchHumanEventSourcesCached',
   'runProducedPrOrMerge',
   // Local-small harness
-  'applyLocalSmallPatchStep',
   'createLocalSmallDryRun',
   'runOvernightQueue',
-  'REPO_CONFIG_FILENAMES',
   'REPO_CONFIG_YAML_HEADER',
   'migrateRepoConfigToYaml',
   'setRepoConfigValue',
@@ -669,80 +501,36 @@ const INTERNAL_API_KEYS = [
   'readRepoConfigFile',
   'resolveRepoConfigPath',
   // Eval internals
-  'judgeSpec',
   'median',
-  'runJudgeSamples',
-  'scoreSpec',
   // Usage internals
-  'defaultTranscriptRoots',
-  'priceFor',
   'TRAILING_WINDOW_MS',
-  'harnessHasUsageSignal',
   'resolveRunUsageHarness',
-  'USAGE_NOT_AVAILABLE_FOR_AGENT',
-  'readClaudeAccessToken',
   // Daemon repo registry (#781)
   'defaultRegistryPath',
-  'dispatchableRepos',
-  'emptyRegistry',
-  'getRepo',
   'listRepos',
   'loadRegistry',
-  'upsertRepo',
-  'writeRegistry',
   // Daemon control-plane HTTP server (#777)
   'createFactorydServer',
   'createRunRuntime',
   'findOpenPR',
   'settleParkedPullRequest',
-  'detectLowerSliceChange',
-  'parkOnLowerSliceChange',
   'parkPayload',
   'parkUnblockHint',
   'createShipExecutor',
-  'createStackSliceBranch',
   'DEFAULT_FACTORYD_PORT',
   // Durable explicit daemon runs (#1393)
-  'createDaemonRunExclusive',
   'daemonRunFile',
-  'executeDaemonRun',
   'isValidRunId',
-  'MAX_DETAIL_CHARS',
   'readDaemonRun',
-  'submitDaemonRun',
-  'writeDaemonRun',
   // Daemon runtime state: pid/port/log files (#1177)
   'acquirePidFile',
   'createDaemonLogSink',
   'daemonRuntimePaths',
   'releaseRuntimeFiles',
   'writePortFile',
-  // Daemon lane state resolution (#843)
-  'createDaemonLaneContext',
-  // Daemon per-repo orchestration dispatch (#1041)
-  'runDaemonRepo',
-  // Daemon in-process engine supervisor (#1178)
-  'DEFAULT_STALE_THRESHOLD_MS',
-  'DEFAULT_SUPERVISOR_POLL_MS',
-  'superviseActiveRepos',
-  'superviseEngine',
   // Daemon attach gate (#778)
-  'attachRepo',
   'parseRemoteSlug',
-  'readOriginUrl',
   'readParkedOrder',
-  // Daemon checkout validation gate (#1398)
-  'parseCheckoutRequest',
-  'validateCheckout',
-  // Daemon pause/resume gate (#779)
-  'setRepoState',
-  // Daemon detach gate (#780)
-  'beginDetach',
-  'DEFAULT_DRAIN_POLL_INTERVAL_MS',
-  'DEFAULT_DRAIN_TIMEOUT_MS',
-  'DRAIN_BLOCKING_STATUSES',
-  'drainAndDetach',
-  'isDrainSafe',
   // Utils
   'branchFor',
   'branchPrefixSlug',
@@ -750,15 +538,11 @@ const INTERNAL_API_KEYS = [
   'colorEnabled',
   'defaultRemoteBase',
   'ensureDir',
-  'escalationLine',
   'factoryBranchIssue',
   'factoryBranchPrefixes',
-  'LEGACY_BRANCH_PREFIX',
   'formatEventLine',
   'getIssueTitle',
   'gitFetch',
-  'isEscalation',
-  'levelForType',
   'logCost',
   'logEvent',
   'readCosts',
@@ -766,9 +550,7 @@ const INTERNAL_API_KEYS = [
   'claudeConfigDirOverride',
   'claudeKeychainService',
   // docker-sandbox microVM lifecycle + orphan scan/reap (#653, #1527)
-  'createMicroVm',
   'microVmName',
-  'removeMicroVm',
   'worktreeSandboxFor',
   'listMicroVms',
   'reapOrphanMicroVm',
@@ -778,46 +560,31 @@ const INTERNAL_API_KEYS = [
   'startEgressProxy',
   'egressSummaryMessage',
   'egressHostMessage',
-  'isTelemetryHost',
-  'TELEMETRY_HOST_PATTERNS',
   'shouldProxyEgress',
   'claimReviewRework',
-  'classifyCiFailure',
-  'collectCiFailureEvidence',
   'watchChecks',
   'watchChecksWithInfraRerun',
-  'isPassingConclusion',
-  'describeCommandFailure',
   'runCommand',
-  ...'withFileLock withFileLockSync withGitLock readRunLockHolder formatStopMarker readStopMarker'.split(' '),
-  ...'RunLockHeldError withRunLock withScopedRunLock runLockDirFor listLiveRunLocks'.split(' '),
+  ...'withFileLock withGitLock formatStopMarker readStopMarker'.split(' '),
+  ...'RunLockHeldError withScopedRunLock runLockDirFor listLiveRunLocks'.split(' '),
   'countUnpushedCommits',
-  'findCredentialFiles',
   'formatGcReport',
   'isWorktreeClean',
   'parseWorktreeList',
   'reapCleanShipWorktree',
   'reapLaneWorktree',
-  'scrubFile',
   'sweepWorktrees',
-  'zeroFill',
   ...'findWorktreeKeep removeWorktreeKeep upsertWorktreeKeep'.split(' '), // #3318
-  'checkRatchetDrift',
   'checkScopedRatchetDrift',
   'DEFAULT_RATCHET_SLACK',
-  'parseCoverageSummary',
   'parseCoverageSummaryScopes',
   'renderRatchetReport',
   // GitHub-label-backed work queue (#824)
-  'claimedByLabel',
-  'CLAIMED_BY_LABEL_PREFIX',
-  'claimExpiresLabel',
   'CLAIM_EXPIRES_LABEL_PREFIX',
   'createGithubQueue',
   'createOctokitQueueClient',
   'createFileReviewReworkStore',
   'createOctokitReviewReworkGitHub',
-  'latestDecisiveReviews',
   'pollReviewRework',
   'countReviewReworkRuns',
   'parkAtReviewReworkCap',
@@ -825,56 +592,41 @@ const INTERNAL_API_KEYS = [
   'reviewReworkCapMessage',
   'defaultClaimantId',
   'DEFAULT_CLAIM_LEASE_MS',
-  'DEFAULT_CLAIM_SETTLE_MS',
   'IN_PROGRESS_LABEL',
   'LANE_LABEL_PREFIX',
   'laneLabel',
   'laneSlug',
-  'MAX_LABEL_NAME_LENGTH',
-  'parseClaimExpiresLabel',
   'PARKED_LABEL',
-  'DECOMPOSED_LABEL',
   'planQueueMigration',
   'QUEUED_LABEL',
   'QUEUE_ORDER_LABEL_PREFIX',
   'queueOrderLabel',
-  'queueLabelSpecs',
   'readGithubQueueSnapshot',
   'formatQueueOrderConflict',
   // Factory App admission-state compatibility (#1497)
-  'ADMISSION_SNAPSHOT_VERSION',
-  'ADMISSION_STATE_FILENAME',
   'classifyQueueCompatibility',
   'createFileAdmissionStateReader',
   'createGithubLaneClaimStalenessProbe',
   'releaseLaneClaim',
-  'FACTORY_APP_REPAIR_HINT',
   'formatAdmissionConflict',
   'formatBreakerRemaining',
   'withAdmissionGuard',
   // Backend-agnostic queue seam (#1499)
-  'createGithubQueueBackend',
   // Stale-claim reaping (#999, lease-based since #1500)
-  'findStaleClaims',
   'releaseStaleClaims',
   'unqueueDeferredOnly',
   // Green-and-ready PR reporting (#1000)
   'createOctokitGreenPrClient',
   'findUnmergedGreenPrs',
-  'owningIssueForPr',
-  // Read-only GitHub ProjectV2 queue-intent polling (#847)
-  'createProjectBoardPoller',
-  'DEFAULT_PROJECT_BOARD_POLL_MS',
-  // Board-constrained local lane dispatch (#848)
-  'createBoardQueueDispatcher',
-  // ProjectV2 queue-intent scheduler (#867)
-  'createBoardQueueScheduler',
   // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
   'wrapCommandInSandbox',
 ];
 describe('public API surface (ADR-0004)', () => {
   it('root export exposes exactly the documented public API', () => {
     expect(Object.keys(publicApi).sort()).toEqual([...PUBLIC_API_KEYS, ...WORK_KEY_API_KEYS].sort());
+  });
+  it('SIZE_GATE_MODES lists exactly off and stack (#3835)', () => {
+    expect(SIZE_GATE_MODES).toEqual(['off', 'stack']);
   });
   it('root export has no internal or testing symbols', () => {
     for (const key of [

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
-import { asPhaseOctokit, createSimOctokit } from '../sim/octokit.js';
+import { asPhaseOctokit, createSimOctokit } from '../fakes/octokit.js';
 import {
   commitAll,
   makeStubModelsConfig,

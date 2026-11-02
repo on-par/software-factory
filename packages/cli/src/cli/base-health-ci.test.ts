@@ -97,4 +97,35 @@ describe('baseHealthWithCi (#3287)', () => {
     });
     expect(res.kind).toBe('green');
   });
+
+  it.each(['skipped', 'neutral'])(
+    'does not list hosted-ci as failing when the required check is %s (#3871)',
+    async (conclusion) => {
+      const SHA = 'c'.repeat(40);
+      const base = octokit403() as any;
+      base.rest.repos.getStatusChecksProtection = async () => ({ data: { contexts: ['test'] } });
+      base.rest.checks.listForRef = async () => ({
+        data: { check_runs: [{ name: 'test', status: 'completed', conclusion, check_suite: { id: 1 } }] },
+      });
+      base.rest.actions.listWorkflowRunsForRepo = async () => ({ data: { workflow_runs: [] } });
+      const res = await baseHealthWithCi(
+        base as Octokit,
+        'o',
+        'r',
+      )({
+        worktree: '/nonexistent',
+        constitution: null,
+        router: {} as never,
+        env: {},
+        log: () => {},
+        deps: {
+          runCommand: (async () => ({ stdout: `${SHA}\n`, exitCode: 0 })) as never,
+          runBaseline: (async () => ({ baseSha: SHA, checkers: [] })) as never,
+          memo: new Map(),
+        },
+      });
+      expect(res.kind).toBe('green');
+      expect((res as { failingChecks?: string[] }).failingChecks ?? []).not.toContain('hosted-ci');
+    },
+  );
 });

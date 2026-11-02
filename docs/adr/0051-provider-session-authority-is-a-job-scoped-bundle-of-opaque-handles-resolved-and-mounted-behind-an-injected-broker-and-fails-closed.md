@@ -1,6 +1,6 @@
 # ADR-0051: Provider-session authority is a job-scoped bundle of opaque handles, resolved and mounted behind an injected broker, and fails closed
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-08-26
 
 ## Context

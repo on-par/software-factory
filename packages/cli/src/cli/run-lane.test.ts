@@ -198,35 +198,6 @@ describe('cli', () => {
       },
     );
 
-    it('stack-wait released outcome settles queued without waitMerge (#3367)', async () => {
-      const calls: any[] = [];
-      const claims = [buildClaim(5)!];
-      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
-        claimNext: async () => claims.shift() ?? null,
-        ship: async (_issue, _opts, ctx) => {
-          ctx?.onOutcome?.({
-            state: 'released',
-            reason: 'stack-wait',
-            branch: 'b',
-            reworkRounds: 0,
-            prNumber: 55,
-            slice: { index: 1, count: 3 },
-          });
-          return 'b';
-        },
-        waitMerge: async (issue) => {
-          calls.push(['waitMerge', issue]);
-        },
-        releaseIssue: async (issue, outcome) => {
-          calls.push(['release', issue, outcome]);
-        },
-        pathExists: () => false,
-        emitEvent: () => {},
-      });
-
-      expect(calls).toEqual([['release', 5, 'queued']]);
-    });
-
     it('heartbeats the claim lease every 5 minutes while ship/waitMerge are in flight, and stops once they settle (#1500)', async () => {
       vi.useFakeTimers();
       try {
@@ -330,7 +301,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (1 merged, 0 awaiting review, 0 skipped, 0 decomposed, 1 parked)',
+        'lane complete (1 merged, 0 awaiting review, 0 skipped, 1 parked)',
         { lane: 'app' },
       ]);
       expect(errorSpy).not.toHaveBeenCalled();
@@ -360,7 +331,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (0 merged, 0 awaiting review, 0 skipped, 0 decomposed, 1 parked)',
+        'lane complete (0 merged, 0 awaiting review, 0 skipped, 1 parked)',
         { lane: 'app' },
       ]);
     });
@@ -389,7 +360,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (0 merged, 0 awaiting review, 0 skipped, 0 decomposed, 1 parked)',
+        'lane complete (0 merged, 0 awaiting review, 0 skipped, 1 parked)',
         { lane: 'app' },
       ]);
     });
@@ -492,7 +463,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (0 merged, 0 awaiting review, 0 skipped, 0 decomposed, 1 parked)',
+        'lane complete (0 merged, 0 awaiting review, 0 skipped, 1 parked)',
         { lane: 'app' },
       ]);
     });

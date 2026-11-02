@@ -1,7 +1,7 @@
 import { StorySchema } from '@on-par/contracts';
 import { describe, expect, it, vi } from 'vitest';
 import type { Slice, SlicePlan } from '../readiness/slice-plan.js';
-import { octokitStackSliceGateReader, readReviewApproval, readStackSliceGate } from './stack-approval.js';
+import { readReviewApproval, readStackSliceGate } from './stack-approval.js';
 import type { StackPullReviews, StackSliceGateReader, StackSliceReview } from './stack-approval.js';
 
 const review = (reviewerId: number | null, state: string, commitId: string | null = 'head'): StackSliceReview => ({
@@ -122,39 +122,5 @@ describe('readStackSliceGate', () => {
   });
   it('throws when a pr-open slice records no PR number', async () => {
     await expect(readStackSliceGate(planOf(slice(1, 'pr-open')), readerOf('open'))).rejects.toThrow(/no PR number/);
-  });
-});
-
-describe('octokitStackSliceGateReader (#3367)', () => {
-  const make = (pr: Record<string, unknown>, pages: unknown[][] = [[]]) => {
-    const get = vi.fn(async () => ({ data: pr }));
-    const listReviews = vi.fn(async (a: { page: number }) => ({ data: pages[a.page - 1] ?? [] }));
-    const getAuthenticated = vi.fn(async () => ({ data: { id: 7 } }));
-    const octokit = { rest: { pulls: { get, listReviews }, users: { getAuthenticated } } } as never;
-    return { reader: octokitStackSliceGateReader(octokit, 'o/r'), get, listReviews, getAuthenticated };
-  };
-
-  it('maps merged, open and closed pulls', async () => {
-    expect(await make({ merged: true, state: 'closed' }).reader.getPullState(1)).toBe('merged');
-    expect(await make({ merged: false, merged_at: 'x', state: 'closed' }).reader.getPullState(1)).toBe('merged');
-    expect(await make({ merged: false, state: 'open' }).reader.getPullState(1)).toBe('open');
-    expect(await make({ merged: false, state: 'closed' }).reader.getPullState(1)).toBe('closed');
-  });
-
-  it('reads head sha, self id and every review page', async () => {
-    const full = Array.from({ length: 100 }, () => ({ user: { id: 3 }, state: 'COMMENTED', commit_id: 'a' }));
-    const { reader, listReviews, getAuthenticated, get } = make({ head: { sha: 'h' } }, [
-      full,
-      [{ user: null, state: 'APPROVED' }],
-    ]);
-    const out = await reader.getPullReviews(4);
-    expect(out.headSha).toBe('h');
-    expect(out.selfId).toBe(7);
-    expect(out.reviews).toHaveLength(101);
-    expect(out.reviews.at(-1)).toEqual({ reviewerId: null, state: 'APPROVED', commitId: null });
-    expect(listReviews).toHaveBeenCalledTimes(2);
-    await reader.getPullReviews(4);
-    expect(getAuthenticated).toHaveBeenCalledTimes(1);
-    expect(get).toHaveBeenCalledWith({ owner: 'o', repo: 'r', pull_number: 4 });
   });
 });

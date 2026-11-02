@@ -43,6 +43,11 @@ describe('EVENT_TRAITS', () => {
     expect(EVENT_TRAITS.size_gate_cohesive).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });
 
+  it('classifies the red-main pause and recovery events', () => {
+    expect(EVENT_TRAITS['red-main']).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+    expect(EVENT_TRAITS['red-main-cleared']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+  });
+
   it('classifies base-hold-cleared as non-park info (#2350)', () => {
     expect(EVENT_TRAITS['base-hold-cleared']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });

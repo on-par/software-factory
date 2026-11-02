@@ -76,7 +76,7 @@ ${previousAttempt ? `${previousAttempt}\n\n` : ''}## Rules
 - Match the surrounding code style. Add or update the tests in the spec's Tests section.
 - ${verifyRule(lintCommands, verifyCommand, affectedTestsCommand)}
 - ${MAX_LINES_OVERRIDE_RULE}
-- Commit atomically: one commit per independently testable functional change, with a clear conventional message. Never mix unrelated functional changes in one commit. A single-slice task yields exactly ONE commit.
+- Commit atomically: one commit per independently testable functional change, with a clear conventional message (no brief ids). Never mix unrelated functional changes in one commit. A single-slice task yields exactly ONE commit.
 - Do NOT push, do NOT open a pull request, do NOT merge. CHECK and SHIP run next.
 - If something is genuinely ambiguous, print a line starting exactly with "ESCALATE:" followed by the question, then stop. If you are stuck, commit what safely builds and passes, say what is blocked in the commit message, and stop.
 - Work directly. Use sub-agents only for genuinely independent work.

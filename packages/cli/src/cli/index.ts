@@ -43,8 +43,6 @@ import {
   type KpiReconstruction,
   type LaneProxy,
   type LeaseHealth,
-  type LocalBriefParams,
-  type LocalOnlyPolicy,
   type DoctorProbes,
   type ModelDiagnosis,
   type PrSource,
@@ -84,9 +82,7 @@ import {
   getFactoryPaths,
   GITHUB_ISSUE_SOURCE,
   hasUnresolvedPark,
-  InvalidArtifactsDirError,
   InvalidWorkRequestInputError,
-  InvalidWorkspaceError,
   isCommandAvailable,
   isProxyRunning,
   kpiBranchPrefixes,
@@ -98,7 +94,6 @@ import {
   loadModelsConfig,
   loadRepoConfig,
   loadRoutesConfig,
-  LOCAL_BRIEF_SOURCE,
   joinClassifierOutcomes,
   mergeClassifierOutcomes,
   parseClassifierOutcomes,
@@ -128,8 +123,6 @@ import {
   type SizeGateMode,
   resolveEffectiveModelPins,
   resolveEnvironmentProxy,
-  resolveArtifactsDir,
-  resolveLocalOnlyPolicy,
   resolveMergePolicy,
   resolveSkipCI,
   resolveTimeouts,
@@ -234,13 +227,19 @@ import {
   formatStopMarker,
   readStopMarker,
   detectClaudePlan,
+  findSlicePlanComment,
+  listBlockedBy,
+  aliasDeprecatedSizeGateMode,
 } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
+import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
+import { runIssueStack } from './stack-run.js';
 import { withRepoRunLock } from './repo-run-lock.js';
 
 export { CliExitError, withRepoRunLock };
 import type { StopMarker } from '@on-par/factory-core/internal';
 import { formatSteerabilityReport } from '@on-par/factory-core/internal';
+import { buildTierEvidence, formatTierEvidence, resolveTrustTier } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
 import { clearSelfUpdateStop } from './self-update-stop.js';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
@@ -323,9 +322,6 @@ import {
   missingTokenMessage,
   notInitializedMessage,
 } from './first-run.js';
-import { cmdHostedSmoke } from './hosted.js';
-import { cmdHostedQueue } from './hosted-queue.js';
-import { cmdHostedRunner } from './hosted-runner.js';
 import { resolveFactoryCheckoutCommit, runFilingPreview } from './filing.js';
 import { cmdRisk } from './risk.js';
 import { buildFeedbackDeps, type FeedbackDeps, resolveFeedbackRepo, runFeedback } from './feedback.js';
@@ -338,7 +334,7 @@ import { selectOctokit } from './github-stub.js';
 import { createFactoryOctokit, type FactoryOctokitOptions } from './octokit.js';
 import { runDraftCommand } from './draft-command.js';
 import { checkErrorExit, checkReportExit, createDeepModelRunner, runIssueCheck } from './ready-check.js';
-import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
+import { cmdRunBrief as cmdRunBriefWith, type RunBriefOptions } from './run-brief.js';
 import { readRunFlagOverrides, recordDraftPrFlag } from './run-flags.js';
 import { runStalenessGuard } from './staleness.js';
 import { cmdBaselineClear } from './baseline.js';
@@ -719,7 +715,6 @@ setShipRuntime(() => ({
   LaneParkError,
   LaneEnvironmentPauseError,
   IssueSkippedError,
-  IssueDecomposedError,
 }));
 
 export { LaneEnvironmentPauseError, shipIssue };
@@ -1070,7 +1065,7 @@ function branchPrefixOrExit(raw: string | undefined, configPath: string): string
 
 function sizeGateOrExit(raw: string | undefined): SizeGateMode | undefined {
   if (raw === undefined) return undefined;
-  const mode = parseSizeGateMode(raw);
+  const mode = parseSizeGateMode(aliasDeprecatedSizeGateMode(raw));
   if (mode === undefined) {
     throw new CliExitError(`factory: invalid --size-gate '${raw}' — expected one of: ${SIZE_GATE_MODES.join(', ')}`, 2);
   }
@@ -1084,12 +1079,6 @@ function maxSlicesOrExit(raw: string | undefined): number | undefined {
     throw new CliExitError(`factory: invalid --max-slices '${raw}' — expected a whole number from 1 to 20`, 2);
   }
   return n;
-}
-
-/** Deterministic run number for a brief, derived from its content digest.
- *  Reserved 9,000,000+ range keeps brief branches/worktrees clear of real issue numbers. */
-function briefRunNumber(sha256Hex: string): number {
-  return 9_000_000 + (Number.parseInt(sha256Hex.slice(0, 8), 16) % 1_000_000);
 }
 
 // Product names become a filename in the constitutions dir; keep them to a safe,
@@ -1568,15 +1557,40 @@ function runRisk(pr: string, opts: { policy?: string } = {}): Promise<void> {
 async function cmdClassifierReport(opts: { json?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const report = summarizeClassifierOutcomes(parseClassifierOutcomes(readTextFileOrEmpty(paths.classifierOutcomes)));
+  const records = parseClassifierOutcomes(readTextFileOrEmpty(paths.classifierOutcomes));
+  const report = summarizeClassifierOutcomes(records);
   const steerability = await buildSteerabilityReport(paths);
+  const readOptional = (p: string) => {
+    try {
+      return existsSync(p) ? readFileSync(p, 'utf8') : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  let configuredTier: ReturnType<typeof resolveTrustTier> | 'unknown' = 'unknown';
+  let configError: string | undefined;
+  try {
+    configuredTier = resolveTrustTier(configLoaders.loadRepoConfig(repoRoot));
+  } catch (err) {
+    configError = err instanceof Error ? err.message : String(err);
+  }
+  const tier = buildTierEvidence({
+    configuredTier,
+    configError,
+    records,
+    mutationSummaryText: readOptional(join(repoRoot, 'mutation-summary.json')),
+    coverageEvidenceText: readOptional(join(repoRoot, 'coverage-ratchet.json')),
+    now: new Date(),
+  });
   if (opts.json) {
-    console.log(JSON.stringify({ ...report, steerability }));
+    console.log(JSON.stringify({ ...report, steerability, tier }));
     return;
   }
   for (const line of formatClassifierReport(report)) console.log(line);
   console.log('');
   for (const line of formatSteerabilityReport(steerability)) console.log(line);
+  console.log('');
+  for (const line of formatTierEvidence(tier)) console.log(line);
 }
 
 async function cmdReport(opts: { steerability?: boolean; json?: boolean } = {}) {
@@ -1604,7 +1618,9 @@ async function cmdClassifierBacktestEntry(opts: ClassifierBacktestOptions) {
     effective.allowExperimental,
     effective.localOnly,
   );
-  router.setCodexFullAccessTasks?.(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox.codexFullAccessTasks);
+  const sandbox = configLoaders.loadFactoryConfigForRepo(paths.config).sandbox;
+  router.setCodexFullAccessTasks?.(sandbox.codexFullAccessTasks);
+  router.setCodexSandbox?.(sandbox.codexSandbox);
   applyRouterGuards(router);
   try {
     await cmdClassifierBacktest(
@@ -1929,7 +1945,9 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
     effective.allowExperimental,
     effective.localOnly,
   );
-  router.setCodexFullAccessTasks?.(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox.codexFullAccessTasks);
+  const sandbox = configLoaders.loadFactoryConfigForRepo(paths.config).sandbox;
+  router.setCodexFullAccessTasks?.(sandbox.codexFullAccessTasks);
+  router.setCodexSandbox?.(sandbox.codexSandbox);
   applyRouterGuards(router);
   const effectiveConfigLines = describeEffectiveConfig({
     router,
@@ -2231,6 +2249,7 @@ async function cmdShip(
     sandbox?: boolean;
     approvePlan?: boolean;
     branchPrefix?: string;
+    baseBranch?: string;
     draftPr?: boolean;
   },
 ) {
@@ -2250,6 +2269,7 @@ async function cmdShip(
   }
 
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
+  baseBranchOrExit(opts.baseBranch);
 
   return withRepoRunLock(
     paths,
@@ -2304,12 +2324,15 @@ async function cmdRunIssue(
     sandbox?: boolean;
     approvePlan?: boolean;
     branchPrefix?: string;
+    baseBranch?: string;
     runChildren?: boolean;
     sizeGate?: string;
+    stack?: boolean;
     maxSlices?: string;
     draftPr?: boolean;
   },
 ) {
+  if (opts.runChildren) throw new CliExitError('--run-children was removed; oversized issues stack with --stack', 2);
   if (availableAgentClis(coreOps.isCommandAvailable).length === 0) {
     throw new CliExitError(`factory: ${missingAgentCliMessage()}`, 2);
   }
@@ -2319,15 +2342,23 @@ async function cmdRunIssue(
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
-  const { runChildren, sizeGate: rawSizeGate, maxSlices: rawMaxSlices, ...shipOpts } = opts;
+  const { runChildren: _removed, sizeGate: rawSizeGate, maxSlices: rawMaxSlices, stack, ...shipOpts } = opts;
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
-  const sizeGate = sizeGateOrExit(rawSizeGate);
+  const parsedSizeGate = sizeGateOrExit(rawSizeGate);
+  if (stack && parsedSizeGate !== undefined && parsedSizeGate !== 'stack') {
+    throw new CliExitError('factory: --stack is --size-gate stack — drop one of them', 2);
+  }
+  const sizeGate = stack ? 'stack' : parsedSizeGate;
+  const explicitStack = stack === true || rawSizeGate === 'stack';
   const maxSlices = maxSlicesOrExit(rawMaxSlices);
-  if (opts.pr === false && ((sizeGate !== undefined && sizeGate !== 'off') || runChildren)) {
-    throw new CliExitError(
-      'factory: --no-pr runs with the size gate off — drop --size-gate/--run-children or drop --no-pr',
-      2,
-    );
+  const baseBranch = baseBranchOrExit(opts.baseBranch);
+  const conflict = baseBranchConflict({ baseBranch, sizeGate });
+  if (conflict) throw new CliExitError(conflict, 2);
+  if (sizeGate === 'stack' && opts.pr === false) {
+    throw new CliExitError('factory: --stack opens a PR per slice — drop --no-pr or drop --stack', 2);
+  }
+  if (opts.pr === false && sizeGate !== undefined && sizeGate !== 'off') {
+    throw new CliExitError('factory: --no-pr runs with the size gate off — drop --size-gate or drop --no-pr', 2);
   }
 
   await withRepoRunLock(
@@ -2366,232 +2397,55 @@ async function cmdRunIssue(
       }
 
       try {
+        if (sizeGate === 'stack') {
+          await runIssueStack(issueNum, baseBranch, {
+            repo: ghRepo,
+            list: (issue) => listBlockedBy({ octokit: getOctokit(), repo: ghRepo }, issue),
+            shipMember: async (issue, base, onOutcome) => {
+              const memberWork =
+                issue === issueNum
+                  ? work
+                  : await workSources.resolve(GITHUB_ISSUE_SOURCE, { repo: ghRepo, issue } satisfies GithubIssueParams);
+              await shipIssue(
+                issue,
+                {
+                  ...shipOpts,
+                  branchPrefix,
+                  sizeGate,
+                  explicitStack,
+                  maxSlices,
+                  baseBranch: base,
+                  parkOverBudget: true,
+                },
+                { repoRoot, ghRepo, workRequest: memberWork, onOutcome },
+              );
+            },
+            readSlicePlan: async () => {
+              const lookup = await findSlicePlanComment({ octokit: getOctokit(), repo: ghRepo, issue: issueNum });
+              return lookup.status === 'found' ? lookup.plan : undefined;
+            },
+            ship: async (base, onOutcome) => {
+              await shipIssue(
+                issueNum,
+                { ...shipOpts, branchPrefix, sizeGate, explicitStack, maxSlices, baseBranch: base },
+                { repoRoot, ghRepo, workRequest: work, onOutcome },
+              );
+            },
+          });
+          return;
+        }
         await shipIssue(
           issueNum,
-          { ...shipOpts, branchPrefix, sizeGate, maxSlices },
+          { ...shipOpts, branchPrefix, sizeGate, explicitStack, maxSlices },
           { repoRoot, ghRepo, workRequest: work },
         );
       } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
         if (err instanceof IssueSkippedError) return;
-        if (err instanceof IssueDecomposedError && runChildren) {
-          await runDecomposedChildren(
-            issueNum,
-            err.childIssues,
-            { ...shipOpts, branchPrefix, sizeGate, maxSlices },
-            { repoRoot, ghRepo, workSources },
-          );
-          return;
-        }
-        if (err instanceof IssueDecomposedError && !runChildren) {
-          const children = err.childIssues.map((n) => `#${n}`).join(', ');
-          throw new CliExitError(
-            `Run failed for issue #${issueNum}: the size gate decomposed it into ${children} — no child issue was run. ` +
-              `Re-run with \`factory run-issue ${issueNum} --run-children\` to run them.`,
-            1,
-          );
-        }
         throw new CliExitError(`Run failed for issue #${issueNum}: ${err.message}`, 1);
       }
     },
     { scope: { kind: 'issue', key: workKeyFromIssue(issueNum) } },
-  );
-}
-
-/** Runs each decomposed child through the one-shot pipeline in build order, inside the caller's
- *  run lock, then prints a per-child summary. Nested decompositions expand in place and closed
- *  children are skipped. A failed or escalated child is recorded and the next one still runs;
- *  `.factory/STOP` is checked before each child starts (read only, ADR-0111). Throws CliExitError(1)
- *  unless every child is ready or skipped (#1747, #1748, #1749). */
-async function runDecomposedChildren(
-  parent: number,
-  children: readonly number[],
-  opts: Parameters<typeof shipIssue>[1],
-  env: { repoRoot: string; ghRepo: string; workSources: ReturnType<typeof createDefaultWorkSourceRegistry> },
-): Promise<void> {
-  const list = children.map((n) => `#${n}`).join(', ');
-  console.log(styleText('cyan', `run-children: #${parent} decomposed into ${list} — running them in build order`));
-  const paths = getFactoryPaths(env.repoRoot);
-  const results = await runChildrenInOrder(
-    children,
-    async (child): Promise<ChildRunResult> => {
-      let work: WorkRequest;
-      try {
-        work = await env.workSources.resolve(GITHUB_ISSUE_SOURCE, {
-          repo: env.ghRepo,
-          issue: child,
-        } satisfies GithubIssueParams);
-      } catch (err) {
-        return { issue: child, status: 'failed', detail: `could not resolve issue #${child} (${errorDetail(err)})` };
-      }
-      console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
-      let outcome: RunOutcome | undefined;
-      try {
-        await withRepoRunLock(
-          paths,
-          'factory run-issue',
-          () =>
-            shipIssue(child, opts, {
-              repoRoot: env.repoRoot,
-              ghRepo: env.ghRepo,
-              workRequest: work,
-              onOutcome: (o) => {
-                outcome = o;
-              },
-            }),
-          { scope: { kind: 'issue', key: workKeyFromIssue(child) } },
-        );
-      } catch (err: any) {
-        if (err instanceof IssueDecomposedError) {
-          const again = err.childIssues.map((n) => `#${n}`).join(', ');
-          console.log(
-            styleText('cyan', `run-children: #${child} decomposed into ${again} — running them in its place`),
-          );
-          return { issue: child, status: 'decomposed', children: err.childIssues };
-        }
-        if (err instanceof IssueSkippedError) {
-          return { issue: child, status: 'skipped', detail: err.message };
-        }
-        return { issue: child, status: 'failed', detail: err instanceof Error ? err.message : String(err) };
-      }
-      const done = outcome as RunOutcome | undefined;
-      return { issue: child, status: 'ready', prNumber: done && 'prNumber' in done ? done.prNumber : undefined };
-    },
-    [parent],
-    (next) => {
-      if (!existsSync(paths.stop)) return false;
-      logEvent(paths.events, 'stopped', next, 'STOP file present');
-      console.log(
-        styleText('yellow', `run-children: .factory/STOP present — not starting #${next} or any later child`),
-      );
-      return true;
-    },
-  );
-  const ok = childRunSucceeded(results);
-  for (const line of formatChildRunSummary(parent, results)) {
-    console.log(ok ? styleText('green', line) : styleText('yellow', line));
-  }
-  if (!ok) {
-    throw new CliExitError(
-      `Run failed for issue #${parent}: not every decomposed child reached ready-for-review or was skipped as closed (failed or not-run children are listed above)`,
-      1,
-    );
-  }
-}
-
-async function cmdRunBrief(
-  briefPath: string,
-  opts: {
-    product?: string;
-    autoRework?: boolean;
-    interactive?: boolean;
-    /** `--no-pr` sets false: stop after CHECK, no GitHub writes. */
-    pr?: boolean;
-    sandbox?: boolean;
-    approvePlan?: boolean;
-    workspace?: string;
-    artifacts?: string;
-    branchPrefix?: string;
-    draftPr?: boolean;
-  },
-) {
-  if (availableAgentClis(coreOps.isCommandAvailable).length === 0) {
-    throw new CliExitError(`factory: ${missingAgentCliMessage()}`, 2);
-  }
-  const repoRoot = await getRepoRoot();
-  const paths = getFactoryPaths(repoRoot);
-  if (!existsSync(paths.root)) {
-    throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
-  }
-
-  const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
-
-  let localOnly: LocalOnlyPolicy | undefined;
-  if (opts.workspace !== undefined) {
-    try {
-      localOnly = resolveLocalOnlyPolicy(opts.workspace);
-    } catch (err) {
-      if (err instanceof InvalidWorkspaceError) throw new CliExitError(`factory: ${err.message}`, 2);
-      throw err;
-    }
-  }
-
-  let artifactsDir: string | undefined;
-  if (opts.artifacts !== undefined) {
-    if (!localOnly) {
-      throw new CliExitError('factory: --artifacts requires --workspace (local-only runs only)', 2);
-    }
-    try {
-      artifactsDir = resolveArtifactsDir(opts.artifacts);
-    } catch (err) {
-      if (err instanceof InvalidArtifactsDirError) throw new CliExitError(`factory: ${err.message}`, 2);
-      throw err;
-    }
-    console.log(styleText('cyan', `local-only: benchmark artifacts will be written to ${artifactsDir}`));
-  }
-
-  // Local-only runs never touch GitHub — no remote required, no mutation possible.
-  const ghRepo = localOnly ? 'local/workspace' : await getGitHubRepo();
-
-  // Pre-flight: resolve the brief through the canonical work-request seam
-  // BEFORE any worktree or PR exists — a malformed brief exits here, so BUILD never starts.
-  const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
-  let work: WorkRequest;
-  try {
-    work = await workSources.resolve(LOCAL_BRIEF_SOURCE, { path: briefPath } satisfies LocalBriefParams);
-  } catch (err) {
-    if (err instanceof InvalidWorkRequestInputError) {
-      throw new CliExitError(`factory: ${err.message}`, 2);
-    }
-    throw new CliExitError(
-      `factory: could not resolve brief at ${briefPath} (${errorDetail(err)}) — no worktree or PR was created`,
-      2,
-    );
-  }
-  const digest = work.reference?.externalId ?? '';
-  const runNum = briefRunNumber(digest);
-
-  await withRepoRunLock(
-    paths,
-    'factory run-brief',
-    async () => {
-      recordDraftPrFlag(paths.runFlags, opts.draftPr);
-      console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
-      logEvent(paths.events, 'work-source', runNum, `inline local brief ${briefPath} (sha256 ${digest})`);
-      if (localOnly) {
-        console.log(styleText('cyan', `local-only: workspace ${localOnly.workspace} — publishing disabled`));
-        logEvent(
-          paths.events,
-          'local-only',
-          runNum,
-          `caller-provided workspace ${localOnly.workspace} — publishing disabled`,
-        );
-      }
-
-      const priorEvents = readEvents(paths.events, { includeSegments: true });
-      if (hasUnresolvedPark(priorEvents, String(runNum))) {
-        logEvent(paths.events, 'human-restarted', runNum, 'manual retry of a previously parked/failed run', {
-          actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
-        });
-      }
-
-      try {
-        await shipIssue(
-          runNum,
-          { ...opts, branchPrefix },
-          {
-            repoRoot,
-            ghRepo,
-            workRequest: work,
-            workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
-            localOnly,
-            artifactsDir,
-          },
-        );
-      } catch (err: any) {
-        throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
-      }
-    },
-    { scope: { kind: 'issue', key: workKeyFromIssue(runNum) } },
   );
 }
 
@@ -2933,7 +2787,9 @@ async function cmdTriage(opts: { product?: string; model?: string }) {
     effective.allowExperimental,
     effective.localOnly,
   );
-  router.setCodexFullAccessTasks?.(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox.codexFullAccessTasks);
+  const sandbox = configLoaders.loadFactoryConfigForRepo(paths.config).sandbox;
+  router.setCodexFullAccessTasks?.(sandbox.codexFullAccessTasks);
+  router.setCodexSandbox?.(sandbox.codexSandbox);
   applyRouterGuards(router);
   router.skipMissingHarnessClis(coreOps.isCommandAvailable);
   router.setCostSink((entry) => logCost(paths.costs, { ...entry, issue: '-' }));
@@ -3580,19 +3436,18 @@ export interface PlannedLane {
   lane: string;
   /** Seed issues to work before claiming. Always empty in GitHub-queue mode. */
   issues: number[];
-  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining' | 'queueChildren'>;
+  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining'>;
 }
 
 export function laneQueueDeps(
   queue: GithubQueue,
   lane: string,
-): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining' | 'queueChildren'> {
+): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining'> {
   return {
     claimNext: () => queue.claimNext(lane),
     releaseIssue: (issue, outcome) => queue.release(issue, outcome),
     heartbeat: (issue) => queue.heartbeat(issue),
     countRemaining: async () => (await queue.list(lane)).length,
-    queueChildren: (parent, children) => queue.enqueueAfter(lane, parent, children),
   };
 }
 
@@ -3659,17 +3514,6 @@ export class IssueSkippedError extends Error {
   }
 }
 
-/** The target issue tripped the PLAN pre-flight size gate and was decomposed into real
- *  filed sub-issues; the queue was rewritten. Not a park — the lane continues with the
- *  children in place of the oversized issue. (#823) */
-export class IssueDecomposedError extends Error {
-  constructor(
-    message: string,
-    readonly childIssues: number[],
-  ) {
-    super(message);
-  }
-}
 export function issueFromFactoryBranch(branch: string, prefix?: string): number | undefined {
   return factoryBranchIssue(branch, prefix) ?? undefined;
 }
@@ -4238,6 +4082,18 @@ async function resumeFromCheck(issueNum: number): Promise<void> {
 }
 
 /** index.ts bindings the commander registrations in program*.ts call (#2793); type-only imports there avoid a runtime cycle. */
+/** `factory run-brief` (#3762): the handler lives in ./run-brief.ts; this binds its runtime. */
+function cmdRunBrief(files: readonly string[], opts: RunBriefOptions): Promise<void> {
+  return cmdRunBriefWith(files, opts, {
+    isCommandAvailable: (cmd) => coreOps.isCommandAvailable(cmd),
+    getRepoRoot: () => getRepoRoot(),
+    getGitHubRepo: () => getGitHubRepo(),
+    getOctokit: () => getOctokit(),
+    branchPrefixOrExit,
+    errorDetail,
+  });
+}
+
 /** `factory supervise` (#2797): the handler lives in ./supervise.ts; this binds its runtime. */
 function runSupervise(opts: SuperviseOptions): Promise<void> {
   return cmdSupervise(opts, {
@@ -4360,9 +4216,6 @@ export const PROGRAM_HANDLERS = {
   cmdQueueReconcile,
   cmdQueueList,
   cmdQueueClear,
-  cmdHostedSmoke,
-  cmdHostedRunner,
-  cmdHostedQueue,
   cmdCheck,
   cmdDraft,
   cmdShip,

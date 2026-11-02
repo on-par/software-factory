@@ -11,20 +11,9 @@ import type { ModelsConfig } from '../config/index.js';
 import type { RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { ModelRegistry } from '../models/index.js';
-import type { SandboxPolicy } from '../sandbox/index.js';
 import { CodexCliHarness, quoteCodexFlags } from './codex-cli.js';
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
 import { HarnessError } from './index.js';
-
-const sandboxPolicy: SandboxPolicy = {
-  runtime: 'sandbox-exec',
-  worktree: '/tmp/factory worktree',
-  writablePaths: ['/tmp/factory worktree'],
-  writableFilePrefixes: [],
-  allowHosts: [],
-  cpuMs: 300_000,
-  memMb: 4096,
-};
 
 function outFileFromCmd(cmd: string): string {
   const match = cmd.match(/-o '([^']+)'/);
@@ -133,6 +122,7 @@ describe('CodexCliHarness command shape', () => {
         model: 'codex-model',
         registry,
         prompt: 'build it',
+        codexSandbox: 'workspace-write',
         worktree: '/tmp/factory worktree',
         timeoutSeconds: 7,
       }),
@@ -153,7 +143,9 @@ describe('CodexCliHarness command shape', () => {
   it('omits the model flag when none is configured, still parses', async () => {
     const rec = successExec();
     const harness = new CodexCliHarness(rec.fn);
-    await harness.run(makeContractRequest({ model: 'codex-no-flag', registry, prompt: 'build it' }));
+    await harness.run(
+      makeContractRequest({ model: 'codex-no-flag', registry, prompt: 'build it', codexSandbox: 'workspace-write' }),
+    );
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toContain('network_access=false -C');
     expect(rec.calls[0].cmd).not.toContain('--model');
@@ -193,25 +185,6 @@ describe('CodexCliHarness command shape', () => {
 
     await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
     expect(rec.calls[0].opts.env).toBeUndefined();
-  });
-
-  it('uses the outer wrapper when present and Codex workspace-write for runtime none', async () => {
-    const rec = recordingExec();
-    const harness = new CodexCliHarness(rec.fn);
-    await harness
-      .run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it', sandbox: sandboxPolicy }))
-      .catch(() => {});
-    expect(rec.calls).toHaveLength(1);
-    expect(rec.calls[0].cmd.startsWith('sandbox-exec -p ')).toBe(true);
-    expect(rec.calls[0].cmd).toContain('codex exec --json --sandbox workspace-write');
-    const none = { ...sandboxPolicy, runtime: 'none' as const, allowHosts: ['example.com'] };
-    const request = makeContractRequest({ model: 'codex-model', registry, task: 'plan', sandbox: none });
-    await harness.run(request).catch(() => {});
-    expect(rec.calls[1].cmd).toMatch(/^codex exec --json --sandbox workspace-write /);
-    expect(rec.calls[1].cmd).toContain('-c sandbox_workspace_write.network_access=true');
-    expect(rec.calls[1].cmd).toContain('-c features.network_proxy.enabled=true');
-    expect(rec.calls[1].cmd).toContain('"example.com"="allow"');
-    expect(rec.calls[1].cmd).toContain('"api.github.com"="allow"');
   });
 });
 

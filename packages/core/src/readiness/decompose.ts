@@ -8,11 +8,7 @@
 // advisory and non-fatal (a failure logs decompose_failed), but the issue is always
 // parked for decomposition afterwards; the driver never throws to its caller.
 //
-// The INVEST gate is owned by core because core must not depend on the private
-// @on-par/product leaf (ADR-0010 already settled this for the size gate). checkStoryInvest
-// deliberately duplicates product's checkInvest (packages/product/src/decompose/invest.ts)
-// predicate-for-predicate and reuses the size.ts constants; the two files carry this
-// comment and MUST change together.
+// The core INVEST gate reuses the size.ts constants (ADR-0010).
 
 import type { Octokit } from '@octokit/rest';
 import { CONTRACTS_SCHEMA_VERSION, EpicSchema, StorySchema } from '@on-par/contracts';
@@ -183,7 +179,7 @@ export function parseDecompositionOutput(
 }
 
 // ---------------------------------------------------------------------------
-// Core-owned INVEST gate (mirror of packages/product/src/decompose/invest.ts)
+// Core-owned INVEST gate
 // ---------------------------------------------------------------------------
 
 export type InvestLetter = 'independent' | 'negotiable' | 'valuable' | 'estimable' | 'small' | 'testable';
@@ -198,8 +194,7 @@ export interface InvestReport {
   violations: readonly InvestViolation[];
 }
 
-/** Lowercase substrings that mark a story as depending on other work. Copied verbatim
- *  from packages/product/src/decompose/invest.ts — change both together. */
+/** Lowercase substrings that mark a story as depending on other work. */
 const DEPENDENCY_CUES: readonly string[] = ['depends on', 'after we', 'once the', 'blocked by', 'requires story'];
 
 function firstDependencyHit(story: Story): string | undefined {
@@ -210,12 +205,7 @@ function firstUntestableCriterion(story: Story): Story['acceptanceCriteria'][num
   return story.acceptanceCriteria.find((criterion) => criterion.when.length === 0 || criterion.then.length === 0);
 }
 
-/**
- * Six predicates, each decidable on a bare Story. Deliberately mirrors
- * packages/product/src/decompose/invest.ts predicate-for-predicate (same reasons,
- * same wording), but the "small" thresholds come from ./size.ts so the two core gates
- * share one threshold pair. Both files MUST change together.
- */
+/** Six predicates on a Story, sharing the small thresholds with size.ts. */
 export function checkStoryInvest(story: Story): InvestReport {
   const violations: InvestViolation[] = [];
 
@@ -333,9 +323,14 @@ export function renderDecompositionComment(decomposition: DecompositionOutput): 
 
 /** Renders a filed child issue's body with exactly the five factory-task headings
  *  (`FACTORY_TASK_REQUIRED_FIELDS`) so it scores as a ready factory-task on its own —
- *  and, deliberately, no `## Children` heading, which would classify it as an epic. */
-export function renderChildIssueBody(story: Story, parentIssue: number): string {
+ *  and, deliberately, no `## Children` heading, which would classify it as an epic.
+ *  With no `parentIssue` (a brief slice, #3813) the "Decomposed from #N" line is left out. */
+export function renderChildIssueBody(story: Story, parentIssue?: number): string {
   const covered = parentIdsTracedBy(story);
+  const footer = [
+    ...(covered.length > 0 ? [`Covers parent criteria: ${covered.join(', ')}`, ''] : []),
+    ...(parentIssue === undefined ? [] : [`Decomposed from #${parentIssue} by the factory size gate.`]),
+  ];
   const lines: string[] = [
     '## Problem statement',
     '',
@@ -360,10 +355,7 @@ export function renderChildIssueBody(story: Story, parentIssue: number): string 
     '',
     ...story.verification.map((step) => `- ${step.command} — passes when: ${step.passWhen}`),
     '',
-    '---',
-    '',
-    ...(covered.length > 0 ? [`Covers parent criteria: ${covered.join(', ')}`, ''] : []),
-    `Decomposed from #${parentIssue} by the factory size gate.`,
+    ...(footer.length > 0 ? ['---', '', ...footer] : []),
   ];
 
   return lines.join('\n').trim();
@@ -520,8 +512,7 @@ export async function fileDecomposition(deps: {
 export interface DecomposeResult {
   /** The rendered breakdown was posted as a comment on the original issue. */
   posted: boolean;
-  /** Numbers of the child issues filed under the original issue, in build order.
-   *  Empty unless deps.fileSubIssues was set AND every child was filed successfully. */
+  /** Always empty: PLAN no longer files child issues. Kept for callers. */
   childIssues: number[];
   /** The decomposition that passed the INVEST gate, set whenever one did. */
   decomposition?: DecompositionOutput;
@@ -551,10 +542,6 @@ export interface DecomposeDriverDeps {
    *  decompose never reports into the breaker, so a lane keeps re-attempting a
    *  known-capped provider on every relaunch cycle with no gating at all. */
   onProviderFailure?: (info: ProviderFailureInfo) => void | Promise<void>;
-  /** File the decomposition as real GitHub issues linked as native sub-issues of the
-   *  original issue, instead of only commenting. Off by default: both
-   *  file-mode PLAN size gates (pre-flight and post-plan build-scope) opt in (#823, #2662). */
-  fileSubIssues?: boolean;
   /** Default true. False returns the validated decomposition without posting the epic
    *  comment or filing (slice mode, ADR-0147). */
   postComment?: boolean;
@@ -565,8 +552,7 @@ export interface DecomposeDriverDeps {
 }
 
 /**
- * Posts the rendered epic comment and, when `fileSubIssues` is set, files the stories as
- * linked sub-issues. Never throws: a failure logs decompose_failed and returns nothing posted.
+ * Posts the rendered epic comment. Never throws: a failure logs decompose_failed and returns nothing posted.
  */
 export async function publishDecomposition(deps: {
   decomposition: DecompositionOutput;
@@ -574,7 +560,6 @@ export async function publishDecomposition(deps: {
   repo: string;
   octokit: Octokit;
   log: (type: EventKind, msg: string) => void;
-  fileSubIssues?: boolean;
 }): Promise<{ posted: boolean; childIssues: number[] }> {
   const { decomposition, issue, repo, octokit, log } = deps;
   const [owner, name] = repo.split('/');
@@ -589,9 +574,7 @@ export async function publishDecomposition(deps: {
       'decompose_comment_posted',
       `posted proposed epic + ${decomposition.stories.length} INVEST-compliant stories as a comment on issue #${issue}`,
     );
-
-    const childIssues = deps.fileSubIssues ? await fileDecomposition({ decomposition, issue, repo, octokit, log }) : [];
-    return { posted: true, childIssues };
+    return { posted: true, childIssues: [] };
   } catch (error) {
     log('decompose_failed', `decomposition of issue #${issue} failed: ${errorDetail(error)}`);
     return { posted: false, childIssues: [] };
@@ -601,9 +584,8 @@ export async function publishDecomposition(deps: {
 /**
  * Runs the bounded decomposition pass: up to maxAttempts model calls (retrying with the
  * INVEST violations), then — only when every story passes the core-owned INVEST gate —
- * posts the rendered breakdown as a comment on the original issue, and, when
- * `fileSubIssues` is set, files the stories as real linked sub-issues. When it would post,
- * it first runs the #728 guard and skips (no model call, comment or filing) for a closed
+ * posts the rendered breakdown as a comment on the original issue. When it would post,
+ * it first runs the #728 guard and skips (no model call or comment) for a closed
  * issue or a still-pending own proposal. Never throws to the caller.
  */
 export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promise<DecomposeResult> {
@@ -666,7 +648,6 @@ export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promis
         repo,
         octokit,
         log,
-        fileSubIssues: deps.fileSubIssues,
       });
       return { ...published, decomposition: parsed.decomposition };
     }

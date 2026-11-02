@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isMap, isScalar, isSeq, LineCounter, parseDocument, YAMLParseError, type Document } from 'yaml';
 import { factoryRuntimeConfigIssues, isPlainObject, type ConfigSchemaIssue } from './index.js';
+import { codexSandboxValueIssue } from './sandbox-schema.js';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { repoRoutingConfigIssues } from './repo.js';
 import { unknownRuntimeConfigKeys } from './unknown-runtime-keys.js';
@@ -151,6 +152,43 @@ export function findUnknownConfigKeyWarnings(configFile: { absPath: string; relP
 /** `findUnknownConfigKeyWarnings` rendered one `file[:line]: message; fix` string per key, for the run-start log. */
 export function unknownConfigKeyMessages(configFile: { absPath: string; relPath: string }): string[] {
   return findUnknownConfigKeyWarnings(configFile).map(
+    (w) => `${w.file}${w.line ? `:${w.line}` : ''}: ${w.message}; ${w.fix}`,
+  );
+}
+
+/** Warning for an unknown sandbox.codexSandbox value, ignored by the loader (#3829, ADR-0160 warn stage). Read/parse
+ *  errors are `findConfigSchemaErrors`' to report, so they yield []. Read-only. */
+export function findCodexSandboxWarnings(configFile: { absPath: string; relPath: string }): ConfigSchemaFinding[] {
+  const { absPath, relPath } = configFile;
+  if (!existsSync(absPath)) return [];
+  let raw: unknown;
+  try {
+    raw = readRepoConfigFile(absPath);
+  } catch {
+    return [];
+  }
+  if (!isPlainObject(raw)) return [];
+  const issue = codexSandboxValueIssue(raw);
+  if (!issue) return [];
+  const lc = new LineCounter();
+  const doc: Document | undefined = /\.ya?ml$/i.test(absPath)
+    ? parseDocument(readFileSync(absPath, 'utf8').replace(/^\uFEFF/, ''), { lineCounter: lc })
+    : undefined;
+  const line = doc ? yamlLineForPath(doc, lc, ['sandbox', 'codexSandbox']) : undefined;
+  return [
+    {
+      file: relPath,
+      ...(line !== undefined ? { line } : {}),
+      path: 'sandbox.codexSandbox',
+      message: issue.message,
+      fix: issue.fix,
+    },
+  ];
+}
+
+/** `findCodexSandboxWarnings` rendered one `file[:line]: message; fix` string, for the run-start log. */
+export function codexSandboxWarningMessages(configFile: { absPath: string; relPath: string }): string[] {
+  return findCodexSandboxWarnings(configFile).map(
     (w) => `${w.file}${w.line ? `:${w.line}` : ''}: ${w.message}; ${w.fix}`,
   );
 }

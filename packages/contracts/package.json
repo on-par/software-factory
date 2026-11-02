@@ -1,6 +1,6 @@
 {
   "name": "@on-par/contracts",
-  "version": "0.9.22",
+  "version": "0.9.26",
   "description": "Shared typed seam: engineering-ready issue/epic/story, Gherkin acceptance criteria, and the DesignArtifact schema.",
   "type": "module",
   "main": "dist/index.js",
@@ -43,6 +43,6 @@
   },
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^26.6.5"
+    "@types/node": "^26.6.6"
   }
 }

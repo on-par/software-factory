@@ -1,10 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { DiffRunner } from '../checkers/design-smells.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from './floor.js';
 import {
   classifierGateReason,
   decideT1Sample,
+  decideTrustTier,
+  effectiveTrustTier,
   parseNumstat,
   readReviewFloorChanges,
   resolveReviewRouting,
@@ -13,6 +18,8 @@ import {
 } from './routing.js';
 
 const rules = DEFAULT_REVIEW_FLOOR_RULES;
+const tempDirs = createTempDirs();
+afterEach(() => tempDirs.cleanup());
 
 describe('parseNumstat', () => {
   it('parses added/removed/path and skips blank lines', () => {
@@ -174,6 +181,56 @@ describe('readReviewFloorChanges', () => {
     await expect(readReviewFloorChanges('/w', { run })).rejects.toThrow(/no base ref/);
   });
 
+  it.each([
+    { parent: true, ok: true, output: '  abc123\n', expected: 'abc123' },
+    { parent: true, ok: true, output: '  \n', expected: 'slice-1' },
+    { parent: true, ok: false, output: 'ignored', expected: 'slice-1' },
+    { parent: false, ok: true, output: '  abc123\n', expected: 'abc123' },
+    { parent: false, ok: true, output: '  \n', expected: 'origin/main' },
+    { parent: false, ok: false, output: 'ignored', expected: 'origin/main' },
+  ])('chooses base $expected for parent=$parent, ok=$ok', async ({ parent, ok, output, expected }) => {
+    const ref = parent ? 'slice-1' : 'origin/main';
+    const { run, calls } = fakeRun({
+      [`git rev-parse --verify --quiet ${ref}`]: { ok: true },
+      [`git merge-base ${ref} HEAD`]: { ok, stdout: output },
+      [`git diff --numstat --no-renames ${expected}`]: { ok: true, stdout: '1\t0\tdocs/a.md\n' },
+      'git ls-files --others --exclude-standard': { ok: true },
+    });
+    expect(
+      await readReviewFloorChanges('/w', {
+        run,
+        fallbackBaseRef: 'fallback',
+        ...(parent ? { parentBaseRef: ref } : {}),
+      }),
+    ).toEqual([{ path: 'docs/a.md', added: 1, removed: 0 }]);
+    expect(calls.filter((call) => call.includes('fallback'))).toEqual([]);
+  });
+
+  it('rejects an unresolved fallback ref', async () => {
+    const { run, calls } = fakeRun({});
+    await expect(readReviewFloorChanges('/w', { run, fallbackBaseRef: 'missing' })).rejects.toThrow(
+      'no base ref for review floor (tried origin/main, origin/master, build diff base)',
+    );
+    expect(calls.filter((call) => call.includes('missing'))).toEqual([
+      'git rev-parse --verify --quiet missing^{commit}',
+    ]);
+  });
+
+  it('reads untracked files by default and skips blank listing lines', async () => {
+    const dir = await tempDirs.make('review-floor-');
+    writeFileSync(join(dir, 'trailing.txt'), 'one\ntwo\n');
+    writeFileSync(join(dir, 'plain.txt'), 'one\ntwo');
+    const { run } = fakeRun({
+      'git rev-parse --verify --quiet origin/main': { ok: true },
+      'git diff --numstat --no-renames origin/main': { ok: true },
+      'git ls-files --others --exclude-standard': { ok: true, stdout: '\ntrailing.txt\n  \nplain.txt\n' },
+    });
+    expect(await readReviewFloorChanges(dir, { run })).toEqual([
+      { path: 'trailing.txt', added: 2, removed: 0 },
+      { path: 'plain.txt', added: 2, removed: 0 },
+    ]);
+  });
+
   it('throws when numstat fails', async () => {
     const { run } = fakeRun({ 'git rev-parse --verify --quiet origin/main': { ok: true } });
     await expect(readReviewFloorChanges('/w', { run })).rejects.toThrow(/numstat/);
@@ -247,5 +304,116 @@ describe('decideT1Sample (#1958)', () => {
   it('leaves a C floor gated with its own reason', () => {
     const c: ReviewRouting = { floor: 'C', rules: [], gated: true, reason: 'classifier:floor:C:workflows' };
     expect(decideT1Sample(c, { trustTier: 'T1', t1SampleRate: 1 }, input)).toBe(c);
+  });
+});
+
+describe('effectiveTrustTier (#1960)', () => {
+  const demotion = { reason: 'slip on #99' };
+
+  it('drops a demoted tier one rung and floors at T0', () => {
+    expect(effectiveTrustTier('T2', demotion)).toBe('T1');
+    expect(effectiveTrustTier('T1', demotion)).toBe('T0');
+    expect(effectiveTrustTier('T0', demotion)).toBe('T0');
+  });
+
+  it('is the identity without a demotion', () => {
+    for (const tier of ['T0', 'T1', 'T2'] as const) expect(effectiveTrustTier(tier)).toBe(tier);
+  });
+
+  it('fails closed to T0 for an unknown tier', () => {
+    expect(effectiveTrustTier('T9' as never)).toBe('T0');
+  });
+});
+
+describe('decideTrustTier (#1960)', () => {
+  const aFloor: ReviewRouting = { floor: 'A', rules: [], gated: false };
+  const input = { repo: 'o/r', issue: 7 };
+  const value = t1SampleValue('o/r', 7);
+  const demotion = { reason: 'slip on #99' };
+
+  it('records a t2-auto receipt for an ungated A floor at T2', () => {
+    const out = decideTrustTier(aFloor, { trustTier: 'T2', t1SampleRate: 1 }, input);
+    expect(out).toMatchObject({
+      gated: false,
+      receipt: 't2-auto',
+      trustTier: { configured: 'T2', effective: 'T2' },
+    });
+    expect(out.sample).toBeUndefined();
+  });
+
+  it('leaves a gated class C routing gated with no receipt', () => {
+    const cFloor: ReviewRouting = { floor: 'C', rules: [], gated: true, reason: 'classifier:floor:C:x' };
+    const out = decideTrustTier(cFloor, { trustTier: 'T2', t1SampleRate: 0 }, input);
+    expect(out).toMatchObject({ gated: true, reason: 'classifier:floor:C:x' });
+    expect(out.receipt).toBeUndefined();
+  });
+
+  it('keeps a classifier error gated with no receipt', () => {
+    const errored: ReviewRouting = {
+      floor: null,
+      rules: [],
+      gated: true,
+      reason: 'classifier:error',
+      error: 'boom',
+    };
+    const out = decideTrustTier(errored, { trustTier: 'T2', t1SampleRate: 0 }, input);
+    expect(out.gated).toBe(true);
+    expect(out.receipt).toBeUndefined();
+  });
+
+  it('samples a demoted T2 like T1: held sample, no receipt', () => {
+    const out = decideTrustTier(aFloor, { trustTier: 'T2', t1SampleRate: value + 0.01, demotion }, input);
+    expect(out).toMatchObject({
+      gated: true,
+      reason: expect.stringContaining('t1-sampled'),
+      trustTier: { configured: 'T2', effective: 'T1', demotion: 'slip on #99' },
+    });
+    expect(out.receipt).toBeUndefined();
+  });
+
+  it('records an unheld sample and no receipt for a demoted T2 at rate 0', () => {
+    const out = decideTrustTier(aFloor, { trustTier: 'T2', t1SampleRate: 0, demotion }, input);
+    expect(out.gated).toBe(false);
+    expect(out.sample).toMatchObject({ held: false });
+    expect(out.receipt).toBeUndefined();
+  });
+
+  it('returns the routing untouched at T0 without a demotion', () => {
+    expect(decideTrustTier(aFloor, { trustTier: 'T0', t1SampleRate: 1 }, input)).toStrictEqual(aFloor);
+  });
+});
+
+describe('trust routing edge cases', () => {
+  const input = { repo: 'o/r', issue: 7 };
+
+  it('does not sample an ungated B floor or an already gated A floor', () => {
+    const b: ReviewRouting = { floor: 'B', rules: [], gated: false };
+    const gatedA: ReviewRouting = { floor: 'A', rules: [], gated: true, reason: 'held' };
+    expect(decideT1Sample(b, { trustTier: 'T1', t1SampleRate: 1 }, input)).toBe(b);
+    expect(decideT1Sample(gatedA, { trustTier: 'T1', t1SampleRate: 1 }, input)).toBe(gatedA);
+  });
+
+  it('only issues a receipt for an ungated A floor at T2', () => {
+    const a: ReviewRouting = { floor: 'A', rules: [], gated: false };
+    const b: ReviewRouting = { floor: 'B', rules: [], gated: false };
+    const gatedA: ReviewRouting = { floor: 'A', rules: [], gated: true, reason: 'held' };
+    expect(decideTrustTier(a, { trustTier: 'T2', t1SampleRate: 0 }, input)).toEqual({
+      ...a,
+      trustTier: { configured: 'T2', effective: 'T2' },
+      receipt: 't2-auto',
+    });
+    expect(decideTrustTier(b, { trustTier: 'T2', t1SampleRate: 0 }, input)).toEqual({
+      ...b,
+      trustTier: { configured: 'T2', effective: 'T2' },
+    });
+    expect(decideTrustTier(gatedA, { trustTier: 'T2', t1SampleRate: 0 }, input)).toEqual({
+      ...gatedA,
+      trustTier: { configured: 'T2', effective: 'T2' },
+    });
+    expect(decideTrustTier(a, { trustTier: 'T0', t1SampleRate: 0 }, input)).toEqual(a);
+    expect(decideTrustTier(a, { trustTier: 'T9' as never, t1SampleRate: 0 }, input)).toEqual({
+      ...a,
+      trustTier: { configured: 'T9', effective: 'T0' },
+    });
   });
 });

@@ -26,29 +26,17 @@ const evaluation: RiskEvaluation = {
 };
 
 describe('renderRiskReceipt', () => {
-  it('lists every matched rule with its tier and paths', () => {
+  it('renders one path-free reason for each matched rule', () => {
     const out = renderRiskReceipt(evaluation);
-    expect(out.startsWith(RISK_RECEIPT_START)).toBe(true);
-    expect(out.endsWith(RISK_RECEIPT_END)).toBe(true);
     expect(out).toContain('**Tier: high**');
-    expect(out).toContain('| `auth` | high | `src/auth/login.ts`, `src/auth/session.ts` |');
-    expect(out).toContain('| `docs` | low | `README.md` |');
-  });
-
-  it('truncates long path lists, shows (none), and escapes pipes', () => {
-    const many = Array.from({ length: 12 }, (_, i) => `f${i}.md`);
-    const out = renderRiskReceipt({
-      tier: 'med',
-      rules: [
-        { id: 'docs', tier: 'low', paths: many },
-        { id: 'empty-diff', tier: 'med', paths: [] },
-        { id: 'odd', tier: 'low', paths: ['a|b`c.ts'] },
-      ],
-    });
-    expect(out).toContain('`f9.md`, … and 2 more |');
-    expect(out).not.toContain('f10.md');
-    expect(out).toContain('| `empty-diff` | med | (none) |');
-    expect(out).toContain('`a\\|bc.ts`');
+    expect(out).toContain('- `auth`: high risk (rule matched).');
+    expect(out).toContain('- `docs`: low risk (rule matched).');
+    expect(out).not.toContain('Paths');
+    for (const rule of evaluation.rules) for (const path of rule.paths) expect(out).not.toContain(path);
+    expect(renderRiskReceipt({ tier: 'med', rules: [{ id: 'empty-diff', tier: 'med', paths: [] }] })).toContain(
+      'diff is empty',
+    );
+    expect(renderRiskReceipt({ tier: 'low', rules: [] })).toContain('**Tier: low**');
   });
 });
 
@@ -89,6 +77,18 @@ function fakeOctokit(body: string | null, filenames: string[]) {
 }
 
 describe('publishRiskReceipt', () => {
+  it('regenerates a path-free receipt for a mixed diff', async () => {
+    const paths = ['src/widget.test.ts', 'scripts/build.sh', 'src/widget.ts'];
+    const legacy = `${RISK_RECEIPT_START}\n${paths.join(' ')}\n${RISK_RECEIPT_END}`;
+    const f = fakeOctokit(`intro\n${legacy}\noutro`, paths);
+    const result = await publishRiskReceipt({ octokit: f.octokit, owner: 'o', repo: 'r', prNumber: 5 });
+    const body = f.update.mock.calls[0][0].body;
+    expect(body).toContain(renderRiskReceipt(result.evaluation));
+    expect(body).toContain(`**Tier: ${result.evaluation.tier}**`);
+    for (const rule of result.evaluation.rules) expect(body).toContain(`\`${rule.id}\``);
+    for (const path of paths) expect(body).not.toContain(path);
+  });
+
   it('writes a receipt with the tier into the PR body', async () => {
     const f = fakeOctokit('Closes #5', ['src/auth/login.ts']);
     const res = await publishRiskReceipt({ octokit: f.octokit, owner: 'o', repo: 'r', prNumber: 5 });

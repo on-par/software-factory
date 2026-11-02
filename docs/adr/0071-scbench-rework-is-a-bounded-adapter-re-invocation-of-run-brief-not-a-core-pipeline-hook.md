@@ -1,6 +1,6 @@
 # ADR-0071: SCBench rework is a bounded adapter re-invocation of run-brief, not a core pipeline hook
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-09-01
 
 ## Context
