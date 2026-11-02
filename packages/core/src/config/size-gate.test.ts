@@ -1,8 +1,9 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { createTempDirs } from '../harness/temp-dir.js';
 
 import { loadFactoryConfig, loadFactoryConfigForRepo } from './index.js';
 import {
@@ -85,23 +86,23 @@ describe('warnSizeGateModeOnce and markSizeGateModeWarned (#3850)', () => {
 });
 
 describe('loadFactoryConfigForRepo unknown sizeGate.mode (#3850)', () => {
-  afterEach(() => vi.restoreAllMocks());
+  const tempDirs = createTempDirs();
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await tempDirs.cleanup();
+  });
 
   it('loadFactoryConfigForRepo warns once for an unknown sizeGate.mode and resolves it to stack (#3850)', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    const dir = await tempDirs.make('factory-config-');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    try {
-      const path = join(dir, 'config.json');
-      await writeFile(path, JSON.stringify({ sizeGate: { mode: 'bogus' } }));
-      const config = loadFactoryConfigForRepo(path);
-      expect(resolveSizeGateMode(config)).toBe('stack');
-      expect(warn).toHaveBeenCalledTimes(1);
-      const line = String(warn.mock.calls[0]?.[0]);
-      expect(line).toContain(path);
-      expect(line).toContain('"bogus"');
-      expect(line).toContain('off, stack');
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ sizeGate: { mode: 'bogus' } }));
+    const config = loadFactoryConfigForRepo(path);
+    expect(resolveSizeGateMode(config)).toBe('stack');
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0]?.[0]);
+    expect(line).toContain(path);
+    expect(line).toContain('"bogus"');
+    expect(line).toContain('off, stack');
   });
 });
