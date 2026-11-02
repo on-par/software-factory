@@ -1,6 +1,6 @@
 # ADR-0039: The status board is a pure projection of the SSE stream, and unobserved state is pending, never inferred
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-08-19
 
 ## Context

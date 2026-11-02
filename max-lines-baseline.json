@@ -59,7 +59,6 @@
   "packages/scbench-adapter/src/baseline.ts": 861,
   "packages/scbench-adapter/src/cli-run.test.ts": 1531,
   "packages/scbench-adapter/src/cli-run.ts": 577,
-  "packages/server/src/index.test.ts": 624,
   "packages/tui/src/components/App.test.tsx": 1086,
   "packages/tui/src/components/App.tsx": 568
 }

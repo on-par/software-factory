@@ -21,7 +21,7 @@ What works today (this table matches the code on main):
 | `factory supervise` (multi-window unattended runs)    | ✅ Working | Waits for usage headroom, runs the queue, repeats until drained                                                  |
 | Cost tracking (`factory cost`)                        | ✅ Working | Per-task tokens and cost logged to `.factory/state/costs.jsonl`                                                  |
 
-The full matrix, including model harnesses, prompt evals, the server, and experimental local (Ollama) models, is in [docs/status.md](docs/status.md).
+The full matrix, including model harnesses, prompt evals and experimental local (Ollama) models, is in [docs/status.md](docs/status.md).
 
 ## Monorepo structure
 
@@ -34,12 +34,10 @@ packages/
 ├── config/           @on-par/factory-config     typed defaults + constitutions in TypeScript (zero deps)
 ├── contracts/        @on-par/contracts          shared zod schemas (Issue/Epic/Story/Design)
 ├── core/             @on-par/factory-core       engine: router, phases, checkers
-├── dashboard/        @on-par/factory-dashboard  (private) web dashboard, Vite + React
 ├── grade/            @on-par/factory-grade      (private) read-only grader for recorded runs
 ├── product/          @on-par/product            (private) proposer: brain-dump to engineering-ready issues
 ├── repo-context/     @on-par/repo-context       read-only repo reader port (zero deps)
 ├── scbench-adapter/  @on-par/scbench-adapter    (private) SlopCodeBench adapter
-├── server/           @on-par/factory-server     (private) loopback SSE events + lane pause endpoint
 └── tui/              @on-par/factory-tui        read-only Ink TUI for a live run
 ```
 
@@ -225,7 +223,7 @@ Checker commands (compile, tests, lint, evidence, `app_smoke`) inherit only an a
 
 **What's OSS (this repo):** `packages/cli`, `packages/core`, and `packages/config` are the open-source core. The full local pipeline (router, constitutions, checkers, phases) runs from this repo alone, MIT-licensed.
 
-**What isn't published:** `packages/dashboard` (web dashboard, Vite + React walking skeleton), `packages/product` (the proposer: brain-dump to engineering-ready issues), `packages/server` and `packages/scbench-adapter` (SlopCodeBench adapter) live in this monorepo as private workspaces and are not published to npm. A hosted multi-tenant control plane is not part of this codebase. `packages/server` is a small local server. It serves `GET /events`, an SSE relay of the lane lifecycle bus, and `POST /repos/:owner/:repo/lanes/:laneId/pause`, which pauses a lane. Both are unauthenticated and loopback-only.
+**What isn't published:** `packages/product` (the proposer: brain-dump to engineering-ready issues) and `packages/scbench-adapter` (SlopCodeBench adapter) live in this monorepo as private workspaces and are not published to npm. A hosted multi-tenant control plane is not part of this codebase.
 
 For the safety note (agent permissions, worktrees, and when the factory merges), see [Safety](#safety) under Quick start.
 

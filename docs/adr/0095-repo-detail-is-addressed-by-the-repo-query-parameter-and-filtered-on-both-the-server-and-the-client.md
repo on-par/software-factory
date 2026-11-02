@@ -1,6 +1,6 @@
 # ADR-0095: Repo detail is addressed by the `?repo=` query parameter and filtered on both the server and the client
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-09-12
 
 ## Context
