@@ -113,7 +113,6 @@ export const TMPDIR_MKDTEMP_BASELINE: Readonly<Record<string, number>> = {
   'packages/core/src/harness/opencode.test.ts': 1,
   'packages/core/src/hosted/docker.test.ts': 11,
   'packages/core/src/hosted/prepare-workspace-disposable-docker.test.ts': 7,
-  'packages/core/src/hosted/store.sqlite.test.ts': 1,
   'packages/core/src/ingest/index.test.ts': 2,
   'packages/core/src/local-small/overnight.test.ts': 1,
   'packages/core/src/local-small/stepwise.test.ts': 5,
