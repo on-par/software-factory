@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { createSimOctokit, type SimOctokit, type SimRecordedCall } from '../fakes/octokit.js';
-import { createSimWorkspace, simCommitAll, type SimWorkspace } from '../fakes/workspace.js';
+import { createSimWorkspace, simCommitAll, type SimWorkspace } from './sim/workspace.js';
 import { cleanupWorktree } from '../utils/index.js';
 import { withGitLock } from '../utils/lock.js';
 

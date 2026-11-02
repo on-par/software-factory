@@ -1,12 +1,12 @@
-// packages/core/src/fakes/workspace.ts — throwaway local git workspace for simulated runs:
+// packages/core/src/test-support/sim/workspace.ts — throwaway local git workspace for simulated runs:
 // a bare "origin" plus a clone, both under the OS temp dir, so pushes never leave the machine.
 
 import { realpathSync, rmSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { cp, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { execGit } from '../utils/git-exec.js';
+import { execGit } from '../../utils/git-exec.js';
+import { createTempDirs } from '../../harness/temp-dir.js';
 
 export interface SimWorkspace {
   /** Bare repo standing in for the GitHub remote — a local path, so pushes never touch the network. */
@@ -39,7 +39,7 @@ let template: Promise<SimTemplate> | undefined;
  * tests that use them past their deadline (Gate 0, base-red at 9024b07).
  */
 async function buildTemplate(): Promise<SimTemplate> {
-  const root = realpathSync(await mkdtemp(join(tmpdir(), 'factory-sim-template-')));
+  const root = realpathSync(await createTempDirs().make('factory-sim-template-'));
   process.once('exit', () => rmSync(root, { recursive: true, force: true }));
   const origin = join(root, 'origin');
   const repoRoot = join(root, 'repo');
@@ -66,9 +66,10 @@ function simTemplate(): Promise<SimTemplate> {
 
 export async function createSimWorkspace(): Promise<SimWorkspace> {
   const tpl = await simTemplate();
-  const origin = realpathSync(await mkdtemp(join(tmpdir(), 'factory-origin-')));
-  const repoRoot = realpathSync(await mkdtemp(join(tmpdir(), 'factory-repo-')));
-  const plansRoot = realpathSync(await mkdtemp(join(tmpdir(), 'factory-plan-')));
+  const dirs = createTempDirs();
+  const origin = realpathSync(await dirs.make('factory-origin-'));
+  const repoRoot = realpathSync(await dirs.make('factory-repo-'));
+  const plansRoot = realpathSync(await dirs.make('factory-plan-'));
   const plansDir = join(plansRoot, 'plans');
   await mkdir(plansDir, { recursive: true });
 
@@ -81,7 +82,7 @@ export async function createSimWorkspace(): Promise<SimWorkspace> {
     repoRoot,
     plansDir,
     async dispose(): Promise<void> {
-      await Promise.all([origin, repoRoot, plansRoot].map((dir) => rm(dir, { recursive: true, force: true })));
+      await dirs.cleanup();
     },
   };
 }

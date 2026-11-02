@@ -11,8 +11,8 @@ export type { StubCodingHarnessOptions, StubHarnessStep } from './harness/stub.j
 export { StubCodingHarness } from './harness/stub.js';
 export type { SimClock, SimLatency } from './fakes/latency.js';
 export { applyLatency, realSimClock, resolveLatencyMs } from './fakes/latency.js';
-export type { SimModelCall, SimModelExecutorOptions, SimModelStep } from './fakes/model.js';
-export { failOnCall, SimModelExecutor } from './fakes/model.js';
+export type { SimModelCall, SimModelExecutorOptions, SimModelStep } from './test-support/sim/model.js';
+export { failOnCall, SimModelExecutor } from './test-support/sim/model.js';
 export type {
   SimOctokit,
   SimOctokitEndpoint,
@@ -21,8 +21,8 @@ export type {
   SimRecordedCall,
 } from './fakes/octokit.js';
 export { createSimOctokit } from './fakes/octokit.js';
-export type { SimWorkspace } from './fakes/workspace.js';
-export { createSimWorkspace, simCommitAll } from './fakes/workspace.js';
+export type { SimWorkspace } from './test-support/sim/workspace.js';
+export { createSimWorkspace, simCommitAll } from './test-support/sim/workspace.js';
 export type { StubModelExecutorOptions } from './router/stub.js';
 export { StubModelExecutor } from './router/stub.js';
 export { simWorkspace } from './run/ports.js';

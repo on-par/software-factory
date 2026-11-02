@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-20
-- Implemented in: `packages/core/src/phases/build.ts` (cross-harness build failover ladder on usage cap; breaker config in `packages/core/src/config/v2.ts`), `packages/core/src/failure/index.ts` (fingerprint and evidence, #372), `packages/core/src/filing/index.ts` (dedup and auto-file, #373), `packages/core/src/discovery/index.ts`, `author.ts` and `promote.ts` (discovery scan, draft Epic, validation and decompose)
+- Implemented in: `packages/core/src/phases/build.ts` (cross-harness build failover ladder on usage cap; breaker config in `packages/core/src/config/v2.ts`), `packages/core/src/failure/index.ts` (fingerprint and evidence, #372), `packages/core/src/filing/index.ts` (dedup and auto-file, #373)
 
 ## Context
 

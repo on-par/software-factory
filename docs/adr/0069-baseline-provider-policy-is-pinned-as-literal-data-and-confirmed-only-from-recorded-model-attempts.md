@@ -1,6 +1,6 @@
 # ADR-0069: Baseline provider policy is pinned as literal data and confirmed only from recorded model attempts
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-09-01
 
 ## Context

@@ -1,6 +1,6 @@
 # ADR-0008: SlopCodeBench problem inputs come from a pinned scb-problems revision injected via SCBENCH_PROBLEMS_PATH
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-07-29
 
 ## Context

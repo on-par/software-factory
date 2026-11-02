@@ -8,11 +8,7 @@
 // advisory and non-fatal (a failure logs decompose_failed), but the issue is always
 // parked for decomposition afterwards; the driver never throws to its caller.
 //
-// The INVEST gate is owned by core because core must not depend on the private
-// @on-par/product leaf (ADR-0010 already settled this for the size gate). checkStoryInvest
-// deliberately duplicates product's checkInvest (packages/product/src/decompose/invest.ts)
-// predicate-for-predicate and reuses the size.ts constants; the two files carry this
-// comment and MUST change together.
+// The core INVEST gate reuses the size.ts constants (ADR-0010).
 
 import type { Octokit } from '@octokit/rest';
 import { CONTRACTS_SCHEMA_VERSION, EpicSchema, StorySchema } from '@on-par/contracts';
@@ -183,7 +179,7 @@ export function parseDecompositionOutput(
 }
 
 // ---------------------------------------------------------------------------
-// Core-owned INVEST gate (mirror of packages/product/src/decompose/invest.ts)
+// Core-owned INVEST gate
 // ---------------------------------------------------------------------------
 
 export type InvestLetter = 'independent' | 'negotiable' | 'valuable' | 'estimable' | 'small' | 'testable';
@@ -198,8 +194,7 @@ export interface InvestReport {
   violations: readonly InvestViolation[];
 }
 
-/** Lowercase substrings that mark a story as depending on other work. Copied verbatim
- *  from packages/product/src/decompose/invest.ts — change both together. */
+/** Lowercase substrings that mark a story as depending on other work. */
 const DEPENDENCY_CUES: readonly string[] = ['depends on', 'after we', 'once the', 'blocked by', 'requires story'];
 
 function firstDependencyHit(story: Story): string | undefined {
@@ -210,12 +205,7 @@ function firstUntestableCriterion(story: Story): Story['acceptanceCriteria'][num
   return story.acceptanceCriteria.find((criterion) => criterion.when.length === 0 || criterion.then.length === 0);
 }
 
-/**
- * Six predicates, each decidable on a bare Story. Deliberately mirrors
- * packages/product/src/decompose/invest.ts predicate-for-predicate (same reasons,
- * same wording), but the "small" thresholds come from ./size.ts so the two core gates
- * share one threshold pair. Both files MUST change together.
- */
+/** Six predicates on a Story, sharing the small thresholds with size.ts. */
 export function checkStoryInvest(story: Story): InvestReport {
   const violations: InvestViolation[] = [];
 

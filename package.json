@@ -27,7 +27,6 @@
     "eval": "tsx scripts/eval.ts",
     "local-small-scoreboard": "tsx scripts/local-small-scoreboard.ts",
     "sandbox-ab-report": "tsx scripts/sandbox-ab-report.ts",
-    "scbench": "tsx packages/scbench-adapter/src/cli.ts launch",
     "eval-history": "tsx scripts/eval-history.ts",
     "slowest-tests": "tsx scripts/slowest-tests.ts",
     "test-budget": "tsx scripts/test-budget.ts",

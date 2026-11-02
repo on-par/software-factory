@@ -1,6 +1,6 @@
 # ADR-0070: The SCBench regression gate fires only on measured core-cases regressions
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-09-01
 
 ## Context

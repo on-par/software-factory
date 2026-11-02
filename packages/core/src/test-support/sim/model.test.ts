@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { ModelRegistry } from '../models/index.js';
-import { ModelExecutorError } from '../router/executor-error.js';
-import { ModelRouter } from '../router/index.js';
-import { makeStubModelsConfig, makeStubRoutesConfig, specContentFor } from '../test-support/index.js';
-import { realSimClock, type SimClock } from './latency.js';
+import { ModelRegistry } from '../../models/index.js';
+import { ModelExecutorError } from '../../router/executor-error.js';
+import { ModelRouter } from '../../router/index.js';
+import { makeStubModelsConfig, makeStubRoutesConfig, specContentFor } from '../index.js';
+import { realSimClock, type SimClock } from '../../fakes/latency.js';
 import { failOnCall, SimModelExecutor } from './model.js';
 
 function recordingClock(random = 0.5): SimClock & { slept: number[] } {

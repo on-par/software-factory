@@ -1,10 +1,10 @@
-// packages/core/src/fakes/model.ts — reusable fake ModelExecutor: per-call response,
+// packages/core/src/test-support/sim/model.ts — reusable fake ModelExecutor: per-call response,
 // latency, and scripted failure, injected straight into ModelRouter.
 
-import type { TaskType } from '../types/index.js';
-import { ModelExecutorError } from '../router/executor-error.js';
-import type { FailoverReason, ModelExecutor, ModelExecutorContext } from '../router/index.js';
-import { applyLatency, realSimClock, type SimClock, type SimLatency } from './latency.js';
+import type { TaskType } from '../../types/index.js';
+import { ModelExecutorError } from '../../router/executor-error.js';
+import type { FailoverReason, ModelExecutor, ModelExecutorContext } from '../../router/index.js';
+import { applyLatency, realSimClock, type SimClock, type SimLatency } from '../../fakes/latency.js';
 
 export interface SimModelStep {
   /** Resolved output for this call. Defaults to '' when omitted and `fail` is unset. */
