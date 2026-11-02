@@ -146,7 +146,7 @@ export const FactoryConfigSchema = z.object({
     compile_seconds: z.number().default(120),
   }),
   merge: z.object({ auto: z.boolean(), admin: z.boolean().default(false), comment: z.string() }),
-  /** `run.merge.*` mirrors FactoryConfigV2Schema's `run.merge` naming and, when present,
+  /** `run.merge.*` mirrors the `run.merge` shape of RepoFactoryConfigV2Schema in `config/repo.ts` and, when present,
    *  is authoritative over the legacy top-level `merge.*` fields above (see
    *  `resolveMergePolicy`). Left optional with no defaults so "unset" survives parsing
    *  and is distinguishable from an explicit `false`. */
@@ -830,13 +830,3 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string, env: NodeJ
 export function getConstitutionsDir(): string {
   return resolveConfigPath('constitutions');
 }
-
-// ---------- Unified v2 config schema (additive; v1 loaders above are untouched) ----------
-
-export {
-  FactoryConfigV2Schema,
-  factoryConfigV2JsonSchema,
-  loadV2Config,
-  parseV2Config,
-  type FactoryConfigV2,
-} from './v2.js';

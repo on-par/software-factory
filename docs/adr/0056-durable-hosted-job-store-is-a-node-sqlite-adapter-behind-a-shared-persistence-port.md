@@ -1,6 +1,6 @@
 # ADR-0056: Durable hosted job store is a node:sqlite adapter behind a shared persistence port
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-08-27
 
 ## Context

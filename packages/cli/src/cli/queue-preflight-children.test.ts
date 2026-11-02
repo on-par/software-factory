@@ -22,6 +22,78 @@ describe('queue prerequisite sub-issue evidence (#3703)', () => {
     getPullRefs: async () => ({ headRef: 'b', baseRef: 'main', headSha: 's' }),
     branchContains: async () => false,
   };
+  it('rejects an issue response for a different issue', async () => {
+    const octokit = { rest: { issues: { get: async () => ({ data: { number: 3, body: 'text' } }) } } };
+    const ops = createQueuePreflightOps(octokit as never, 'o', 'r');
+    await expect(ops.readIssueBody(2)).rejects.toThrow('issue #2 body response was malformed');
+  });
+
+  it.each([
+    ['missing issue', {}, 'response was incomplete'],
+    ['invalid state', { repository: { issue: { state: 'UNKNOWN' } } }, 'state was malformed'],
+    ['missing closing PRs', { repository: { issue: { state: 'CLOSED' } } }, 'closing PR evidence was incomplete'],
+    [
+      'invalid closing PRs',
+      { repository: { issue: { state: 'CLOSED', closedByPullRequestsReferences: { nodes: [], pageInfo: {} } } } },
+      'closing PR evidence was malformed',
+    ],
+    [
+      'missing cursor',
+      {
+        repository: {
+          issue: {
+            state: 'CLOSED',
+            closedByPullRequestsReferences: { nodes: [], pageInfo: { hasNextPage: true, endCursor: null } },
+          },
+        },
+      },
+      'pagination cursor was malformed',
+    ],
+  ])('rejects %s in prerequisite evidence', async (_name, response, message) => {
+    const octokit = { graphql: async () => response };
+    const ops = createQueuePreflightOps(octokit as never, 'o', 'r');
+    await expect(ops.getPrerequisiteState(2)).rejects.toThrow(message);
+  });
+
+  it('rejects a prerequisite that changes state between pages', async () => {
+    const graphql = vi
+      .fn()
+      .mockResolvedValueOnce({
+        repository: {
+          issue: {
+            state: 'CLOSED',
+            closedByPullRequestsReferences: { nodes: [], pageInfo: { hasNextPage: true, endCursor: 'next' } },
+          },
+        },
+      })
+      .mockResolvedValueOnce({ repository: { issue: { state: 'OPEN' } } });
+    const ops = createQueuePreflightOps({ graphql } as never, 'o', 'r');
+    await expect(ops.getPrerequisiteState(2)).rejects.toThrow('prerequisite #2 state changed during pagination');
+    expect(graphql).toHaveBeenCalledTimes(2);
+  });
+
+  it('parks a linked PR when watching its CI fails', async () => {
+    const watch = vi.fn(async () => {
+      throw new Error('CI unavailable');
+    });
+    await expect(
+      preflightQueuedIssue(
+        { number: 7, labels: [] },
+        {
+          ...baseDeps,
+          findOpenPR: async () => ({
+            number: 71,
+            branch: 'feature',
+            headSha: 'abc',
+            headRepoFullName: 'on-par/software-factory',
+          }),
+          watch,
+        },
+      ),
+    ).resolves.toEqual({ kind: 'park', reason: 'CI watch for PR #71 failed: CI unavailable' });
+    expect(watch).toHaveBeenCalledWith('abc');
+  });
+
   const childOps = (reason: string | undefined, children: unknown, parentPrs: unknown[] = []) => {
     const graphql = vi.fn(async (query: string, _input: unknown) =>
       query.includes('QueuePrerequisiteChildren')

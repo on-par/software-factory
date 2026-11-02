@@ -15,8 +15,8 @@ import { registerSetupCommands } from './program-setup.js';
 const countCommands = (cmd: Command): number => cmd.commands.reduce((n, c) => n + 1 + countCommands(c), 0);
 
 describe('buildProgram', () => {
-  it('buildProgram registers 68 commands', () => {
-    expect(countCommands(buildProgram(PROGRAM_HANDLERS, {}))).toBe(68);
+  it('buildProgram registers 64 commands', () => {
+    expect(countCommands(buildProgram(PROGRAM_HANDLERS, {}))).toBe(64);
   });
 
   it('each help-group registrar registers exactly its HELP_GROUPS commands', () => {
@@ -92,18 +92,8 @@ describe('buildProgram', () => {
     expect(cmdUnpark).toHaveBeenCalledWith('12', expect.objectContaining({ keepOrder: true }));
   });
 
-  it('hosted smoke, runner and queue pass their options to their handlers', async () => {
-    const cmdHostedSmoke = vi.fn(async () => {});
-    const cmdHostedRunner = vi.fn(async () => {});
-    const cmdHostedQueue = vi.fn(async () => {});
-    const handlers = { ...PROGRAM_HANDLERS, cmdHostedSmoke, cmdHostedRunner, cmdHostedQueue };
-    const run = (args: string[]) => buildProgram(handlers, {}).parseAsync(['node', 'factory', 'hosted', ...args]);
-    await run(['smoke', '--image', 'node:22']);
-    expect(cmdHostedSmoke).toHaveBeenCalledWith(expect.objectContaining({ image: 'node:22' }));
-    await run(['runner', '--runner-id', 'r1']);
-    expect(cmdHostedRunner).toHaveBeenCalledWith(expect.objectContaining({ runnerId: 'r1' }));
-    await run(['queue']);
-    expect(cmdHostedQueue).toHaveBeenCalledTimes(1);
+  it('does not register the hosted command', () => {
+    expect(buildProgram(PROGRAM_HANDLERS, {}).commands.some((command) => command.name() === 'hosted')).toBe(false);
   });
 });
 

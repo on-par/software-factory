@@ -1,6 +1,6 @@
 # ADR-0050: The hosted job workspace is always a fresh disposable clone, never the host checkout
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-08-26
 
 ## Context
