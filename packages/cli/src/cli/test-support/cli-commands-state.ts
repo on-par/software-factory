@@ -206,10 +206,16 @@ export const setupWorktree = vi.fn<NonNullable<CliDeps['setupWorktree']>>(async 
 });
 export const cleanupWorktree = vi.fn(async (..._args: Parameters<NonNullable<CliDeps['cleanupWorktree']>>) => {});
 export const gitFetch = vi.fn(async (_repoRoot: string) => {});
-export const inertGitOps: Pick<CliDeps, 'setupWorktree' | 'cleanupWorktree' | 'gitFetch'> = {
+export const checkResumeBaseDrift = vi.fn<NonNullable<CliDeps['checkResumeBaseDrift']>>(async () => ({
+  kind: 'current',
+  ref: 'origin/main',
+  sha: 'c'.repeat(40),
+}));
+export const inertGitOps: Pick<CliDeps, 'setupWorktree' | 'cleanupWorktree' | 'gitFetch' | 'checkResumeBaseDrift'> = {
   setupWorktree,
   cleanupWorktree,
   gitFetch,
+  checkResumeBaseDrift,
 };
 
 export function makeInternalFakes() {

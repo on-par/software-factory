@@ -1,7 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { schemaErrorCheckerOutput } from '../checkers/index.js';
@@ -9,8 +11,10 @@ import { writeSpec } from '../spec/index.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 import {
   checkResumePath,
+  checkResumeBaseDrift,
   createCheckResumeStore,
   createPlanReuseStore,
+  formatBaseMovedRefusal,
   formatPreservedBuildMessage,
   issueBodyHash,
   planReusePath,
@@ -218,7 +222,19 @@ describe('check resume store (#2564)', () => {
   it('formats the preserved-build sentence', () => {
     expect(
       formatPreservedBuildMessage({ issue: workKeyFromIssue(7), branch: 'b', buildMinutes: 40, fixTarget: 'f:1' }),
-    ).toBe('40 min of build preserved at b; fix f:1 then run factory resume 7 --from check');
+    ).toBe(
+      '40 min of build preserved at b; fix f:1 — if the fix lands on the default branch, run factory run-issue 7 (resume refuses once the base moves); if it was local to this machine, run factory resume 7 --from check',
+    );
+  });
+
+  it('formatPreservedBuildMessage points at factory run-issue when the fix lands on main', () => {
+    const msg = formatPreservedBuildMessage({
+      issue: workKeyFromIssue(5),
+      branch: 'b',
+      buildMinutes: 3,
+      fixTarget: 'f',
+    });
+    expect(msg).toContain('factory run-issue 5');
   });
 
   describe('preservedFixTarget', () => {
@@ -250,10 +266,21 @@ describe('check resume store (#2564)', () => {
       expect(preservedFixTarget(configFailure, null)).toBe('the constitution checkers list');
     });
 
-    it('uses the first log path for an environment cause, else the base-failing names', () => {
-      const env = { cause: 'environment' as const, failingChecks: ['tests', 'lint'], logPaths: ['/logs/a.log'] };
-      expect(preservedFixTarget(env, null)).toBe('/logs/a.log');
+    it('uses the first existing log path for an environment cause, else the base-failing names', async () => {
+      const log = join(dir, 'a.log');
+      await writeFile(log, 'x');
+      const env = { cause: 'environment' as const, failingChecks: ['tests', 'lint'], logPaths: [log] };
+      expect(preservedFixTarget(env, null)).toBe(log);
       expect(preservedFixTarget({ ...env, logPaths: [] }, null)).toBe('the base (failing: tests, lint)');
+    });
+
+    it('preservedFixTarget skips log paths that do not exist', async () => {
+      const log = join(dir, 'real.log');
+      await writeFile(log, 'x');
+      const missing = join(dir, 'missing.log');
+      const env = { cause: 'environment' as const, failingChecks: ['tests'], logPaths: [missing, log] };
+      expect(preservedFixTarget(env, null)).toBe(log);
+      expect(preservedFixTarget({ ...env, logPaths: [missing] }, null)).toBe('the base (failing: tests)');
     });
   });
 
@@ -305,5 +332,92 @@ describe('check resume store (#2564)', () => {
       expect(msg).toContain('file: the constitution checkers list');
       expect(msg).toContain('fix: fix the constitution checkers list so every entry is a known checker name');
     });
+  });
+});
+
+describe('checkResumeBaseDrift (#3852)', () => {
+  const temps = createTempDirs();
+  afterEach(() => temps.cleanup());
+
+  const git = (cwd: string, ...args: string[]): string => execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
+  const commit = (cwd: string, file: string): string => {
+    execFileSync('sh', ['-c', `echo ${file} > ${file}`], { cwd });
+    git(cwd, 'add', file);
+    git(cwd, 'commit', '-q', '-m', file);
+    return git(cwd, 'rev-parse', 'HEAD');
+  };
+  const identify = (cwd: string): void => {
+    git(cwd, 'config', 'user.email', 't@example.com');
+    git(cwd, 'config', 'user.name', 'T');
+  };
+
+  async function setup() {
+    const root = await temps.make('drift-');
+    const origin = join(root, 'origin.git');
+    git(root, 'init', '-q', '--bare', '-b', 'main', origin);
+    const repo = join(root, 'repo');
+    git(root, 'clone', '-q', origin, repo);
+    identify(repo);
+    git(repo, 'checkout', '-q', '-B', 'main');
+    const a = commit(repo, 'a.txt');
+    git(repo, 'push', '-q', 'origin', 'main');
+    const kept = join(root, 'kept');
+    git(repo, 'worktree', 'add', '-q', '-b', 'factory/1-x', kept, 'main');
+    identify(kept);
+    commit(kept, 'work.txt');
+    const advance = (): string => {
+      const other = join(root, `other-${Math.random().toString(36).slice(2)}`);
+      git(root, 'clone', '-q', origin, other);
+      identify(other);
+      const b = commit(other, 'b.txt');
+      git(other, 'push', '-q', 'origin', 'main');
+      return b;
+    };
+    return { repo, kept, a, advance };
+  }
+
+  it('checkResumeBaseDrift reports moved from A to B when origin/main advanced past the kept branch base (real git)', async () => {
+    const { repo, kept, a, advance } = await setup();
+    const b = advance();
+    const drift = await checkResumeBaseDrift({ repoRoot: repo, record: { worktree: kept, baseSha: a } });
+    expect(drift).toEqual({ kind: 'moved', from: a, to: b, ref: 'origin/main' });
+    if (drift.kind === 'current') throw new Error('unexpected');
+    const msg = formatBaseMovedRefusal({ issue: workKeyFromIssue(1), drift });
+    expect(msg).toContain(a);
+    expect(msg).toContain(b);
+    expect(msg).toContain('factory run-issue 1');
+  });
+
+  it('checkResumeBaseDrift reports current when the kept branch already contains origin/main (real git)', async () => {
+    const { repo, kept, a, advance } = await setup();
+    const same = await checkResumeBaseDrift({ repoRoot: repo, record: { worktree: kept, baseSha: a } });
+    expect(same).toEqual({ kind: 'current', ref: 'origin/main', sha: a });
+    const b = advance();
+    git(kept, 'fetch', '-q', 'origin');
+    git(kept, 'merge', '-q', '--no-edit', 'origin/main');
+    const merged = await checkResumeBaseDrift({ repoRoot: repo, record: { worktree: kept, baseSha: a } });
+    expect(merged).toEqual({ kind: 'current', ref: 'origin/main', sha: b });
+  });
+
+  it('checkResumeBaseDrift falls back to diffBase when the record has no baseSha (real git)', async () => {
+    const { repo, kept, a, advance } = await setup();
+    advance();
+    const drift = await checkResumeBaseDrift({ repoRoot: repo, record: { worktree: kept, diffBase: a } });
+    expect(drift).toMatchObject({ kind: 'moved', from: a });
+    const bare = await checkResumeBaseDrift({ repoRoot: repo, record: { worktree: kept } });
+    expect(bare).toMatchObject({ kind: 'moved', from: a });
+  });
+
+  it('checkResumeBaseDrift reports unknown when the fetch fails', async () => {
+    const { repo, kept } = await setup();
+    const drift = await checkResumeBaseDrift({
+      repoRoot: repo,
+      record: { worktree: kept },
+      fetch: () => Promise.reject(new Error('offline')),
+    });
+    expect(drift).toEqual({ kind: 'unknown', reason: 'git fetch origin failed: offline' });
+    expect(
+      formatBaseMovedRefusal({ issue: workKeyFromIssue(1), drift: drift as { kind: 'unknown'; reason: string } }),
+    ).toContain('factory run-issue 1');
   });
 });

@@ -140,6 +140,7 @@ factory run                         Claim queued issues and ship them, lanes in 
 factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
 factory land <N>                    Squash-merge the issue's open PR once CI is green, then remove its worktree
 factory stop / factory resume       Halt lanes after their current issue / clear the stop
+factory resume N --from check       Re-run CHECK on a kept build; refuses if the base moved
 factory stop|resume --json         One JSON object: action, repo, stopFlag {before, after}; idempotent
 
 # Setup

@@ -413,7 +413,12 @@ export {
 } from './kpis/steerability.js';
 export { buildTierEvidence, coverageRatchetEvidence, formatTierEvidence } from './kpis/tier-evidence.js';
 export { restackAfterSquashMerge, type StackRestackOutcome } from './run/stack-restack.js';
-export { createCheckResumeStore, createPlanReuseStore } from './run/resume-context.js';
+export {
+  checkResumeBaseDrift,
+  createCheckResumeStore,
+  createPlanReuseStore,
+  formatBaseMovedRefusal,
+} from './run/resume-context.js';
 export type { CheckResumeRecord, CheckResumeStore, PlanReuseRecord, PlanReuseStore } from './run/resume-context.js';
 // Pre-PLAN base health (#2339)
 export { BaselineCache } from './checkers/baseline-cache.js';

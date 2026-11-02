@@ -317,6 +317,7 @@ const INTERNAL_API_KEYS = [
   'fetchRequiredChecksVerdict', // #3186 CI lookup for a timed-out compile; base health (#2339) follows
   'BASE_HEALTH_CHECKERS',
   'checkBaseHealth',
+  'checkResumeBaseDrift',
   'codexChatgptSessionState',
   'hasClaudeLoginEvidence',
   // #3214
@@ -610,6 +611,7 @@ const INTERNAL_API_KEYS = [
   'createGithubLaneClaimStalenessProbe',
   'releaseLaneClaim',
   'formatAdmissionConflict',
+  'formatBaseMovedRefusal',
   'formatBreakerRemaining',
   'withAdmissionGuard',
   // Backend-agnostic queue seam (#1499)
