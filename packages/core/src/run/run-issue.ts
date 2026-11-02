@@ -31,7 +31,11 @@ import { renderEnvironmentReleaseComment } from '../phases/environment-release.j
 import type { SizeBudget } from '../readiness/size.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
-import { codexSandboxWarningMessages, unknownConfigKeyMessages } from '../config/config-schema-lint.js';
+import {
+  codexSandboxWarningMessages,
+  sizeGateModeWarningMessages,
+  unknownConfigKeyMessages,
+} from '../config/config-schema-lint.js';
 import { planPhase as planPhaseDefault, type PlanResult } from '../phases/plan.js';
 import { planConfigParkMessage } from '../phases/plan-spec-guards.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
@@ -563,6 +567,7 @@ async function runIssueOnce(
     if (request.repoConfigFile) {
       for (const m of unknownConfigKeyMessages(request.repoConfigFile)) log('config_unknown_key', m);
       for (const m of codexSandboxWarningMessages(request.repoConfigFile)) log('config_invalid_value', m);
+      for (const m of sizeGateModeWarningMessages(request.repoConfigFile)) log('config_invalid_value', m);
     }
 
     // Pre-PLAN base health (#2339): a red origin/main releases the issue before any model spend;
@@ -997,6 +1002,7 @@ async function runIssueOnce(
               branch: request.branch,
               worktree: ports.workspace.path,
               diffBase: buildDiffBase,
+              baseSha: env.baseSha,
               route: builtRoute,
               model: builtModel,
               buildMinutes,
@@ -1037,6 +1043,7 @@ async function runIssueOnce(
           failingChecks: env.failingChecks,
           ...(failed.failureSignature !== undefined ? { failureSignature: failed.failureSignature } : {}),
           ...(preserve ? { buildPreserved: true } : {}),
+          ...(env.confirmedLocally ? { confirmedLocally: true } : {}),
         };
       }
       const verdict = classifyCheckFailure(failed, opts);

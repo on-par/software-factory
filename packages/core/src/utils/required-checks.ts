@@ -10,6 +10,8 @@ export interface RequiredChecksVerdict {
   basis?: string;
   /** Set when not green because nothing decides code health (no deciding set); a moved base can never turn green (#3620). */
   noCodeHealthChecks?: true;
+  /** Set on a pending verdict whose only non-green cause is required contexts with zero runs on the commit (#3870). */
+  missing?: string[];
 }
 
 interface CheckRunLike {
@@ -18,7 +20,13 @@ interface CheckRunLike {
   conclusion: string | null;
 }
 
-/** Green only when every required context has a completed run with conclusion `success`; fails closed otherwise. */
+// Mirrors ci-watch's isPassingConclusion allow-list (ADR-0014); ci-watch imports this module, so it cannot be imported here.
+const PASSING_HEAD_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
+
+/** A completed run whose conclusion GitHub accepts for a required check: success, neutral or skipped (ADR-0014). */
+const passed = (r: CheckRunLike): boolean => PASSING_HEAD_CONCLUSIONS.has(r.conclusion ?? '');
+
+/** Green only when every required context has a completed run with a passing conclusion (success, neutral or skipped); fails closed otherwise. */
 export function evaluateRequiredChecks(
   required: readonly string[],
   runs: readonly CheckRunLike[],
@@ -26,18 +34,25 @@ export function evaluateRequiredChecks(
   const contexts = [...new Set(required)];
   if (contexts.length === 0) return { green: false, reason: 'no required checks configured', noCodeHealthChecks: true };
   const failed = contexts.flatMap((ctx) =>
-    runs
-      .filter((r) => r.name === ctx && r.status === 'completed' && r.conclusion !== 'success')
-      .map((r) => ({ ctx, run: r })),
+    runs.filter((r) => r.name === ctx && r.status === 'completed' && !passed(r)).map((r) => ({ ctx, run: r })),
   )[0];
   if (failed)
     return { green: false, state: 'failed', reason: `${failed.ctx} ${failed.run.conclusion ?? 'incomplete'}` };
+  const missing: string[] = [];
+  let incomplete = false;
+  let firstReason: string | undefined;
   for (const ctx of contexts) {
     const matching = runs.filter((r) => r.name === ctx);
-    if (matching.length === 0) return { green: false, state: 'pending', reason: `missing ${ctx}` };
-    if (matching.some((r) => r.status !== 'completed'))
-      return { green: false, state: 'pending', reason: `${ctx} pending` };
+    if (matching.length === 0) {
+      missing.push(ctx);
+      firstReason ??= `missing ${ctx}`;
+    } else if (matching.some((r) => r.status !== 'completed')) {
+      incomplete = true;
+      firstReason ??= `${ctx} pending`;
+    }
   }
+  if (incomplete && firstReason) return { green: false, state: 'pending', reason: firstReason };
+  if (missing.length > 0) return { green: false, state: 'pending', reason: `missing ${missing[0]}`, missing };
   return {
     green: true,
     state: 'green',
@@ -46,10 +61,10 @@ export function evaluateRequiredChecks(
   };
 }
 
-/** Green only when there is at least one push-triggered check run and every one completed with `success` (#3195). */
+/** Green only when there is at least one push-triggered check run and every one completed with a passing conclusion (success, neutral or skipped) (#3195). */
 export function evaluatePushChecks(runs: readonly CheckRunLike[]): RequiredChecksVerdict {
   if (runs.length === 0) return { green: false, state: 'pending', reason: 'no push-triggered checks' };
-  const failed = runs.find((r) => r.status === 'completed' && r.conclusion !== 'success');
+  const failed = runs.find((r) => r.status === 'completed' && !passed(r));
   if (failed) return { green: false, state: 'failed', reason: `${failed.name} ${failed.conclusion ?? 'incomplete'}` };
   const pending = runs.find((r) => r.status !== 'completed');
   if (pending) return { green: false, state: 'pending', reason: `${pending.name} pending` };
@@ -71,7 +86,7 @@ export interface RequiredChecksState {
   missing: string[];
   /** Required contexts with a run that is not completed. */
   pending: string[];
-  /** Required contexts with a completed run whose conclusion is not `success`. */
+  /** Required contexts with a completed run whose conclusion is not passing (success, neutral, skipped). */
   failed: string[];
 }
 
@@ -87,7 +102,7 @@ export function classifyRequiredChecks(
   for (const ctx of new Set(required)) {
     const matching = runs.filter((r) => r.name === ctx);
     if (matching.length === 0) result.missing.push(ctx);
-    else if (matching.some((r) => r.status === 'completed' && r.conclusion !== 'success')) result.failed.push(ctx);
+    else if (matching.some((r) => r.status === 'completed' && !passed(r))) result.failed.push(ctx);
     else if (matching.some((r) => r.status !== 'completed')) result.pending.push(ctx);
   }
   if (new Set(required).size === 0) return result;
@@ -96,9 +111,6 @@ export function classifyRequiredChecks(
   else result.state = 'green';
   return result;
 }
-
-// Mirrors ci-watch's isPassingConclusion allow-list (ADR-0014); ci-watch imports this module, so it cannot be imported here.
-const PASSING_HEAD_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
 
 /**
  * Verdict on a head commit (#3208). With required contexts it is classifyRequiredChecks. With none, every check run on the
@@ -220,7 +232,7 @@ export async function fetchRequiredChecksVerdict(
     if (ciSuites.size === 0) {
       const workflow = workflowRuns.find(isCi);
       if (workflow) {
-        const failed = workflow.status === 'completed' && workflow.conclusion !== 'success';
+        const failed = workflow.status === 'completed' && !PASSING_HEAD_CONCLUSIONS.has(workflow.conclusion ?? '');
         return {
           green: false,
           state: failed ? 'failed' : 'pending',

@@ -62,10 +62,16 @@ export function registerObserveCommands(program: Command, handlers: ProgramHandl
   classifierCmd
     .command('report')
     .description(
-      'Confusion table, rule-of-three slip bounds and model-vs-floor agreement from classifier-outcomes.jsonl',
+      'Confusion table, rule-of-three slip bounds, model-vs-floor agreement and trust-tier evidence from classifier-outcomes.jsonl',
     )
     .option('--json', 'Print one JSON object with the same numbers')
     .action((opts: { json?: boolean }) => handlers.cmdClassifierReport(opts));
+  classifierCmd
+    .command('ack-demotion')
+    .description(
+      'Acknowledge recorded trust tier demotions so the effective tier returns to classifier.trustTier (ADR-0148)',
+    )
+    .action(() => handlers.cmdClassifierAckDemotion());
   classifierCmd
     .command('backtest')
     .description('Replay the floor and shadow classifier over merged factory PRs and print the outcome report')

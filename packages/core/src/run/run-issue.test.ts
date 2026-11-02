@@ -2350,6 +2350,14 @@ describe('runIssue — preserved build on a non-code CHECK failure (#2564)', () 
     buildMinutes: 33,
   };
 
+  it('records the base SHA of the environment release in the check-resume record', async () => {
+    vi.mocked(buildPhase).mockResolvedValue({ ...BUILD_OK, diffBase: 'd1', model: 'bm', route: 'claude' });
+    vi.mocked(checkPhase).mockResolvedValue(ENV_FAIL);
+    const checkResume = fakeStore();
+    await runIssue(baseRequest({ issue: 42 }), basePolicy(), basePorts({ checkResume }));
+    expect(checkResume.record.mock.calls[0][0].baseSha).toBe(ENV.baseSha);
+  });
+
   it('appends minutes, branch, file:line and the resume command to environment-released', async () => {
     vi.mocked(buildPhase).mockResolvedValue({ ...BUILD_OK, diffBase: 'd1', model: 'bm', route: 'claude' });
     vi.mocked(checkPhase).mockResolvedValue(ENV_FAIL);
@@ -2367,14 +2375,17 @@ describe('runIssue — preserved build on a non-code CHECK failure (#2564)', () 
         branch: 'issue-1-fix-the-thing',
         worktree: '/tmp/wt',
         diffBase: 'd1',
+        baseSha: ENV.baseSha,
         route: 'claude',
         model: 'bm',
-        fixTarget: '/logs/a.log',
+        fixTarget: 'the base (failing: tests)',
       }),
     );
     expect(checkResume.record.mock.calls[0][0].buildMinutes).toBeGreaterThanOrEqual(1);
     const released = log.mock.calls.find((c) => c[0] === 'environment-released');
-    expect(released?.[1]).toMatch(/\d+ min of build preserved at .+; fix .+ then run factory resume 42 --from check/);
+    expect(released?.[1]).toMatch(
+      /\d+ min of build preserved at .+; fix .+ run factory run-issue 42 .+run factory resume 42 --from check/,
+    );
   });
 
   it('records nothing on a local-only run, and without the port', async () => {

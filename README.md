@@ -140,6 +140,7 @@ factory run                         Claim queued issues and ship them, lanes in 
 factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
 factory land <N>                    Squash-merge the issue's open PR once CI is green, then remove its worktree
 factory stop / factory resume       Halt lanes after their current issue / clear the stop
+factory resume N --from check       Re-run CHECK on a kept build; refuses if the base moved
 factory stop|resume --json         One JSON object: action, repo, stopFlag {before, after}; idempotent
 
 # Setup
@@ -172,7 +173,7 @@ factory usage                       Report 5-hour subscription usage
 
 ### Size gate: stack by default
 
-Oversized issues stack by default: `factory run-issue <N>` (or `--stack`) ships an oversized issue as stacked slice PRs. `run-issue --run-children` was removed and exits 2. `--size-gate file|slice` and `sizeGate.mode: file|slice` are deprecated aliases for stack that print one warning naming `--stack`. `--size-gate` accepts `stack` or `off`; `off` skips both gates.
+Oversized issues stack by default: `factory run-issue <N>` (or `--stack`) ships an oversized issue as stacked slice PRs. `run-issue --run-children` was removed and exits 2. `--size-gate file|slice` and `sizeGate.mode: file|slice` are deprecated aliases for stack that print one warning naming `--stack`. `--size-gate` accepts `stack` or `off`; `off` skips both gates. An unknown `sizeGate.mode` value (case matters: `Off` is unknown) runs as stack with a warning and a ⚠️ `factory doctor` row (#3850).
 
 ## Root npm scripts
 

@@ -40,6 +40,7 @@ describe('getFactoryPaths', () => {
       kpiHistory: resolve(state, 'kpi-history.jsonl'),
       kpiSweepCache: resolve(state, 'kpi-sweep-cache.json'),
       classifierOutcomes: resolve(state, 'classifier-outcomes.jsonl'),
+      tierDemotions: resolve(state, 'tier-demotions.jsonl'),
       ingestWatermark: resolve(state, 'ingest-watermark'),
       ports: resolve(state, 'ports.json'),
       portsLock: resolve(state, 'ports.lock'),

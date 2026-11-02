@@ -200,6 +200,21 @@ describe('configLintChecks (#2610, #2612)', () => {
     }
   });
 
+  it('warns, without failing, on an unknown sizeGate.mode value (#3850)', () => {
+    const rows = configLintChecks(setup(VALID_CONSTITUTION, 'sizeGate:\n  mode: bogus\n'));
+    const warning = rows.find((r) => r.detail.includes('sizeGate.mode'));
+    expect(warning).toMatchObject({ name: 'config', ok: false, optional: true, section: REPO_SECTION });
+    for (const part of ['bogus', 'off, stack', 'stack']) expect(warning!.detail).toContain(part);
+    expect(doctorFailed(rows)).toBe(false);
+  });
+
+  it('prints no sizeGate.mode row for an unset, off or stack mode (#3850)', () => {
+    for (const config of [VALID_CONFIG, 'sizeGate:\n  mode: off\n', 'sizeGate:\n  mode: stack\n']) {
+      const rows = configLintChecks(setup(VALID_CONSTITUTION, config));
+      expect(rows.some((r) => r.detail.includes('sizeGate.mode'))).toBe(false);
+    }
+  });
+
   it('prints no unknown-key row for a config of known keys (#3568)', () => {
     const rows = configLintChecks(setup(VALID_CONSTITUTION, VALID_CONFIG));
     expect(rows.some((r) => r.detail.includes('unknown key'))).toBe(false);

@@ -47,6 +47,7 @@ export function pauseLaneForBrokenBase(
       baseSha: err.baseSha,
       failingChecks: err.failingChecks,
       since: new Date().toISOString(),
+      issue,
       ...(err.awaitingCi ? { ciRecheckAfter: new Date(now().getTime() + BASE_HOLD_CI_RECHECK_MS).toISOString() } : {}),
       ...(err.confirmedLocally ? { confirmedLocally: true as const } : {}),
     });

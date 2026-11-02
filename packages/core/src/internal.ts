@@ -348,7 +348,12 @@ export {
 } from './constitutions/index.js';
 export * from './checkers/internal-exports.js';
 export { isTemplateToken } from './config/template-tokens.js';
-export { findCodexSandboxWarnings, findUnknownConfigKeyWarnings, lintFactoryConfig } from './config/config-lint.js';
+export {
+  findCodexSandboxWarnings,
+  findSizeGateModeWarnings,
+  findUnknownConfigKeyWarnings,
+  lintFactoryConfig,
+} from './config/config-lint.js';
 export { findConfigSchemaErrors } from './config/config-schema-lint.js';
 export type { ConfigLintInput } from './config/config-lint.js';
 export { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './checkers/constitution-preflight.js';
@@ -378,6 +383,16 @@ export {
 export * from './readiness/internal-exports.js';
 export type { IssueRunState, RunStatus } from './types/index.js';
 export {
+  acknowledgeTierDemotions,
+  effectiveTrustTier,
+  findSlipDemotions,
+  MERGED_UNDER_TIER_PATTERN,
+  parseTierDemotions,
+  serializeTierDemotions,
+  tierDemotionComment,
+  type TierDemotionRecord,
+} from './kpis/tier-demotion.js';
+export {
   runStateFile,
   writeIssueRunState,
   readIssueRunState,
@@ -401,11 +416,18 @@ export {
   formatSteerabilityReport,
   type SteerabilityReport,
 } from './kpis/steerability.js';
+export { buildTierEvidence, coverageRatchetEvidence, formatTierEvidence } from './kpis/tier-evidence.js';
 export { restackAfterSquashMerge, type StackRestackOutcome } from './run/stack-restack.js';
-export { createCheckResumeStore, createPlanReuseStore } from './run/resume-context.js';
+export {
+  checkResumeBaseDrift,
+  createCheckResumeStore,
+  createPlanReuseStore,
+  formatBaseMovedRefusal,
+} from './run/resume-context.js';
 export type { CheckResumeRecord, CheckResumeStore, PlanReuseRecord, PlanReuseStore } from './run/resume-context.js';
 // Pre-PLAN base health (#2339)
 export { BaselineCache } from './checkers/baseline-cache.js';
+export { runBaselineCheckers } from './checkers/baseline.js';
 export { BASE_HEALTH_CHECKERS, checkBaseHealth, fetchRequiredChecksVerdict } from './checkers/base-health.js';
 export type { BaseHealthOptions, BaseHealthResult, RequiredChecksVerdict } from './checkers/base-health.js';
 // Codex ChatGPT session freshness for doctor (#2509)

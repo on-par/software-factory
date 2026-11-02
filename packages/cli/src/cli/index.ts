@@ -230,6 +230,8 @@ import {
   findSlicePlanComment,
   listBlockedBy,
   aliasDeprecatedSizeGateMode,
+  checkResumeBaseDrift,
+  formatBaseMovedRefusal,
 } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
 import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
@@ -239,6 +241,7 @@ import { withRepoRunLock } from './repo-run-lock.js';
 export { CliExitError, withRepoRunLock };
 import type { StopMarker } from '@on-par/factory-core/internal';
 import { formatSteerabilityReport } from '@on-par/factory-core/internal';
+import { buildTierEvidence, formatTierEvidence, resolveTrustTier } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
 import { clearSelfUpdateStop } from './self-update-stop.js';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
@@ -260,6 +263,7 @@ import {
   MergeGatedError,
 } from './land-pr.js';
 import { setLandRuntime } from './land-runtime.js';
+import { recordKpiTierDemotions, runAckTierDemotion } from './tier-demotion.js';
 import { cmdRun, type RunOptions } from './run.js';
 import type { RunLaneDeps } from './run-lane.js';
 import { shipIssue } from './ship.js';
@@ -385,10 +389,10 @@ function resolveConfigLoaders(overrides: Partial<ConfigLoaders>, base: ConfigLoa
   };
 }
 
-export type GitOpKey = 'setupWorktree' | 'cleanupWorktree' | 'gitFetch';
+export type GitOpKey = 'setupWorktree' | 'cleanupWorktree' | 'gitFetch' | 'checkResumeBaseDrift';
 type GitOps = Required<Pick<CliDeps, GitOpKey>>;
 
-const DEFAULT_GIT_OPS: GitOps = { setupWorktree, cleanupWorktree, gitFetch };
+const DEFAULT_GIT_OPS: GitOps = { setupWorktree, cleanupWorktree, gitFetch, checkResumeBaseDrift };
 
 /** Git worktree/fetch ops for the current main() or cmdLand invocation; DEFAULT_GIT_OPS outside them. */
 let gitOps: GitOps = DEFAULT_GIT_OPS;
@@ -399,6 +403,7 @@ function resolveGitOps(overrides: Partial<GitOps>, base: GitOps = gitOps): GitOp
     setupWorktree: overrides.setupWorktree ?? base.setupWorktree,
     cleanupWorktree: overrides.cleanupWorktree ?? base.cleanupWorktree,
     gitFetch: overrides.gitFetch ?? base.gitFetch,
+    checkResumeBaseDrift: overrides.checkResumeBaseDrift ?? base.checkResumeBaseDrift,
   };
 }
 
@@ -1555,15 +1560,40 @@ function runRisk(pr: string, opts: { policy?: string } = {}): Promise<void> {
 async function cmdClassifierReport(opts: { json?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const report = summarizeClassifierOutcomes(parseClassifierOutcomes(readTextFileOrEmpty(paths.classifierOutcomes)));
+  const records = parseClassifierOutcomes(readTextFileOrEmpty(paths.classifierOutcomes));
+  const report = summarizeClassifierOutcomes(records);
   const steerability = await buildSteerabilityReport(paths);
+  const readOptional = (p: string) => {
+    try {
+      return existsSync(p) ? readFileSync(p, 'utf8') : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  let configuredTier: ReturnType<typeof resolveTrustTier> | 'unknown' = 'unknown';
+  let configError: string | undefined;
+  try {
+    configuredTier = resolveTrustTier(configLoaders.loadRepoConfig(repoRoot));
+  } catch (err) {
+    configError = err instanceof Error ? err.message : String(err);
+  }
+  const tier = buildTierEvidence({
+    configuredTier,
+    configError,
+    records,
+    mutationSummaryText: readOptional(join(repoRoot, 'mutation-summary.json')),
+    coverageEvidenceText: readOptional(join(repoRoot, 'coverage-ratchet.json')),
+    now: new Date(),
+  });
   if (opts.json) {
-    console.log(JSON.stringify({ ...report, steerability }));
+    console.log(JSON.stringify({ ...report, steerability, tier }));
     return;
   }
   for (const line of formatClassifierReport(report)) console.log(line);
   console.log('');
   for (const line of formatSteerabilityReport(steerability)) console.log(line);
+  console.log('');
+  for (const line of formatTierEvidence(tier)) console.log(line);
 }
 
 async function cmdReport(opts: { steerability?: boolean; json?: boolean } = {}) {
@@ -1695,12 +1725,10 @@ async function cmdKpis(opts: { branchPrefix?: string; json?: boolean } = {}) {
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const events = readEvents(paths.events, { includeSegments: true });
   const costs = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
-
   const recon = await reconstructHumanEventsForKpis(events, branchPrefix);
   let allEvents = recon.events;
   const prSources = recon.sources;
   const { owner, repoName } = recon;
-
   if (prSources.length > 0) {
     try {
       const windowDays = resolveDefectWindowDays(configLoaders.loadFactoryConfigForRepo(paths.config));
@@ -1713,6 +1741,7 @@ async function cmdKpis(opts: { branchPrefix?: string; json?: boolean } = {}) {
       } catch (err: any) {
         console.error(styleText('yellow', `factory: classifier outcomes not recorded (${err?.message ?? err})`));
       }
+      await recordKpiTierDemotions(paths.tierDemotions, allEvents, now, getOctokit(), owner, repoName);
     } catch (err: any) {
       console.error(
         styleText(
@@ -3883,6 +3912,7 @@ export interface CliDeps {
   setupWorktree?: typeof setupWorktree;
   cleanupWorktree?: typeof cleanupWorktree;
   gitFetch?: typeof gitFetch;
+  checkResumeBaseDrift?: typeof checkResumeBaseDrift;
   /** factory-core/internal ops (CI watch, costs, worktree GC, reconcile reaps, local-small). Each defaults to the export of the same name. */
   watchChecks?: typeof watchChecks;
   createLocalSmallDryRun?: typeof createLocalSmallDryRun;
@@ -4021,6 +4051,10 @@ async function resumeFromCheck(issueNum: number): Promise<void> {
       `factory: no preserved build for #${issueNum} — nothing to resume; run factory run-issue ${issueNum}`,
       2,
     );
+  }
+  const drift = await gitOps.checkResumeBaseDrift({ repoRoot, record });
+  if (drift.kind !== 'current') {
+    throw new CliExitError(`factory: ${formatBaseMovedRefusal({ issue: workKeyFromIssue(issueNum), drift })}`, 2);
   }
 
   await withRepoRunLock(
@@ -4173,6 +4207,7 @@ export const PROGRAM_HANDLERS = {
   cmdRuns,
   cmdKpis,
   cmdClassifierReport,
+  cmdClassifierAckDemotion: async () => runAckTierDemotion(await getRepoRoot()),
   cmdReport,
   cmdRisk: runRisk,
   cmdClassifierBacktestEntry,

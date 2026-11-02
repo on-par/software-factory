@@ -350,6 +350,7 @@ describe('cli', () => {
             baseSha: 'abc1234567890def',
             failingChecks: ['tests'],
             since: expect.any(String),
+            issue: expect.any(Number),
           });
           expect(Number.isNaN(Date.parse(hold!.since))).toBe(false);
         },

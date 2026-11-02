@@ -279,7 +279,7 @@ const PUBLIC_API_KEYS = [
 ];
 const JOB_KEYS = 'resolveHostMaxAgentJobs hostAgentJobsDir withHostAgentJobLease'.split(' ');
 const TAIL =
-  'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince listEventSegmentPaths'.split(
+  'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince listEventSegmentPaths acknowledgeTierDemotions effectiveTrustTier findSlipDemotions MERGED_UNDER_TIER_PATTERN parseTierDemotions serializeTierDemotions tierDemotionComment'.split(
     ' ',
   );
 const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError appendSteerEvent'.split(' '); // #3400
@@ -311,12 +311,13 @@ const INTERNAL_API_KEYS = [
   ...'describeChecksProbe holdRunConfigSnapshot'.split(' '), // #3600
   // `factory init --detect-checks`: heuristics, agent prompt and reply, shell-free tokenizer
   ...'CHECK_KINDS buildDetectChecksPrompt detectCheckHeuristics heuristicProposal parseDetectedChecks'.split(' '),
-  'tokenizeEvidenceCommand',
-  ...'BaselineCache resolveBaselineCacheTtlHours'.split(' '), // #3540
+  ...'tokenizeEvidenceCommand coverageRatchetEvidence'.split(' '), // #1957
+  ...'BaselineCache resolveBaselineCacheTtlHours buildTierEvidence formatTierEvidence'.split(' '), // #3540, #1957
   ...'openCodeVersion allProvidersDownReleasePayload'.split(' '), // #3340
   'fetchRequiredChecksVerdict', // #3186 CI lookup for a timed-out compile; base health (#2339) follows
   'BASE_HEALTH_CHECKERS',
   'checkBaseHealth',
+  'checkResumeBaseDrift',
   'codexChatgptSessionState',
   'hasClaudeLoginEvidence',
   // #3214
@@ -407,6 +408,7 @@ const INTERNAL_API_KEYS = [
   'lintFactoryConfig',
   'findConfigSchemaErrors',
   'findCodexSandboxWarnings',
+  'findSizeGateModeWarnings',
   'findUnknownConfigKeyWarnings',
   'formatUnknownCheckerMessage',
   'describePullRequestAccessError',
@@ -461,6 +463,7 @@ const INTERNAL_API_KEYS = [
     ' ',
   ), // #3380, #3381, #3149
   ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles publishRiskReceipt renderRiskReceipt'.split(' '), // #3386
+  'runBaselineCheckers', // #3851
   ...'upsertRiskReceipt riskPolicyConfigFile loadRiskPolicy formatRiskPolicy'.split(' '), // #3387
   ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad resolveBaseHealthChecks'.split(' '), // #3048, #3290
   ...'hostBuildSlotsDir listHostSlots syncLandBranch listIssueRuns'.split(' '), // syncLandBranch: #1886; run readers: #3448
@@ -609,6 +612,7 @@ const INTERNAL_API_KEYS = [
   'createGithubLaneClaimStalenessProbe',
   'releaseLaneClaim',
   'formatAdmissionConflict',
+  'formatBaseMovedRefusal',
   'formatBreakerRemaining',
   'withAdmissionGuard',
   // Backend-agnostic queue seam (#1499)

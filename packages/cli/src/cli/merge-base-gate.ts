@@ -7,6 +7,8 @@ export class BaseCiPendingError extends Error {
   prNumber?: number;
 }
 
+const MISSING_CONTEXT_GRACE_MS = 2 * 60_000;
+
 type RecordState = { repo: string; merge: string; paused?: boolean };
 type Options = {
   file: string;
@@ -40,7 +42,8 @@ export function createMergeBaseGate(opts: Options) {
     mkdirSync(dirname(opts.file), { recursive: true });
     writeFileSync(opts.file, `${JSON.stringify({ ...all, [opts.repo]: entry }, null, 2)}\n`);
   };
-  const once = async (): Promise<boolean> => {
+  const warned = new Set<string>();
+  const once = async (graceOver: boolean): Promise<boolean> => {
     let sha: string;
     let verdict: RequiredChecksVerdict;
     try {
@@ -59,6 +62,17 @@ export function createMergeBaseGate(opts: Options) {
     }
     if (entry?.paused) throw new BaseCiPendingError(`base merge pause for ${entry.merge}: ${verdict.reason}`);
     if (verdict.noCodeHealthChecks) return true;
+    if (verdict.state === 'pending' && verdict.missing?.length) {
+      if (!graceOver) return false;
+      if (!warned.has(sha)) {
+        warned.add(sha);
+        opts.log(
+          'warn',
+          `base CI: required check(s) ${verdict.missing.join(', ')} have no run on ${sha.slice(0, 8)}; base has no hosted code-health signal, merging without the base CI gate`,
+        );
+      }
+      return true;
+    }
     if (verdict.state === 'failed') {
       let related = entry?.merge === sha;
       if (entry && !related) {
@@ -79,10 +93,11 @@ export function createMergeBaseGate(opts: Options) {
   const check = async (wait = true): Promise<void> => {
     const now = opts.now ?? Date.now;
     const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-    const deadline = now() + 30 * 60_000;
+    const start = now();
+    const deadline = start + 30 * 60_000;
     let delay = 5_000;
     for (;;) {
-      if (await once()) return;
+      if (await once(!wait || now() - start >= MISSING_CONTEXT_GRACE_MS)) return;
       if (!wait || now() >= deadline) throw new BaseCiPendingError('base CI is pending; leaving PR open');
       await sleep(Math.min(delay, deadline - now()));
       delay = Math.min(delay * 2, 60_000);

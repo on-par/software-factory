@@ -120,4 +120,65 @@ describe('runBaselineCheckers CI cross-check (#3540)', () => {
     expect(onCacheInvalidated).toHaveBeenCalledTimes(2);
     expect(runCheckers).toHaveBeenCalledTimes(1);
   });
+
+  describe('confirmedLocally (#3851)', () => {
+    const failRun = (timedOut?: true) => ({
+      failures: 1,
+      passes: 0,
+      skips: 0,
+      total: 1,
+      results: [{ checker: 'links', result: 'FAIL' as const, details: 'fresh', ...(timedOut ? { timedOut } : {}) }],
+    });
+    const depsWith = (dir: string, results: ReturnType<typeof failRun>) => ({
+      runCommand: vi.fn(async () => ok()),
+      runCheckers: vi.fn(async () => results) as never,
+      makeTempDir: () => mkdtemp(join(dir, 'q-')),
+    });
+
+    it('marks the report confirmedLocally when a fresh base run fails while CI is green (#3851)', async () => {
+      const { run } = await setup([out('links', 'FAIL')]);
+      const dir = await tempDirs.make('baseline-fresh-');
+      const report = await run({
+        cache: undefined,
+        deps: depsWith(dir, failRun()),
+        requiredChecksVerdict: async () => ({ green: true, reason: 'ok' }),
+      });
+      expect(report.confirmedLocally).toBe(true);
+    });
+
+    it('re-run after a CI-green cache invalidation that still fails is confirmedLocally (#3851)', async () => {
+      const { run } = await setup([out('links', 'FAIL')]);
+      const dir = await tempDirs.make('baseline-rerun-');
+      const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
+      const report = await run({ deps: depsWith(dir, failRun()), requiredChecksVerdict });
+      expect(report.confirmedLocally).toBe(true);
+      expect(requiredChecksVerdict).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not mark confirmedLocally when CI is not green, the lookup throws, or the FAIL timed out (#3851)', async () => {
+      const { run } = await setup([]);
+      const dir = await tempDirs.make('baseline-neg-');
+      const failing = [out('links', 'FAIL')];
+      const notGreen = await run({
+        failing,
+        deps: depsWith(dir, failRun()),
+        requiredChecksVerdict: async () => ({ green: false, reason: 'red' }),
+      });
+      const thrown = await run({
+        failing,
+        deps: depsWith(dir, failRun()),
+        requiredChecksVerdict: async () => {
+          throw new Error('rate limited');
+        },
+      });
+      const timedOut = await run({
+        failing,
+        deps: depsWith(dir, failRun(true)),
+        requiredChecksVerdict: async () => ({ green: true, reason: 'ok' }),
+      });
+      expect(notGreen.confirmedLocally).toBeUndefined();
+      expect(thrown.confirmedLocally).toBeUndefined();
+      expect(timedOut.confirmedLocally).toBeUndefined();
+    });
+  });
 });

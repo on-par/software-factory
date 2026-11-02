@@ -9,9 +9,22 @@ section to `## X.Y.Z - date`. See
 
 ## 0.9.27 - 2026-11-02
 
-A smaller factory: the unpublished dashboard and server packages, the experimental hosted execution commands, the discovery exports, the unused ProjectV2 board-queue stack and the unused v2 config schema exports are gone, with no change to shipped commands or repo config (#3862, #3863, #3864, #3865, #3866, #3867).
+A smaller factory: the unpublished dashboard and server packages, the experimental hosted execution commands, the discovery exports, the unused ProjectV2 board-queue stack and the unused v2 config schema exports are gone, with no change to shipped commands or repo config (#3862, #3863, #3864, #3865, #3866, #3867). Also: trust-tier evidence and demotion (#1957, #1959) and five land, base-gate and config fixes (#3850, #3851, #3852, #3870, #3871).
 All seven published `@on-par` packages move to 0.9.27 in lockstep.
 Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Added
+
+- `factory classifier report` (and `--json` as `tier`) shows trust-tier promotion evidence: configured tier, coverage ratchet, per-package mutation vs floor, human-intervention rate with a caveat, rule-of-three slips and `eligibleFor` with the unmet criteria; missing or stale evidence is `unknown`, never 0%; `npm run coverage-ratchet -- --out coverage-ratchet.json` writes the coverage evidence (#1957).
+- A post-merge defect on a PR auto-merged under trust tier T1 or T2 records a tier demotion, lowers the effective tier one step, and comments once on the defect issue; `factory classifier ack-demotion` restores the configured tier (#1959).
+
+### Fixed
+
+- An unknown `sizeGate.mode` (for example `Off`, `none`, `bogus`) still runs as stack but now warns at config load and run start, and shows a non-failing ⚠️ `factory doctor` row naming the value and `off, stack` (#3850).
+- A CHECK environment release whose fresh base re-run fails while GitHub CI is green now writes a `confirmedLocally` base hold, so the lane no longer re-claims and rebuilds the issue every poll; `factory status` names the waiting issue (#3851).
+- `factory resume N --from check` refuses with both SHAs and `factory run-issue N` when origin's default branch moved since the build was kept, instead of re-checking on the stale base; the preserved-build hint points at `run-issue` for fixes that land on main and only names log paths that exist (#3852).
+- Land no longer stalls when a required check only runs on pull requests: a required context with no run on the base head is treated as no hosted base signal, merges proceed after a short grace and one warn event names the context (#3870).
+- The base CI gate and base health treat a `skipped` or `neutral` required check as passing, like GitHub, so a skipped check on main no longer writes a permanent merge pause or marks `hosted-ci` failing; an existing pause clears on the next check (#3871).
 
 ### Changed
 

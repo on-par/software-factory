@@ -1,6 +1,6 @@
 // packages/cli/src/cli/land-risk.test.ts — risk tier gate on the autonomous merge path (#3381)
 import type { Octokit } from '@octokit/rest';
-import type { TrustTier } from '@on-par/factory-core/internal';
+import { MERGED_UNDER_TIER_PATTERN, type TrustTier } from '@on-par/factory-core/internal';
 import { describe, expect, it, vi } from 'vitest';
 
 import { enforceRiskAtLand, listPullRequestPaths, type RiskGateInput } from './land-risk.js';
@@ -85,6 +85,14 @@ describe('enforceRiskAtLand', () => {
     await enforceRiskAtLand(gateInput(f, 'T2', ['risk:high']).input);
     expect(f.createComment).not.toHaveBeenCalled();
     expect(f.addLabels).toHaveBeenCalledWith({ owner: 'o', repo: 'r', issue_number: PR, labels: ['needs-human'] });
+  });
+
+  it('the eligible land message matches MERGED_UNDER_TIER_PATTERN', async () => {
+    const f = fake(files('docs/readme.md'));
+    const { input, log } = gateInput(f, 'T2');
+    await enforceRiskAtLand(input);
+    const landCall = log.mock.calls.find(([type]) => type === 'land');
+    expect(MERGED_UNDER_TIER_PATTERN.exec(String(landCall?.[1]))?.[1]).toBe('T2');
   });
 
   it('never adds a factory queue label for any tier', async () => {
