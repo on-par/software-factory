@@ -408,6 +408,7 @@ const INTERNAL_API_KEYS = [
   'lintFactoryConfig',
   'findConfigSchemaErrors',
   'findCodexSandboxWarnings',
+  'findSizeGateModeWarnings',
   'findUnknownConfigKeyWarnings',
   'formatUnknownCheckerMessage',
   'describePullRequestAccessError',

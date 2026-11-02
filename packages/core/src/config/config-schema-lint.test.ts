@@ -6,6 +6,7 @@ import { createTempDirs } from '../harness/temp-dir.js';
 import {
   findCodexSandboxWarnings,
   findConfigSchemaErrors,
+  findSizeGateModeWarnings,
   findUnknownConfigKeyWarnings,
 } from './config-schema-lint.js';
 
@@ -179,5 +180,47 @@ describe('findCodexSandboxWarnings (#3829)', () => {
     expect(findCodexSandboxWarnings(files('config.yaml', 'a: [unclosed\n'))).toEqual([]);
     const missing = files('config.yaml', '');
     expect(findCodexSandboxWarnings({ ...missing, absPath: `${missing.absPath}.nope` })).toEqual([]);
+  });
+});
+
+describe('findSizeGateModeWarnings (#3850)', () => {
+  const temp = createTempDirs();
+  afterEach(() => temp.cleanup());
+
+  function files(name: string, content: string) {
+    const dir = temp.makeSync('size-gate-mode-');
+    writeFileSync(join(dir, name), content);
+    return { absPath: join(dir, name), relPath: `.factory/${name}` };
+  }
+
+  it('reports an unknown sizeGate.mode with file, line and fix', () => {
+    const file = files('config.yaml', 'sizeGate:\n  mode: Off\n');
+    const [f, ...rest] = findSizeGateModeWarnings(file);
+    expect(rest).toEqual([]);
+    expect(f).toMatchObject({ file: '.factory/config.yaml', line: 2, path: 'sizeGate.mode' });
+    expect(f!.message).toContain('"Off"');
+    expect(f!.message).toContain('off, stack');
+    expect(findConfigSchemaErrors(file)).toEqual([]);
+  });
+
+  it('reports a JSON config without a line', () => {
+    const [f] = findSizeGateModeWarnings(files('config.json', '{"sizeGate":{"mode":"none"}}'));
+    expect(f).toMatchObject({ path: 'sizeGate.mode' });
+    expect(f!.line).toBeUndefined();
+  });
+
+  it('returns nothing for valid, missing, deprecated, non-mapping, unparsable or absent files', () => {
+    for (const body of [
+      'sizeGate:\n  mode: off\n',
+      'sizeGate:\n  mode: stack\n',
+      'sizeGate:\n  mode: slice\n',
+      'sizeGate:\n  maxSlices: 3\n',
+      '- a\n',
+      'a: [unclosed\n',
+    ]) {
+      expect(findSizeGateModeWarnings(files('config.yaml', body))).toEqual([]);
+    }
+    const missing = files('config.yaml', '');
+    expect(findSizeGateModeWarnings({ ...missing, absPath: `${missing.absPath}.nope` })).toEqual([]);
   });
 });

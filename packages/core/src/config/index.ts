@@ -34,6 +34,7 @@ import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS, retiredHarnessReplacement } from '../harness/catalog.js';
 import type { FailoverReason } from '../types/index.js';
 import { SandboxConfigSchema, warnCodexSandboxOnce } from './sandbox-schema.js';
+import { markSizeGateModeWarned, warnSizeGateModeOnce } from './size-gate.js';
 import { ModelEffortsSchema } from './effort.js';
 import { resolvePrecedence, type ConfigSource } from './precedence.js';
 import { HarnessDeclarationSchema, type HarnessDeclaration } from './harness-declaration.js';
@@ -190,7 +191,7 @@ export const FactoryConfigSchema = z.object({
       contextCeiling: z.record(z.string(), z.number().int().nonnegative()).default({ 'codex-cli': 120000 }),
     })
     .default({ publishFromBuild: false, contextCeiling: { 'codex-cli': 120000 } }),
-  // Plain string on purpose: an unknown mode must load and resolve to `stack`, not throw.
+  // Plain string on purpose: an unknown mode must load, resolve to `stack` and warn, not throw (ADR-0160, #3850).
   sizeGate: z
     .object({
       mode: z.string().optional(),
@@ -468,6 +469,7 @@ export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
     throw new Error(`Invalid ${configPath}: expected a JSON object`);
   }
   warnCodexSandboxOnce(configPath, raw);
+  const sizeGateWarned = warnSizeGateModeOnce(configPath, raw);
 
   const result = FactoryConfigSchema.safeParse(mergeRuntimeOverlay(raw));
   if (!result.success) {
@@ -476,6 +478,7 @@ export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
       .join('; ');
     throw new Error(`Invalid ${configPath}: ${issues}`);
   }
+  if (sizeGateWarned) markSizeGateModeWarned(result.data);
   return result.data;
 }
 

@@ -939,18 +939,30 @@ describe('resolveSizeGateMode (#2048)', () => {
     }
   });
 
-  it.each(['SLICE', 'OFF', ' off ', '', 'STACK', ' stack '])(
-    'resolves unknown mode %j to stack without a warning',
+  it.each(['SLICE', 'OFF', ' off ', 'STACK', ' stack ', 'none'])(
+    'resolves unknown mode %s to stack with one warning (#3850)',
     (mode) => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       try {
         expect(resolveSizeGateMode(withMode(mode))).toBe('stack');
-        expect(warn).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(String(warn.mock.calls[0]?.[0])).toContain('off, stack');
       } finally {
         warn.mockRestore();
       }
     },
   );
+
+  it('resolves an empty mode to stack with one warning (#3850)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      expect(resolveSizeGateMode(withMode(''))).toBe('stack');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('off, stack');
+    } finally {
+      warn.mockRestore();
+    }
+  });
 
   it('isExplicitStackMode is true only for stack', () => {
     expect(isExplicitStackMode(withMode('stack'))).toBe(true);
@@ -989,8 +1001,13 @@ describe('resolveSizeGateMode (#2048)', () => {
       const path = join(dir, 'factory.json');
       const base = loadFactoryConfig();
       await writeFile(path, JSON.stringify({ ...base, sizeGate: { mode: 'bogus' } }));
-      const config = loadFactoryConfig(path);
-      expect(resolveSizeGateMode(config)).toBe('stack');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const config = loadFactoryConfig(path);
+        expect(resolveSizeGateMode(config)).toBe('stack');
+      } finally {
+        warn.mockRestore();
+      }
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

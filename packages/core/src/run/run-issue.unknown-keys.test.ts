@@ -179,6 +179,20 @@ describe('runIssue unknown config keys (#3568)', () => {
     expect(warnings[0][1]).toContain('set sandbox.codexSandbox to "danger-full-access" or "workspace-write"');
   });
 
+  it('logs one config_invalid_value warning for an unknown sizeGate.mode and proceeds to PLAN (#3850)', async () => {
+    const events = await eventsFor('sizeGate:\n  mode: bogus\n');
+    const warnings = events.filter(([type]) => type === 'config_invalid_value');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0][1]).toContain('sizeGate.mode');
+    expect(warnings[0][1]).toContain('"bogus"');
+    expect(warnings[0][1]).toContain('off, stack');
+  });
+
+  it('logs no config warning for sizeGate.mode off (#3850)', async () => {
+    const events = await eventsFor('sizeGate:\n  mode: off\n');
+    expect(events.some(([type]) => type === 'config_invalid_value')).toBe(false);
+  });
+
   it('logs no config warning for a valid sandbox.codexSandbox (#3829)', async () => {
     const events = await eventsFor('sandbox:\n  codexSandbox: workspace-write\n');
     expect(events.some(([type]) => type === 'config_invalid_value' || type === 'config_unknown_key')).toBe(false);
