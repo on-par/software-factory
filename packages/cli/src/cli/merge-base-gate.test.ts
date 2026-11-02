@@ -116,4 +116,52 @@ describe('merge base gate', () => {
     await expect(gate.check()).rejects.toThrow('ancestry lookup failed');
     expect(base.log).not.toHaveBeenCalled();
   });
+  describe('missing required context (#3870)', () => {
+    const missing = { green: false, state: 'pending' as const, reason: 'missing test', missing: ['test'] };
+    const gateFor = (verdict: () => Promise<typeof missing>, log = vi.fn()) => {
+      let now = 0;
+      const gate = createMergeBaseGate({
+        file: join(dirs.makeSync('merge-missing-'), 'state.json'),
+        repo: 'o/r',
+        log,
+        head: async () => 'abcdef123456',
+        verdict,
+        now: () => now,
+        sleep: async (ms) => {
+          now += ms;
+        },
+      });
+      return { gate, log, elapsed: () => now };
+    };
+    it('still waits the full deadline when a missing context is mixed with a pending run', async () => {
+      const { gate, elapsed } = gateFor(async () => ({ green: false, state: 'pending', reason: 'missing a' }) as never);
+      await expect(gate.check()).rejects.toThrow('pending');
+      expect(elapsed()).toBe(30 * 60_000);
+    });
+    it("returns to the failed path when the missing context's run appears and fails during the grace", async () => {
+      const verdict = vi
+        .fn()
+        .mockResolvedValueOnce(missing)
+        .mockResolvedValue({ green: false, state: 'failed', reason: 'test failure' });
+      const { gate, log } = gateFor(verdict);
+      await expect(gate.check()).rejects.toThrow('failed');
+      expect(log).not.toHaveBeenCalled();
+    });
+    it('still throws the pause when the entry is paused and the verdict is missing-only', async () => {
+      const dir = dirs.makeSync('merge-missing-pause-');
+      const opts = {
+        file: join(dir, 'state.json'),
+        repo: 'o/r',
+        log: vi.fn(),
+        head: async () => 'child',
+        descends: async () => true,
+      };
+      const failed = { green: false, state: 'failed' as const, reason: 'failure' };
+      createMergeBaseGate({ ...opts, verdict: async () => failed }).record('merge');
+      await expect(createMergeBaseGate({ ...opts, verdict: async () => failed }).check()).rejects.toThrow('failed');
+      await expect(createMergeBaseGate({ ...opts, verdict: async () => missing }).check(false)).rejects.toThrow(
+        'pause',
+      );
+    });
+  });
 });
