@@ -320,9 +320,6 @@ import {
   missingTokenMessage,
   notInitializedMessage,
 } from './first-run.js';
-import { cmdHostedSmoke } from './hosted.js';
-import { cmdHostedQueue } from './hosted-queue.js';
-import { cmdHostedRunner } from './hosted-runner.js';
 import { resolveFactoryCheckoutCommit, runFilingPreview } from './filing.js';
 import { cmdRisk } from './risk.js';
 import { buildFeedbackDeps, type FeedbackDeps, resolveFeedbackRepo, runFeedback } from './feedback.js';
@@ -4192,9 +4189,6 @@ export const PROGRAM_HANDLERS = {
   cmdQueueReconcile,
   cmdQueueList,
   cmdQueueClear,
-  cmdHostedSmoke,
-  cmdHostedRunner,
-  cmdHostedQueue,
   cmdCheck,
   cmdDraft,
   cmdShip,

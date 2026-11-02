@@ -7,6 +7,30 @@ const dirs = createTempDirs();
 afterEach(() => dirs.cleanup());
 
 describe('merge base gate', () => {
+  it('uses the default timer before retrying pending CI', async () => {
+    vi.useFakeTimers();
+    try {
+      const verdict = vi
+        .fn()
+        .mockResolvedValueOnce({ green: false, state: 'pending', reason: 'running' })
+        .mockResolvedValueOnce({ green: true });
+      const gate = createMergeBaseGate({
+        file: join(dirs.makeSync('merge-timer-'), 'state'),
+        repo: 'o/r',
+        log: vi.fn(),
+        head: async () => 'base',
+        verdict,
+      });
+      const checking = gate.check();
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(verdict).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(checking).resolves.toBeUndefined();
+      expect(verdict).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('waits for pending CI, blocks failure, and clears a recorded pause only on green', async () => {
     const dir = dirs.makeSync('merge-gate-');
     const log = vi.fn();

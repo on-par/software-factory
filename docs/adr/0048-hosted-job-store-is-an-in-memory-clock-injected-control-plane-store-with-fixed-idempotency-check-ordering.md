@@ -1,6 +1,6 @@
 # ADR-0048: Hosted job store is an in-memory, clock-injected control-plane store with fixed idempotency check-ordering
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-08-26
 
 ## Context

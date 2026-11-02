@@ -1,6 +1,6 @@
 # ADR-0052: Hosted-exec GitHub access is brokered per job through an injected mint port, never ambient host credentials
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-08-26
 
 ## Context
