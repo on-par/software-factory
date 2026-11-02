@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { isMap, isScalar, isSeq, LineCounter, parseDocument, YAMLParseError, type Document } from 'yaml';
 import { factoryRuntimeConfigIssues, isPlainObject, type ConfigSchemaIssue } from './index.js';
 import { codexSandboxValueIssue } from './sandbox-schema.js';
+import { sizeGateModeValueIssue } from './size-gate.js';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { repoRoutingConfigIssues } from './repo.js';
 import { unknownRuntimeConfigKeys } from './unknown-runtime-keys.js';
@@ -189,6 +190,43 @@ export function findCodexSandboxWarnings(configFile: { absPath: string; relPath:
 /** `findCodexSandboxWarnings` rendered one `file[:line]: message; fix` string, for the run-start log. */
 export function codexSandboxWarningMessages(configFile: { absPath: string; relPath: string }): string[] {
   return findCodexSandboxWarnings(configFile).map(
+    (w) => `${w.file}${w.line ? `:${w.line}` : ''}: ${w.message}; ${w.fix}`,
+  );
+}
+
+/** Warning for an unknown string sizeGate.mode, which runs as stack (#3850, ADR-0160 warn stage). Read/parse errors
+ *  are `findConfigSchemaErrors`' to report, so they yield []. Read-only. */
+export function findSizeGateModeWarnings(configFile: { absPath: string; relPath: string }): ConfigSchemaFinding[] {
+  const { absPath, relPath } = configFile;
+  if (!existsSync(absPath)) return [];
+  let raw: unknown;
+  try {
+    raw = readRepoConfigFile(absPath);
+  } catch {
+    return [];
+  }
+  if (!isPlainObject(raw)) return [];
+  const issue = sizeGateModeValueIssue(raw);
+  if (!issue) return [];
+  const lc = new LineCounter();
+  const doc: Document | undefined = /\.ya?ml$/i.test(absPath)
+    ? parseDocument(readFileSync(absPath, 'utf8').replace(/^\uFEFF/, ''), { lineCounter: lc })
+    : undefined;
+  const line = doc ? yamlLineForPath(doc, lc, ['sizeGate', 'mode']) : undefined;
+  return [
+    {
+      file: relPath,
+      ...(line !== undefined ? { line } : {}),
+      path: 'sizeGate.mode',
+      message: issue.message,
+      fix: issue.fix,
+    },
+  ];
+}
+
+/** `findSizeGateModeWarnings` rendered one `file[:line]: message; fix` string, for the run-start log. */
+export function sizeGateModeWarningMessages(configFile: { absPath: string; relPath: string }): string[] {
+  return findSizeGateModeWarnings(configFile).map(
     (w) => `${w.file}${w.line ? `:${w.line}` : ''}: ${w.message}; ${w.fix}`,
   );
 }
