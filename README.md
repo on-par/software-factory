@@ -224,7 +224,7 @@ A repo with its own PR preview deployments can opt in to a SHIP gate. Once the P
 ```yaml
 preview:
   source:
-    kind: deployment # or: { kind: comment, urlPattern: 'Preview: (?<url>https://\S+)' }
+    kind: deployment
     environment: 'preview/pr-*' # glob; `*` matches any run of characters
   readyPath: / # polled until it answers expectedStatus
   expectedStatus: 200
@@ -232,10 +232,27 @@ preview:
   command: [npm, run, smoke:preview] # argv, never shell-interpolated
   urlEnv: PREVIEW_URL # env var that carries the URL to the command
   commandTimeoutSeconds: 600
-  artifacts: [playwright-report/index.html] # attached when present
+  artifacts: [playwright-report] # copied into the run's logs when present
 ```
 
-The result is `pass`, `fail` (the command exited non-zero) or `preview-unavailable` (no URL, or never ready before `readyTimeoutSeconds`). The last two go back to BUILD rework, then CHECK and SHIP again under the CI rework budget, and park `fail` when it runs out. Evidence (URL, head SHA, command, exit code, duration, output tail, artifacts, reason) is written to `preview-check.json` in the run's logs directory. Repos without a `preview` section behave as before.
+A bot that posts the preview link as a PR comment can be the source instead. You must name who is trusted to post it, with `authors` (logins), `authorAssociations` (`OWNER`, `MEMBER`, `COLLABORATOR`), or both. Comments by anyone else are ignored.
+
+```yaml
+preview:
+  source:
+    kind: comment
+    urlPattern: 'Preview: (?<url>https://\S+)' # the URL is the `url` group, else group 1
+    authors: ['vercel[bot]']
+  command: [npm, run, smoke:preview]
+```
+
+The newest trusted comment wins, but only if it names the head commit (its first 7 characters or more) or was posted or edited after the head commit. After a rework push, an older comment for the previous commit is never used.
+
+The preview URL must be a public `http(s)` host. The gate refuses `localhost`, `*.localhost`, `*.local`, `*.internal`, single-label hosts, URLs with credentials, and loopback, private, link-local, unique-local and IPv4-mapped IPv6 addresses. It also refuses a hostname that resolves to one of those addresses. A refused URL is `preview-unavailable` and is never probed.
+
+The result is `pass`, `fail` (the command exited non-zero) or `preview-unavailable` (no URL, never ready before `readyTimeoutSeconds`, a refused host, or CI still pending when the watch timed out). `fail` and `preview-unavailable` go back to BUILD rework, then CHECK and SHIP again under the CI rework budget, and park `fail` when it runs out. CI still pending does not use a rework round. It parks `fail` at once and leaves the PR as a draft.
+
+Evidence is written to `preview-check.json` in the run's logs directory, also when the gate itself throws. It holds the URL with its query string masked, head SHA, command, exit code, readiness wait, command run time, output tail (stdout and stderr), artifacts and reason. Artifacts are copied to `preview-artifacts/` in the same directory. SHIP also writes the result as a "Preview check" block in the PR body and updates that block on each SHIP. A preview pass does not change land: land still refuses to merge into a red main. Repos without a `preview` section behave as before.
 
 ## Open-core boundary
 
