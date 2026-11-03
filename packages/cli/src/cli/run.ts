@@ -21,14 +21,13 @@ import {
 import type { FactoryEvent, HealthKpis, KpiReconstruction, QueueDiagnostic } from '@on-par/factory-core';
 import {
   createDockerEngine,
-  createGithubQueue,
+  createQueueBackend,
   createFileIterateStore,
   createFileReviewReworkStore,
   createOctokitCollaboratorPermissionClient,
   createOctokitQueueClient,
   createOctokitIterateGitHub,
   createOctokitReviewReworkGitHub,
-  formatQueueOrderConflict,
   logEvent,
   parkPayload,
   pollIterateCommands,
@@ -66,6 +65,7 @@ import type {
 import { awaitingCiLaneDeps } from './awaiting-ci-wiring.js';
 import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
 import { laneFileHoldLookup } from './lane-file-hold.js';
+import { reportQueueOrderConflict } from './run-order-conflict.js';
 import { waitForMerge } from './land.js';
 import { hostClaimGuards } from './host-claim-guards.js';
 import { DRAIN_MESSAGE, createNotifier, resolveNotifyCommand, withDiskLowNotify, withParkNotify } from './notify.js';
@@ -173,35 +173,34 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
       queue: () => {
         const [owner, repo] = ghRepo.split('/');
         const octokit = rt.getOctokit();
-        return createGithubQueue({
-          client: createOctokitQueueClient(octokit),
-          owner,
-          repo,
-          claimSettleMs: resolveQueueClaimSettleMs(factoryConfig),
-          preflight: withAdmissionGuard({
-            reader: admissionStateReaderFor(paths.state),
-            preflight: (issue) =>
-              rt.preflightQueuedIssue(
-                issue,
-                rt.createQueuePreflightOps(octokit, owner, repo, {
-                  autoMergeStack:
-                    resolveSizeGateMode(factoryConfig) === 'stack' &&
-                    resolveMergePolicy(factoryConfig, process.env, { auto: opts.autoMerge }).auto,
-                  stackMode: resolveSizeGateMode(factoryConfig) === 'stack',
-                  laneFileHold: laneFileHoldLookup(paths.laneFiles, ghRepo),
-                  onDeferred: deferrals.onDeferred,
-                }),
-              ),
-            onConflict: (issue, verdict) => {
-              const line = `#${issue} refused — ${verdict.reason} | repair: ${verdict.repair}`;
-              console.error(styleText('yellow', `factory: ${line}`));
-              logEvent(paths.events, 'queue_admission_conflict', String(issue), line);
-            },
-          }),
-          onOrderConflict: (conflict) => {
-            const line = formatQueueOrderConflict(conflict);
-            console.error(styleText('yellow', `factory: ${line}`));
-            logEvent(paths.events, 'queue_order_conflict', conflict.issues.join(','), line, { lane: conflict.lane });
+        return createQueueBackend({
+          kind: 'github',
+          github: {
+            client: createOctokitQueueClient(octokit),
+            owner,
+            repo,
+            claimSettleMs: resolveQueueClaimSettleMs(factoryConfig),
+            preflight: withAdmissionGuard({
+              reader: admissionStateReaderFor(paths.state),
+              preflight: (issue) =>
+                rt.preflightQueuedIssue(
+                  issue,
+                  rt.createQueuePreflightOps(octokit, owner, repo, {
+                    autoMergeStack:
+                      resolveSizeGateMode(factoryConfig) === 'stack' &&
+                      resolveMergePolicy(factoryConfig, process.env, { auto: opts.autoMerge }).auto,
+                    stackMode: resolveSizeGateMode(factoryConfig) === 'stack',
+                    laneFileHold: laneFileHoldLookup(paths.laneFiles, ghRepo),
+                    onDeferred: deferrals.onDeferred,
+                  }),
+                ),
+              onConflict: (issue, verdict) => {
+                const line = `#${issue} refused — ${verdict.reason} | repair: ${verdict.repair}`;
+                console.error(styleText('yellow', `factory: ${line}`));
+                logEvent(paths.events, 'queue_admission_conflict', String(issue), line);
+              },
+            }),
+            onOrderConflict: (conflict) => reportQueueOrderConflict(paths.events, conflict),
           },
         });
       },

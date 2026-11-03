@@ -134,13 +134,14 @@ import {
   validateQueue,
   watchUsage,
   writeLocalRunReport,
+  issueNumberOf,
   workKeyFromIssue,
   writeProxyState,
 } from '@on-par/factory-core';
 import {
   type EnqueueResult,
   type GardenCluster,
-  type GithubQueue,
+  type QueueBackend,
   type OvernightItemOutcome,
   type OvernightPreflightResult,
   type OvernightQueueDeps,
@@ -3442,14 +3443,18 @@ export interface PlannedLane {
   deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining'>;
 }
 
+/** The lane loop is numeric and GitHub-only in v1 (ADR-0168 §1); this is its single meeting point with the WorkKey seam. */
 export function laneQueueDeps(
-  queue: GithubQueue,
+  queue: QueueBackend,
   lane: string,
 ): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining'> {
   return {
-    claimNext: () => queue.claimNext(lane),
-    releaseIssue: (issue, outcome) => queue.release(issue, outcome),
-    heartbeat: (issue) => queue.heartbeat(issue),
+    claimNext: async () => {
+      const claim = await queue.claimNext(lane);
+      return claim === null ? null : { issue: issueNumberOf(claim.key), decision: claim.decision };
+    },
+    releaseIssue: (issue, outcome) => queue.release(workKeyFromIssue(issue), outcome),
+    heartbeat: (issue) => queue.heartbeat(workKeyFromIssue(issue)),
     countRemaining: async () => (await queue.list(lane)).length,
   };
 }
@@ -3479,7 +3484,7 @@ export async function planRunLanes(input: {
   /** `null` when `.factory/queue` does not exist. */
   readLocalQueue: () => string | null;
   /** Lazy so the octokit client is never built under --local-queue. */
-  queue: () => GithubQueue;
+  queue: () => QueueBackend;
 }): Promise<{ lanes: PlannedLane[]; diagnostics: QueueDiagnostic[] }> {
   if (input.localQueue) {
     const content = input.readLocalQueue();
@@ -3498,10 +3503,10 @@ export async function planRunLanes(input: {
     };
   }
 
-  const gq = input.queue();
-  const lanes = await gq.lanes();
+  const backend = input.queue();
+  const lanes = await backend.lanes();
   return {
-    lanes: lanes.map((lane) => ({ lane, issues: [], deps: laneQueueDeps(gq, lane) })),
+    lanes: lanes.map((lane) => ({ lane, issues: [], deps: laneQueueDeps(backend, lane) })),
     diagnostics: [],
   };
 }

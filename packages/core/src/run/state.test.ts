@@ -284,10 +284,42 @@ describe('listIssueRuns', () => {
   });
 
   it('validates a record against the number of its work key', () => {
-    const state = JSON.parse(record(7)) as IssueRunState;
+    const state = { ...(JSON.parse(record(7)) as IssueRunState), key: workKeyFromIssue(7) };
     expect(isValidIssueRunState(state, workKeyFromIssue(7))).toBe(true);
     expect(isValidIssueRunState(state, workKeyFromIssue(8))).toBe(false);
     expect(isValidIssueRunState(null, workKeyFromIssue(7))).toBe(false);
+  });
+
+  it('reads a legacy numeric issue record with work key <n>', async () => {
+    const dir = dirs.makeSync('list-runs-legacy-');
+    writeFileSync(join(dir, 'issue-42.json'), record(42));
+
+    const read = await readIssueRunState(join(dir, 'issue-42.json'));
+    expect(read?.key).toBe('42');
+    expect(read?.issue).toBe(42);
+    expect((await listIssueRuns(dir)).runs.map((r) => r.key)).toEqual(['42']);
+  });
+
+  it('writes the string key and no numeric issue, and reads it back', async () => {
+    const dir = dirs.makeSync('list-runs-write-');
+    const file = runStateFile(dir, workKeyFromIssue(42));
+
+    const returned = await writeIssueRunState(file, fixtureState(dir, { issue: 42, repo: 'o/r' }));
+
+    const raw = JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>;
+    expect(raw.key).toBe('42');
+    expect('issue' in raw).toBe(false);
+    expect(returned).toMatchObject({ key: '42', issue: 42 });
+    expect(await readIssueRunState(file)).toMatchObject({ key: '42', issue: 42 });
+    expect((await listIssueRuns(dir)).runs.map((r) => r.issue)).toEqual([42]);
+  });
+
+  it('skips a string-key record whose key disagrees with the file name', async () => {
+    const dir = dirs.makeSync('list-runs-mismatch-');
+    const { issue: _issue, ...rest } = JSON.parse(record(8)) as Record<string, unknown>;
+    writeFileSync(join(dir, 'issue-7.json'), JSON.stringify({ key: '8', ...rest }));
+
+    expect(await listIssueRuns(dir)).toEqual({ runs: [], skipped: ['issue-7.json'] });
   });
 
   it('returns an empty result for a missing runs dir', async () => {

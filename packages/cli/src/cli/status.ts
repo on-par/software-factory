@@ -19,8 +19,8 @@ import {
 } from '@on-par/factory-core';
 import type { ActiveQueueClaim, QueueDiagnostic } from '@on-par/factory-core';
 import {
-  createGithubQueue,
   createOctokitQueueClient,
+  createQueueBackend,
   daemonRuntimePaths,
   formatQueueOrderConflict,
   formatWorktreeLocation,
@@ -288,19 +288,22 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
   } else {
     const [owner, repoName] = ghRepo.split('/');
     const orderConflicts: QueueOrderConflict[] = [];
-    const githubQueue = createGithubQueue({
-      client: createOctokitQueueClient(rt.getOctokit()),
-      owner,
-      repo: repoName,
-      onOrderConflict: (c) => orderConflicts.push(c),
+    const backend = createQueueBackend({
+      kind: 'github',
+      github: {
+        client: createOctokitQueueClient(rt.getOctokit()),
+        owner,
+        repo: repoName,
+        onOrderConflict: (c) => orderConflicts.push(c),
+      },
     });
     try {
-      const lanes = await githubQueue.lanes();
+      const lanes = await backend.lanes();
       let printed = false;
       for (const lane of lanes) {
-        const issues = await githubQueue.list(lane);
-        for (const issue of issues) {
-          console.log(`  ${lane} #${issue}`);
+        const keys = await backend.list(lane);
+        for (const key of keys) {
+          console.log(`  ${lane} #${key}`);
           printed = true;
         }
       }

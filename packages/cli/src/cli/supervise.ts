@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { Octokit } from '@octokit/rest';
 import { getFactoryPaths, parseQueue, resolveIngestConfig } from '@on-par/factory-core';
 import type { QueueDiagnostic } from '@on-par/factory-core';
-import { createGithubQueue, createOctokitQueueClient, resolveQueueClaimSettleMs } from '@on-par/factory-core/internal';
+import { createOctokitQueueClient, createQueueBackend, resolveQueueClaimSettleMs } from '@on-par/factory-core/internal';
 
 import type {
   CliDeps,
@@ -64,15 +64,16 @@ export async function cmdSupervise(opts: SuperviseOptions, rt: SuperviseRuntime)
       return parsed.entries.length;
     }
     const [owner, repo] = (await rt.getGitHubRepo()).split('/');
-    const gq = createGithubQueue({
-      client: createOctokitQueueClient(rt.getOctokit()),
-      owner,
-      repo,
-      claimSettleMs: resolveQueueClaimSettleMs(factoryConfig),
+    const backend = createQueueBackend({
+      kind: 'github',
+      github: {
+        client: createOctokitQueueClient(rt.getOctokit()),
+        owner,
+        repo,
+        claimSettleMs: resolveQueueClaimSettleMs(factoryConfig),
+      },
     });
-    const lanes = await gq.lanes();
-    const counts = await Promise.all(lanes.map((lane) => gq.list(lane)));
-    return counts.reduce((total, issues) => total + issues.length, 0);
+    return (await backend.list()).length;
   };
 
   if ((await countPending()) === 0 && !ingestCfg.enabled) {

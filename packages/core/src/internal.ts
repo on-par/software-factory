@@ -215,6 +215,15 @@ export {
   readGithubQueueSnapshot,
 } from './queue/github-queue.js';
 export type { QueueSnapshot } from './queue/index.js';
+export {
+  createGithubQueueBackend,
+  createQueueBackend,
+  UnsupportedQueueBackendError,
+  type GithubQueueBackendOptions,
+  type QueueBackend,
+  type QueueBackendClaim,
+  type QueueBackendOptions,
+} from './queue/queue-backend.js';
 export { formatQueueOrderConflict, type QueueOrderConflict } from './queue/queue-order.js';
 
 // Factory App admission-state compatibility (#1497)

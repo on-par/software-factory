@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { ModelDiagnosis } from '@on-par/factory-core';
-import { getFactoryPaths, readPortLeases, workKeyFromIssue } from '@on-par/factory-core';
-import type { GithubQueue } from '@on-par/factory-core/internal';
+import { getFactoryPaths, readPortLeases, toWorkKey, workKeyFromIssue } from '@on-par/factory-core';
+import type { QueueBackend } from '@on-par/factory-core/internal';
 import { RunLockHeldError, type withScopedRunLock } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -3003,27 +3003,21 @@ describe('cli', () => {
       expect(result.lanes).toEqual([{ lane: 'app', issues: [5], deps: {} }]);
     });
 
-    it('GitHub mode builds one planned lane per discovered lane, wired to that lane via the queue', async () => {
+    it('GitHub mode plans one lane per QueueBackend lane, wired to that lane', async () => {
       const calls: any[] = [];
-      const fakeQueue: GithubQueue = {
-        claimSettleMs: 0,
-        settle: async () => {},
+      const fakeQueue: QueueBackend = {
         claimNext: async (lane) => {
           calls.push(['claimNext', lane]);
-          return { issue: 42, decision: { kind: 'build' } };
+          return { key: toWorkKey('42'), decision: { kind: 'build' } };
         },
         release: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
         },
-        releaseStale: async () => 'released',
         heartbeat: async () => true,
         list: async () => [],
         lanes: async () => ['app', 'infra'],
-        migrateLocalQueue: async () => {},
-        enqueue: async () => [],
-        enqueueFront: async () => ({ results: [], placement: 'front' }),
-        previewClear: async () => ({ entries: [], wouldClear: 0, wouldSkip: 0 }),
-        clear: async () => ({ entries: [], cleared: 0, skipped: 0, failed: 0 }),
+        reap: async () => [],
+        pollBlockedParks: async () => [],
       };
 
       const result = await planRunLanes({
@@ -3046,25 +3040,19 @@ describe('cli', () => {
       await result.lanes[0].deps.releaseIssue!(9, 'parked');
       expect(calls).toEqual([
         ['claimNext', 'app'],
-        ['release', 9, 'parked'],
+        ['release', '9', 'parked'],
       ]);
     });
 
     it('GitHub mode returns no lanes when nothing is queued', async () => {
-      const fakeQueue: GithubQueue = {
-        claimSettleMs: 0,
-        settle: async () => {},
+      const fakeQueue: QueueBackend = {
         claimNext: async () => null,
         release: async () => {},
-        releaseStale: async () => 'released',
         heartbeat: async () => true,
         list: async () => [],
         lanes: async () => [],
-        migrateLocalQueue: async () => {},
-        enqueue: async () => [],
-        enqueueFront: async () => ({ results: [], placement: 'front' }),
-        previewClear: async () => ({ entries: [], wouldClear: 0, wouldSkip: 0 }),
-        clear: async () => ({ entries: [], cleared: 0, skipped: 0, failed: 0 }),
+        reap: async () => [],
+        pollBlockedParks: async () => [],
       };
 
       const result = await planRunLanes({
@@ -3080,33 +3068,27 @@ describe('cli', () => {
   });
 
   describe('laneQueueDeps', () => {
-    it('binds claimNext, releaseIssue, heartbeat, and countRemaining to the given lane through the queue', async () => {
+    it('laneQueueDeps maps a QueueBackend claim key to the lane issue and back', async () => {
       const calls: any[] = [];
-      const fakeQueue: GithubQueue = {
-        claimSettleMs: 0,
-        settle: async () => {},
+      const fakeQueue: QueueBackend = {
         claimNext: async (lane) => {
           calls.push(['claimNext', lane]);
-          return { issue: 3, decision: { kind: 'build' } };
+          return { key: toWorkKey('3'), decision: { kind: 'build' } };
         },
         release: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
         },
-        releaseStale: async () => 'released',
         heartbeat: async (issue) => {
           calls.push(['heartbeat', issue]);
           return true;
         },
         list: async (lane) => {
           calls.push(['list', lane]);
-          return [4, 5];
+          return [toWorkKey('4'), toWorkKey('5')];
         },
         lanes: async () => [],
-        migrateLocalQueue: async () => {},
-        enqueue: async () => [],
-        enqueueFront: async () => ({ results: [], placement: 'front' }),
-        previewClear: async () => ({ entries: [], wouldClear: 0, wouldSkip: 0 }),
-        clear: async () => ({ entries: [], cleared: 0, skipped: 0, failed: 0 }),
+        reap: async () => [],
+        pollBlockedParks: async () => [],
       };
 
       const deps = laneQueueDeps(fakeQueue, 'app');
@@ -3117,8 +3099,8 @@ describe('cli', () => {
 
       expect(calls).toEqual([
         ['claimNext', 'app'],
-        ['release', 3, 'done'],
-        ['heartbeat', 3],
+        ['release', '3', 'done'],
+        ['heartbeat', '3'],
         ['list', 'app'],
       ]);
     });
