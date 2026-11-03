@@ -14,6 +14,7 @@ import {
 import { getFactoryPaths, isPlainObject } from '../config/index.js';
 import { readRepoConfigFile } from '../config/repo-config-file.js';
 import { listPrChangedFiles } from '../run/ci-rework.js';
+import { upsertMarkedBlock } from './marked-block.js';
 import { evaluateRisk, type RiskEvaluation } from './risk.js';
 
 export const RISK_RECEIPT_START = '<!-- factory:risk-receipt v1 -->';
@@ -43,28 +44,9 @@ export function renderRiskReceipt(evaluation: RiskEvaluation): string {
   ].join('\n');
 }
 
-function blockEnd(text: string, start: number): number {
-  const end = text.indexOf(RISK_RECEIPT_END, start + RISK_RECEIPT_START.length);
-  return end === -1 ? text.length : end + RISK_RECEIPT_END.length;
-}
-
 /** Swap the marked block in a PR body for `receipt`, or append it when absent. */
 export function upsertRiskReceipt(body: string | null | undefined, receipt: string): string {
-  const current = body ?? '';
-  const first = current.indexOf(RISK_RECEIPT_START);
-  if (first === -1) {
-    return current.trim() === '' ? receipt : `${current.trimEnd()}\n\n${receipt}\n`;
-  }
-  const head = current.slice(0, first);
-  let tail = current.slice(blockEnd(current, first));
-  let next = tail.indexOf(RISK_RECEIPT_START);
-  while (next !== -1) {
-    const before = tail.slice(0, next).trimEnd();
-    const after = tail.slice(blockEnd(tail, next)).trimStart();
-    tail = before !== '' && after !== '' ? `${before}\n\n${after}` : `${before}${after}`;
-    next = tail.indexOf(RISK_RECEIPT_START);
-  }
-  return `${head}${receipt}${tail}`;
+  return upsertMarkedBlock(body, receipt, { start: RISK_RECEIPT_START, end: RISK_RECEIPT_END });
 }
 
 export async function publishRiskReceipt(opts: {

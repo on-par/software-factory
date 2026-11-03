@@ -21,6 +21,8 @@ export type {
   SimRecordedCall,
 } from './fakes/octokit.js';
 export { createSimOctokit } from './fakes/octokit.js';
+export type { FakeGitHub, FakeGitHubRequest, FakeGitHubRoute } from './fakes/fake-github.js';
+export { createFakeGitHub, githubError } from './fakes/fake-github.js';
 export type { SimWorkspace } from './testing/sim/workspace.js';
 export { createSimWorkspace, simCommitAll } from './testing/sim/workspace.js';
 export type { StubModelExecutorOptions } from './router/stub.js';

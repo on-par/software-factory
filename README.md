@@ -76,7 +76,7 @@ factory triage accept        # promotes the proposal to the queue
 factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue
 ```
 
-While SHIP waits for CI, a PR with no checks reported yet counts as pending. `factory ship` ends at a green, ready-for-review PR. Merging stays with you: merge it, or run `factory land <N>`. `factory run` processes the whole queue in parallel lanes.
+While SHIP waits for CI, a PR with no checks reported yet counts as pending. If the CI watch itself fails (for example a GitHub API error), CI counts as unknown: SHIP fails with `CI unknown`, never marks the PR ready, and the run parks `fail`. `factory ship` ends at a green, ready-for-review PR. Merging stays with you: merge it, or run `factory land <N>`. `factory run` processes the whole queue in parallel lanes.
 
 ## GitHub Actions
 
@@ -216,6 +216,45 @@ Each lane leases a port from `.factory/state/ports.json` and every build/check c
 Product e2e suites should boot their app on `PORT` (strict-port) and point their test runner's base URL at `FACTORY_BASE_URL`. The constitution template scaffolds the full Playwright reference contract. When port leasing is disabled, checks still run but an `environment_warning` event flags the collision risk for app-testing worktrees. Factory-managed runs are headless by default, so e2e configs must honor `FACTORY_HEADLESS`. To run headed, set `FACTORY_HEADLESS=0` or run outside the factory. Unlike the port variables, `FACTORY_HEADLESS` and `PLAYWRIGHT_HEADLESS` are set even when no port lease is configured.
 
 Checker commands (compile, tests, lint, evidence, `app_smoke`) inherit only an allow-list of host variables: `PATH`, `HOME`, locale, `TERM`, `CI`, `NODE_OPTIONS`, `npm_config_*`, proxies, common toolchain roots and the lane contract above. Other host variables, such as `ANTHROPIC_API_KEY`, are not passed. The list lives in `packages/core/src/environment/checker-env.ts`; set `FACTORY_CHECKER_ENV_ALLOW=NAME,...` on the factory process to add names.
+
+### Preview environment gate
+
+A repo with its own PR preview deployments can opt in to a SHIP gate. Once the PR's hosted CI is green, SHIP finds the preview URL, waits for it to answer, and runs your smoke or e2e command against it. The gate only reads GitHub. It never deploys anything, never merges, and does not replace the CI watch or land's merge gates.
+
+```yaml
+preview:
+  source:
+    kind: deployment
+    environment: 'preview/pr-*' # glob; `*` matches any run of characters
+  readyPath: / # polled until it answers expectedStatus
+  expectedStatus: 200
+  readyTimeoutSeconds: 300
+  command: [npm, run, smoke:preview] # argv, never shell-interpolated
+  urlEnv: PREVIEW_URL # env var that carries the URL to the command
+  commandTimeoutSeconds: 600
+  artifacts: [playwright-report] # copied into the run's logs when present
+```
+
+A bot that posts the preview link as a PR comment can be the source instead. You must name who is trusted to post it, with `authors` (logins), `authorAssociations` (`OWNER`, `MEMBER`, `COLLABORATOR`), or both. Comments by anyone else are ignored.
+
+```yaml
+preview:
+  source:
+    kind: comment
+    urlPattern: 'Preview: (?<url>https://\S+)' # the URL is the `url` group, else group 1
+    authors: ['vercel[bot]']
+  command: [npm, run, smoke:preview]
+```
+
+The newest trusted comment wins, but only if it names the head commit (its first 7 characters or more) or was posted or edited after the head commit. After a rework push, an older comment for the previous commit is never used.
+
+The preview URL must be a public `http(s)` host. The gate refuses `localhost`, `*.localhost`, `*.local`, `*.internal`, single-label hosts, URLs with credentials, and loopback, private, link-local, unique-local and IPv4-mapped IPv6 addresses. It also refuses a hostname that resolves to one of those addresses. A refused URL is `preview-unavailable` and is never probed.
+
+The gate checks the host again on every poll. The readiness probe connects only to the address that this check approved, and it still sends the preview hostname as the `Host` header and the TLS server name. A DNS answer that changes after the check (DNS rebinding) cannot send the probe to an internal address. The smoke command is a separate process and resolves the host itself, so the gate cannot pin its connections. The gate checks the host one more time right before it starts the command. If the host now resolves to a refused address, or does not resolve, the result is `preview-unavailable` and the command does not run. A host can still change its DNS answer while the command runs. If your smoke command must never reach internal addresses, run the factory where those addresses are not reachable. `readyPath` must be a path on the preview host: it starts with a single `/` and has no backslashes, spaces or control characters, so config load rejects `//other-host/` and `/\other-host/`. If the probe URL still ends up on another origin, the gate reports `preview-unavailable` and does not probe it.
+
+The result is `pass`, `fail` (the command exited non-zero) or `preview-unavailable` (no URL, never ready before `readyTimeoutSeconds`, a refused host, or CI still pending because the watch timed out or failed). `fail` and `preview-unavailable` go back to BUILD rework, then CHECK and SHIP again under the CI rework budget, and park `fail` when it runs out. CI still pending does not use a rework round. SHIP leaves the PR a draft and the run parks `fail` at once. The park closes the PR and keeps the branch.
+
+Evidence is written to `preview-check.json` in the run's logs directory, also when the gate itself throws. It holds the URL with its query string masked, head SHA, command, exit code, readiness wait, command run time, output tail (stdout and stderr), artifacts and reason. Artifacts are copied to `preview-artifacts/` in the same directory. SHIP also writes the result as a "Preview check" block in the PR body and updates that block on each SHIP. A preview pass does not change land: land still refuses to merge into a red main. Repos without a `preview` section behave as before.
 
 ## Open-core boundary
 

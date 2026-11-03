@@ -24,6 +24,9 @@ import {
   shortDetail,
   verifyRemoteHead,
 } from './ship-git.js';
+import type { PreviewCheckResult } from '../checkers/preview-check.js';
+import { publishPreviewReceipt } from '../checkers/preview-receipt.js';
+import { type PreviewGate, previewFailureReason, runPreviewGate } from './ship-preview.js';
 import { commitLeftoverBuildOutput } from './ship-leftover.js';
 import { markPrReadyWithRetry } from './ship-ready.js';
 import { readRisk, readSpecBody } from './ship-spec.js';
@@ -57,6 +60,7 @@ export interface ShipResult {
   draft?: boolean;
   /** CI watch timed out before a verdict (#3569): the PR was left as draft. */
   ciPending?: boolean;
+  previewCheck?: PreviewCheckResult;
 }
 
 export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Promise<ShipResult> {
@@ -127,6 +131,8 @@ async function shipPhaseImpl(opts: {
   /** CI watch deadline (#3569); default DEFAULT_CI_DEADLINE_MS. */
   ciDeadlineMs?: number;
   walkthrough?: WalkthroughShipOpts['walkthrough'];
+  previewGate?: PreviewGate;
+  ciWatch?: typeof watchChecksWithInfraRerun;
 }): Promise<ShipResult> {
   const {
     issue,
@@ -462,13 +468,13 @@ async function shipPhaseImpl(opts: {
     } catch {}
 
   let ciOutcome: InfraRerunOutcome | undefined;
+  let ciWatchError: string | undefined;
   const ciDeadlineMs = opts.ciDeadlineMs ?? DEFAULT_CI_DEADLINE_MS;
 
-  // Watch CI (best-effort)
   if (watchCI) {
     log('ship', `Watching CI for PR #${prNumber}`);
     try {
-      ciOutcome = await watchChecksWithInfraRerun({
+      ciOutcome = await (opts.ciWatch ?? watchChecksWithInfraRerun)({
         octokit,
         owner,
         repo: repoName,
@@ -517,10 +523,38 @@ async function shipPhaseImpl(opts: {
           `CI pending for PR #${prNumber}: CI did not finish within ${ciDeadlineMs / 60_000} min; leaving PR as draft`,
         );
       }
-    } catch {}
+    } catch (err) {
+      ciWatchError = shortDetail(err);
+      log('warn', `CI watch for PR #${prNumber} failed: ${ciWatchError}; treating CI as pending`);
+    }
   }
 
-  const ciPending = ciOutcome === 'timeout';
+  const ciPending = ciOutcome === 'timeout' || ciWatchError !== undefined;
+
+  let previewCheck: PreviewCheckResult | undefined;
+  if (opts.previewGate) {
+    const sha = headSha ?? (await run('git rev-parse HEAD', { cwd: worktree })).stdout.trim();
+    const publish = (n: number, r: PreviewCheckResult) => publishPreviewReceipt(octokit, owner, repoName, n, r);
+    const gateCtx = { log, ciPending, publish, ...(opts.logsDir ? { logsDir: opts.logsDir } : {}) };
+    previewCheck = await runPreviewGate(opts.previewGate, { prNumber, headSha: sha }, gateCtx);
+    if (previewCheck.status !== 'pass') {
+      return {
+        ok: false,
+        prNumber,
+        reason: previewFailureReason(prNumber, previewCheck),
+        previewCheck,
+        headSha: sha,
+        ...(ciOutcome ? { ciOutcome } : {}),
+        ...(ciPending ? { ciPending: true, draft: true } : {}),
+      };
+    }
+  }
+
+  if (ciWatchError !== undefined) {
+    const reason = `CI unknown for PR #${prNumber}: the CI watch failed (${ciWatchError}); leaving PR as draft`;
+    log('ship', reason);
+    return { ok: false, prNumber, reason, ciPending: true, draft: true, ...(headSha ? { headSha } : {}) };
+  }
 
   // Mark ready for review (if draft). REST pulls.update ignores `draft`;
   // undrafting requires the markPullRequestReadyForReview GraphQL mutation.
@@ -554,6 +588,7 @@ async function shipPhaseImpl(opts: {
     ...(headSha ? { headSha } : {}),
     ...(opts.draft || ciPending ? { draft: true } : {}),
     ...(ciPending ? { ciPending: true } : {}),
+    ...(previewCheck ? { previewCheck } : {}),
   };
 }
 

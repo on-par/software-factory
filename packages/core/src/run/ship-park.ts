@@ -8,6 +8,7 @@ import type { ParkReason } from './outcome.js';
 /** Park reason for a failed SHIP: approval denial escalates, CI infra and CI failures keep their own reasons. */
 export function shipParkReason(ship: ShipResult): ParkReason {
   if (ship.denied) return 'escalate';
+  if (ship.previewCheck && ship.previewCheck.status !== 'pass') return 'fail';
   if (ship.ciOutcome === 'infra-failure') return 'ci-infra';
   return ship.ciOutcome === 'failure' ? 'ci-failed' : 'fail';
 }
