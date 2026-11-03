@@ -65,7 +65,6 @@ export interface CiReworkPorts {
   collectFailingJobLogs?: typeof collectFailingJobLogsDefault;
   /** Aborts when the lane loses this issue's claim lease (#3146): phase boundaries, push, PR creation and merge refuse to run. */
   claimSignal?: AbortSignal;
-  /** Reads the repo's opt-in `preview` gate config (#3880) from the worktree's repo config; undefined when the section is absent, throws on a malformed config so the gate fails closed. */
   loadPreviewConfig?: (worktree: string) => PreviewConfig | undefined;
 }
 
