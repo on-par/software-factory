@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.27 - 2026-11-03
+
+An opt-in preview gate checks a PR against its preview environment, SHIP fails closed when the CI watch itself fails, and trust-tier promotion evidence and demotion are recorded (#3880, #1957, #1959).
+All seven published `@on-par` packages move to 0.9.27 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - Opt-in `preview` config: after CI is green, SHIP finds the PR's preview (deployment status, or a PR comment from an allow-listed author via `authors` / `authorAssociations` that names or postdates the head commit), waits for it, runs a smoke command with `PREVIEW_URL`, and sends fail or `preview-unavailable` back to rework. Only public http(s) hosts are probed: `readyPath` must stay on the preview host, the probe connects only to the address the host check approved, and the host is checked again right before the smoke command starts. CI still pending, or a CI watch that fails, fails the gate closed. Evidence goes to `preview-check.json` (also when the gate throws), artifacts are copied into the run logs, and the result is written to the PR body (#3880).
