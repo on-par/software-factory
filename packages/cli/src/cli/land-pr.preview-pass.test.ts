@@ -1,6 +1,5 @@
 import { renderPreviewReceipt } from '@on-par/factory-core/internal';
-import { createTempDirs } from '@on-par/factory-core/testing';
-import { Octokit } from '@octokit/rest';
+import { createFakeGitHub, createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import './index.js';
@@ -24,49 +23,32 @@ const previewPassBody = `Implements #1.\n\n${renderPreviewReceipt({
   },
 })}\n`;
 
-const json = (data: unknown): Response =>
-  new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
-
 function redMainOctokit() {
-  const merge = vi.fn();
-  const routes: ReadonlyArray<readonly [RegExp, () => unknown]> = [
+  const github = createFakeGitHub([
     [
-      /^GET \/repos\/o\/r\/pulls\/2$/,
+      'GET /repos/o/r/pulls/2',
       () => ({ head: { sha: 'pr' }, base: { ref: 'main' }, body: previewPassBody, merge_commit_sha: 'merge' }),
     ],
-    [
-      /^PUT \/repos\/o\/r\/pulls\/2\/merge$/,
-      () => {
-        merge();
-        return { merged: true };
-      },
-    ],
+    ['PUT /repos/o/r/pulls/2/merge', () => ({ merged: true })],
     [/^DELETE \/repos\/o\/r\/git\/refs\//, () => ({})],
-    [/^GET \/repos\/o\/r\/branches\/main$/, () => ({ commit: { sha: 'main-head' } })],
+    ['GET /repos/o/r/branches/main', () => ({ commit: { sha: 'main-head' } })],
     [/\/protection\/required_status_checks$/, () => ({ contexts: ['ci'] })],
-    [/^GET \/repos\/o\/r\/rules\/branches\/main$/, () => []],
+    ['GET /repos/o/r/rules/branches/main', () => []],
     [/^GET \/repos\/o\/r\/compare\//, () => ({ status: 'ahead' })],
     [
       /^GET \/repos\/o\/r\/commits\/[^/]+\/check-runs$/,
       () => ({ check_runs: [{ name: 'ci', status: 'completed', conclusion: 'failure' }] }),
     ],
-    [/^GET \/repos\/o\/r\/actions\/runs$/, () => ({ workflow_runs: [] })],
-    [/^POST \/graphql$/, () => ({ data: { repository: { pullRequest: { mergeStateStatus: 'CLEAN' } } } })],
-  ];
-  const fetch = async (input: Parameters<typeof globalThis.fetch>[0], init?: RequestInit): Promise<Response> => {
-    const url = new URL(input instanceof Request ? input.url : input.toString());
-    const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
-    const key = `${method} ${url.pathname}`;
-    const route = routes.find(([pattern]) => pattern.test(key));
-    return route ? json(route[1]()) : new Response('{}', { status: 404 });
-  };
-  const octokit = new Octokit({ request: { fetch } });
-  return { octokit, merge };
+    ['GET /repos/o/r/actions/runs', () => ({ workflow_runs: [] })],
+    ['POST /graphql', () => ({ data: { repository: { pullRequest: { mergeStateStatus: 'CLEAN' } } } })],
+  ]);
+  const merges = () => github.requests.filter((r) => r.method === 'PUT' && r.path === '/repos/o/r/pulls/2/merge');
+  return { octokit: github.octokit, merges };
 }
 
 describe('landing after a preview pass', () => {
   it('still refuses to merge into a red main', async () => {
-    const { octokit, merge } = redMainOctokit();
+    const { octokit, merges } = redMainOctokit();
     const log = vi.fn();
     const baseGate = landBaseGate({ octokit, owner: 'o', repo: 'r', prNumber: 2, state: dirs.makeSync('land-'), log });
     const landing = landOpenPullRequest({
@@ -87,7 +69,7 @@ describe('landing after a preview pass', () => {
       behindProbe: async () => false,
       baseGate,
     });
-    await expect(landing).rejects.toThrow('failed');
-    expect(merge).not.toHaveBeenCalled();
+    await expect(landing).rejects.toMatchObject({ message: 'base CI failed on main-head: ci failure' });
+    expect(merges()).toEqual([]);
   });
 });
