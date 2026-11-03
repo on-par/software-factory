@@ -12,7 +12,13 @@ import {
   type PreviewCheckDeps,
   type PreviewCheckInput,
 } from './preview-check.js';
+import type { PinnedAddress } from './preview-pin.js';
 import type { PreviewGitHub } from './preview-source.js';
+
+const resolvesTo = (...answers: string[][]) => {
+  const queue = [...answers];
+  return async () => queue.shift() ?? [];
+};
 
 const tempDirs = createTempDirs();
 afterEach(() => tempDirs.cleanup());
@@ -58,6 +64,7 @@ function setup(github: PreviewGitHub, over: Partial<PreviewCheckInput> = {}) {
   let clock = 0;
   const commands: { argv: readonly string[]; options: RunCommandOptions }[] = [];
   const probes: string[] = [];
+  const pins: PinnedAddress[] = [];
   const input: PreviewCheckInput = {
     config: config(),
     github,
@@ -69,8 +76,9 @@ function setup(github: PreviewGitHub, over: Partial<PreviewCheckInput> = {}) {
     ...over,
   };
   const deps = (more: Partial<PreviewCheckDeps> = {}): PreviewCheckDeps => ({
-    probe: async (url) => {
+    probe: async (url, pin) => {
       probes.push(url);
+      pins.push(pin);
       return 200;
     },
     resolveHost: async () => ['93.184.216.34'],
@@ -84,7 +92,7 @@ function setup(github: PreviewGitHub, over: Partial<PreviewCheckInput> = {}) {
     now: () => clock,
     ...more,
   });
-  return { input, deps, commands, probes, advance: (ms: number) => (clock += ms) };
+  return { input, deps, commands, probes, pins, advance: (ms: number) => (clock += ms) };
 }
 
 describe('runPreviewCheck', () => {
@@ -224,6 +232,53 @@ describe('runPreviewCheck', () => {
     const r = await runPreviewCheck(h.input, h.deps({ resolveHost: async () => ['93.184.216.34', '10.0.0.5'] }));
     expect(r.evidence.reason).toBe('preview host rebind.example.com resolves to non-public address 10.0.0.5');
     expect(h.probes).toEqual([]);
+  });
+
+  it('probes the address the host guard vetted, not a fresh resolution', async () => {
+    const h = setup(previewAt('https://p.example.com'));
+    const r = await runPreviewCheck(h.input, h.deps({ resolveHost: resolvesTo(['93.184.216.34'], ['93.184.216.34']) }));
+    expect(r.status).toBe('pass');
+    expect(h.pins).toEqual([{ address: '93.184.216.34', family: 4 }]);
+  });
+
+  it('refuses when the host rebinds to a private address on a later poll', async () => {
+    const h = setup(previewAt('https://p.example.com'));
+    const r = await runPreviewCheck(
+      h.input,
+      h.deps({
+        probe: async (url) => (h.probes.push(url), 503),
+        resolveHost: resolvesTo(['93.184.216.34'], ['10.0.0.5']),
+      }),
+    );
+    expect(r.evidence.reason).toBe('preview host p.example.com resolves to non-public address 10.0.0.5');
+    expect(h.probes).toEqual(['https://p.example.com/']);
+  });
+
+  it('re-checks the host right before the command and refuses when it now resolves to a private address', async () => {
+    const h = setup(previewAt('https://p.example.com'));
+    const r = await runPreviewCheck(
+      h.input,
+      h.deps({ resolveHost: resolvesTo(['93.184.216.34'], ['169.254.169.254']) }),
+    );
+    expect(r).toMatchObject({
+      status: 'preview-unavailable',
+      evidence: { reason: 'preview host p.example.com resolves to non-public address 169.254.169.254' },
+    });
+    expect(h.probes).toEqual(['https://p.example.com/']);
+    expect(h.commands).toEqual([]);
+  });
+
+  it('refuses to run the command when the pre-command host check cannot resolve', async () => {
+    const h = setup(previewAt('https://p.example.com'));
+    let calls = 0;
+    const resolveHost = async () => {
+      calls++;
+      if (calls > 1) throw new Error('ENOTFOUND p.example.com');
+      return ['93.184.216.34'];
+    };
+    const r = await runPreviewCheck(h.input, h.deps({ resolveHost }));
+    expect(r.evidence.reason).toBe('preview host check failed: ENOTFOUND p.example.com');
+    expect(h.commands).toEqual([]);
   });
 
   it('writes the evidence JSON to logsDir', async () => {

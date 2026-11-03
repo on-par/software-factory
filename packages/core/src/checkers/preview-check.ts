@@ -10,8 +10,10 @@ import {
   type PreviewCheckStatus,
   writePreviewEvidence,
 } from './preview-evidence.js';
-import { findPreviewUrl, type PreviewGitHub } from './preview-source.js';
-import { maskUrl, previewHostBlock } from './preview-url-guard.js';
+import { probePinned, type PreviewHostVet, vetPreviewHost } from './preview-pin.js';
+import type { PreviewGitHub } from './preview-source.js';
+import { maskUrl } from './preview-url-guard.js';
+import { errorMessage, type PreviewPollDeps, waitForPreview } from './preview-wait.js';
 import { runVerificationCommand } from './run-command.js';
 
 export type { PreviewCheckResult } from './preview-evidence.js';
@@ -30,67 +32,23 @@ export interface PreviewCheckInput {
   onPgid?: (pgid: number) => void;
 }
 
-export interface PreviewCheckDeps {
-  probe: (url: string) => Promise<number | null>;
-  resolveHost: (hostname: string) => Promise<string[]>;
+export interface PreviewCheckDeps extends PreviewPollDeps {
   runCommand: (argv: readonly string[], options: RunCommandOptions) => Promise<CommandResult>;
-  sleep: (ms: number) => Promise<void>;
-  now: () => number;
 }
 
-type PreviewWait = { ready: true; url: string } | { ready: false; reason: string; url?: string };
-
-const POLL_INTERVAL_MS = 5000;
-const PROBE_TIMEOUT_MS = 5000;
-
-const defaultProbe: PreviewCheckDeps['probe'] = async (url) => {
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS), redirect: 'manual' });
-    return res.status;
-  } catch {
-    return null;
-  }
-};
-
 const DEFAULT_DEPS: PreviewCheckDeps = {
-  probe: defaultProbe,
+  probe: probePinned,
   resolveHost: async (hostname) => (await lookup(hostname, { all: true })).map((entry) => entry.address),
   runCommand: runVerificationCommand,
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now: Date.now,
 };
 
-const describeSource = (source: PreviewConfig['source']): string =>
-  source.kind === 'deployment' ? `deployment environment ${source.environment}` : `PR comment ${source.urlPattern}`;
-
-const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
-
-async function waitForPreview(input: PreviewCheckInput, d: PreviewCheckDeps, deadline: number): Promise<PreviewWait> {
-  const { config, headSha } = input;
-  const target = { owner: input.owner, repo: input.repo, prNumber: input.prNumber, headSha };
-  let url: string | null = null;
-  let reason = `no preview URL found for ${headSha.slice(0, 12)} (${describeSource(config.source)})`;
-  for (;;) {
-    try {
-      url = await findPreviewUrl(input.github, target, config.source);
-      if (url) {
-        const blocked = await previewHostBlock(url, d.resolveHost);
-        if (blocked) return { ready: false, reason: blocked, url };
-        const probeUrl = new URL(config.readyPath, url);
-        const { origin } = new URL(url);
-        if (probeUrl.origin !== origin)
-          return { ready: false, reason: `readyPath leaves the preview origin ${origin}`, url };
-        const status = await d.probe(probeUrl.toString());
-        if (status === config.expectedStatus) return { ready: true, url };
-        reason = `preview ${maskUrl(url)} not ready (last status ${status ?? 'no response'}) after ${config.readyTimeoutSeconds}s`;
-      }
-    } catch (err) {
-      reason = `preview lookup failed: ${errorMessage(err)}`;
-    }
-    if (d.now() >= deadline) return { ready: false, reason, ...(url ? { url } : {}) };
-    await d.sleep(POLL_INTERVAL_MS);
-  }
-}
+const recheckHost = (url: string, d: PreviewCheckDeps): Promise<PreviewHostVet> =>
+  vetPreviewHost(url, d.resolveHost).catch((err: unknown) => ({
+    ok: false,
+    reason: `preview host check failed: ${errorMessage(err)}`,
+  }));
 
 export async function runPreviewCheck(
   input: PreviewCheckInput,
@@ -119,9 +77,16 @@ export async function runPreviewCheck(
       input.logsDir,
     );
 
-  const wait = await waitForPreview(input, d, started + config.readyTimeoutSeconds * 1000);
+  const target = { owner: input.owner, repo: input.repo, prNumber: input.prNumber, headSha };
+  const wait = await waitForPreview(
+    { config, github: input.github, target },
+    d,
+    started + config.readyTimeoutSeconds * 1000,
+  );
   const readyWaitMs = d.now() - started;
   if (!wait.ready) return finish('preview-unavailable', wait.url, { readyWaitMs, reason: wait.reason });
+  const recheck = await recheckHost(wait.url, d);
+  if (!recheck.ok) return finish('preview-unavailable', wait.url, { readyWaitMs, reason: recheck.reason });
 
   const r = await d.runCommand(config.command, {
     cwd: worktree,

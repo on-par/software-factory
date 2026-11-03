@@ -83,14 +83,3 @@ export function maskUrl(value: string): string {
   const auth = url.username !== '' || url.password !== '' ? '***@' : '';
   return `${url.protocol}//${auth}${url.host}${url.pathname}${url.search === '' ? '' : '?***'}`;
 }
-
-export async function previewHostBlock(
-  url: string,
-  resolveHost: (hostname: string) => Promise<string[]>,
-): Promise<string | undefined> {
-  if (!isPublicHttpUrl(url)) return `preview URL ${maskUrl(url)} is not a public http(s) host`;
-  const { hostname } = new URL(url);
-  if (isIP(hostname.replace(/^\[(.*)\]$/, '$1')) !== 0) return undefined;
-  const blocked = (await resolveHost(hostname)).find((address) => !isPublicAddress(address));
-  return blocked === undefined ? undefined : `preview host ${hostname} resolves to non-public address ${blocked}`;
-}
