@@ -24,6 +24,8 @@ import {
   shortDetail,
   verifyRemoteHead,
 } from './ship-git.js';
+import type { PreviewCheckResult } from '../checkers/preview-check.js';
+import { type PreviewGate, previewFailureReason, runPreviewGate } from './ship-preview.js';
 import { commitLeftoverBuildOutput } from './ship-leftover.js';
 import { markPrReadyWithRetry } from './ship-ready.js';
 import { readRisk, readSpecBody } from './ship-spec.js';
@@ -57,6 +59,8 @@ export interface ShipResult {
   draft?: boolean;
   /** CI watch timed out before a verdict (#3569): the PR was left as draft. */
   ciPending?: boolean;
+  /** The preview gate's verdict (#3880); a non-pass is a failed SHIP before mark-ready. */
+  previewCheck?: PreviewCheckResult;
 }
 
 export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Promise<ShipResult> {
@@ -127,6 +131,8 @@ async function shipPhaseImpl(opts: {
   /** CI watch deadline (#3569); default DEFAULT_CI_DEADLINE_MS. */
   ciDeadlineMs?: number;
   walkthrough?: WalkthroughShipOpts['walkthrough'];
+  /** Opt-in preview gate (#3880): runs after CI is green or absent, before mark-ready. */
+  previewGate?: PreviewGate;
 }): Promise<ShipResult> {
   const {
     issue,
@@ -522,6 +528,22 @@ async function shipPhaseImpl(opts: {
 
   const ciPending = ciOutcome === 'timeout';
 
+  let previewCheck: PreviewCheckResult | undefined;
+  if (opts.previewGate && !ciPending) {
+    const sha = headSha ?? (await run('git rev-parse HEAD', { cwd: worktree })).stdout.trim();
+    previewCheck = await runPreviewGate(opts.previewGate, { prNumber, headSha: sha }, log);
+    if (previewCheck.status !== 'pass') {
+      return {
+        ok: false,
+        prNumber,
+        reason: previewFailureReason(prNumber, previewCheck),
+        previewCheck,
+        headSha: sha,
+        ...(ciOutcome ? { ciOutcome } : {}),
+      };
+    }
+  }
+
   // Mark ready for review (if draft). REST pulls.update ignores `draft`;
   // undrafting requires the markPullRequestReadyForReview GraphQL mutation.
   if (opts.draft || ciPending) {
@@ -554,6 +576,7 @@ async function shipPhaseImpl(opts: {
     ...(headSha ? { headSha } : {}),
     ...(opts.draft || ciPending ? { draft: true } : {}),
     ...(ciPending ? { ciPending: true } : {}),
+    ...(previewCheck ? { previewCheck } : {}),
   };
 }
 

@@ -249,6 +249,11 @@ function modelNamespace(): Node[] {
       '{ build: "dotnet build", test: "dotnet test", lint: "dotnet format --verify-no-changes" }',
     ),
     unset('qa', doc('qa'), '{ start: ["npm", "start"], smoke: ["npm", "run", "smoke"] }'),
+    unset(
+      'preview',
+      doc('preview'),
+      '{ source: { kind: "deployment", environment: "preview/pr-*" }, command: ["npm", "run", "smoke:preview"] }',
+    ),
     unset('tests', doc('tests'), '{ affected: { command: "npx vitest related --run {files}" } }'),
     {
       kind: 'object',

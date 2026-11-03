@@ -217,6 +217,26 @@ Product e2e suites should boot their app on `PORT` (strict-port) and point their
 
 Checker commands (compile, tests, lint, evidence, `app_smoke`) inherit only an allow-list of host variables: `PATH`, `HOME`, locale, `TERM`, `CI`, `NODE_OPTIONS`, `npm_config_*`, proxies, common toolchain roots and the lane contract above. Other host variables, such as `ANTHROPIC_API_KEY`, are not passed. The list lives in `packages/core/src/environment/checker-env.ts`; set `FACTORY_CHECKER_ENV_ALLOW=NAME,...` on the factory process to add names.
 
+### Preview environment gate
+
+A repo with its own PR preview deployments can opt in to a SHIP gate. Once the PR's hosted CI is green, SHIP finds the preview URL, waits for it to answer, and runs your smoke or e2e command against it. The gate only reads GitHub. It never deploys anything, never merges, and does not replace the CI watch or land's merge gates.
+
+```yaml
+preview:
+  source:
+    kind: deployment # or: { kind: comment, urlPattern: 'Preview: (?<url>https://\S+)' }
+    environment: 'preview/pr-*' # glob; `*` matches any run of characters
+  readyPath: / # polled until it answers expectedStatus
+  expectedStatus: 200
+  readyTimeoutSeconds: 300
+  command: [npm, run, smoke:preview] # argv, never shell-interpolated
+  urlEnv: PREVIEW_URL # env var that carries the URL to the command
+  commandTimeoutSeconds: 600
+  artifacts: [playwright-report/index.html] # attached when present
+```
+
+The result is `pass`, `fail` (the command exited non-zero) or `preview-unavailable` (no URL, or never ready before `readyTimeoutSeconds`). The last two go back to BUILD rework, then CHECK and SHIP again under the CI rework budget, and park `fail` when it runs out. Evidence (URL, head SHA, command, exit code, duration, output tail, artifacts, reason) is written to `preview-check.json` in the run's logs directory. Repos without a `preview` section behave as before.
+
 ## Open-core boundary
 
 **What's OSS (this repo):** `packages/cli`, `packages/core`, and `packages/config` are the open-source core. The full local pipeline (router, constitutions, checkers, phases) runs from this repo alone, MIT-licensed.

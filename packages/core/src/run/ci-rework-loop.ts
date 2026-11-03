@@ -1,5 +1,8 @@
 // packages/core/src/run/ci-rework-loop.ts — SHIP with a bounded CI rework loop (#2816)
 
+import { PREVIEW_REWORK_INSTRUCTIONS, previewReworkSummary, runPreviewCheck } from '../checkers/preview-check.js';
+import type { PreviewConfig } from '../config/preview-section.js';
+import { loadRepoConfig } from '../config/repo.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 import {
   type checkPhase as checkPhaseDefault,
@@ -61,6 +64,8 @@ export interface CiReworkPorts {
   collectFailingJobLogs?: typeof collectFailingJobLogsDefault;
   /** Aborts when the lane loses this issue's claim lease (#3146): phase boundaries, push, PR creation and merge refuse to run. */
   claimSignal?: AbortSignal;
+  /** Reads the repo's opt-in `preview` gate config (#3880); defaults to the worktree's repo config, undefined on any error. */
+  loadPreviewConfig?: (worktree: string) => PreviewConfig | undefined;
 }
 
 export interface CiReworkLoopContext {
@@ -115,6 +120,16 @@ function attributableNonCodeqlChecks(
   return evidence.failingChecks.filter((c) => names.has(c.name) && !/codeql/i.test(c.name));
 }
 
+const isPreviewFailure = (ship: ShipResult): boolean => !!ship.previewCheck && ship.previewCheck.status !== 'pass';
+
+function loadPreviewConfigDefault(worktree: string): PreviewConfig | undefined {
+  try {
+    return loadRepoConfig(worktree)?.preview;
+  } catch {
+    return undefined;
+  }
+}
+
 const guardError = (match: string): CiSuppressionFinding => ({
   kind: 'path',
   rule: 'guard-error',
@@ -147,6 +162,22 @@ export async function shipWithCiRework(
   const collectLogs = ports.collectFailingJobLogs ?? collectFailingJobLogsDefault;
   const { builtRoute, builtModel, planSlice } = inputs;
   const log = ports.events();
+  const [owner, repoName] = request.repo.split('/');
+  const previewConfig = (ports.loadPreviewConfig ?? loadPreviewConfigDefault)(ports.workspace.path);
+  const previewGate = previewConfig
+    ? (pr: { prNumber: number; headSha: string }) =>
+        runPreviewCheck({
+          config: previewConfig,
+          octokit: ports.octokit,
+          owner,
+          repo: repoName,
+          prNumber: pr.prNumber,
+          headSha: pr.headSha,
+          worktree: ports.workspace.path,
+          logsDir: request.logsDir,
+          onPgid: ctx.onPgid,
+        })
+    : undefined;
   const shipOpts = {
     issue: workKeyFromIssue(request.issue),
     repo: request.repo,
@@ -168,6 +199,7 @@ export async function shipWithCiRework(
     logsDir: request.logsDir,
     work: request.work,
     ...(ports.claimSignal ? { run: claimGuardedRunner(ports.claimSignal) } : {}),
+    ...(previewGate ? { previewGate } : {}),
     laneId: request.lane,
     reviewRouting: inputs.reviewRouting,
     ...(inputs.pinNote ? { pinNotes: [inputs.pinNote] } : {}),
@@ -183,12 +215,84 @@ export async function shipWithCiRework(
   let ship = await shipPhase({ ...shipOpts, checkSummary: check.summary, reworkRounds: check.reworkRounds });
   ports.claimSignal?.throwIfAborted();
 
-  const [owner, repoName] = request.repo.split('/');
   const maxRounds = resolveMaxCiReworkRounds();
   let rounds = 0;
   let lastCiFailure = ship.ciFailure;
   let suffix = '';
-  while (!ship.ok && ship.ciOutcome === 'failure' && ship.prNumber !== undefined) {
+  const suppressionPark = (findings: CiSuppressionFinding[]): ShipWithCiReworkResult => {
+    const described = describeSuppression(findings);
+    ports.events('ship')('ship', `${described} after CI rework round ${rounds} (PR #${ship.prNumber})`);
+    const message = ship.reason
+      ? `ship phase failed: ${ship.reason} — ${described}`
+      : `ship phase failed — ${described}`;
+    const base = lastCiFailure ?? { failingChecks: [], alerts: [], truncated: false };
+    return { ship, parked: { reason: 'ci-failed', message, ciFailure: { ...base, suppressionAttempt: findings } } };
+  };
+  while (!ship.ok && ship.prNumber !== undefined && (ship.ciOutcome === 'failure' || isPreviewFailure(ship))) {
+    if (ship.previewCheck && isPreviewFailure(ship)) {
+      if (rounds >= maxRounds) {
+        suffix = ` — preview rework budget exhausted after ${rounds} round${rounds === 1 ? '' : 's'}`;
+        break;
+      }
+      rounds++;
+      log(
+        'rework',
+        `CI rework round ${rounds}/${maxRounds}: preview check ${ship.previewCheck.status} on PR #${ship.prNumber}`,
+      );
+      let previewBefore: string;
+      try {
+        previewBefore = await readHead(ports.workspace.path);
+      } catch (err) {
+        return suppressionPark([guardError(`could not read the worktree HEAD: ${errorMessage(err)}`)]);
+      }
+      const previewWorked = await rework({
+        issue: workKeyFromIssue(request.issue),
+        worktree: ports.workspace.path,
+        specPath: request.specPath,
+        summary: {
+          failures: 1,
+          passes: 0,
+          skips: 0,
+          total: 1,
+          results: [{ checker: 'preview_check', result: 'FAIL', details: previewReworkSummary(ship.previewCheck) }],
+        },
+        constitution: ctx.constitution,
+        router: ports.router,
+        log: ports.events('build'),
+        buildTimeoutSeconds: request.timeouts.build,
+        sandbox: request.sandboxPolicy,
+        appPort: ctx.appPort,
+        appBaseUrl: ctx.appBaseUrl,
+        onPgid: ctx.onPgid,
+        ...reworkRouteFor(builtRoute, builtModel),
+        runId: ctx.runId,
+        onWorkerResult: ctx.checkOpts.onWorkerResult,
+        extraInstructions: PREVIEW_REWORK_INSTRUCTIONS,
+      });
+      if (!previewWorked.modelCompleted) {
+        suffix = ' — preview rework worker never ran';
+        break;
+      }
+      let previewFindings: CiSuppressionFinding[];
+      try {
+        previewFindings = scanReworkDiff(await readDiff(ports.workspace.path, previewBefore));
+      } catch (err) {
+        previewFindings = [guardError(`could not read the CI rework diff: ${errorMessage(err)}`)];
+      }
+      if (previewFindings.length > 0) return suppressionPark(previewFindings);
+      const previewRecheck = await checkPhase(ctx.checkOpts);
+      const previewEnded = await ctx.onRecheck(previewRecheck, rounds);
+      if (previewEnded) return { ship, outcome: previewEnded };
+      ports.claimSignal?.throwIfAborted();
+      ship = await shipPhase({
+        ...shipOpts,
+        checkSummary: previewRecheck.summary,
+        reworkRounds: previewRecheck.reworkRounds,
+        reentry: { prNumber: ship.prNumber, previousHeadSha: ship.headSha },
+      });
+      ports.claimSignal?.throwIfAborted();
+      continue;
+    }
     lastCiFailure = ship.ciFailure ?? lastCiFailure;
     let changed: string[];
     try {
@@ -245,15 +349,6 @@ export async function shipWithCiRework(
         (skipped.length > 0 ? `; non-attributable: ${skipped.join(', ')}` : ''),
       lastCiFailure ? { ciFailure: lastCiFailure } : undefined,
     );
-    const suppressionPark = (findings: CiSuppressionFinding[]): ShipWithCiReworkResult => {
-      const described = describeSuppression(findings);
-      ports.events('ship')('ship', `${described} after CI rework round ${rounds} (PR #${ship.prNumber})`);
-      const message = ship.reason
-        ? `ship phase failed: ${ship.reason} — ${described}`
-        : `ship phase failed — ${described}`;
-      const base = lastCiFailure ?? { failingChecks: [], alerts: [], truncated: false };
-      return { ship, parked: { reason: 'ci-failed', message, ciFailure: { ...base, suppressionAttempt: findings } } };
-    };
     let logs: Awaited<ReturnType<typeof collectLogs>> = { jobLogs: [], errors: [] };
     if (attributable.length === 0 && base) {
       const merge = await mergeBase(ports.workspace.path, base.baseRef);
