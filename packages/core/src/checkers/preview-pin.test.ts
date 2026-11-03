@@ -1,4 +1,5 @@
-import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
+import { createServer, type IncomingHttpHeaders } from 'node:http';
+import type { Server } from 'node:net';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -67,7 +68,10 @@ describe('pinnedLookup', () => {
 
 describe('probePinned', () => {
   const servers: Server[] = [];
-  afterEach(() => servers.splice(0).forEach((server) => server.close()));
+  const closed = (server: Server) => new Promise<void>((resolve) => server.close(() => resolve()));
+  afterEach(async () => {
+    await Promise.all(servers.splice(0).map(closed));
+  });
 
   async function listen(status: number) {
     const seen: { url?: string; headers?: IncomingHttpHeaders } = {};
@@ -96,7 +100,7 @@ describe('probePinned', () => {
 
   it('reports no response when nothing answers at the pinned address', async () => {
     const { port, server } = await listen(200);
-    await new Promise((resolve) => server.close(resolve));
+    await closed(server);
     expect(await probePinned(`http://p.example.com:${port}/`, { address: '127.0.0.1', family: 4 })).toBeNull();
   });
 });
