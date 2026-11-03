@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-22
+- Amended by: [ADR-0173](0173-a-repo-whose-tracker-is-linear-reads-its-queue-from-linear.md) (a Linear tracker reads its queue from Linear; replaces decisions 1, 5 and 12 for Linear only)
 - Issue: #3458
 - Relates to: [ADR-0030](0030-a-closed-target-issue-is-skipped-before-any-resource-is-committed-and-the-skip-is-not-a-park.md), [ADR-0042](0042-one-factory-config-json-two-disjoint-key-namespaces-owned-by-two-loaders.md), [ADR-0044](0044-claiming-a-queued-issue-is-a-label-cas-verified-by-re-fetch-and-the-smallest-claimant-id-wins.md), [ADR-0108](0108-queuebackend-is-a-narrow-4-method-seam-adapted-from-githubqueue-rather-than-replacing-it.md), [ADR-0119](0119-one-repo-config-file-yaml-preferred-json-still-read.md), [ADR-0129](0129-issue-bodies-reach-plan-and-build-only-inside-an-untrusted-issue-body-block-with-a-do-not-follow-notice.md), [ADR-0147](0147-size-gate-slice-mode-ships-an-oversized-issue-as-sequential-slice-prs-under-the-same-issue-instead-of-filing-sub-issues.md), [ADR-0156](0156-size-gate-slice-mode-never-files-sub-issues-an-over-cap-slice-plan-is-recorded-and-parks-and-the-slice-cap-is-configurable.md), [ADR-0167](0167-readiness-is-a-model-judged-three-way-verdict-and-plan-never-rewrites-the-ticket.md)
 
