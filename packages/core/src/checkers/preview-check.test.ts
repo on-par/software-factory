@@ -205,6 +205,20 @@ describe('runPreviewCheck', () => {
     expect(h.commands).toEqual([]);
   });
 
+  it.each(['//169.254.169.254/latest', '/\\10.0.0.5/x'])(
+    'refuses a readyPath %s that resolves to another host, without probing or running the command',
+    async (readyPath) => {
+      const h = setup(previewAt('https://p.example.com'), { config: { ...config(), readyPath } });
+      const r = await runPreviewCheck(h.input, h.deps());
+      expect(r).toMatchObject({
+        status: 'preview-unavailable',
+        evidence: { reason: 'readyPath leaves the preview origin https://p.example.com' },
+      });
+      expect(h.probes).toEqual([]);
+      expect(h.commands).toEqual([]);
+    },
+  );
+
   it('refuses a public hostname that resolves to a private address', async () => {
     const h = setup(previewAt('https://rebind.example.com'));
     const r = await runPreviewCheck(h.input, h.deps({ resolveHost: async () => ['93.184.216.34', '10.0.0.5'] }));

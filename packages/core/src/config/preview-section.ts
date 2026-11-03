@@ -16,6 +16,11 @@ const insideWorktree = (path: string): boolean => {
   return !isAbsolute(path) && normalized !== '..' && !normalized.startsWith('../');
 };
 
+const unsafePathChar = (ch: string): boolean => ch === '\\' || ch <= ' ' || ch === '\u007f';
+
+const sameOriginPath = (path: string): boolean =>
+  path.startsWith('/') && path[1] !== '/' && ![...path].some(unsafePathChar);
+
 const TRUSTED_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR'] as const;
 
 const PreviewSourceSchema = z.discriminatedUnion('kind', [
@@ -52,7 +57,14 @@ const PreviewSourceSchema = z.discriminatedUnion('kind', [
 export const PreviewConfigSchema = z
   .object({
     source: PreviewSourceSchema,
-    readyPath: z.string().startsWith('/').default('/').describe('Path polled until the preview answers expectedStatus'),
+    readyPath: z
+      .string()
+      .refine(
+        sameOriginPath,
+        'readyPath must be a path on the preview host: one leading /, no backslashes or whitespace',
+      )
+      .default('/')
+      .describe('Path polled until the preview answers expectedStatus'),
     expectedStatus: z.number().int().min(100).max(599).default(200),
     readyTimeoutSeconds: z.number().int().positive().default(300),
     command: z.array(z.string().min(1)).min(1).describe('argv run against the preview; exit 0 passes'),

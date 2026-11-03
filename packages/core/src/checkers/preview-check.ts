@@ -76,7 +76,11 @@ async function waitForPreview(input: PreviewCheckInput, d: PreviewCheckDeps, dea
       if (url) {
         const blocked = await previewHostBlock(url, d.resolveHost);
         if (blocked) return { ready: false, reason: blocked, url };
-        const status = await d.probe(new URL(config.readyPath, url).toString());
+        const probeUrl = new URL(config.readyPath, url);
+        const { origin } = new URL(url);
+        if (probeUrl.origin !== origin)
+          return { ready: false, reason: `readyPath leaves the preview origin ${origin}`, url };
+        const status = await d.probe(probeUrl.toString());
         if (status === config.expectedStatus) return { ready: true, url };
         reason = `preview ${maskUrl(url)} not ready (last status ${status ?? 'no response'}) after ${config.readyTimeoutSeconds}s`;
       }

@@ -40,4 +40,22 @@ describe('PreviewConfigSchema', () => {
   ])('rejects %s', (_name, input) => {
     expect(PreviewConfigSchema.safeParse(input).success).toBe(false);
   });
+
+  it.each(['/healthz', '/api/ready?probe=1', '/%2F%2Fstill-a-path'])('accepts the same-origin readyPath %s', (path) => {
+    expect(PreviewConfigSchema.parse({ ...base, readyPath: path }).readyPath).toBe(path);
+  });
+
+  it.each([
+    ['a relative path', 'healthz'],
+    ['a protocol-relative host', '//169.254.169.254/latest'],
+    ['a backslash host', '/\\10.0.0.5/x'],
+    ['a leading double backslash', '\\\\10.0.0.5/x'],
+    ['a slash then two backslashes', '/\\\\10.0.0.5/x'],
+    ['a backslash then a slash', '\\/10.0.0.5/x'],
+    ['a backslash later in the path', '/ok\\..\\x'],
+    ['a tab the URL parser strips', '/\t/10.0.0.5/x'],
+    ['a newline the URL parser strips', '/\n/10.0.0.5/x'],
+  ])('rejects a readyPath that could leave the preview host: %s', (_name, path) => {
+    expect(PreviewConfigSchema.safeParse({ ...base, readyPath: path }).success).toBe(false);
+  });
 });
