@@ -5,7 +5,7 @@ import { shipParkReason } from './ship-park.js';
 
 const preview = (status: 'fail' | 'preview-unavailable' | 'pass'): ShipResult['previewCheck'] => ({
   status,
-  evidence: { headSha: 'a', command: ['x'], durationMs: 1, artifacts: [] },
+  evidence: { headSha: 'a', command: ['x'], readyWaitMs: 1, durationMs: 1, artifacts: [] },
 });
 
 describe('shipParkReason', () => {

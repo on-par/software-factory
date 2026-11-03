@@ -25,6 +25,7 @@ import {
   verifyRemoteHead,
 } from './ship-git.js';
 import type { PreviewCheckResult } from '../checkers/preview-check.js';
+import { publishPreviewReceipt } from '../checkers/preview-receipt.js';
 import { type PreviewGate, previewFailureReason, runPreviewGate } from './ship-preview.js';
 import { commitLeftoverBuildOutput } from './ship-leftover.js';
 import { markPrReadyWithRetry } from './ship-ready.js';
@@ -131,7 +132,7 @@ async function shipPhaseImpl(opts: {
   /** CI watch deadline (#3569); default DEFAULT_CI_DEADLINE_MS. */
   ciDeadlineMs?: number;
   walkthrough?: WalkthroughShipOpts['walkthrough'];
-  /** Opt-in preview gate (#3880): runs after CI is green or absent, before mark-ready. */
+  /** Opt-in preview gate (#3880): runs after CI is green or absent, before mark-ready; CI still pending fails it closed. */
   previewGate?: PreviewGate;
 }): Promise<ShipResult> {
   const {
@@ -529,9 +530,11 @@ async function shipPhaseImpl(opts: {
   const ciPending = ciOutcome === 'timeout';
 
   let previewCheck: PreviewCheckResult | undefined;
-  if (opts.previewGate && !ciPending) {
+  if (opts.previewGate) {
     const sha = headSha ?? (await run('git rev-parse HEAD', { cwd: worktree })).stdout.trim();
-    previewCheck = await runPreviewGate(opts.previewGate, { prNumber, headSha: sha }, log);
+    const publish = (n: number, r: PreviewCheckResult) => publishPreviewReceipt(octokit, owner, repoName, n, r);
+    const gateCtx = { log, ciPending, publish, ...(opts.logsDir ? { logsDir: opts.logsDir } : {}) };
+    previewCheck = await runPreviewGate(opts.previewGate, { prNumber, headSha: sha }, gateCtx);
     if (previewCheck.status !== 'pass') {
       return {
         ok: false,
@@ -540,6 +543,7 @@ async function shipPhaseImpl(opts: {
         previewCheck,
         headSha: sha,
         ...(ciOutcome ? { ciOutcome } : {}),
+        ...(ciPending ? { ciPending: true, draft: true } : {}),
       };
     }
   }

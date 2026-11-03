@@ -1,64 +1,66 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { Octokit } from '@octokit/rest';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import { PreviewConfigSchema } from '../config/preview-section.js';
-import type { CommandResult } from '../utils/command-runner.js';
-import { previewReworkSummary, runPreviewCheck, type PreviewCheckInput } from './preview-check.js';
+import type { CommandResult, RunCommandOptions } from '../utils/command-runner.js';
+import {
+  previewReworkSummary,
+  runPreviewCheck,
+  type PreviewCheckDeps,
+  type PreviewCheckInput,
+} from './preview-check.js';
+import type { PreviewGitHub } from './preview-source.js';
 
 const tempDirs = createTempDirs();
 afterEach(() => tempDirs.cleanup());
 
 const SHA = 'a'.repeat(40);
-const OTHER = 'b'.repeat(40);
+const URL_WITH_TOKEN = 'https://p.example.com/?share=secret';
 
-interface Fixtures {
-  deployments?: { id: number; sha: string; environment: string; created_at: string }[];
-  statuses?: Record<number, { state: string; created_at: string; environment_url?: string; target_url?: string }[]>;
-  comments?: { body: string }[];
-}
-
-/** Proxy octokit: read endpoints answer from fixtures, anything else throws. */
-function fakeOctokit(f: Fixtures): Octokit {
-  const reads: Record<string, (args: any) => unknown> = {
-    listDeployments: (a) => ({ data: (f.deployments ?? []).filter((d) => d.sha === a.sha) }),
-    listDeploymentStatuses: (a) => ({ data: f.statuses?.[a.deployment_id] ?? [] }),
-    listComments: () => ({ data: f.comments ?? [] }),
+function previewAt(url: string | null): PreviewGitHub & { lookups: () => number } {
+  let lookups = 0;
+  return {
+    lookups: () => lookups,
+    listDeployments: async () => {
+      lookups++;
+      return url ? [{ id: 1, environment: 'preview/pr-7', createdAt: '2026-01-01T00:00:00Z' }] : [];
+    },
+    listDeploymentStatuses: async () =>
+      url ? [{ state: 'success', createdAt: '2026-01-01T00:00:00Z', environmentUrl: url }] : [],
+    listComments: async () => [],
+    headCommitDate: async () => undefined,
   };
-  const ns = (): unknown =>
-    new Proxy(
-      {},
-      {
-        get: (_t, method: string) => {
-          const read = reads[method];
-          if (!read) throw new Error(`write/unknown GitHub call: ${method}`);
-          return async (a: unknown) => read(a);
-        },
-      },
-    );
-  return { rest: { repos: ns(), issues: ns() } } as Octokit;
 }
 
-const okResult = (over: Partial<CommandResult> = {}): CommandResult =>
-  ({ ok: true, exitCode: 0, stdout: '', stderr: '', timedOut: false, ...over }) as CommandResult;
+const okResult = (over: Partial<CommandResult> = {}): CommandResult => ({
+  command: ['npm', 'run', 'smoke'],
+  ok: true,
+  exitCode: 0,
+  stdout: '',
+  stderr: '',
+  killed: false,
+  timedOut: false,
+  ...over,
+});
 
-const deploymentConfig = (over: Record<string, unknown> = {}) =>
+const config = (over: Record<string, unknown> = {}) =>
   PreviewConfigSchema.parse({
     source: { kind: 'deployment', environment: 'preview/pr-*' },
     command: ['npm', 'run', 'smoke'],
+    readyTimeoutSeconds: 10,
     ...over,
   });
 
-function harness(f: Fixtures, config = deploymentConfig(), over: Partial<PreviewCheckInput> = {}) {
-  const calls: { argv: readonly string[]; env: Record<string, string | undefined> }[] = [];
-  const probes: string[] = [];
+function setup(github: PreviewGitHub, over: Partial<PreviewCheckInput> = {}) {
   let clock = 0;
+  const commands: { argv: readonly string[]; options: RunCommandOptions }[] = [];
+  const probes: string[] = [];
   const input: PreviewCheckInput = {
-    config,
-    octokit: fakeOctokit(f),
+    config: config(),
+    github,
     owner: 'o',
     repo: 'r',
     prNumber: 7,
@@ -66,243 +68,156 @@ function harness(f: Fixtures, config = deploymentConfig(), over: Partial<Preview
     worktree: tempDirs.makeSync('preview-'),
     ...over,
   };
-  return { calls, probes, input, tick: (ms: number) => (clock += ms), clock: () => clock };
+  const deps = (more: Partial<PreviewCheckDeps> = {}): PreviewCheckDeps => ({
+    probe: async (url) => {
+      probes.push(url);
+      return 200;
+    },
+    resolveHost: async () => ['93.184.216.34'],
+    runCommand: async (argv, options) => {
+      commands.push({ argv, options });
+      return okResult();
+    },
+    sleep: vi.fn(async (ms: number) => {
+      clock += ms;
+    }),
+    now: () => clock,
+    ...more,
+  });
+  return { input, deps, commands, probes, advance: (ms: number) => (clock += ms) };
 }
 
-const dep = { id: 1, sha: SHA, environment: 'preview/pr-7', created_at: '2026-01-01T00:00:00Z' };
-
 describe('runPreviewCheck', () => {
-  it('deployment source runs the command with PREVIEW_URL set to the matching deployment URL', async () => {
-    const h = harness({
-      deployments: [
-        { ...dep, id: 1, created_at: '2026-01-01T00:00:00Z' },
-        { ...dep, id: 2, created_at: '2026-01-02T00:00:00Z' },
-        { ...dep, id: 3, sha: OTHER, created_at: '2026-01-03T00:00:00Z' },
-        { ...dep, id: 4, environment: 'production', created_at: '2026-01-04T00:00:00Z' },
-      ],
-      statuses: {
-        1: [{ state: 'success', created_at: '2026-01-01T00:00:00Z', environment_url: 'https://old.example.com' }],
-        2: [
-          { state: 'success', created_at: '2026-01-02T00:00:00Z', environment_url: 'https://new.example.com' },
-          { state: 'in_progress', created_at: '2026-01-02T00:01:00Z', environment_url: 'https://x.example.com' },
-        ],
-      },
-    });
-    // newest status of deployment 2 is not success => falls back to deployment 1
-    const r = await runPreviewCheck(h.input, {
-      probe: async () => 200,
-      sleep: async () => {},
-      now: () => 0,
-      runCommand: async (argv, o) => {
-        h.calls.push({ argv, env: o.env ?? {} });
-        return okResult();
-      },
-    });
+  it('runs the command with the real preview URL in PREVIEW_URL and records it masked', async () => {
+    const h = setup(previewAt(URL_WITH_TOKEN), { env: { KEEP: '1' } });
+    const r = await runPreviewCheck(h.input, h.deps());
     expect(r.status).toBe('pass');
-    expect(h.calls[0]?.env.PREVIEW_URL).toBe('https://old.example.com');
-    expect(r.evidence.url).toBe('https://old.example.com');
+    expect(h.commands[0]?.options.env).toEqual({ KEEP: '1', PREVIEW_URL: URL_WITH_TOKEN });
+    expect(r.evidence.url).toBe('https://p.example.com/?***');
   });
 
-  it('uses the newest successful deployment status URL, falling back to target_url', async () => {
-    const h = harness({
-      deployments: [dep],
-      statuses: { 1: [{ state: 'success', created_at: '2026-01-01T00:00:00Z', target_url: 'https://t.example.com' }] },
+  it('sets the configured urlEnv and polls the configured readyPath for expectedStatus', async () => {
+    const h = setup(previewAt('https://p.example.com'), {
+      config: config({ urlEnv: 'BASE', readyPath: '/healthz', expectedStatus: 204 }),
     });
-    const r = await runPreviewCheck(h.input, { probe: async () => 200, runCommand: async () => okResult() });
-    expect(r.evidence.url).toBe('https://t.example.com');
-  });
-
-  it('comment source uses the URL captured from the newest matching PR comment', async () => {
-    const named = harness(
-      { comments: [{ body: 'Preview: https://old.example.com' }, { body: 'Preview: https://new.example.com ok' }] },
-      PreviewConfigSchema.parse({
-        source: { kind: 'comment', urlPattern: 'Preview: (?<url>https://\\S+)' },
-        command: ['x'],
-      }),
-    );
-    const r1 = await runPreviewCheck(named.input, { probe: async () => 200, runCommand: async () => okResult() });
-    expect(r1.evidence.url).toBe('https://new.example.com');
-    const grouped = harness(
-      { comments: [{ body: 'deployed to https://g.example.com' }, { body: 'unrelated' }] },
-      PreviewConfigSchema.parse({ source: { kind: 'comment', urlPattern: 'deployed to (\\S+)' }, command: ['x'] }),
-    );
-    const r2 = await runPreviewCheck(grouped.input, { probe: async () => 200, runCommand: async () => okResult() });
-    expect(r2.evidence.url).toBe('https://g.example.com');
-  });
-
-  it('waits until the preview answers the expected status before running the command', async () => {
-    const h = harness({
-      deployments: [dep],
-      statuses: {
-        1: [{ state: 'success', created_at: '2026-01-01T00:00:00Z', environment_url: 'https://p.example.com' }],
-      },
-    });
-    const statuses: (number | null)[] = [null, 503, 200];
-    let ran = 0;
-    const r = await runPreviewCheck(h.input, {
-      probe: async (u) => {
-        h.probes.push(u);
-        return statuses.shift() as number | null;
-      },
-      sleep: async (ms) => void h.tick(ms),
-      now: h.clock,
-      runCommand: async () => {
-        ran++;
-        expect(h.probes).toHaveLength(3);
-        return okResult();
-      },
-    });
+    const r = await runPreviewCheck(h.input, h.deps({ probe: async (u) => (h.probes.push(u), 204) }));
     expect(r.status).toBe('pass');
-    expect(ran).toBe(1);
-  });
-
-  it('polls the configured readyPath for the configured expectedStatus', async () => {
-    const h = harness(
-      {
-        deployments: [dep],
-        statuses: {
-          1: [{ state: 'success', created_at: '2026-01-01T00:00:00Z', environment_url: 'https://p.example.com' }],
-        },
-      },
-      deploymentConfig({ readyPath: '/healthz', expectedStatus: 204 }),
-    );
-    const r = await runPreviewCheck(h.input, {
-      probe: async (u) => {
-        h.probes.push(u);
-        return u === 'https://p.example.com/healthz' ? 204 : 200;
-      },
-      runCommand: async () => okResult(),
-    });
     expect(h.probes).toEqual(['https://p.example.com/healthz']);
-    expect(r.status).toBe('pass');
+    expect(h.commands[0]?.options.env).toEqual({ BASE: 'https://p.example.com' });
   });
 
-  it('sets the configured urlEnv instead of PREVIEW_URL', async () => {
-    const h = harness(
-      {
-        deployments: [dep],
-        statuses: {
-          1: [{ state: 'success', created_at: '2026-01-01T00:00:00Z', environment_url: 'https://p.example.com' }],
-        },
-      },
-      deploymentConfig({ urlEnv: 'BASE' }),
-      { env: { KEEP: '1' } },
-    );
-    await runPreviewCheck(h.input, {
-      probe: async () => 200,
-      runCommand: async (argv, o) => {
-        h.calls.push({ argv, env: o.env ?? {} });
+  it('waits until the preview answers, then reports the readiness wait and the command time separately', async () => {
+    const h = setup(previewAt('https://p.example.com'));
+    const answers: (number | null)[] = [null, 503, 200];
+    const deps = h.deps({
+      probe: async () => answers.shift() ?? null,
+      runCommand: async () => {
+        h.advance(1234);
         return okResult();
       },
     });
-    expect(h.calls[0]?.env).toEqual({ KEEP: '1', BASE: 'https://p.example.com' });
+    const r = await runPreviewCheck(h.input, deps);
+    expect(r.status).toBe('pass');
+    expect(deps.sleep).toHaveBeenCalledTimes(2);
+    expect(r.evidence).toMatchObject({ readyWaitMs: 10_000, commandMs: 1234, durationMs: 11_234 });
+    expect(previewReworkSummary(r)).toContain('Ready wait: 10.0s; command: 1.2s');
   });
 
-  it('reports fail with url, headSha, command, exitCode, durationMs, outputTail and artifacts', async () => {
-    const h = harness(
-      {
-        deployments: [dep],
-        statuses: {
-          1: [{ state: 'success', created_at: '2026-01-01T00:00:00Z', environment_url: 'https://p.example.com' }],
-        },
-      },
-      deploymentConfig({ artifacts: ['report/out.html', 'missing.txt'] }),
-    );
-    mkdirSync(join(h.input.worktree, 'report'));
-    writeFileSync(join(h.input.worktree, 'report/out.html'), '<html/>');
-    let t = 0;
-    const r = await runPreviewCheck(h.input, {
-      probe: async () => 200,
-      now: () => (t += 10),
-      runCommand: async () => okResult({ ok: false, exitCode: 2, stderr: '\u001b[31mboom\u001b[0m' }),
+  it('reports fail with exit code, a tail of stdout and stderr, and copies artifacts into the run logs', async () => {
+    const logsDir = tempDirs.makeSync('preview-logs-');
+    const h = setup(previewAt('https://p.example.com'), {
+      config: config({ artifacts: ['report', 'missing.txt'] }),
+      logsDir,
     });
+    mkdirSync(join(h.input.worktree, 'report'));
+    writeFileSync(join(h.input.worktree, 'report/index.html'), '<html/>');
+    const failed = okResult({ ok: false, exitCode: 2, stdout: '2 tests failed\n', stderr: '\u001b[31mboom\u001b[0m' });
+    const r = await runPreviewCheck(h.input, h.deps({ runCommand: async () => failed }));
     expect(r.status).toBe('fail');
     expect(r.evidence).toMatchObject({
-      url: 'https://p.example.com',
       headSha: SHA,
       command: ['npm', 'run', 'smoke'],
       exitCode: 2,
-      outputTail: 'boom',
-      artifacts: ['report/out.html'],
+      outputTail: '2 tests failed\nboom',
+      artifacts: ['report'],
+      artifactsDir: join(logsDir, 'preview-artifacts'),
     });
-    expect(r.evidence.durationMs).toBeGreaterThan(0);
+    expect(readFileSync(join(logsDir, 'preview-artifacts/report/index.html'), 'utf8')).toBe('<html/>');
     expect(previewReworkSummary(r)).toContain('Exit code: 2');
-    expect(previewReworkSummary(r)).toContain('boom');
+  });
+
+  it('records a command timeout as the reason', async () => {
+    const h = setup(previewAt('https://p.example.com'), { config: config({ commandTimeoutSeconds: 30 }) });
+    const timedOut = okResult({ ok: false, exitCode: 124, timedOut: true });
+    const r = await runPreviewCheck(h.input, h.deps({ runCommand: async () => timedOut }));
+    expect(r.evidence.reason).toBe('preview command timed out after 30s');
   });
 
   it('reports preview-unavailable when no URL is found before the timeout', async () => {
-    const h = harness({}, deploymentConfig({ readyTimeoutSeconds: 12 }));
-    const r = await runPreviewCheck(h.input, {
-      sleep: async (ms) => void h.tick(ms),
-      now: h.clock,
-      runCommand: async () => {
-        throw new Error('must not run');
-      },
-    });
+    const github = previewAt(null);
+    const h = setup(github);
+    const r = await runPreviewCheck(h.input, h.deps());
     expect(r.status).toBe('preview-unavailable');
     expect(r.evidence.reason).toBe(
       `no preview URL found for ${SHA.slice(0, 12)} (deployment environment preview/pr-*)`,
     );
-    expect(previewReworkSummary(r)).toContain('Reason: no preview URL');
+    expect(github.lookups()).toBe(3);
+    expect(h.commands).toEqual([]);
   });
 
-  it('reports preview-unavailable when the preview never becomes ready', async () => {
-    const h = harness(
-      {
-        deployments: [dep],
-        statuses: {
-          1: [{ state: 'success', created_at: '2026-01-01T00:00:00Z', environment_url: 'https://p.example.com' }],
-        },
-      },
-      deploymentConfig({ readyTimeoutSeconds: 10 }),
-    );
-    const r = await runPreviewCheck(h.input, {
-      probe: async () => 502,
-      sleep: async (ms) => void h.tick(ms),
-      now: h.clock,
-    });
+  it('reports preview-unavailable with a masked URL when the preview never becomes ready', async () => {
+    const h = setup(previewAt(URL_WITH_TOKEN));
+    const r = await runPreviewCheck(h.input, h.deps({ probe: async () => 502 }));
     expect(r.status).toBe('preview-unavailable');
-    expect(r.evidence.reason).toBe('preview https://p.example.com not ready (last status 502) after 10s');
-    expect(r.evidence.url).toBe('https://p.example.com');
+    expect(r.evidence.reason).toBe('preview https://p.example.com/?*** not ready (last status 502) after 10s');
+    expect(r.evidence.url).toBe('https://p.example.com/?***');
   });
 
-  it('retries a lookup error and records it as the reason', async () => {
-    const h = harness({}, deploymentConfig({ readyTimeoutSeconds: 5 }));
-    const r = await runPreviewCheck(h.input, {
-      findUrl: async () => {
+  it('retries a lookup error on every poll until the deadline and records it as the reason', async () => {
+    let calls = 0;
+    const failing: PreviewGitHub = {
+      ...previewAt(null),
+      listDeployments: async () => {
+        calls++;
         throw new Error('api down');
       },
-      sleep: async (ms) => void h.tick(ms),
-      now: h.clock,
-    });
+    };
+    const h = setup(failing, { config: config({ readyTimeoutSeconds: 12 }) });
+    const deps = h.deps();
+    const r = await runPreviewCheck(h.input, deps);
     expect(r.evidence.reason).toBe('preview lookup failed: api down');
+    expect(calls).toBe(4);
+    expect(deps.sleep).toHaveBeenCalledTimes(3);
   });
 
-  it('only reads deployments and comments and never calls a GitHub write API', async () => {
-    const h = harness({ deployments: [dep], comments: [{ body: 'x' }] }, deploymentConfig({ readyTimeoutSeconds: 5 }));
-    await expect(
-      runPreviewCheck(h.input, { sleep: async (ms) => void h.tick(ms), now: h.clock }),
-    ).resolves.toMatchObject({ status: 'preview-unavailable' });
-    const octokit = h.input.octokit as any;
-    expect(() => octokit.rest.repos.createDeployment).toThrow('write/unknown');
+  it.each([
+    ['a loopback URL', 'http://127.0.0.1:3000/', 'preview URL http://127.0.0.1:3000/ is not a public http(s) host'],
+    [
+      'a metadata URL',
+      'http://169.254.169.254/?x=1',
+      'preview URL http://169.254.169.254/?*** is not a public http(s) host',
+    ],
+  ])('refuses %s without probing or running the command', async (_name, url, reason) => {
+    const h = setup(previewAt(url));
+    const r = await runPreviewCheck(h.input, h.deps());
+    expect(r).toMatchObject({ status: 'preview-unavailable', evidence: { reason } });
+    expect(h.probes).toEqual([]);
+    expect(h.commands).toEqual([]);
+  });
+
+  it('refuses a public hostname that resolves to a private address', async () => {
+    const h = setup(previewAt('https://rebind.example.com'));
+    const r = await runPreviewCheck(h.input, h.deps({ resolveHost: async () => ['93.184.216.34', '10.0.0.5'] }));
+    expect(r.evidence.reason).toBe('preview host rebind.example.com resolves to non-public address 10.0.0.5');
+    expect(h.probes).toEqual([]);
   });
 
   it('writes the evidence JSON to logsDir', async () => {
     const logsDir = join(tempDirs.makeSync('preview-logs-'), 'nested');
-    const h = harness(
-      {
-        deployments: [dep],
-        statuses: {
-          1: [{ state: 'success', created_at: '2026-01-01T00:00:00Z', environment_url: 'https://p.example.com' }],
-        },
-      },
-      deploymentConfig(),
-      { logsDir },
-    );
-    const r = await runPreviewCheck(h.input, { probe: async () => 200, runCommand: async () => okResult() });
+    const h = setup(previewAt('https://p.example.com'), { logsDir });
+    const r = await runPreviewCheck(h.input, h.deps());
     expect(r.evidence.evidencePath).toBe(join(logsDir, 'preview-check.json'));
     const saved = JSON.parse(readFileSync(join(logsDir, 'preview-check.json'), 'utf8'));
-    expect(saved.status).toBe('pass');
-    expect(saved.evidence.url).toBe('https://p.example.com');
+    expect(saved).toMatchObject({ status: 'pass', evidence: { url: 'https://p.example.com/' } });
   });
 });

@@ -1,6 +1,7 @@
 // packages/core/src/run/ci-rework-loop.ts — SHIP with a bounded CI rework loop (#2816)
 
 import { PREVIEW_REWORK_INSTRUCTIONS, previewReworkSummary, runPreviewCheck } from '../checkers/preview-check.js';
+import { createOctokitPreviewGitHub } from '../checkers/preview-source.js';
 import type { PreviewConfig } from '../config/preview-section.js';
 import { loadRepoConfig } from '../config/repo.js';
 import { workKeyFromIssue } from '../work/work-key.js';
@@ -32,14 +33,14 @@ import {
   needsBaseChecks,
   resolveMaxCiReworkRounds,
 } from './ci-rework.js';
+import { type CiReworkReentry, type CiReworkRoundPlan, runCiReworkRound } from './ci-rework-round.js';
 import {
   describeSuppression,
   mergeBaseIntoWorktree as mergeBaseIntoWorktreeDefault,
   readReworkDiff as readReworkDiffDefault,
   readWorktreeHead as readWorktreeHeadDefault,
-  scanReworkDiff,
 } from './ci-suppression-guard.js';
-import { reworkRouteFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
+import type { BuildRoute, ParkReason, RunOutcome } from './outcome.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
 import type { RunPolicy } from './policy.js';
 import { shipParkReason } from './ship-park.js';
@@ -64,7 +65,7 @@ export interface CiReworkPorts {
   collectFailingJobLogs?: typeof collectFailingJobLogsDefault;
   /** Aborts when the lane loses this issue's claim lease (#3146): phase boundaries, push, PR creation and merge refuse to run. */
   claimSignal?: AbortSignal;
-  /** Reads the repo's opt-in `preview` gate config (#3880); defaults to the worktree's repo config, undefined on any error. */
+  /** Reads the repo's opt-in `preview` gate config (#3880) from the worktree's repo config; undefined when the section is absent, throws on a malformed config so the gate fails closed. */
   loadPreviewConfig?: (worktree: string) => PreviewConfig | undefined;
 }
 
@@ -120,19 +121,10 @@ function attributableNonCodeqlChecks(
   return evidence.failingChecks.filter((c) => names.has(c.name) && !/codeql/i.test(c.name));
 }
 
-const isPreviewFailure = (ship: ShipResult): boolean => !!ship.previewCheck && ship.previewCheck.status !== 'pass';
+const isPreviewRework = (ship: ShipResult): boolean =>
+  !!ship.previewCheck && ship.previewCheck.status !== 'pass' && !ship.ciPending;
 
-function loadPreviewConfigDefault(worktree: string): PreviewConfig | undefined {
-  // Fail closed: a malformed `preview` section must surface, not silently disable the opt-in gate.
-  return loadRepoConfig(worktree)?.preview;
-}
-
-const guardError = (match: string): CiSuppressionFinding => ({
-  kind: 'path',
-  rule: 'guard-error',
-  file: '(unknown)',
-  match,
-});
+const loadPreviewConfigDefault = (worktree: string): PreviewConfig | undefined => loadRepoConfig(worktree)?.preview;
 
 /**
  * Runs SHIP. When the CI watch fails on CodeQL alerts the PR introduced (on changed files, or not open on base), feeds them to the
@@ -148,7 +140,7 @@ export async function shipWithCiRework(
   ctx: CiReworkLoopContext,
   inputs: CiReworkShipInputs,
 ): Promise<ShipWithCiReworkResult> {
-  const { request, ports, shipPhase, checkPhase, check } = ctx;
+  const { request, ports, shipPhase, check } = ctx;
   const rework = ports.reworkWorker ?? reworkWorkerDefault;
   const listChanged = ports.listPrChangedFiles ?? listPrChangedFilesDefault;
   const listBase = ports.listBaseFailingChecks ?? listBaseFailingChecksDefault;
@@ -165,7 +157,7 @@ export async function shipWithCiRework(
     ? (pr: { prNumber: number; headSha: string }) =>
         runPreviewCheck({
           config: previewConfig,
-          octokit: ports.octokit,
+          github: createOctokitPreviewGitHub(ports.octokit),
           owner,
           repo: repoName,
           prNumber: pr.prNumber,
@@ -225,8 +217,19 @@ export async function shipWithCiRework(
     const base = lastCiFailure ?? { failingChecks: [], alerts: [], truncated: false };
     return { ship, parked: { reason: 'ci-failed', message, ciFailure: { ...base, suppressionAttempt: findings } } };
   };
-  while (!ship.ok && ship.prNumber !== undefined && (ship.ciOutcome === 'failure' || isPreviewFailure(ship))) {
-    if (ship.previewCheck && isPreviewFailure(ship)) {
+  const roundPorts = {
+    ctx,
+    rework,
+    readHead,
+    readDiff,
+    builtRoute,
+    builtModel,
+    reship: (recheck: CheckPhaseResult, reentry: CiReworkReentry) =>
+      shipPhase({ ...shipOpts, checkSummary: recheck.summary, reworkRounds: recheck.reworkRounds, reentry }),
+  };
+  while (!ship.ok && ship.prNumber !== undefined && (ship.ciOutcome === 'failure' || isPreviewRework(ship))) {
+    let plan: CiReworkRoundPlan & { label: string };
+    if (ship.previewCheck && isPreviewRework(ship)) {
       if (rounds >= maxRounds) {
         suffix = ` — preview rework budget exhausted after ${rounds} round${rounds === 1 ? '' : 's'}`;
         break;
@@ -236,16 +239,10 @@ export async function shipWithCiRework(
         'rework',
         `CI rework round ${rounds}/${maxRounds}: preview check ${ship.previewCheck.status} on PR #${ship.prNumber}`,
       );
-      let previewBefore: string;
-      try {
-        previewBefore = await readHead(ports.workspace.path);
-      } catch (err) {
-        return suppressionPark([guardError(`could not read the worktree HEAD: ${errorMessage(err)}`)]);
-      }
-      const previewWorked = await rework({
-        issue: workKeyFromIssue(request.issue),
-        worktree: ports.workspace.path,
-        specPath: request.specPath,
+      plan = {
+        label: 'preview',
+        round: rounds,
+        reentry: { prNumber: ship.prNumber, previousHeadSha: ship.headSha },
         summary: {
           failures: 1,
           passes: 0,
@@ -253,178 +250,114 @@ export async function shipWithCiRework(
           total: 1,
           results: [{ checker: 'preview_check', result: 'FAIL', details: previewReworkSummary(ship.previewCheck) }],
         },
-        constitution: ctx.constitution,
-        router: ports.router,
-        log: ports.events('build'),
-        buildTimeoutSeconds: request.timeouts.build,
-        sandbox: request.sandboxPolicy,
-        appPort: ctx.appPort,
-        appBaseUrl: ctx.appBaseUrl,
-        onPgid: ctx.onPgid,
-        ...reworkRouteFor(builtRoute, builtModel),
-        runId: ctx.runId,
-        onWorkerResult: ctx.checkOpts.onWorkerResult,
         extraInstructions: PREVIEW_REWORK_INSTRUCTIONS,
-      });
-      if (!previewWorked.modelCompleted) {
-        suffix = ' — preview rework worker never ran';
+      };
+    } else {
+      lastCiFailure = ship.ciFailure ?? lastCiFailure;
+      let changed: string[];
+      try {
+        changed = await listChanged(ports.octokit, owner, repoName, ship.prNumber);
+      } catch (err) {
+        const msg = `could not list PR #${ship.prNumber} files for CI attribution: ${errorMessage(err)}`;
+        ports.events('ship')('ship', msg);
         break;
       }
-      let previewFindings: CiSuppressionFinding[];
-      try {
-        previewFindings = scanReworkDiff(await readDiff(ports.workspace.path, previewBefore));
-      } catch (err) {
-        previewFindings = [guardError(`could not read the CI rework diff: ${errorMessage(err)}`)];
+      let base: BaseFailingChecks | undefined;
+      if (needsBaseChecks(ship.ciFailure)) {
+        try {
+          base = await listBase(ports.octokit, owner, repoName, ship.prNumber);
+        } catch (err) {
+          ports.events('ship')('ship', `could not read base checks for PR #${ship.prNumber}: ${errorMessage(err)}`);
+        }
       }
-      if (previewFindings.length > 0) return suppressionPark(previewFindings);
-      const previewRecheck = await checkPhase(ctx.checkOpts);
-      const previewEnded = await ctx.onRecheck(previewRecheck, rounds);
-      if (previewEnded) return { ship, outcome: previewEnded };
-      ports.claimSignal?.throwIfAborted();
-      ship = await shipPhase({
-        ...shipOpts,
-        checkSummary: previewRecheck.summary,
-        reworkRounds: previewRecheck.reworkRounds,
+      let baseAlerts: BaseCodeqlAlerts | undefined;
+      if (needsBaseAlerts(ship.ciFailure, changed)) {
+        try {
+          baseAlerts = await listBaseAlerts(ports.octokit, owner, repoName, ship.prNumber);
+        } catch (err) {
+          ports.events('ship')(
+            'ship',
+            `could not read base CodeQL alerts for PR #${ship.prNumber}: ${errorMessage(err)}`,
+          );
+        }
+      }
+      const attribution = attributeCiFailure(ship.ciFailure, changed, base, baseAlerts);
+      if (ship.ciFailure) lastCiFailure = { ...ship.ciFailure, attribution };
+      if (attribution.baseline) {
+        const note = 'baseline: no CI failure is attributable to this PR';
+        suffix = ` — ${note}`;
+        ports.events('ship')('ship', `${note} (PR #${ship.prNumber})`);
+        break;
+      }
+      const attributable = attributableCodeqlAlerts(ship.ciFailure, changed, baseAlerts);
+      const failingChecks =
+        attributable.length === 0 && base ? attributableNonCodeqlChecks(ship.ciFailure, attribution.items) : [];
+      if (attributable.length === 0 && failingChecks.length === 0) break;
+      if (rounds >= maxRounds) {
+        suffix = ` — CI rework budget exhausted after ${rounds} round${rounds === 1 ? '' : 's'}`;
+        break;
+      }
+      rounds++;
+      const skipped = attribution.items.filter((i) => !i.attributable).map((i) => i.ref);
+      const what =
+        attributable.length > 0
+          ? `${attributable.length} attributable CodeQL alert(s)`
+          : `attributable failing check(s) ${failingChecks.map((c) => c.name).join(', ')}`;
+      log(
+        'rework',
+        `CI rework round ${rounds}/${maxRounds}: ${what} on PR #${ship.prNumber}` +
+          (skipped.length > 0 ? `; non-attributable: ${skipped.join(', ')}` : ''),
+        lastCiFailure ? { ciFailure: lastCiFailure } : undefined,
+      );
+      let logs: Awaited<ReturnType<typeof collectLogs>> = { jobLogs: [], errors: [] };
+      if (attributable.length === 0 && base) {
+        const merge = await mergeBase(ports.workspace.path, base.baseRef);
+        if (!merge.ok && merge.conflict) {
+          const message = `merge of origin/${base.baseRef} into ${request.branch} conflicts before CI rework round ${rounds}: ${merge.paths.join(', ')}`;
+          ports.events('ship')('ship', message);
+          return { ship, parked: { reason: 'conflict', message, ciFailure: lastCiFailure } };
+        }
+        if (!merge.ok) {
+          suffix = ` — could not merge origin/${base.baseRef}: ${merge.message}`;
+          break;
+        }
+        if (merge.merged) {
+          ports.events('ship')(
+            'ship',
+            `merged origin/${base.baseRef} into ${request.branch} before CI rework round ${rounds}`,
+          );
+        }
+        logs = await collectLogs({
+          octokit: ports.octokit,
+          owner,
+          repo: repoName,
+          ref: ship.headSha ?? request.branch,
+          checkNames: failingChecks.map((c) => c.name),
+        });
+        lastCiFailure = {
+          ...(lastCiFailure ?? { failingChecks: [], alerts: [], truncated: false }),
+          jobLogs: logs.jobLogs,
+        };
+      }
+      plan = {
+        label: 'CI',
+        round: rounds,
         reentry: { prNumber: ship.prNumber, previousHeadSha: ship.headSha },
-      });
-      ports.claimSignal?.throwIfAborted();
-      continue;
-    }
-    lastCiFailure = ship.ciFailure ?? lastCiFailure;
-    let changed: string[];
-    try {
-      changed = await listChanged(ports.octokit, owner, repoName, ship.prNumber);
-    } catch (err) {
-      const msg = `could not list PR #${ship.prNumber} files for CI attribution: ${errorMessage(err)}`;
-      ports.events('ship')('ship', msg);
-      break;
-    }
-    let base: BaseFailingChecks | undefined;
-    if (needsBaseChecks(ship.ciFailure)) {
-      try {
-        base = await listBase(ports.octokit, owner, repoName, ship.prNumber);
-      } catch (err) {
-        ports.events('ship')('ship', `could not read base checks for PR #${ship.prNumber}: ${errorMessage(err)}`);
-      }
-    }
-    let baseAlerts: BaseCodeqlAlerts | undefined;
-    if (needsBaseAlerts(ship.ciFailure, changed)) {
-      try {
-        baseAlerts = await listBaseAlerts(ports.octokit, owner, repoName, ship.prNumber);
-      } catch (err) {
-        ports.events('ship')(
-          'ship',
-          `could not read base CodeQL alerts for PR #${ship.prNumber}: ${errorMessage(err)}`,
-        );
-      }
-    }
-    const attribution = attributeCiFailure(ship.ciFailure, changed, base, baseAlerts);
-    if (ship.ciFailure) lastCiFailure = { ...ship.ciFailure, attribution };
-    if (attribution.baseline) {
-      const note = 'baseline: no CI failure is attributable to this PR';
-      suffix = ` — ${note}`;
-      ports.events('ship')('ship', `${note} (PR #${ship.prNumber})`);
-      break;
-    }
-    const attributable = attributableCodeqlAlerts(ship.ciFailure, changed, baseAlerts);
-    const failingChecks =
-      attributable.length === 0 && base ? attributableNonCodeqlChecks(ship.ciFailure, attribution.items) : [];
-    if (attributable.length === 0 && failingChecks.length === 0) break;
-    if (rounds >= maxRounds) {
-      suffix = ` — CI rework budget exhausted after ${rounds} round${rounds === 1 ? '' : 's'}`;
-      break;
-    }
-    rounds++;
-    const skipped = attribution.items.filter((i) => !i.attributable).map((i) => i.ref);
-    const what =
-      attributable.length > 0
-        ? `${attributable.length} attributable CodeQL alert(s)`
-        : `attributable failing check(s) ${failingChecks.map((c) => c.name).join(', ')}`;
-    log(
-      'rework',
-      `CI rework round ${rounds}/${maxRounds}: ${what} on PR #${ship.prNumber}` +
-        (skipped.length > 0 ? `; non-attributable: ${skipped.join(', ')}` : ''),
-      lastCiFailure ? { ciFailure: lastCiFailure } : undefined,
-    );
-    let logs: Awaited<ReturnType<typeof collectLogs>> = { jobLogs: [], errors: [] };
-    if (attributable.length === 0 && base) {
-      const merge = await mergeBase(ports.workspace.path, base.baseRef);
-      if (!merge.ok && merge.conflict) {
-        const message = `merge of origin/${base.baseRef} into ${request.branch} conflicts before CI rework round ${rounds}: ${merge.paths.join(', ')}`;
-        ports.events('ship')('ship', message);
-        return { ship, parked: { reason: 'conflict', message, ciFailure: lastCiFailure } };
-      }
-      if (!merge.ok) {
-        suffix = ` — could not merge origin/${base.baseRef}: ${merge.message}`;
-        break;
-      }
-      if (merge.merged) {
-        ports.events('ship')(
-          'ship',
-          `merged origin/${base.baseRef} into ${request.branch} before CI rework round ${rounds}`,
-        );
-      }
-      logs = await collectLogs({
-        octokit: ports.octokit,
-        owner,
-        repo: repoName,
-        ref: ship.headSha ?? request.branch,
-        checkNames: failingChecks.map((c) => c.name),
-      });
-      lastCiFailure = {
-        ...(lastCiFailure ?? { failingChecks: [], alerts: [], truncated: false }),
-        jobLogs: logs.jobLogs,
+        summary:
+          attributable.length > 0
+            ? ciReworkSummary(attributable)
+            : ciCheckReworkSummary(failingChecks, logs.jobLogs, logs.errors),
+        extraInstructions: attributable.length > 0 ? CI_REWORK_INSTRUCTIONS : CI_CHECK_REWORK_INSTRUCTIONS,
       };
     }
-    let beforeSha: string;
-    try {
-      beforeSha = await readHead(ports.workspace.path);
-    } catch (err) {
-      return suppressionPark([guardError(`could not read the worktree HEAD: ${errorMessage(err)}`)]);
-    }
-    const worked = await rework({
-      issue: workKeyFromIssue(request.issue),
-      worktree: ports.workspace.path,
-      specPath: request.specPath,
-      summary:
-        attributable.length > 0
-          ? ciReworkSummary(attributable)
-          : ciCheckReworkSummary(failingChecks, logs.jobLogs, logs.errors),
-      constitution: ctx.constitution,
-      router: ports.router,
-      log: ports.events('build'),
-      buildTimeoutSeconds: request.timeouts.build,
-      sandbox: request.sandboxPolicy,
-      appPort: ctx.appPort,
-      appBaseUrl: ctx.appBaseUrl,
-      onPgid: ctx.onPgid,
-      ...reworkRouteFor(builtRoute, builtModel),
-      runId: ctx.runId,
-      onWorkerResult: ctx.checkOpts.onWorkerResult,
-      extraInstructions: attributable.length > 0 ? CI_REWORK_INSTRUCTIONS : CI_CHECK_REWORK_INSTRUCTIONS,
-    });
-    if (!worked.modelCompleted) {
-      suffix = ' — CI rework worker never ran';
+    const step = await runCiReworkRound(roundPorts, plan);
+    if (step.kind === 'suppressed') return suppressionPark(step.findings);
+    if (step.kind === 'ended') return { ship, outcome: step.outcome };
+    if (step.kind === 'never-ran') {
+      suffix = ` — ${plan.label} rework worker never ran`;
       break;
     }
-    let findings: CiSuppressionFinding[];
-    try {
-      findings = scanReworkDiff(await readDiff(ports.workspace.path, beforeSha));
-    } catch (err) {
-      findings = [guardError(`could not read the CI rework diff: ${errorMessage(err)}`)];
-    }
-    if (findings.length > 0) return suppressionPark(findings);
-    const recheck = await checkPhase(ctx.checkOpts);
-    const ended = await ctx.onRecheck(recheck, rounds);
-    if (ended) return { ship, outcome: ended };
-    ports.claimSignal?.throwIfAborted();
-    ship = await shipPhase({
-      ...shipOpts,
-      checkSummary: recheck.summary,
-      reworkRounds: recheck.reworkRounds,
-      reentry: { prNumber: ship.prNumber, previousHeadSha: ship.headSha },
-    });
-    ports.claimSignal?.throwIfAborted();
+    ship = step.ship;
   }
   if (ship.ok) return { ship };
   const message = ship.denied

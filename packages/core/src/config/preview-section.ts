@@ -1,4 +1,4 @@
-// src/config/preview-section.ts — `preview` section of the repo config: opt-in preview-environment gate run in SHIP (#3880)
+import { isAbsolute, normalize } from 'node:path';
 
 import { z } from 'zod';
 
@@ -10,6 +10,13 @@ const compiles = (pattern: string): boolean => {
     return false;
   }
 };
+
+const insideWorktree = (path: string): boolean => {
+  const normalized = normalize(path);
+  return !isAbsolute(path) && normalized !== '..' && !normalized.startsWith('../');
+};
+
+const TRUSTED_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR'] as const;
 
 const PreviewSourceSchema = z.discriminatedUnion('kind', [
   z
@@ -26,8 +33,20 @@ const PreviewSourceSchema = z.discriminatedUnion('kind', [
         .min(1)
         .refine(compiles, 'urlPattern must be a valid regular expression')
         .describe('Regex over PR comments; the URL is the named group `url`, else group 1'),
+      authors: z
+        .array(z.string().min(1))
+        .default([])
+        .describe('Comment author logins trusted to post the preview URL, e.g. vercel[bot]'),
+      authorAssociations: z
+        .array(z.enum(TRUSTED_ASSOCIATIONS))
+        .default([])
+        .describe('Author association levels trusted to post the preview URL'),
     })
-    .strict(),
+    .strict()
+    .refine(
+      (source) => source.authors.length + source.authorAssociations.length > 0,
+      'a comment source needs authors or authorAssociations',
+    ),
 ]);
 
 export const PreviewConfigSchema = z
@@ -43,7 +62,10 @@ export const PreviewConfigSchema = z
       .default('PREVIEW_URL')
       .describe('Env var that carries the preview URL to the command'),
     commandTimeoutSeconds: z.number().int().positive().default(600),
-    artifacts: z.array(z.string().min(1)).default([]).describe('Worktree-relative report paths attached when present'),
+    artifacts: z
+      .array(z.string().min(1).refine(insideWorktree, 'artifact paths must stay inside the worktree'))
+      .default([])
+      .describe('Worktree-relative report paths attached when present'),
   })
   .strict();
 export type PreviewConfig = z.infer<typeof PreviewConfigSchema>;

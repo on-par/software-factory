@@ -1,38 +1,25 @@
-// src/checkers/preview-check.ts — SHIP preview gate: find the PR's preview, wait for it, run the repo's smoke command (#3880).
-// Read-only against GitHub: it never deploys or provisions anything.
-
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-
-import type { Octokit } from '@octokit/rest';
+import { lookup } from 'node:dns/promises';
 
 import type { PreviewConfig } from '../config/preview-section.js';
 import type { CommandResult, RunCommandOptions } from '../utils/command-runner.js';
-import { stripAnsi } from './command-log.js';
+import {
+  copyPreviewArtifacts,
+  outputTail,
+  type PreviewCheckEvidence,
+  type PreviewCheckResult,
+  type PreviewCheckStatus,
+  writePreviewEvidence,
+} from './preview-evidence.js';
+import { findPreviewUrl, type PreviewGitHub } from './preview-source.js';
+import { maskUrl, previewHostBlock } from './preview-url-guard.js';
 import { runVerificationCommand } from './run-command.js';
 
-export type PreviewCheckStatus = 'pass' | 'fail' | 'preview-unavailable';
-
-export interface PreviewCheckEvidence {
-  url?: string;
-  headSha: string;
-  command: string[];
-  exitCode?: number;
-  durationMs: number;
-  outputTail?: string;
-  artifacts: string[];
-  reason?: string;
-  evidencePath?: string;
-}
-
-export interface PreviewCheckResult {
-  status: PreviewCheckStatus;
-  evidence: PreviewCheckEvidence;
-}
+export type { PreviewCheckResult } from './preview-evidence.js';
+export { PREVIEW_REWORK_INSTRUCTIONS, previewReworkSummary } from './preview-evidence.js';
 
 export interface PreviewCheckInput {
   config: PreviewConfig;
-  octokit: Octokit;
+  github: PreviewGitHub;
   owner: string;
   repo: string;
   prNumber: number;
@@ -43,21 +30,18 @@ export interface PreviewCheckInput {
   onPgid?: (pgid: number) => void;
 }
 
-type PreviewTarget = { owner: string; repo: string; prNumber: number; headSha: string };
-
 export interface PreviewCheckDeps {
-  findUrl: (octokit: Octokit, target: PreviewTarget, source: PreviewConfig['source']) => Promise<string | null>;
   probe: (url: string) => Promise<number | null>;
+  resolveHost: (hostname: string) => Promise<string[]>;
   runCommand: (argv: readonly string[], options: RunCommandOptions) => Promise<CommandResult>;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
 }
 
+type PreviewWait = { ready: true; url: string } | { ready: false; reason: string; url?: string };
+
 const POLL_INTERVAL_MS = 5000;
 const PROBE_TIMEOUT_MS = 5000;
-const TAIL_CHARS = 2000;
-const SUMMARY_TAIL_CHARS = 1500;
-const EVIDENCE_FILE = 'preview-check.json';
 
 const defaultProbe: PreviewCheckDeps['probe'] = async (url) => {
   try {
@@ -68,102 +52,42 @@ const defaultProbe: PreviewCheckDeps['probe'] = async (url) => {
   }
 };
 
-const isHttpUrl = (value: string | null | undefined): value is string => {
-  if (!value) return false;
-  try {
-    const { protocol } = new URL(value);
-    return protocol === 'http:' || protocol === 'https:';
-  } catch {
-    return false;
-  }
-};
-
-const globToRegExp = (glob: string): RegExp =>
-  new RegExp(
-    `^${glob
-      .split('*')
-      .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
-      .join('.*')}$`,
-  );
-
-const describeSource = (source: PreviewConfig['source']): string =>
-  source.kind === 'deployment' ? `deployment environment ${source.environment}` : `PR comment ${source.urlPattern}`;
-
-async function findDeploymentUrl(octokit: Octokit, target: PreviewTarget, environment: string): Promise<string | null> {
-  const matches = globToRegExp(environment);
-  const { data } = await octokit.rest.repos.listDeployments({
-    owner: target.owner,
-    repo: target.repo,
-    sha: target.headSha,
-    per_page: 100,
-  });
-  const deployments = data
-    .filter((d) => matches.test(d.environment))
-    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
-  for (const deployment of deployments) {
-    const { data: statuses } = await octokit.rest.repos.listDeploymentStatuses({
-      owner: target.owner,
-      repo: target.repo,
-      deployment_id: deployment.id,
-      per_page: 100,
-    });
-    const newest = [...statuses].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
-    if (newest?.state !== 'success') continue;
-    const url = newest.environment_url || newest.target_url;
-    if (isHttpUrl(url)) return url;
-  }
-  return null;
-}
-
-async function findCommentUrl(octokit: Octokit, target: PreviewTarget, urlPattern: string): Promise<string | null> {
-  const re = new RegExp(urlPattern);
-  const { data } = await octokit.rest.issues.listComments({
-    owner: target.owner,
-    repo: target.repo,
-    issue_number: target.prNumber,
-    per_page: 100,
-  });
-  for (const comment of [...data].reverse()) {
-    const m = re.exec(comment.body ?? '');
-    const url = m?.groups?.url ?? m?.[1];
-    if (isHttpUrl(url)) return url;
-  }
-  return null;
-}
-
-/** The preview URL for the PR head, or null when none is published yet. Read endpoints only. */
-export async function findPreviewUrl(
-  octokit: Octokit,
-  target: { owner: string; repo: string; prNumber: number; headSha: string },
-  source: PreviewConfig['source'],
-): Promise<string | null> {
-  return source.kind === 'deployment'
-    ? findDeploymentUrl(octokit, target, source.environment)
-    : findCommentUrl(octokit, target, source.urlPattern);
-}
-
 const DEFAULT_DEPS: PreviewCheckDeps = {
-  findUrl: findPreviewUrl,
   probe: defaultProbe,
+  resolveHost: async (hostname) => (await lookup(hostname, { all: true })).map((entry) => entry.address),
   runCommand: runVerificationCommand,
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now: Date.now,
 };
 
-function persist(result: PreviewCheckResult, logsDir: string | undefined): PreviewCheckResult {
-  if (!logsDir) return result;
-  try {
-    mkdirSync(logsDir, { recursive: true });
-    const evidencePath = join(logsDir, EVIDENCE_FILE);
-    const evidence = { ...result.evidence, evidencePath };
-    writeFileSync(evidencePath, `${JSON.stringify({ status: result.status, evidence }, null, 2)}\n`);
-    return { status: result.status, evidence };
-  } catch {
-    return result;
+const describeSource = (source: PreviewConfig['source']): string =>
+  source.kind === 'deployment' ? `deployment environment ${source.environment}` : `PR comment ${source.urlPattern}`;
+
+const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+async function waitForPreview(input: PreviewCheckInput, d: PreviewCheckDeps, deadline: number): Promise<PreviewWait> {
+  const { config, headSha } = input;
+  const target = { owner: input.owner, repo: input.repo, prNumber: input.prNumber, headSha };
+  let url: string | null = null;
+  let reason = `no preview URL found for ${headSha.slice(0, 12)} (${describeSource(config.source)})`;
+  for (;;) {
+    try {
+      url = await findPreviewUrl(input.github, target, config.source);
+      if (url) {
+        const blocked = await previewHostBlock(url, d.resolveHost);
+        if (blocked) return { ready: false, reason: blocked, url };
+        const status = await d.probe(new URL(config.readyPath, url).toString());
+        if (status === config.expectedStatus) return { ready: true, url };
+        reason = `preview ${maskUrl(url)} not ready (last status ${status ?? 'no response'}) after ${config.readyTimeoutSeconds}s`;
+      }
+    } catch (err) {
+      reason = `preview lookup failed: ${errorMessage(err)}`;
+    }
+    if (d.now() >= deadline) return { ready: false, reason, ...(url ? { url } : {}) };
+    await d.sleep(POLL_INTERVAL_MS);
   }
 }
 
-/** Finds the preview, waits until it answers, runs the smoke command with the URL in `urlEnv`. */
 export async function runPreviewCheck(
   input: PreviewCheckInput,
   deps: Partial<PreviewCheckDeps> = {},
@@ -171,82 +95,42 @@ export async function runPreviewCheck(
   const d = { ...DEFAULT_DEPS, ...deps };
   const { config, headSha, worktree } = input;
   const started = d.now();
-  const deadline = started + config.readyTimeoutSeconds * 1000;
-  const target = { owner: input.owner, repo: input.repo, prNumber: input.prNumber, headSha };
-  const unavailable = (reason: string, url?: string): PreviewCheckResult =>
-    persist(
+  const finish = (
+    status: PreviewCheckStatus,
+    url: string | undefined,
+    fields: Partial<PreviewCheckEvidence> & Pick<PreviewCheckEvidence, 'readyWaitMs'>,
+  ): PreviewCheckResult =>
+    writePreviewEvidence(
       {
-        status: 'preview-unavailable',
+        status,
         evidence: {
-          ...(url ? { url } : {}),
+          ...(url ? { url: maskUrl(url) } : {}),
           headSha,
           command: config.command,
           durationMs: d.now() - started,
           artifacts: [],
-          reason,
+          ...fields,
         },
       },
       input.logsDir,
     );
 
-  let url: string | null = null;
-  let lastReason = `no preview URL found for ${headSha.slice(0, 12)} (${describeSource(config.source)})`;
-  for (;;) {
-    try {
-      url = await d.findUrl(input.octokit, target, config.source);
-      if (url) {
-        const status = await d.probe(new URL(config.readyPath, url).toString());
-        if (status === config.expectedStatus) break;
-        lastReason = `preview ${url} not ready (last status ${status ?? 'no response'}) after ${config.readyTimeoutSeconds}s`;
-      }
-    } catch (err) {
-      lastReason = `preview lookup failed: ${err instanceof Error ? err.message : String(err)}`;
-    }
-    if (d.now() >= deadline) return unavailable(lastReason, url ?? undefined);
-    await d.sleep(POLL_INTERVAL_MS);
-  }
+  const wait = await waitForPreview(input, d, started + config.readyTimeoutSeconds * 1000);
+  const readyWaitMs = d.now() - started;
+  if (!wait.ready) return finish('preview-unavailable', wait.url, { readyWaitMs, reason: wait.reason });
 
   const r = await d.runCommand(config.command, {
     cwd: worktree,
-    env: { ...input.env, [config.urlEnv]: url },
+    env: { ...input.env, [config.urlEnv]: wait.url },
     ...(input.onPgid ? { onPgid: input.onPgid } : {}),
     timeoutMs: config.commandTimeoutSeconds * 1000,
   });
-  const tail = stripAnsi(r.stderr.trim() !== '' ? r.stderr : r.stdout)
-    .trim()
-    .slice(-TAIL_CHARS);
-  return persist(
-    {
-      status: r.ok ? 'pass' : 'fail',
-      evidence: {
-        url,
-        headSha,
-        command: config.command,
-        exitCode: r.exitCode,
-        durationMs: d.now() - started,
-        outputTail: tail,
-        artifacts: config.artifacts.filter((p) => existsSync(join(worktree, p))),
-        ...(r.timedOut ? { reason: `preview command timed out after ${config.commandTimeoutSeconds}s` } : {}),
-      },
-    },
-    input.logsDir,
-  );
+  return finish(r.ok ? 'pass' : 'fail', wait.url, {
+    readyWaitMs,
+    commandMs: d.now() - started - readyWaitMs,
+    exitCode: r.exitCode,
+    outputTail: outputTail(r.stdout, r.stderr),
+    ...copyPreviewArtifacts(worktree, config.artifacts, input.logsDir),
+    ...(r.timedOut ? { reason: `preview command timed out after ${config.commandTimeoutSeconds}s` } : {}),
+  });
 }
-
-/** Bounded multi-line summary of a non-pass preview check, fed to the rework worker. */
-export function previewReworkSummary(result: PreviewCheckResult): string {
-  const e = result.evidence;
-  const lines = [
-    `Preview check: ${result.status}`,
-    `URL: ${e.url ?? '-'}`,
-    `SHA: ${e.headSha}`,
-    `Command: ${e.command.join(' ')}`,
-    ...(e.exitCode === undefined ? [] : [`Exit code: ${e.exitCode}`]),
-    ...(e.reason ? [`Reason: ${e.reason}`] : []),
-    ...(e.outputTail ? ['Output tail:', e.outputTail.slice(-SUMMARY_TAIL_CHARS)] : []),
-  ];
-  return lines.join('\n');
-}
-
-export const PREVIEW_REWORK_INSTRUCTIONS =
-  "The PR's deployed preview failed the repo's preview smoke command. Fix the code so the deployed app passes; do not edit the preview config, the smoke command or its tests to make it pass.";

@@ -464,6 +464,7 @@ const INTERNAL_API_KEYS = [
   ), // #3380, #3381, #3149
   ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles publishRiskReceipt renderRiskReceipt'.split(' '), // #3386
   'runBaselineCheckers', // #3851
+  'renderPreviewReceipt',
   ...'upsertRiskReceipt riskPolicyConfigFile loadRiskPolicy formatRiskPolicy'.split(' '), // #3387
   ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad resolveBaseHealthChecks'.split(' '), // #3048, #3290
   ...'hostBuildSlotsDir listHostSlots syncLandBranch listIssueRuns'.split(' '), // syncLandBranch: #1886; run readers: #3448
