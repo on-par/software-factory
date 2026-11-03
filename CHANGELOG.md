@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- Lanes, `factory supervise` and the `factory status` queue band claim, heartbeat, release and list through the WorkKey queue seam, and run state is written with a string `key`; an older factory binary (0.9.27 or earlier) can't read string keys and skips those state files (#3890).
+
 ## 0.9.27 - 2026-11-03
 
 An opt-in preview gate checks a PR against its preview environment, SHIP fails closed when the CI watch itself fails, and trust-tier promotion evidence and demotion are recorded (#3880, #1957, #1959).

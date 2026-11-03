@@ -14,6 +14,7 @@ import type {
   ProviderRestoredPayload,
   StewardTriggeredPayload,
 } from '../events/kinds.js';
+import type { WorkKey } from '../work/work-key.js';
 import type { RunAttribution } from '../run/outcome.js';
 import type { CiFailureEvidence } from './ci-evidence.js';
 import type { SteerEvent } from '../run/steer.js';
@@ -446,6 +447,8 @@ export interface RemoteBranchRecord {
 
 export interface IssueRunState {
   issue: number;
+  /** Tracker-native work key (ADR-0168, #3890). Persisted as a string; set on every read. */
+  key?: WorkKey;
   lane: string;
   /** GitHub slug (`owner/name`) of the checkout this run belongs to (#972). Optional for the same
    *  reason `FactoryEvent.repo` is (#971): a checkout with no readable `origin` remote has no slug

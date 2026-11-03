@@ -1,4 +1,4 @@
-// packages/core/src/queue/queue-backend.ts — Backend-agnostic queue seam; GitHub-labels is today's only implementation (#1499).
+// packages/core/src/queue/queue-backend.ts — Backend-agnostic queue seam speaking WorkKey; GitHub-labels is today's only implementation (#1499, #3890).
 
 import { type BlockedParkPollResult, type BlockedParkStore, pollBlockedParks } from '../blockers/poller.js';
 import {
@@ -7,15 +7,25 @@ import {
   type QueueClaim,
   type QueueReleaseOutcome,
 } from './github-queue.js';
+import { issueNumberOf, workKeyFromIssue, type WorkKey } from '../work/work-key.js';
 import { releaseStaleClaims, type StaleClaimRelease } from './stale-claims.js';
 
+export interface QueueBackendClaim {
+  key: WorkKey;
+  decision: QueueClaim['decision'];
+}
+
 export interface QueueBackend {
-  /** Claims and returns the next eligible issue in `lane`, or null when none is eligible. */
-  claimNext(lane: string): Promise<QueueClaim | null>;
-  /** Releases a previously claimed issue back to the queue with the given outcome (default 'queued'). */
-  release(issue: number, outcome?: QueueReleaseOutcome): Promise<void>;
-  /** Queued issue numbers for one lane, in claim order; every lane, lane-sorted, when `lane` is omitted. */
-  list(lane?: string): Promise<number[]>;
+  /** Claims and returns the next eligible work item in `lane`, or null when none is eligible. */
+  claimNext(lane: string): Promise<QueueBackendClaim | null>;
+  /** Releases a previously claimed work item back to the queue with the given outcome (default 'queued'). */
+  release(key: WorkKey, outcome?: QueueReleaseOutcome): Promise<void>;
+  /** Refreshes this claimant's lease; false when the claim is gone (GithubQueue.heartbeat semantics). */
+  heartbeat(key: WorkKey): Promise<boolean>;
+  /** Queued work keys for one lane, in claim order; every lane, lane-sorted, when `lane` is omitted. */
+  list(lane?: string): Promise<WorkKey[]>;
+  /** Lane names that currently have queued work. */
+  lanes(): Promise<string[]>;
   /** Detects and releases claims whose TTL lease has expired across the whole queue. */
   reap(): Promise<StaleClaimRelease[]>;
   /** Unparks `blocked` parents whose blockers resolved (#2318); [] when no blockedParks store was configured. */
@@ -28,13 +38,18 @@ export function createGithubQueueBackend(options: GithubQueueBackendOptions): Qu
   const { client, owner, repo, now } = options;
   const queue = createGithubQueue(options);
 
-  async function list(lane?: string): Promise<number[]> {
-    if (lane !== undefined) return queue.list(lane);
-    const issues: number[] = [];
+  async function claimNext(lane: string): Promise<QueueBackendClaim | null> {
+    const claim = await queue.claimNext(lane);
+    return claim === null ? null : { key: workKeyFromIssue(claim.issue), decision: claim.decision };
+  }
+
+  async function list(lane?: string): Promise<WorkKey[]> {
+    if (lane !== undefined) return (await queue.list(lane)).map(workKeyFromIssue);
+    const keys: WorkKey[] = [];
     for (const l of await queue.lanes()) {
-      issues.push(...(await queue.list(l)));
+      keys.push(...(await queue.list(l)).map(workKeyFromIssue));
     }
-    return issues;
+    return keys;
   }
 
   async function reap(): Promise<StaleClaimRelease[]> {
@@ -46,5 +61,39 @@ export function createGithubQueueBackend(options: GithubQueueBackendOptions): Qu
     return pollBlockedParks({ client, owner, repo, store: options.blockedParks });
   }
 
-  return { claimNext: queue.claimNext, release: queue.release, list, reap, pollBlockedParks: pollParks };
+  return {
+    claimNext,
+    release: async (key, outcome) => queue.release(issueNumberOf(key), outcome),
+    heartbeat: async (key) => queue.heartbeat(issueNumberOf(key)),
+    list,
+    lanes: () => queue.lanes(),
+    reap,
+    pollBlockedParks: pollParks,
+  };
+}
+
+export type QueueBackendKind = 'github';
+
+export interface QueueBackendOptions {
+  kind: QueueBackendKind;
+  github: GithubQueueBackendOptions;
+}
+
+export class UnsupportedQueueBackendError extends Error {
+  readonly kind: string;
+
+  constructor(kind: string) {
+    super(`unsupported queue backend "${kind}" — supported: github`);
+    this.name = 'UnsupportedQueueBackendError';
+    this.kind = kind;
+  }
+}
+
+export function createQueueBackend(options: QueueBackendOptions): QueueBackend {
+  switch (options.kind) {
+    case 'github':
+      return createGithubQueueBackend(options.github);
+    default:
+      throw new UnsupportedQueueBackendError(String(options.kind));
+  }
 }

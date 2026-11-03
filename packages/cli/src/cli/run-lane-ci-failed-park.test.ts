@@ -2,7 +2,7 @@
 
 import {
   CLAIM_EXPIRES_LABEL_PREFIX,
-  createGithubQueue,
+  createGithubQueueBackend,
   laneLabel,
   PARKED_LABEL,
   QUEUED_LABEL,
@@ -75,7 +75,7 @@ async function runCiFailedPark(opts: { failParkedAddOnce: boolean }) {
       return false;
     },
   };
-  const queue = createGithubQueue({ client, owner: 'on-par', repo: 'ship-it', claimantId: 'mini-1' });
+  const queue = createGithubQueueBackend({ client, owner: 'on-par', repo: 'ship-it', claimantId: 'mini-1' });
   const events: Array<{ type: string; message: string }> = [];
 
   vi.useFakeTimers();

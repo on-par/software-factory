@@ -1,0 +1,16 @@
+[
+  ["addLabels", 101, ["factory:in-progress", "factory:claimed-by:aaa-1", "factory:claim-expires:1700000900"]],
+  ["removeLabel", 101, "factory:queued"],
+  ["addLabels", 101, ["factory:claim-expires:1700000900"]],
+  ["removeLabel", 101, "factory:order:1"],
+  ["removeLabel", 101, "factory:in-progress"],
+  ["removeLabel", 101, "factory:claimed-by:aaa-1"],
+  ["removeLabel", 101, "factory:claim-expires:1700000900"],
+  ["addLabels", 102, ["factory:in-progress", "factory:claimed-by:aaa-1", "factory:claim-expires:1700000900"]],
+  ["removeLabel", 102, "factory:queued"],
+  ["addLabels", 102, ["factory:claim-expires:1700000900"]],
+  ["removeLabel", 102, "factory:in-progress"],
+  ["removeLabel", 102, "factory:claimed-by:aaa-1"],
+  ["removeLabel", 102, "factory:claim-expires:1700000900"],
+  ["addLabels", 102, ["factory:queued"]]
+]

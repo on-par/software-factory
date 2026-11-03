@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 
 import { resolveRepoSlug } from '../logger/repo-slug.js';
 import type { CheckerOutput, FailurePhase, IssueRunState, RunStatus } from '../types/index.js';
-import { toWorkKey, type WorkKey } from '../work/work-key.js';
+import { isNumericWorkKey, issueNumberOf, toWorkKey, workKeyFromIssue, type WorkKey } from '../work/work-key.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
 
 /** Path of one issue's persisted run state inside `runsDir`
@@ -19,26 +19,30 @@ export function runStateFile(runsDir: string, key: WorkKey): string {
   return resolve(runsDir, `issue-${key}.json`);
 }
 
-/** Persists `state`, filling `repo` from the run's worktree when the caller did not
- *  supply one. Returns the record as persisted, so a caller can see the resolved slug.
- *  An unresolvable slug omits the key rather than writing a placeholder. */
+/** Persists `state` with its string `key` and no numeric `issue` (#3890), filling `repo` from the
+ *  run's worktree when the caller did not supply one. Returns the in-memory record (both `key` and
+ *  `issue`), so a caller can see the resolved slug. An unresolvable slug omits the key rather than
+ *  writing a placeholder. */
 export async function writeIssueRunState(file: string, state: IssueRunState): Promise<IssueRunState> {
   const repo = state.repo ?? resolveRepoSlug(state.worktree) ?? undefined;
-  const record: IssueRunState = repo === undefined ? { ...state } : { ...state, repo };
+  const key = state.key ?? workKeyFromIssue(state.issue);
+  const { issue: _issue, key: _key, ...rest } = state;
+  const persisted = repo === undefined ? rest : { ...rest, repo };
   // `repo` must be absent, not undefined, in the JSON: JSON.stringify drops undefined
   // values, so the two shapes serialize identically — keep it that way.
 
   await mkdir(dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(record, null, 2)}\n`);
+  await writeFile(tmp, `${JSON.stringify({ key, ...persisted }, null, 2)}\n`);
   await rename(tmp, file);
-  return record;
+  return { ...persisted, key, issue: state.issue };
 }
 
 /** Reads one issue's persisted run state, or null when the file is missing,
  *  unreadable, or not a JSON object. Never throws. `repo` is surfaced when the record
  *  carries a non-empty string and is absent otherwise, so a record written before
- *  #972 reads back with `repo === undefined`. */
+ *  #972 reads back with `repo === undefined`. `key` is set from the persisted string key, or from
+ *  the legacy numeric `issue` of a record written before #3890. */
 export async function readIssueRunState(file: string): Promise<IssueRunState | null> {
   let parsed: unknown;
   try {
@@ -48,10 +52,22 @@ export async function readIssueRunState(file: string): Promise<IssueRunState | n
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
 
-  const record = parsed as IssueRunState;
+  const { key: rawKey, ...rest } = parsed as IssueRunState & { key?: unknown };
+  const record: IssueRunState = { ...rest };
+  if (typeof rawKey === 'string') {
+    try {
+      const key = toWorkKey(rawKey);
+      record.key = key;
+      if (isNumericWorkKey(key)) record.issue = issueNumberOf(key);
+    } catch {
+      // An invalid key stays absent, so the record fails isValidIssueRunState.
+    }
+  } else if (Number.isSafeInteger(record.issue) && record.issue >= 0) {
+    record.key = workKeyFromIssue(record.issue);
+  }
   if (typeof record.repo !== 'string' || record.repo.length === 0) {
-    const { repo: _dropped, ...rest } = record;
-    return rest as IssueRunState;
+    const { repo: _dropped, ...withoutRepo } = record;
+    return withoutRepo as IssueRunState;
   }
   return record;
 }
@@ -70,13 +86,15 @@ export interface ListIssueRunsResult {
   skipped: string[];
 }
 
-/** The one validity rule for a persisted run record (#3448): an object whose `issue` is an
- *  integer equal to the number of the work key (the file name's digits), with string `startedAt` and `updatedAt`. */
+/** The one validity rule for a persisted run record (#3448): an object whose `key` equals the
+ *  work key of the file name (#3890), with an integer `issue` and string `startedAt` and `updatedAt`. */
 export function isValidIssueRunState(state: IssueRunState | null, key: WorkKey): state is IssueRunState {
   return (
     state !== null &&
+    state.key !== undefined &&
+    // A zero-padded file name (issue-007.json) still names the numeric key 7.
+    (state.key === key || (isNumericWorkKey(state.key) && state.issue === Number(key))) &&
     Number.isInteger(state.issue) &&
-    state.issue === Number(key) &&
     typeof state.startedAt === 'string' &&
     typeof state.updatedAt === 'string'
   );

@@ -14,7 +14,13 @@ import {
   type QueueGitHubClient,
   type QueueIssue,
 } from './github-queue.js';
-import { createGithubQueueBackend, type QueueBackend } from './queue-backend.js';
+import { toWorkKey, workKeyFromIssue } from '../work/work-key.js';
+import {
+  createGithubQueueBackend,
+  createQueueBackend,
+  UnsupportedQueueBackendError,
+  type QueueBackend,
+} from './queue-backend.js';
 import { fakeIssueComments } from './fake-issue-comments.js';
 
 const NOW_MS = 1_700_000_000_000;
@@ -55,13 +61,15 @@ function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
 }
 
 describe('createGithubQueueBackend', () => {
-  it('returns an object satisfying QueueBackend, with all four members callable', () => {
+  it('returns an object satisfying QueueBackend, with every member callable', () => {
     const { client } = createFakeStore([]);
     const backend: QueueBackend = createGithubQueueBackend({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
 
     expect(typeof backend.claimNext).toBe('function');
     expect(typeof backend.release).toBe('function');
     expect(typeof backend.list).toBe('function');
+    expect(typeof backend.heartbeat).toBe('function');
+    expect(typeof backend.lanes).toBe('function');
     expect(typeof backend.reap).toBe('function');
   });
 
@@ -74,7 +82,7 @@ describe('createGithubQueueBackend', () => {
 
     const claim = await backend.claimNext('build');
 
-    expect(claim).toEqual({ issue: 1055, decision: { kind: 'build' } });
+    expect(claim).toEqual({ key: '1055', decision: { kind: 'build' } });
     expect(state.get(1055)!.has(QUEUED_LABEL)).toBe(false);
     expect(state.get(1055)!.has(IN_PROGRESS_LABEL)).toBe(true);
     expect(state.get(1055)!.has(claimedByLabel('aaa-1'))).toBe(true);
@@ -87,7 +95,7 @@ describe('createGithubQueueBackend', () => {
     ]);
     const backend = createGithubQueueBackend({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
 
-    await backend.release(1);
+    await backend.release(workKeyFromIssue(1));
 
     expect(state.get(1)!.has(QUEUED_LABEL)).toBe(true);
     expect(state.get(1)!.has(IN_PROGRESS_LABEL)).toBe(false);
@@ -102,7 +110,7 @@ describe('createGithubQueueBackend', () => {
     ]);
     const backend = createGithubQueueBackend({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
 
-    expect(await backend.list('build')).toEqual([1055, 993]);
+    expect(await backend.list('build')).toEqual(['1055', '993']);
   });
 
   it('list() with no lane returns every lane concatenated, lane-sorted', async () => {
@@ -113,7 +121,7 @@ describe('createGithubQueueBackend', () => {
     ]);
     const backend = createGithubQueueBackend({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
 
-    expect(await backend.list()).toEqual([10, 20, 30]);
+    expect(await backend.list()).toEqual(['10', '20', '30']);
   });
 
   it('reap() delegates unchanged: releases an expired-lease claim back to factory:queued', async () => {
@@ -148,5 +156,75 @@ describe('createGithubQueueBackend', () => {
     };
     const backend = createGithubQueueBackend({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1', blockedParks });
     expect(await backend.pollBlockedParks()).toEqual([{ issue: 5, outcome: 'skipped', detail: 'no park comment' }]);
+  });
+
+  it('claimNext returns the claimed issue as a WorkKey', async () => {
+    const { client } = createFakeStore([{ number: 7, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1)] }]);
+    const backend = createGithubQueueBackend({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    expect(await backend.claimNext('build')).toEqual({ key: '7', decision: { kind: 'build' } });
+  });
+
+  it('release and heartbeat take a WorkKey and convert it to the issue number', async () => {
+    const label = claimedByLabel('aaa-1');
+    const { client, state } = createFakeStore([
+      { number: 9, labels: [IN_PROGRESS_LABEL, label, laneLabel('build'), queueOrderLabel(1)] },
+    ]);
+    const backend = createGithubQueueBackend({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1', now });
+
+    expect(await backend.heartbeat(workKeyFromIssue(9))).toBe(true);
+    expect(state.get(9)!.has(claimExpiresLabel(NOW_SECONDS + 900))).toBe(true);
+    await backend.release(workKeyFromIssue(9));
+    expect(state.get(9)!.has(QUEUED_LABEL)).toBe(true);
+  });
+
+  it('list returns WorkKeys in claim order and lanes returns the lane names', async () => {
+    const { client } = createFakeStore([
+      { number: 20, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(2)] },
+      { number: 10, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1)] },
+      { number: 30, labels: [QUEUED_LABEL, laneLabel('docs'), queueOrderLabel(1)] },
+    ]);
+    const backend = createGithubQueueBackend({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    expect(await backend.list('build')).toEqual(['10', '20']);
+    expect(await backend.lanes()).toEqual(['build', 'docs']);
+  });
+
+  it('release refuses a non-numeric WorkKey before any GitHub call', async () => {
+    const calls: string[] = [];
+    const { client } = createFakeStore([]);
+    const recording: QueueGitHubClient = {
+      ...client,
+      async addLabels() {
+        calls.push('addLabels');
+      },
+      async removeLabel() {
+        calls.push('removeLabel');
+      },
+    };
+    const backend = createGithubQueueBackend({ client: recording, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    await expect(backend.release(toWorkKey('PROJ-1'))).rejects.toThrow(/not a numeric/);
+    await expect(backend.heartbeat(toWorkKey('PROJ-1'))).rejects.toThrow(/not a numeric/);
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('createQueueBackend', () => {
+  it('createQueueBackend builds the GitHub backend for kind github', async () => {
+    const { client } = createFakeStore([{ number: 4, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1)] }]);
+    const backend = createQueueBackend({ kind: 'github', github: { client, owner: 'o', repo: 'r', claimantId: 'a' } });
+
+    expect(await backend.list('build')).toEqual(['4']);
+  });
+
+  it('createQueueBackend refuses an unsupported kind', () => {
+    const { client } = createFakeStore([]);
+    const options = { kind: 'linear', github: { client, owner: 'o', repo: 'r' } };
+
+    expect(() => createQueueBackend(options as never)).toThrow(UnsupportedQueueBackendError);
+    expect(() => createQueueBackend(options as never)).toThrow(
+      'unsupported queue backend "linear" — supported: github',
+    );
   });
 });
