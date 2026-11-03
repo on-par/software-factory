@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- Core has a read-only `linear-issue` work source that resolves `ON-12` or a Linear issue URL into a work request; it reads `LINEAR_API_KEY` only when used (#3889).
+
 ### Changed
 
 - Lanes, `factory supervise` and the `factory status` queue band claim, heartbeat, release and list through the WorkKey queue seam, and run state is written with a string `key`; an older factory binary (0.9.27 or earlier) can't read string keys and skips those state files (#3890).

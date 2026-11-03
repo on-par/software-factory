@@ -3,13 +3,14 @@
 import type { Octokit } from '@octokit/rest';
 
 import { createGithubIssueAdapter, createOctokitIssueClient } from './github-issue.js';
+import { createLinearIssueAdapter } from './linear-issue.js';
 import type { WorkKey } from './work-key.js';
 import { type BriefFileReader, createFsBriefReader, createLocalBriefAdapter } from './local-brief.js';
 
 export * from './work-key.js';
 
 /** Registered input sources. Open-ended by design — adapters register by string key. */
-export type WorkRequestSourceKind = 'github-issue' | 'local-brief' | (string & {});
+export type WorkRequestSourceKind = 'github-issue' | 'local-brief' | 'linear-issue' | (string & {});
 
 /** Source-native lifecycle state, for sources that have one. */
 export type WorkRequestState = 'open' | 'closed';
@@ -102,14 +103,15 @@ export class WorkSourceRegistry {
   }
 }
 
-/** Registry with the built-in input sources — GitHub issue + local Markdown brief — registered. */
+/** Registry with the built-in input sources — GitHub issue + local Markdown brief + Linear issue (lazy: no env/network until resolve). */
 export function createDefaultWorkSourceRegistry(deps: {
   octokit: Octokit;
   briefReader?: BriefFileReader;
 }): WorkSourceRegistry {
   return new WorkSourceRegistry()
     .register(createGithubIssueAdapter(createOctokitIssueClient(deps.octokit)))
-    .register(createLocalBriefAdapter(deps.briefReader ?? createFsBriefReader()));
+    .register(createLocalBriefAdapter(deps.briefReader ?? createFsBriefReader()))
+    .register(createLinearIssueAdapter());
 }
 
 /** The reason to refuse this work before committing any resource, or null to proceed.
