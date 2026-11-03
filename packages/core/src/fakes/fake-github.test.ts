@@ -32,4 +32,13 @@ describe('createFakeGitHub', () => {
       message: 'forbidden',
     });
   });
+
+  it('sends Octokit request logs to the given logger instead of the console', async () => {
+    const lines: string[] = [];
+    const ignore = () => {};
+    const log = { debug: ignore, info: ignore, warn: ignore, error: (message: string) => void lines.push(message) };
+    const { octokit } = createFakeGitHub([], { log });
+    await octokit.rest.issues.get({ owner: 'o', repo: 'r', issue_number: 1 }).catch(() => undefined);
+    expect(lines).toEqual([expect.stringMatching(/^GET \/repos\/o\/r\/issues\/1 - 404 /)]);
+  });
 });

@@ -9,6 +9,11 @@ export interface FakeGitHubRequest {
 
 export type FakeGitHubRoute = readonly [route: string | RegExp, reply: (request: FakeGitHubRequest) => unknown];
 
+export type FakeGitHubLog = NonNullable<ConstructorParameters<typeof Octokit>[0]>['log'];
+
+const silent = (): void => {};
+const SILENT_LOG = { debug: silent, info: silent, warn: silent, error: silent };
+
 export interface FakeGitHub {
   octokit: Octokit;
   requests: FakeGitHubRequest[];
@@ -28,7 +33,10 @@ const readBody = (body: RequestInit['body']): unknown => {
 const matches = (route: string | RegExp, key: string): boolean =>
   typeof route === 'string' ? route === key : route.test(key);
 
-export function createFakeGitHub(routes: readonly FakeGitHubRoute[]): FakeGitHub {
+export function createFakeGitHub(
+  routes: readonly FakeGitHubRoute[],
+  { log = SILENT_LOG }: { log?: FakeGitHubLog } = {},
+): FakeGitHub {
   const requests: FakeGitHubRequest[] = [];
   const fetch = async (input: Parameters<typeof globalThis.fetch>[0], init?: RequestInit): Promise<Response> => {
     const url = new URL(input instanceof Request ? input.url : input.toString());
@@ -40,5 +48,5 @@ export function createFakeGitHub(routes: readonly FakeGitHubRoute[]): FakeGitHub
     const reply = await route[1](request);
     return reply instanceof Response ? reply : new Response(JSON.stringify(reply), { headers: JSON_HEADERS });
   };
-  return { octokit: new Octokit({ request: { fetch } }), requests };
+  return { octokit: new Octokit({ request: { fetch }, log }), requests };
 }
