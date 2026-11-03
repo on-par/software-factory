@@ -1,7 +1,7 @@
 // packages/core/src/run/ci-rework-loop.ts — SHIP with a bounded CI rework loop (#2816)
 
 import { PREVIEW_REWORK_INSTRUCTIONS, previewReworkSummary, runPreviewCheck } from '../checkers/preview-check.js';
-import { createOctokitPreviewGitHub } from '../checkers/preview-source.js';
+import { createOctokitPreviewGitHub } from '../checkers/preview-source-octokit.js';
 import type { PreviewConfig } from '../config/preview-section.js';
 import { loadRepoConfig } from '../config/repo.js';
 import { workKeyFromIssue } from '../work/work-key.js';

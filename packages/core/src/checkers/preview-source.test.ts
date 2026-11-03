@@ -1,9 +1,7 @@
-import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, type Mock, vi } from 'vitest';
 
 import { PreviewConfigSchema } from '../config/preview-section.js';
 import {
-  createOctokitPreviewGitHub,
   findPreviewUrl,
   type PreviewComment,
   type PreviewDeployment,
@@ -140,40 +138,5 @@ describe('findPreviewUrl from a PR comment', () => {
   it('finds nothing when the head commit date is unknown and no comment names the SHA', async () => {
     const github = fakeGitHub({ comments: [comment()] });
     expect(await findPreviewUrl(github, target, commentSource())).toBeNull();
-  });
-});
-
-describe('createOctokitPreviewGitHub', () => {
-  it('reads every page of comments and maps author, association and timestamps', async () => {
-    const pages: Record<string, unknown[]> = {
-      listComments: [
-        { body: 'hi', user: { login: 'bot' }, author_association: 'NONE', created_at: 'c', updated_at: 'u' },
-      ],
-      listDeployments: [{ id: 5, environment: 'preview/pr-7', created_at: 'c' }],
-    };
-    const paginate = vi.fn(async (method: string, _params: Record<string, unknown>) => pages[method] ?? []);
-    const getCommit = vi.fn(async () => ({ data: { commit: { committer: { date: HEAD_DATE } } } }));
-    const listDeploymentStatuses = vi.fn(async () => ({
-      data: [{ state: 'success', created_at: 'c', environment_url: 'https://e.example.com', target_url: '' }],
-    }));
-    const octokit: Octokit = Object.assign(Object.create(null), {
-      paginate,
-      rest: {
-        issues: { listComments: 'listComments' },
-        repos: { listDeployments: 'listDeployments', listDeploymentStatuses, getCommit },
-      },
-    });
-    const github = createOctokitPreviewGitHub(octokit);
-    expect(await github.listComments(target)).toEqual([
-      { body: 'hi', author: 'bot', authorAssociation: 'NONE', createdAt: 'c', updatedAt: 'u' },
-    ]);
-    expect(paginate).toHaveBeenCalledWith('listComments', { owner: 'o', repo: 'r', issue_number: 7, per_page: 100 });
-    expect(await github.headCommitDate(target)).toBe(HEAD_DATE);
-    expect(getCommit).toHaveBeenCalledWith({ owner: 'o', repo: 'r', ref: SHA });
-    expect(await github.listDeploymentStatuses(target, 5)).toEqual([
-      { state: 'success', createdAt: 'c', environmentUrl: 'https://e.example.com', targetUrl: '' },
-    ]);
-    expect(await github.listDeployments(target)).toEqual([{ id: 5, environment: 'preview/pr-7', createdAt: 'c' }]);
-    expect(paginate).toHaveBeenLastCalledWith('listDeployments', { owner: 'o', repo: 'r', sha: SHA, per_page: 100 });
   });
 });
