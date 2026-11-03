@@ -12,3 +12,7 @@ paths = ['''^\.factory/plans/''']
 [[allowlists]]
 description = "Fake AWS access-key fixture in packages/core/src/filing/redact.test.ts (and git history of oxlint enable commits)"
 regexes = ['''AKIAABCDEFGHIJKLMNOP''']
+
+[[allowlists]]
+description = "Fake Linear API key fixture in linear-preflight.test.ts and doctor-linear.test.ts (also present in git history)"
+regexes = ['''lin_api_SECRET123''']
