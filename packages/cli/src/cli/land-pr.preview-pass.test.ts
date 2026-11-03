@@ -1,6 +1,6 @@
 import { renderPreviewReceipt } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
-import type { Octokit } from '@octokit/rest';
+import { Octokit } from '@octokit/rest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import './index.js';
@@ -24,29 +24,43 @@ const previewPassBody = `Implements #1.\n\n${renderPreviewReceipt({
   },
 })}\n`;
 
+const json = (data: unknown): Response =>
+  new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
+
 function redMainOctokit() {
-  const merge = vi.fn(async () => ({ data: { merged: true } }));
-  const rest = {
-    pulls: {
-      get: async () => ({
-        data: { head: { sha: 'pr' }, base: { ref: 'main' }, body: previewPassBody, merge_commit_sha: 'merge' },
-      }),
-      merge,
-    },
-    git: { deleteRef: vi.fn() },
-    repos: {
-      getBranch: async () => ({ data: { commit: { sha: 'main-head' } } }),
-      getStatusChecksProtection: async () => ({ data: { contexts: ['ci'] } }),
-      getBranchRules: async () => ({ data: [] }),
-      compareCommitsWithBasehead: async () => ({ data: { status: 'ahead' } }),
-    },
-    checks: {
-      listForRef: async () => ({ data: { check_runs: [{ name: 'ci', status: 'completed', conclusion: 'failure' }] } }),
-    },
-    actions: { listWorkflowRunsForRepo: async () => ({ data: { workflow_runs: [] } }) },
+  const merge = vi.fn();
+  const routes: ReadonlyArray<readonly [RegExp, () => unknown]> = [
+    [
+      /^GET \/repos\/o\/r\/pulls\/2$/,
+      () => ({ head: { sha: 'pr' }, base: { ref: 'main' }, body: previewPassBody, merge_commit_sha: 'merge' }),
+    ],
+    [
+      /^PUT \/repos\/o\/r\/pulls\/2\/merge$/,
+      () => {
+        merge();
+        return { merged: true };
+      },
+    ],
+    [/^DELETE \/repos\/o\/r\/git\/refs\//, () => ({})],
+    [/^GET \/repos\/o\/r\/branches\/main$/, () => ({ commit: { sha: 'main-head' } })],
+    [/\/protection\/required_status_checks$/, () => ({ contexts: ['ci'] })],
+    [/^GET \/repos\/o\/r\/rules\/branches\/main$/, () => []],
+    [/^GET \/repos\/o\/r\/compare\//, () => ({ status: 'ahead' })],
+    [
+      /^GET \/repos\/o\/r\/commits\/[^/]+\/check-runs$/,
+      () => ({ check_runs: [{ name: 'ci', status: 'completed', conclusion: 'failure' }] }),
+    ],
+    [/^GET \/repos\/o\/r\/actions\/runs$/, () => ({ workflow_runs: [] })],
+    [/^POST \/graphql$/, () => ({ data: { repository: { pullRequest: { mergeStateStatus: 'CLEAN' } } } })],
+  ];
+  const fetch = async (input: Parameters<typeof globalThis.fetch>[0], init?: RequestInit): Promise<Response> => {
+    const url = new URL(input instanceof Request ? input.url : input.toString());
+    const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+    const key = `${method} ${url.pathname}`;
+    const route = routes.find(([pattern]) => pattern.test(key));
+    return route ? json(route[1]()) : new Response('{}', { status: 404 });
   };
-  const graphql = async () => ({ repository: { pullRequest: { mergeStateStatus: 'CLEAN' } } });
-  const octokit: Octokit = Object.assign(Object.create(null), { graphql, rest });
+  const octokit = new Octokit({ request: { fetch } });
   return { octokit, merge };
 }
 
