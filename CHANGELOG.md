@@ -16,6 +16,7 @@ section to `## X.Y.Z - date`. See
 
 ### Fixed
 
+- SHIP no longer marks a PR ready for review when the CI watch itself fails, for example on a GitHub API error. CI counts as unknown: SHIP fails with `CI unknown for PR #N: the CI watch failed (...)`, the PR is not marked ready, also in draft mode, and the run parks `fail` (#3880).
 - An unknown `sizeGate.mode` (for example `Off`, `none`, `bogus`) still runs as stack but now warns at config load and run start, and shows a non-failing ⚠️ `factory doctor` row naming the value and `off, stack` (#3850).
 - A CHECK environment release whose fresh base re-run fails while GitHub CI is green now writes a `confirmedLocally` base hold, so the lane no longer re-claims and rebuilds the issue every poll; `factory status` names the waiting issue (#3851).
 - `factory resume N --from check` refuses with both SHAs and `factory run-issue N` when origin's default branch moved since the build was kept, instead of re-checking on the stale base; the preserved-build hint points at `run-issue` for fixes that land on main and only names log paths that exist (#3852).

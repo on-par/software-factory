@@ -468,10 +468,9 @@ async function shipPhaseImpl(opts: {
     } catch {}
 
   let ciOutcome: InfraRerunOutcome | undefined;
-  let ciWatchFailed = false;
+  let ciWatchError: string | undefined;
   const ciDeadlineMs = opts.ciDeadlineMs ?? DEFAULT_CI_DEADLINE_MS;
 
-  // Watch CI (best-effort)
   if (watchCI) {
     log('ship', `Watching CI for PR #${prNumber}`);
     try {
@@ -525,12 +524,12 @@ async function shipPhaseImpl(opts: {
         );
       }
     } catch (err) {
-      ciWatchFailed = true;
-      log('warn', `CI watch for PR #${prNumber} failed: ${shortDetail(err)}; treating CI as pending`);
+      ciWatchError = shortDetail(err);
+      log('warn', `CI watch for PR #${prNumber} failed: ${ciWatchError}; treating CI as pending`);
     }
   }
 
-  const ciPending = ciOutcome === 'timeout' || (ciWatchFailed && opts.previewGate !== undefined);
+  const ciPending = ciOutcome === 'timeout' || ciWatchError !== undefined;
 
   let previewCheck: PreviewCheckResult | undefined;
   if (opts.previewGate) {
@@ -549,6 +548,12 @@ async function shipPhaseImpl(opts: {
         ...(ciPending ? { ciPending: true, draft: true } : {}),
       };
     }
+  }
+
+  if (ciWatchError !== undefined) {
+    const reason = `CI unknown for PR #${prNumber}: the CI watch failed (${ciWatchError}); leaving PR as draft`;
+    log('ship', reason);
+    return { ok: false, prNumber, reason, ciPending: true, draft: true, ...(headSha ? { headSha } : {}) };
   }
 
   // Mark ready for review (if draft). REST pulls.update ignores `draft`;
