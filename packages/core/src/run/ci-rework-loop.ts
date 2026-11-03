@@ -123,11 +123,8 @@ function attributableNonCodeqlChecks(
 const isPreviewFailure = (ship: ShipResult): boolean => !!ship.previewCheck && ship.previewCheck.status !== 'pass';
 
 function loadPreviewConfigDefault(worktree: string): PreviewConfig | undefined {
-  try {
-    return loadRepoConfig(worktree)?.preview;
-  } catch {
-    return undefined;
-  }
+  // Fail closed: a malformed `preview` section must surface, not silently disable the opt-in gate.
+  return loadRepoConfig(worktree)?.preview;
 }
 
 const guardError = (match: string): CiSuppressionFinding => ({

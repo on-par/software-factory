@@ -1,13 +1,16 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { PreviewConfigSchema } from '../config/preview-section.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import { previewReworkSummary, runPreviewCheck, type PreviewCheckInput } from './preview-check.js';
+
+const tempDirs = createTempDirs();
+afterEach(() => tempDirs.cleanup());
 
 const SHA = 'a'.repeat(40);
 const OTHER = 'b'.repeat(40);
@@ -60,7 +63,7 @@ function harness(f: Fixtures, config = deploymentConfig(), over: Partial<Preview
     repo: 'r',
     prNumber: 7,
     headSha: SHA,
-    worktree: mkdtempSync(join(tmpdir(), 'preview-')),
+    worktree: tempDirs.makeSync('preview-'),
     ...over,
   };
   return { calls, probes, input, tick: (ms: number) => (clock += ms), clock: () => clock };
@@ -285,7 +288,7 @@ describe('runPreviewCheck', () => {
   });
 
   it('writes the evidence JSON to logsDir', async () => {
-    const logsDir = join(mkdtempSync(join(tmpdir(), 'preview-logs-')), 'nested');
+    const logsDir = join(tempDirs.makeSync('preview-logs-'), 'nested');
     const h = harness(
       {
         deployments: [dep],
