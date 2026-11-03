@@ -34,6 +34,7 @@ import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS, retiredHarnessReplacement } from '../harness/catalog.js';
 import type { FailoverReason } from '../types/index.js';
 import { SandboxConfigSchema, warnCodexSandboxOnce } from './sandbox-schema.js';
+import { TrackerConfigSchema } from './tracker-section.js';
 import { markSizeGateModeWarned, warnSizeGateModeOnce } from './size-gate.js';
 import { ModelEffortsSchema } from './effort.js';
 import { resolvePrecedence, type ConfigSource } from './precedence.js';
@@ -347,6 +348,7 @@ export const FactoryConfigSchema = z.object({
       comment: z.string().optional(),
     })
     .default({ backend: 'host' }),
+  tracker: TrackerConfigSchema.default({ kind: 'github' }),
 });
 
 // ---------- Types ----------
@@ -529,6 +531,15 @@ export {
   resolveSizeGateMode,
   sizeGateDeprecationLine,
 } from './size-gate.js';
+export {
+  TRACKER_KINDS,
+  type TrackerKind,
+  TrackerConfigSchema,
+  type TrackerConfig,
+  type LinearTrackerConfig,
+  DEFAULT_TRACKER_CONFIG,
+  resolveTrackerConfig,
+} from './tracker-section.js';
 
 /** --max-slices value: a whole number from 1 to SLICE_CAP_CEILING, else undefined (ADR-0156). */
 export function parseMaxSlices(raw: string): number | undefined {

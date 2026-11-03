@@ -111,6 +111,8 @@ version: 2
 
 Every other key is optional. `pr.footer` defaults to `This PR was made by Software Factory`; set a non-empty string to replace it verbatim, or `""` to remove the footer and its separator. It supports no templating or token substitution. [`docs/config.example.yaml`](docs/config.example.yaml) lists each key the factory reads, with its default and what it does. It is generated from the config schemas (`npm run config-example`) and a test fails when it drifts, so it matches the code. Copy only the keys you want to change (comments included) into `.factory/config.yaml`; `.factory/config.json` is still read for existing repos, and `factory migrate --to-yaml` converts it. `factory status --kpis` prints the effective config.
 
+**Tracker.** The `tracker` key picks the ticket tracker per repo: `kind` is `github` (default) or `linear`. A `linear` block holds `teamKey`, `projects` (Linear project name or id → `owner/repo`), `readyLabel` (default `factory:ready`), `laneLabelGroup` (default `lane`) and `states.ready` / `states.inProgress` / `states.parked` (default `Todo` / `In Progress` / `Todo`). The API key comes only from the `LINEAR_API_KEY` environment variable, never from config. So far only `factory doctor` reads Linear: it checks the key and names any project with ready issues but no repo mapping. The Linear queue and lanes come in later slices of #3872.
+
 ## Updating
 
 ```bash
