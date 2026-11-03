@@ -3,13 +3,15 @@
 import type { Octokit } from '@octokit/rest';
 
 import { createGithubIssueAdapter, createOctokitIssueClient } from './github-issue.js';
+import { createLinearClient } from './linear-client.js';
+import { createLinearIssueAdapter } from './linear-issue.js';
 import type { WorkKey } from './work-key.js';
 import { type BriefFileReader, createFsBriefReader, createLocalBriefAdapter } from './local-brief.js';
 
 export * from './work-key.js';
 
 /** Registered input sources. Open-ended by design — adapters register by string key. */
-export type WorkRequestSourceKind = 'github-issue' | 'local-brief' | (string & {});
+export type WorkRequestSourceKind = 'github-issue' | 'local-brief' | 'linear-issue' | (string & {});
 
 /** Source-native lifecycle state, for sources that have one. */
 export type WorkRequestState = 'open' | 'closed';
@@ -40,7 +42,7 @@ export interface WorkRequest {
   reference?: WorkRequestReference;
   /** Tracker-native key (ADR-0168); set by tracker sources, absent for a local brief until #3640. */
   key?: WorkKey;
-  /** Source-native labels (GitHub issue labels); absent when the source has none. */
+  /** Source-native labels (GitHub issue or Linear labels); absent when the source has none. */
   labels?: string[];
 }
 
@@ -102,14 +104,23 @@ export class WorkSourceRegistry {
   }
 }
 
-/** Registry with the built-in input sources — GitHub issue + local Markdown brief — registered. */
+/** Registry with the built-in input sources — GitHub issue, local Markdown brief and read-only Linear issue — registered. */
 export function createDefaultWorkSourceRegistry(deps: {
   octokit: Octokit;
   briefReader?: BriefFileReader;
+  linear?: { apiKey?: string; fetch?: typeof fetch };
 }): WorkSourceRegistry {
   return new WorkSourceRegistry()
     .register(createGithubIssueAdapter(createOctokitIssueClient(deps.octokit)))
-    .register(createLocalBriefAdapter(deps.briefReader ?? createFsBriefReader()));
+    .register(createLocalBriefAdapter(deps.briefReader ?? createFsBriefReader()))
+    .register(
+      createLinearIssueAdapter(
+        createLinearClient({
+          apiKey: () => deps.linear?.apiKey ?? process.env.LINEAR_API_KEY,
+          ...(deps.linear?.fetch ? { fetch: deps.linear.fetch } : {}),
+        }),
+      ),
+    );
 }
 
 /** The reason to refuse this work before committing any resource, or null to proceed.

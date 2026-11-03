@@ -1,0 +1,13 @@
+{
+  "data": {
+    "issue": {
+      "id": "00000000-0000-4000-8000-000000000013",
+      "identifier": "ON-13",
+      "title": "Drop the widget",
+      "description": null,
+      "url": "https://linear.app/acme/issue/ON-13/drop-the-widget",
+      "state": { "type": "canceled" },
+      "labels": { "nodes": [] }
+    }
+  }
+}

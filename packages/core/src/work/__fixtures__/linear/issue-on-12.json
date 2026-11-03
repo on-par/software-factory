@@ -1,0 +1,13 @@
+{
+  "data": {
+    "issue": {
+      "id": "00000000-0000-4000-8000-000000000012",
+      "identifier": "ON-12",
+      "title": "Add a widget",
+      "description": "Please add a widget.\n\n## Acceptance criteria\n\n- [ ] the widget exists\n",
+      "url": "https://linear.app/acme/issue/ON-12/add-a-widget",
+      "state": { "type": "started" },
+      "labels": { "nodes": [{ "name": "feature" }, { "name": "factory" }] }
+    }
+  }
+}

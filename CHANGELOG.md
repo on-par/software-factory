@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- A read-only `linear-issue` work source resolves a Linear issue (`ON-12` or a linear.app issue URL) into a work request through the work-source registry, reading `LINEAR_API_KEY`; it is not yet wired to a CLI command (#3889).
+
 ## 0.9.27 - 2026-11-03
 
 An opt-in preview gate checks a PR against its preview environment, SHIP fails closed when the CI watch itself fails, and trust-tier promotion evidence and demotion are recorded (#3880, #1957, #1959).

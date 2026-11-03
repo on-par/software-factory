@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   closedWorkSkipReason,
@@ -98,7 +100,29 @@ describe('createDefaultWorkSourceRegistry', () => {
     const registry = createDefaultWorkSourceRegistry({ octokit });
 
     expect(registry.has('local-brief')).toBe(true);
-    expect(registry.kinds()).toEqual(['github-issue', 'local-brief']);
+    expect(registry.kinds()).toEqual(['github-issue', 'local-brief', 'linear-issue']);
+    expect(registry.has('linear-issue')).toBe(true);
+  });
+
+  it('resolves a Linear issue through an injected fetch', async () => {
+    const octokit: any = { rest: { issues: {} } };
+    const body = readFileSync(new URL('./__fixtures__/linear/issue-on-12.json', import.meta.url), 'utf8');
+    const fetch = vi.fn(async () => new Response(body, { status: 200 }));
+    const registry = createDefaultWorkSourceRegistry({ octokit, linear: { apiKey: 'k', fetch } });
+
+    const request = await registry.resolve('linear-issue', { input: 'ON-12' });
+    expect(request.title).toBe('Add a widget');
+  });
+
+  it('constructs without a Linear API key', async () => {
+    vi.stubEnv('LINEAR_API_KEY', '');
+    try {
+      const octokit: any = { rest: { issues: {} } };
+      const registry = createDefaultWorkSourceRegistry({ octokit });
+      await expect(registry.resolve('linear-issue', { input: 'ON-12' })).rejects.toThrow(/LINEAR_API_KEY/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('resolves a local brief through an injected briefReader', async () => {
