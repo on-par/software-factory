@@ -1,6 +1,5 @@
 import { join } from 'node:path';
 
-import type { Octokit } from '@octokit/rest';
 import { vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
@@ -8,6 +7,7 @@ import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { shipPhase as realShipPhase } from '../phases/ship.js';
+import { createFakeGitHub } from '../fakes/fake-github.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
@@ -94,7 +94,7 @@ export const policy: RunPolicy = {
 export const tmp = createTempDirs();
 export const breakerDir = tmp.makeSync('run-issue-ci-rework-');
 
-const octokit: Octokit = Object.create(null);
+const { octokit } = createFakeGitHub([]);
 
 export type Log = ReturnType<RunPorts['events']>;
 

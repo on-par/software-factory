@@ -1,11 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { Octokit } from '@octokit/rest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { PreviewCheckResult } from '../checkers/preview-check.js';
 import { PREVIEW_RECEIPT_START } from '../checkers/preview-receipt.js';
+import { createFakeGitHub, githubError } from '../fakes/fake-github.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 import type { PreviewGate } from './ship-preview.js';
@@ -21,32 +21,36 @@ interface CheckRun {
   conclusion: string | null;
 }
 
-function createOctokit(checkRuns: CheckRun[]) {
-  const graphqlCalls: string[] = [];
-  const bodyUpdates: string[] = [];
-  const rest = {
-    pulls: {
-      list: async () => ({ data: [] }),
-      create: async () => ({ data: { number: 123 } }),
-      get: async () => ({ data: { draft: true, node_id: 'PR_1', body: 'Implements #9.' } }),
-      update: async ({ body }: { body: string }) => {
-        bodyUpdates.push(body);
-        return { data: {} };
-      },
-    },
-    issues: {
-      get: async () => ({ data: { title: 'Preview' } }),
-      createComment: async () => ({ data: { id: 1 } }),
-    },
-    checks: { listForRef: async () => ({ data: { check_runs: checkRuns } }) },
-    repos: { getCombinedStatusForRef: async () => ({ data: { total_count: 0, statuses: [], sha: SHA } }) },
+interface FakeOptions {
+  updateFails?: boolean;
+}
+
+const REPO = '/repos/on-par/software-factory';
+
+const queryOf = (body: unknown): string =>
+  typeof body === 'object' && body !== null && 'query' in body && typeof body.query === 'string' ? body.query : '';
+
+const bodyOf = (body: unknown): string =>
+  typeof body === 'object' && body !== null && 'body' in body && typeof body.body === 'string' ? body.body : '';
+
+function createOctokit(checkRuns: CheckRun[], { updateFails = false }: FakeOptions = {}) {
+  const github = createFakeGitHub([
+    [`GET ${REPO}/pulls`, () => []],
+    [`POST ${REPO}/pulls`, () => ({ number: 123 })],
+    [`GET ${REPO}/pulls/123`, () => ({ draft: true, node_id: 'PR_1', body: 'Implements #9.' })],
+    [`PATCH ${REPO}/pulls/123`, () => (updateFails ? githubError(403, 'forbidden') : {})],
+    [`GET ${REPO}/issues/9`, () => ({ title: 'Preview' })],
+    [`POST ${REPO}/issues/123/comments`, () => ({ id: 1 })],
+    [/\/check-runs$/, () => ({ total_count: checkRuns.length, check_runs: checkRuns })],
+    [/\/commits\/[^/]+\/status$/, () => ({ state: 'success', total_count: 0, statuses: [], sha: SHA })],
+    ['POST /graphql', () => ({ data: {} })],
+  ]);
+  const sent = (method: string, path: string) => github.requests.filter((r) => r.method === method && r.path === path);
+  return {
+    octokit: github.octokit,
+    graphqlCalls: () => sent('POST', '/graphql').map((r) => queryOf(r.body)),
+    bodyUpdates: () => sent('PATCH', `${REPO}/pulls/123`).map((r) => bodyOf(r.body)),
   };
-  const graphql = async (query: string) => {
-    graphqlCalls.push(query);
-    return {};
-  };
-  const octokit: Octokit = Object.assign(Object.create(null), { graphql, rest });
-  return { octokit, graphqlCalls, bodyUpdates, rest };
 }
 
 const run = async (command: string) => {
@@ -68,13 +72,14 @@ const result = (
   evidence: { ...evidence, artifacts: [], url: 'https://p.example.com/', ...extra },
 });
 
-async function ship(
-  checkRuns: CheckRun[],
-  previewGate: PreviewGate,
-  logsDir?: string,
-  fake = createOctokit(checkRuns),
-  extra: Partial<Parameters<typeof shipPhase>[0]> = {},
-) {
+interface ShipOptions extends FakeOptions {
+  logsDir?: string;
+  ciWatch?: Parameters<typeof shipPhase>[0]['ciWatch'];
+}
+
+async function ship(checkRuns: CheckRun[], previewGate: PreviewGate, options: ShipOptions = {}) {
+  const fake = createOctokit(checkRuns, options);
+  const { logsDir, ciWatch } = options;
   const logs: Array<[string, string]> = [];
   vi.useFakeTimers();
   try {
@@ -89,10 +94,11 @@ async function ship(
       run,
       previewGate,
       ...(logsDir ? { logsDir } : {}),
-      ...extra,
+      ...(ciWatch ? { ciWatch } : {}),
     });
     await vi.runAllTimersAsync();
-    return { result: await promise, logs, ...fake };
+    const shipped = await promise;
+    return { result: shipped, logs, graphqlCalls: fake.graphqlCalls(), bodyUpdates: fake.bodyUpdates() };
   } finally {
     vi.useRealTimers();
   }
@@ -129,11 +135,7 @@ describe('shipPhase preview gate (#3880)', () => {
   });
 
   it('still reports the verdict when the PR body cannot be updated', async () => {
-    const fake = createOctokit(green);
-    fake.rest.pulls.update = async () => {
-      throw new Error('forbidden');
-    };
-    const { result: r, logs } = await ship(green, async () => result('pass'), undefined, fake);
+    const { result: r, logs } = await ship(green, async () => result('pass'), { updateFails: true });
     expect(r).toMatchObject({ ok: true, previewCheck: { status: 'pass' } });
     expect(logs).toContainEqual(['warn', 'could not write the preview result to PR #123: forbidden']);
   });
@@ -165,7 +167,7 @@ describe('shipPhase preview gate (#3880)', () => {
     const ciWatch = async () => {
       throw new Error('GitHub 502');
     };
-    const { result: r, graphqlCalls, logs } = await ship(green, gate, undefined, createOctokit(green), { ciWatch });
+    const { result: r, graphqlCalls, logs } = await ship(green, gate, { ciWatch });
     expect(gate).not.toHaveBeenCalled();
     expect(graphqlCalls).toEqual([]);
     expect(logs).toContainEqual(['warn', 'CI watch for PR #123 failed: GitHub 502; treating CI as pending']);
@@ -203,7 +205,7 @@ describe('shipPhase preview gate (#3880)', () => {
       async () => {
         throw new Error('gate exploded');
       },
-      logsDir,
+      { logsDir },
     );
     expect(graphqlCalls).toEqual([]);
     expect(r.ok).toBe(false);

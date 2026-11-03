@@ -7,6 +7,8 @@ export const TESTING_API_KEYS = [
   'loadInjectionFixtures',
   'SimModelExecutor',
   'createSimOctokit',
+  'createFakeGitHub',
+  'githubError',
   'createSimWorkspace',
   'simWorkspace',
   'failOnCall',

@@ -1,6 +1,6 @@
-import type { Octokit } from '@octokit/rest';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
+import { createFakeGitHub } from '../fakes/fake-github.js';
 import type { PreviewCheckResult } from './preview-evidence.js';
 import {
   PREVIEW_RECEIPT_END,
@@ -27,11 +27,13 @@ const result = (over: Partial<PreviewCheckResult['evidence']> = {}): PreviewChec
   },
 });
 
-function fakeOctokit(body: string | null) {
-  const get = vi.fn(async (_args: { pull_number: number }) => ({ data: { body } }));
-  const update = vi.fn(async (_args: { pull_number: number; body: string }) => ({ data: {} }));
-  const octokit: Octokit = Object.assign(Object.create(null), { rest: { pulls: { get, update } } });
-  return { octokit, get, update };
+function prWithBody(body: string | null) {
+  const github = createFakeGitHub([
+    ['GET /repos/o/r/pulls/5', () => ({ number: 5, body })],
+    ['PATCH /repos/o/r/pulls/5', () => ({ number: 5 })],
+  ]);
+  const updates = () => github.requests.filter((r) => r.method === 'PATCH').map((r) => r.body);
+  return { octokit: github.octokit, updates };
 }
 
 describe('renderPreviewReceipt', () => {
@@ -69,26 +71,21 @@ describe('renderPreviewReceipt', () => {
 
 describe('publishPreviewReceipt', () => {
   it('appends the receipt to the PR body and keeps the rest of the body', async () => {
-    const f = fakeOctokit('Closes #5');
-    await publishPreviewReceipt(f.octokit, 'o', 'r', 5, result());
-    expect(f.update).toHaveBeenCalledWith({
-      owner: 'o',
-      repo: 'r',
-      pull_number: 5,
-      body: `Closes #5\n\n${renderPreviewReceipt(result())}\n`,
-    });
+    const pr = prWithBody('Closes #5');
+    await publishPreviewReceipt(pr.octokit, 'o', 'r', 5, result());
+    expect(pr.updates()).toEqual([{ body: `Closes #5\n\n${renderPreviewReceipt(result())}\n` }]);
   });
 
   it('replaces the previous receipt after a rework round', async () => {
-    const f = fakeOctokit(`Closes #5\n\n${renderPreviewReceipt(result())}\n`);
+    const pr = prWithBody(`Closes #5\n\n${renderPreviewReceipt(result())}\n`);
     const passed: PreviewCheckResult = { ...result({ exitCode: 0 }), status: 'pass' };
-    await publishPreviewReceipt(f.octokit, 'o', 'r', 5, passed);
-    expect(f.update.mock.calls[0]?.[0].body).toBe(`Closes #5\n\n${renderPreviewReceipt(passed)}\n`);
+    await publishPreviewReceipt(pr.octokit, 'o', 'r', 5, passed);
+    expect(pr.updates()).toEqual([{ body: `Closes #5\n\n${renderPreviewReceipt(passed)}\n` }]);
   });
 
   it('does not write when the body already holds this receipt', async () => {
-    const f = fakeOctokit(renderPreviewReceipt(result()));
-    await publishPreviewReceipt(f.octokit, 'o', 'r', 5, result());
-    expect(f.update).not.toHaveBeenCalled();
+    const pr = prWithBody(renderPreviewReceipt(result()));
+    await publishPreviewReceipt(pr.octokit, 'o', 'r', 5, result());
+    expect(pr.updates()).toEqual([]);
   });
 });
