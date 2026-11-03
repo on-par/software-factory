@@ -60,7 +60,6 @@ export interface ShipResult {
   draft?: boolean;
   /** CI watch timed out before a verdict (#3569): the PR was left as draft. */
   ciPending?: boolean;
-  /** The preview gate's verdict (#3880); a non-pass is a failed SHIP before mark-ready. */
   previewCheck?: PreviewCheckResult;
 }
 
@@ -132,8 +131,8 @@ async function shipPhaseImpl(opts: {
   /** CI watch deadline (#3569); default DEFAULT_CI_DEADLINE_MS. */
   ciDeadlineMs?: number;
   walkthrough?: WalkthroughShipOpts['walkthrough'];
-  /** Opt-in preview gate (#3880): runs after CI is green or absent, before mark-ready; CI still pending fails it closed. */
   previewGate?: PreviewGate;
+  ciWatch?: typeof watchChecksWithInfraRerun;
 }): Promise<ShipResult> {
   const {
     issue,
@@ -469,13 +468,14 @@ async function shipPhaseImpl(opts: {
     } catch {}
 
   let ciOutcome: InfraRerunOutcome | undefined;
+  let ciWatchFailed = false;
   const ciDeadlineMs = opts.ciDeadlineMs ?? DEFAULT_CI_DEADLINE_MS;
 
   // Watch CI (best-effort)
   if (watchCI) {
     log('ship', `Watching CI for PR #${prNumber}`);
     try {
-      ciOutcome = await watchChecksWithInfraRerun({
+      ciOutcome = await (opts.ciWatch ?? watchChecksWithInfraRerun)({
         octokit,
         owner,
         repo: repoName,
@@ -524,10 +524,13 @@ async function shipPhaseImpl(opts: {
           `CI pending for PR #${prNumber}: CI did not finish within ${ciDeadlineMs / 60_000} min; leaving PR as draft`,
         );
       }
-    } catch {}
+    } catch (err) {
+      ciWatchFailed = true;
+      log('warn', `CI watch for PR #${prNumber} failed: ${shortDetail(err)}; treating CI as pending`);
+    }
   }
 
-  const ciPending = ciOutcome === 'timeout';
+  const ciPending = ciOutcome === 'timeout' || (ciWatchFailed && opts.previewGate !== undefined);
 
   let previewCheck: PreviewCheckResult | undefined;
   if (opts.previewGate) {

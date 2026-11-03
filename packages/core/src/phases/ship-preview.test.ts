@@ -73,6 +73,7 @@ async function ship(
   previewGate: PreviewGate,
   logsDir?: string,
   fake = createOctokit(checkRuns),
+  extra: Partial<Parameters<typeof shipPhase>[0]> = {},
 ) {
   const logs: Array<[string, string]> = [];
   vi.useFakeTimers();
@@ -88,6 +89,7 @@ async function ship(
       run,
       previewGate,
       ...(logsDir ? { logsDir } : {}),
+      ...extra,
     });
     await vi.runAllTimersAsync();
     return { result: await promise, logs, ...fake };
@@ -156,6 +158,24 @@ describe('shipPhase preview gate (#3880)', () => {
       previewCheck: { status: 'preview-unavailable', evidence: { reason: 'CI pending, preview not checked' } },
       reason: 'preview check preview-unavailable for PR #123: CI pending, preview not checked',
     });
+  });
+
+  it('fails closed as CI pending when the CI watch itself throws, so the preview never stands in for CI', async () => {
+    const gate = vi.fn<PreviewGate>(async () => result('pass'));
+    const ciWatch = async () => {
+      throw new Error('GitHub 502');
+    };
+    const { result: r, graphqlCalls, logs } = await ship(green, gate, undefined, createOctokit(green), { ciWatch });
+    expect(gate).not.toHaveBeenCalled();
+    expect(graphqlCalls).toEqual([]);
+    expect(logs).toContainEqual(['warn', 'CI watch for PR #123 failed: GitHub 502; treating CI as pending']);
+    expect(r).toMatchObject({
+      ok: false,
+      ciPending: true,
+      draft: true,
+      previewCheck: { status: 'preview-unavailable', evidence: { reason: 'CI pending, preview not checked' } },
+    });
+    expect(r.ciOutcome).toBeUndefined();
   });
 
   it('returns ok false before mark-ready when the preview gate is not pass', async () => {
