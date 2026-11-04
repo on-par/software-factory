@@ -5,7 +5,7 @@ import {
   type FactoryConfig,
   type SizeGateMode,
 } from '@on-par/factory-core';
-import { isExplicitStackMode } from '@on-par/factory-core/internal';
+import { isExplicitStackMode, type PrerequisiteStackTarget } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
 
 export interface ShipSizeGate {
@@ -16,10 +16,11 @@ export interface ShipSizeGate {
 }
 
 /** The size gate for one ship (ADR-0147). `--no-pr` never files child issues or slice PRs and `--in-place` builds one
- *  branch in one checkout (#3904), so both turn it off; `--base-branch` turns it off unless stack mode was asked for. */
+ *  branch in one checkout (#3904), so both turn it off; `--base-branch` turns it off unless stack mode was asked for
+ *  or the base is a prerequisite stack's branch (#3916). */
 export function resolveShipSizeGate(opts: ShipIssueOptions, config: FactoryConfig): ShipSizeGate {
   const noPr = opts.pr === false;
-  const gateOff = noPr || opts.inPlace === true || (opts.baseBranch !== undefined && opts.sizeGate !== 'stack');
+  const gateOff = noPr || opts.inPlace === true || baseBranchGateOff(opts);
   const sizeGateMode = gateOff ? 'off' : (opts.sizeGate ?? resolveSizeGateMode(config));
   const explicitStack =
     sizeGateMode === 'stack' &&
@@ -49,6 +50,8 @@ export interface ShipIssueOptions {
   pr?: boolean;
   /** --base-branch (#3764): start from origin/<ref> and open the PR against <ref>; undefined = default branch. */
   baseBranch?: string;
+  /** The open prerequisite PR this issue is stacked on (#3916); `baseBranch` is its branch and the size gate stays on. */
+  prerequisiteStack?: PrerequisiteStackTarget;
   /** --in-place / FACTORY_WORKSPACE=in-place (#3904): run in the current checkout, no worktree */
   inPlace?: boolean;
 }
@@ -122,4 +125,9 @@ export function baseBranchConflict(opts: {
 /** The remote-tracking ref a --base-branch run starts from. */
 export function baseRemoteRef(baseBranch: string | undefined): string | undefined {
   return baseBranch === undefined ? undefined : `origin/${baseBranch}`;
+}
+
+/** True when `--base-branch` turns the size gate off; a prerequisite stack's base keeps it on (#3916). */
+export function baseBranchGateOff(opts: ShipIssueOptions): boolean {
+  return opts.baseBranch !== undefined && opts.prerequisiteStack === undefined && opts.sizeGate !== 'stack';
 }

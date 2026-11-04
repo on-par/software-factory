@@ -236,6 +236,7 @@ export {
   type LinearQueueBackendOptions,
 } from './queue/linear-queue-backend.js';
 export { createLinearQueueGraphqlClient, LINEAR_LEASE_ATTACHMENT_URL } from './queue/linear-queue.js';
+export * from './work/internal-exports.js'; // Ticket write-back (#3894)
 export { formatQueueOrderConflict, type QueueOrderConflict } from './queue/queue-order.js';
 
 // Factory App admission-state compatibility (#1497)
@@ -450,6 +451,7 @@ export {
 } from './kpis/steerability.js';
 export { buildTierEvidence, coverageRatchetEvidence, formatTierEvidence } from './kpis/tier-evidence.js';
 export { restackAfterSquashMerge, type StackRestackOutcome } from './run/stack-restack.js';
+export { restackOnPrerequisite, type PrerequisiteRestackOutcome } from './run/prerequisite-restack.js';
 export {
   checkResumeBaseDrift,
   createCheckResumeStore,
@@ -480,3 +482,19 @@ export { listBlockedBy, type BlockedByItem } from './blockers/dependencies.js';
 
 export { LINEAR_API_KEY_ENV, probeLinearSetup, type LinearPreflightResult } from './work/linear-preflight.js';
 export { resolveTrackerConfig, type TrackerConfig } from './config/tracker-section.js';
+
+// Feedback round (#3910)
+export {
+  collectFeedbackItems,
+  feedbackHandledMarker,
+  feedbackReworkSummary,
+  prepareFeedbackRound,
+  publishFeedbackRound,
+  renderFeedbackReply,
+  triageFeedback,
+  type FeedbackDisposition,
+  type FeedbackItem,
+  type FeedbackRoundPlan,
+  type FeedbackRoundTarget,
+} from './run/feedback-round.js';
+export { createOctokitFeedbackRoundGitHub, type FeedbackRoundGitHub } from './run/feedback-github.js';

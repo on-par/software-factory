@@ -24,6 +24,11 @@ export async function squashMergeAndDelete(
 ): Promise<void> {
   opts.signal?.throwIfAborted();
   const { sha } = opts;
+  // #3916: a PR stacked on a prerequisite's factory branch is never landed; it must be retargeted to main first.
+  const { data: pull } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
+  if (pull.base.ref.startsWith('factory/')) {
+    throw new Error(`refusing to merge PR #${prNumber}: its base is ${pull.base.ref}, not main (stacked PR)`);
+  }
   if (opts.admin) {
     const run = opts.run ?? landRuntime().shellOps.exec;
     const pin = sha ? ` --match-head-commit ${shellEscape(sha)}` : '';

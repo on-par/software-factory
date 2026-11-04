@@ -7,6 +7,8 @@
 import type { Octokit } from '@octokit/rest';
 
 import type { ParkPayload } from '../events/kinds.js';
+import type { EnvironmentFailure } from '../phases/check.js';
+import { renderEnvironmentReleaseComment } from '../phases/environment-release.js';
 import { fenceExcerpt, stripHiddenContent } from '../filing/sanitize.js';
 import { readWorktreeHead } from './ci-suppression-guard.js';
 import { QUEUE_ORDER_LABEL_PREFIX } from '../queue/queue-order.js';
@@ -395,5 +397,22 @@ export async function publishParkComment(deps: {
     return { ok: true, ...result };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Upserts the issue's environment-failure comment; a GitHub error goes to `warn` and never fails the run. */
+export async function postEnvironmentReleaseComment(deps: {
+  octokit: Octokit;
+  repo: string;
+  issue: WorkKey;
+  env: EnvironmentFailure;
+  warn: (message: string) => void;
+}): Promise<void> {
+  const marker = environmentReleaseMarker(deps.issue);
+  try {
+    const body = `${renderEnvironmentReleaseComment(deps.env)}\n${marker}`;
+    await upsertMarkerComment({ octokit: deps.octokit, repo: deps.repo, issue: deps.issue, marker, body });
+  } catch (err) {
+    deps.warn(`could not post the environment-failure comment: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

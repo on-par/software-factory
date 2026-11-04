@@ -1,14 +1,11 @@
 // packages/core/src/run/stack-restack.ts — ADR-0161 (#3368): rebase open stack slices above a squash-merged slice.
 
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
 import type { Octokit } from '@octokit/rest';
 
 import { renderStackOrderLine, replaceStackOrderLine, retargetedStackPosition } from '../phases/stack-order.js';
 import { stackSliceBranch, withSliceState, type SlicePlan } from '../readiness/slice-plan.js';
 import { execGit } from '../utils/git-exec.js';
+import { gitErrorDetail, rebaseAndPushStack } from './stack-rebase.js';
 
 export interface StackRestackOptions {
   /** Main checkout; a short-lived detached worktree is added from it. */
@@ -45,12 +42,7 @@ interface Candidate {
   recorded: string;
 }
 
-function detail(err: unknown): string {
-  const e = err as { stderr?: unknown; message?: unknown } | null;
-  const stderr = typeof e?.stderr === 'string' ? e.stderr.trim() : '';
-  if (stderr) return stderr;
-  return err instanceof Error ? err.message : String(err);
-}
+const detail = gitErrorDetail;
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
   return (await execGit(args, { cwd })).stdout.trim();
@@ -174,60 +166,32 @@ export async function restackAfterSquashMerge(opts: StackRestackOptions): Promis
     oldHeads.push(head);
   }
 
-  const tmp = await mkdtemp(join(tmpdir(), 'factory-restack-'));
-  const newHeads: string[] = [];
-  try {
-    await git(repoRoot, 'worktree', 'add', '--detach', tmp, `${remote}/${base}`);
-    for (const [at, c] of run.entries()) {
-      const label = `slice ${c.index}/${n}`;
-      const newBase = at === 0 ? `${remote}/${base}` : newHeads[at - 1]!;
-      const upstream = at === 0 ? mergedHead : oldHeads[at - 1]!;
-      try {
-        await git(tmp, 'checkout', '--detach', oldHeads[at]!);
-        await git(tmp, 'rebase', '--onto', newBase, upstream);
-      } catch (err) {
-        let files: string[] = [];
-        try {
-          files = (await git(tmp, 'diff', '--name-only', '--diff-filter=U')).split('\n').filter(Boolean);
-        } catch {
-          // best effort
-        }
-        await succeeds(tmp, 'rebase', '--abort');
-        const why = files.length > 0 ? `conflicted in: ${files.join(', ')}` : `failed: ${detail(err)}`;
-        return park(
-          `restack of ${label} PR #${c.prNumber} onto ${newBase} ${why}; nothing was pushed`,
-          c.index,
-          c.prNumber,
-          files,
-        );
-      }
-      newHeads.push(await git(tmp, 'rev-parse', 'HEAD'));
-    }
-
-    try {
-      await git(
-        tmp,
-        'push',
-        '--atomic',
-        remote,
-        ...run.map((c) => `--force-with-lease=refs/heads/${c.branch}:${c.recorded}`),
-        ...run.map((c, at) => `${newHeads[at]}:refs/heads/${c.branch}`),
-      );
-    } catch (err) {
-      const text = detail(err);
-      const named = run.find((c) => text.includes(c.branch)) ?? run[0]!;
+  const rebased = await rebaseAndPushStack({
+    repoRoot,
+    remote,
+    startBase: `${remote}/${base}`,
+    layers: run.map((c, at) => ({
+      branch: c.branch,
+      recordedHead: oldHeads[at]!,
+      upstream: at === 0 ? mergedHead : oldHeads[at - 1]!,
+    })),
+  });
+  if (!rebased.ok) {
+    const c = run[rebased.at]!;
+    const label = `slice ${c.index}/${n}`;
+    if (rebased.phase === 'setup') {
       return park(
-        `force-push of slice ${named.index}/${n} PR #${named.prNumber} (${named.branch}) was refused (lease on ${named.recorded}): ${text}; nothing was pushed`,
-        named.index,
-        named.prNumber,
+        `restack of slices above slice ${mergedIndex} failed: ${rebased.reason}`,
+        run[0]!.index,
+        run[0]!.prNumber,
       );
     }
-  } catch (err) {
-    return park(`restack of slices above slice ${mergedIndex} failed: ${detail(err)}`, run[0]!.index, run[0]!.prNumber);
-  } finally {
-    await succeeds(repoRoot, 'worktree', 'remove', '--force', tmp);
-    await rm(tmp, { recursive: true, force: true });
+    if (rebased.phase === 'rebase') {
+      return park(`restack of ${label} PR #${c.prNumber} ${rebased.reason}`, c.index, c.prNumber, rebased.files);
+    }
+    return park(`force-push of ${label} PR #${c.prNumber} ${rebased.reason}`, c.index, c.prNumber);
   }
+  const newHeads = rebased.newHeads;
 
   const first = run[0]!;
   let next = plan;

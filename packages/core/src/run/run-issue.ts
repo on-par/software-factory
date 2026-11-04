@@ -27,7 +27,6 @@ import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import { installLaneDependencies as installLaneDependenciesDefault } from './lane-install.js';
 import { checkPhase as checkPhaseDefault, type CheckPhaseResult } from '../phases/check.js';
-import { renderEnvironmentReleaseComment } from '../phases/environment-release.js';
 import type { SizeBudget } from '../readiness/size.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
@@ -44,7 +43,7 @@ import { beginBuildRoute, compatibleBuildModel, laneRouteCapabilities } from './
 import { classifyCheckFailure } from './check-verdict.js';
 import { withSingleTerminalEvent } from './terminal-events.js';
 import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
-import { environmentReleaseMarker, parkPayload, publishParkComment, upsertMarkerComment } from './park-comment.js';
+import { parkPayload, postEnvironmentReleaseComment, publishParkComment } from './park-comment.js';
 import { createRunPhaseLogger } from './run-phase-log.js';
 import { providerFailureRecorder } from './provider-failure-recorder.js';
 import { gateBuildTarget, pickOrderedProvider, type ProviderPick } from './provider-breaker-gate.js';
@@ -96,6 +95,7 @@ import { describeSteering, type ConsumedSteering } from '../steering/index.js';
 import type { CiFailureEvidence, CheckSummary, Constitution, FailoverReason, FailurePhase } from '../types/index.js';
 import { type WorkRequest, type WorkRequestSourceKind, workKeyFromIssue } from '../work/index.js';
 import { LOCAL_BRIEF_SOURCE } from '../work/local-brief.js';
+import { linearRunWriteback, type LinearRunPorts } from './linear-run.js';
 import {
   deferOnLaneCollision,
   releaseLaneClaim,
@@ -119,6 +119,7 @@ import { safeRecordRunState, terminalRunStateUpdate, thrownRunStateUpdate } from
 import { runStatusForPhase, type RunStateUpdate } from './state.js';
 import { type ParkedPrDisposition, settleParkedPullRequest } from './park-pr.js';
 import { runParkSteward } from './park-steward.js';
+import * as feedbackRound from './feedback-round-hooks.js';
 import { reviewReworkResume, runRequestedReviewRework, type ReworkRequestFields } from './review-rework.js';
 import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
 import { parkLogExtra } from './ship-park.js';
@@ -127,6 +128,8 @@ import type { IssueRunState } from '../types/index.js';
 import type { RequiredChecksVerdict } from '../utils/required-checks.js';
 import type { RunReportInfo } from './run-report-info.js';
 import { providerProbe, type ProviderProbe } from './provider-probe.js';
+import type { PrerequisiteStackTarget } from '../queue/prerequisite-stack.js';
+import { errorMessage } from '../checkers/preview-wait.js';
 import { renderPreviousAttempt } from './previous-attempt.js';
 import { withoutHumanOnlyLabels } from './max-lines-override.js';
 
@@ -203,6 +206,8 @@ export interface RunRequest extends ReworkRequestFields {
   /** Resume at CHECK on a kept worktree (#2564): PLAN and BUILD are skipped. */
   /** Parent ref of a stacked slice branch (#2716); CHECK and the review floor diff against it. Absent = origin/main. */
   parentBaseRef?: string;
+  /** The open prerequisite PR this issue is stacked on (#3916); its stack line and marker go into the PR body. */
+  prerequisiteStack?: PrerequisiteStackTarget;
   resumeFrom?: { phase: 'check'; diffBase?: string; route: BuildRoute; model: string; buildMinutes: number };
   /** Resolved factory-state paths shipPhase reads/writes directly (unchanged from today —
    *  shipPhase's own surface already takes plain path strings, not a path-resolution port). */
@@ -223,7 +228,7 @@ export interface RunRequest extends ReworkRequestFields {
 /** The injected seams runIssue needs. Effectful, path-bound concerns (Octokit, worktree
  *  layout, approvals/steering directories, report/artifact destinations) are the caller's
  *  responsibility to wire — runIssue only calls the closures it is handed. */
-export interface RunPorts extends CiReworkPorts {
+export interface RunPorts extends CiReworkPorts, LinearRunPorts {
   /** Run-state slice-plan store for briefs (#3813); absent = the issue's slice-plan comment. */
   slicePlanStore?: SlicePlanStore;
   /** ADR-0161 stack mode: creates a slice branch in the worktree. Defaults to createStackSliceBranch. */
@@ -304,10 +309,6 @@ export interface RunPorts extends CiReworkPorts {
   ) => Promise<ReviewFloorPathChange[]>;
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 export async function runIssue(request: RunRequest, policy: RunPolicy, rawPorts: RunPorts): Promise<RunOutcome> {
   const { ports: attributed, stamp } = withRunAttribution(rawPorts);
   const ports = withSingleTerminalEvent(attributed);
@@ -340,10 +341,11 @@ async function runIssueOnce(
   const checkPhase: typeof checkPhaseDefault = (o) => slot('check', () => (ports.checkPhase ?? checkPhaseDefault)(o));
   const shipPhase = ports.shipPhase ?? shipPhaseDefault;
   const log = ports.events();
+  const linear = linearRunWriteback(request.work, ports, log);
   // One id per run: BUILD, CHECK and rework share a per-run VBCSCompiler server (#1910).
   // 12 hex chars keeps the compiler's Unix-socket pipe path short under macOS $TMPDIR.
   const runId = randomUUID().replace(/-/g, '').slice(0, 12);
-  const previousAttemptNote = renderPreviousAttempt(request.previousAttempt);
+  let previousAttemptNote = renderPreviousAttempt(request.previousAttempt);
   const phaseLogger = createRunPhaseLogger({
     logsDir: request.logsDir,
     issue: workKey,
@@ -464,13 +466,15 @@ async function runIssueOnce(
     }
     let settled: ParkedPrDisposition | undefined;
     if (!request.localOnly && !request.noPr) {
-      if (request.work.kind !== LOCAL_BRIEF_SOURCE) {
+      // prettier-ignore
+      const parkInput = { reason, message: terminalMessage, runId, branch: request.branch, lane: request.lane, blockers: [], ...(designSmell ? { designSmell } : {}) };
+      if (linear) await linear.park(parkInput);
+      else if (request.work.kind !== LOCAL_BRIEF_SOURCE) {
         const posted = await publishParkComment({
           octokit: ports.octokit,
           repo: request.repo,
           worktree: ports.workspace.path,
-          // prettier-ignore
-          input: { issue: workKey, reason, message: terminalMessage, runId, branch: request.branch, lane: request.lane, blockers: [], ...(designSmell ? { designSmell } : {}) },
+          input: { issue: workKey, ...parkInput },
         });
         if (!posted.ok) log('environment_warning', `could not post the issue park comment: ${posted.error}`);
       }
@@ -622,7 +626,11 @@ async function runIssueOnce(
     let builtModel: string;
     let pinNote: string | undefined;
     let buildMinutes: number;
-    const resumed = request.resumeFrom ?? reviewReworkResume(request);
+    const feedbackPlan = await feedbackRound.prepareFeedbackForRun(request, ports, log);
+    const idle = await feedbackRound.idleFeedbackRound(feedbackPlan, request, ports, route, log);
+    if (idle) return idle;
+    previousAttemptNote = feedbackRound.feedbackReplanNote(previousAttemptNote, feedbackPlan);
+    const resumed = request.resumeFrom ?? reviewReworkResume(request, feedbackPlan);
     if (resumed) {
       ports.events('check')(
         'check',
@@ -659,7 +667,8 @@ async function runIssueOnce(
         );
       }
 
-      const reused = await loadReusablePlan(ports.planReuse, { ...request, issue: workKey }, log, ports.events('plan'));
+      const planReuse = feedbackPlan?.replan ? undefined : ports.planReuse;
+      const reused = await loadReusablePlan(planReuse, { ...request, issue: workKey }, log, ports.events('plan'));
       const routeCaps = await laneRouteCapabilities(request, ports, ports.events('plan'));
       const planGate = reused ? undefined : await capGate.enterPlan(route, ports.events('plan'));
       if (planGate?.released) return planGate.released;
@@ -692,7 +701,7 @@ async function runIssueOnce(
           sizeGateMode: request.sizeGateMode,
           parkOverBudget: request.parkOverBudget,
           sliceIndex: request.sliceIndex,
-          slicePlanStore: ports.slicePlanStore,
+          slicePlanStore: linear?.slicePlanStore ?? ports.slicePlanStore,
           maxSlices: request.maxSlices,
           sizeBudget: request.sizeBudget,
           blockUnresolvedRegressions: request.blockUnresolvedRegressions,
@@ -924,7 +933,7 @@ async function runIssueOnce(
       requiredChecksVerdict: ports.requiredChecksVerdict,
     };
     capGate.watchCheck(builtRoute, builtModel);
-    await runRequestedReviewRework(request, ports, checkOpts);
+    await runRequestedReviewRework(request, ports, checkOpts, feedbackPlan);
     const check = await (request.providerOrder
       ? runCheckStage(
           runStage,
@@ -973,19 +982,16 @@ async function runIssueOnce(
             failure,
           );
         }
-        if (!request.localOnly && !request.noPr) {
-          try {
-            const marker = environmentReleaseMarker(workKey);
-            await upsertMarkerComment({
-              octokit: ports.octokit,
-              repo: request.repo,
-              issue: workKey,
-              marker,
-              body: `${renderEnvironmentReleaseComment(env)}\n${marker}`,
-            });
-          } catch (err) {
-            log('environment_warning', `could not post the environment-failure comment: ${errorMessage(err)}`);
-          }
+        if (linear && !request.localOnly && !request.noPr) await linear.environment(env);
+        else if (!request.localOnly && !request.noPr) {
+          const warn = (message: string) => log('environment_warning', message);
+          await postEnvironmentReleaseComment({
+            octokit: ports.octokit,
+            repo: request.repo,
+            issue: workKey,
+            env,
+            warn,
+          });
         }
         let preserve =
           ports.checkResume !== undefined &&
@@ -1166,6 +1172,7 @@ async function runIssueOnce(
     if (shipped.outcome) return shipped.outcome;
     const { ship, parked } = shipped;
     if (parked) return await terminalParked(parked.reason, parked.message, parked.checkFailure, parked.ciFailure);
+    await feedbackRound.publishFeedbackForRun(request, ports, feedbackPlan, ship.headSha, log);
 
     if (planSlice) {
       const failure = await recordShippedSlice({
@@ -1179,7 +1186,7 @@ async function runIssueOnce(
         // Brief PRs carry no stack-order line (shipPhase ignores the stack for inline work), so skip
         // the parent-PR update: its branch names hold the brief's stand-in number (#3813).
         stackMode: request.work.kind !== LOCAL_BRIEF_SOURCE,
-        store: ports.slicePlanStore,
+        store: linear?.slicePlanStore ?? ports.slicePlanStore,
         log,
       });
       if (failure !== undefined) return await terminalParked('fail', failure);

@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { withLifecycle } from '../bus/index.js';
 import { type InfraRerunOutcome } from '../utils/ci-watch.js';
 import { GITHUB_ISSUE_SOURCE } from '../work/github-issue.js';
+import { ticketKeyOf } from '../work/ticket-writeback.js';
 import { requestShipApproval } from './ship-approval.js';
 import { pushNewBranch } from './ship-branch-push.js';
 import { watchShipCi } from './ship-ci-watch.js';
@@ -18,6 +19,7 @@ import { findMergedPR, findOpenPR } from './ship-pr-lookup.js';
 import { pushReentry } from './ship-reentry.js';
 import type { PrLookup, ShipResult } from './ship-types.js';
 import { lazyWalkthrough } from './ship-walkthrough.js';
+import { syncShipBranchWithMain } from './ship-main-sync.js';
 
 export { findMergedPR, findOpenPR };
 export type { PrLookup, ShipResult };
@@ -58,7 +60,9 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
     checkSummary,
   } = opts;
   const [owner, repoName] = repo.split('/');
-  const inlineWork = opts.work && opts.work.kind !== GITHUB_ISSUE_SOURCE ? opts.work : undefined;
+  const ticketKey = ticketKeyOf(opts.work);
+  const ticket = ticketKey !== undefined && opts.work ? { key: ticketKey, title: opts.work.title } : undefined;
+  const inlineWork = opts.work && opts.work.kind !== GITHUB_ISSUE_SOURCE && !ticket ? opts.work : undefined;
   const stack = inlineWork ? undefined : opts.stack;
   const base = stack?.base ?? opts.baseBranch ?? SHIP_BASE_BRANCH;
   const walkthrough = lazyWalkthrough(run, worktree, { ...opts, base }, log);
@@ -80,6 +84,11 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
   let watchRef = branch;
   let headSha: string | undefined;
 
+  // #3945: open the PR mergeable with main (CHANGELOG/ADR index auto-resolved), or GitHub runs no CI on it.
+  const synced =
+    opts.syncMain && !reentry && base === SHIP_BASE_BRANCH
+      ? await syncShipBranchWithMain({ run, worktree, branch, log })
+      : undefined;
   if (reentry) {
     const pushed = await pushReentry({ run, worktree, branch, prNumber, reentry, log });
     if ('stop' in pushed) return pushed.stop;
@@ -94,7 +103,7 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
       run,
       worktree,
       branch,
-      issue: inlineWork ? undefined : issue,
+      issue: inlineWork || ticket ? undefined : issue,
       octokit,
       owner,
       repoName,
@@ -102,7 +111,7 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
       log,
     });
     if (stop) return stop;
-    const opened = await openOrFindPr({ opts, inlineWork, stack, base, owner, repoName, walkthrough });
+    const opened = await openOrFindPr({ opts, inlineWork, ticket, stack, base, owner, repoName, walkthrough });
     if ('stop' in opened) return opened.stop;
     prNumber = opened.prNumber;
   }
@@ -114,7 +123,7 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
   }
 
   if (!reentry && opts.evidenceComment)
-    await postEvidenceComment({ opts, run, owner, repoName, prNumber, walkthrough });
+    await postEvidenceComment({ opts, run, owner, repoName, prNumber, walkthrough, checkedSha: synced?.checkedSha });
 
   let ciOutcome: InfraRerunOutcome | undefined;
   let ciWatchError: string | undefined;

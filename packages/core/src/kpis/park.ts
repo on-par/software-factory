@@ -3,6 +3,7 @@
 import { isParkKind } from '../events/kinds.js';
 import type { FactoryEvent } from '../types/index.js';
 import { median } from '../utils/median.js';
+import { isTicketKey } from '../work/work-key.js';
 import { hasUnresolvedPark, isHumanEvent } from './human.js';
 
 export interface ParkKpis {
@@ -17,7 +18,7 @@ export interface ParkKpis {
 export function computeParkKpis(events: FactoryEvent[]): ParkKpis {
   const byIssue = new Map<string, FactoryEvent[]>();
   for (const event of events) {
-    if (!/^\d+$/.test(event.issue)) continue;
+    if (!isTicketKey(event.issue)) continue;
     const list = byIssue.get(event.issue);
     if (list) list.push(event);
     else byIssue.set(event.issue, [event]);

@@ -11,6 +11,16 @@ const hr = (h: number) => new Date(Date.UTC(2026, 6, 20, h)).toISOString();
 const HOUR = 3_600_000;
 
 describe('park KPIs (#3513)', () => {
+  it('counts an open park keyed by a Linear WorkKey', () => {
+    const events = [
+      event({ issue: 'ON-12', ts: hr(0) }),
+      event({ issue: 'ON-12', type: 'parked', ts: hr(0) }),
+      event({ issue: '-', type: 'parked', ts: hr(0) }),
+      event({ issue: 'all', type: 'parked', ts: hr(0) }),
+    ];
+    expect(computeHealthKpis(events, []).openParked).toBe(1);
+  });
+
   it('reports open parked 3 and median park-to-human 2h', () => {
     const events = [
       event({ issue: '1', ts: hr(0) }),

@@ -6,7 +6,13 @@ import {
   type WorkRequest,
   workKeyFromIssue,
 } from '@on-par/factory-core';
-import { branchFor, findAdoptablePr, logEvent, type CheckResumeRecord } from '@on-par/factory-core/internal';
+import {
+  branchFor,
+  findAdoptablePr,
+  logEvent,
+  ticketKeyOf,
+  type CheckResumeRecord,
+} from '@on-par/factory-core/internal';
 import { findSliceIndex } from './ship-steps.js';
 import { shipRuntime } from './ship-runtime.js';
 
@@ -53,7 +59,7 @@ export async function resolveRunBranch(opts: {
     ? undefined
     : await findSliceIndex({ sizeGateMode, ctx, work, octokit, ghRepo, issueNum });
   if (ctx?.resumeFrom) return ctx.resumeFrom.branch;
-  const fresh = branchFor(workKeyFromIssue(issueNum), issueTitle, branchPrefix, sliceIndex);
+  const fresh = branchFor(ticketKeyOf(work) ?? workKeyFromIssue(issueNum), issueTitle, branchPrefix, sliceIndex);
   if (
     ctx?.localOnly ||
     noPr ||

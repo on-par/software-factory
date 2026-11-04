@@ -3,6 +3,7 @@
 // optional risk line, the Closes / Part of line, and a configurable footer. It never lists changed
 // files: the PR's own Files tab already shows them.
 
+import { closesTrailer, type TicketTrackerKind } from '../work/ticket-writeback.js';
 import { type WorkKey } from '../work/work-key.js';
 import { defaultFactoryConfig } from '@on-par/factory-config';
 
@@ -23,14 +24,16 @@ export interface PrBodyInput {
   /** Frozen spec body with the frontmatter stripped; intent sections are omitted when absent. */
   specBody?: string;
   checkSummary?: CheckSummary;
-  /** Issue the PR closes; omitted for a non-github work source. */
   /** Rework rounds CHECK ran; undefined renders as 0. */
   reworkRounds?: number;
   /** The design artifact's Risk / blast radius; the Risk line is omitted when absent or blank. */
   risk?: string;
+  /** Issue the PR closes; omitted for a non-github work source. */
   closes?: WorkKey;
-  /** Parent issue of a non-final ADR-0147 slice; renders `Part of #N` and never a closing keyword. */
+  /** Parent issue of a non-final ADR-0147 slice; renders `Part of #N` or `Part of KEY` and never a closing keyword. */
   partOf?: WorkKey;
+  /** Trailer style; undefined = github. */
+  tracker?: TicketTrackerKind;
   /** Stack-mode (ADR-0161) stack-order line, rendered right after the Summary. */
   stackOrder?: string;
   /** Large-PR walkthrough markdown (#3623), rendered as a Walkthrough section; omitted when undefined. */
@@ -107,9 +110,9 @@ export function renderPrBody(input: PrBodyInput): string {
     risk ? `**Risk:** ${risk}` : undefined,
     input.walkthrough ? section('Walkthrough', input.walkthrough) : undefined,
     input.closes !== undefined
-      ? `Closes #${input.closes}`
+      ? closesTrailer(input.tracker ?? 'github', input.closes, true)
       : input.partOf !== undefined
-        ? `Part of #${input.partOf}`
+        ? closesTrailer(input.tracker ?? 'github', input.partOf, false)
         : undefined,
     input.footer === '' ? undefined : (input.footer ?? PR_BODY_FOOTER),
   ]

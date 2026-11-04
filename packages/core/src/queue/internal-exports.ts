@@ -26,3 +26,11 @@ export {
 export type { AllProvidersDownResult, ProviderDown } from '../run/stage-blocked.js';
 export type { GateStage, StageBlockedResult } from '../run/stage-blocked.js';
 export * from '../agent-memory/index.js'; // optional per-lane PLAN memory (#3624)
+export {
+  choosePrerequisiteStack,
+  parsePrerequisiteStackMarker,
+  renderPrerequisiteStackMarker,
+  resolveQueueStackOnOpenPrerequisite,
+  type PrerequisiteRestackDecision,
+  type PrerequisiteStackTarget,
+} from './prerequisite-stack.js';

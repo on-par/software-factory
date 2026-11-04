@@ -18,7 +18,8 @@ import { errorDetail } from './index.js';
 import { findOpenPRForIssue } from './land.js';
 import { getPullRequestLandState } from './land-pr.js';
 import { findMergedClosingPr } from './queue-merged-closing-pr.js';
-import { childrenMerged } from './queue-preflight-children.js';
+import { readPrerequisiteState } from './queue-prerequisite-state.js';
+import { preflightOpenPrerequisites, stackedPullDecision } from './queue-preflight-prerequisite-stack.js';
 
 /** Backoff before each merge-state re-read (#3323): GitHub reports UNKNOWN while it recomputes mergeability. */
 export const MERGE_STATE_REREAD_DELAYS_MS: readonly number[] = [2_000, 5_000, 10_000];
@@ -71,7 +72,9 @@ export interface QueuePreflightOps {
   /** Backoff before each merge-state re-read (#3323). Defaults to setTimeout. */
   sleep?: (ms: number) => Promise<void>;
   /** Current head/base refs of a slice PR; the head SHA is the rebased one after GitHub retargets a layer. */
-  getPullRefs(prNumber: number): Promise<{ headRef: string; baseRef: string; headSha: string }>;
+  getPullRefs(prNumber: number): Promise<{ headRef: string; baseRef: string; headSha: string; body?: string }>;
+  /** `queue.stackOnOpenPrerequisite` (#3916): build on an open prerequisite factory PR instead of waiting for it to merge. */
+  stackOnOpenPrerequisite?: boolean;
   /** True when `branch` still holds commit `sha` (compare status ahead or identical); false for a missing branch (#3368). */
   branchContains(sha: string, branch: string): Promise<boolean>;
 }
@@ -84,6 +87,7 @@ export function makeQueuePreflightOps(
     watch: (ref: string) => Promise<CiOutcome>;
     autoMergeStack?: boolean;
     stackMode?: boolean;
+    stackOnOpenPrerequisite?: boolean;
     onDeferred?: (issue: number, message: string, cause?: QueueDeferCause) => void;
     laneFileHold?: LaneFileHoldLookup;
     sleep?: (ms: number) => Promise<void>;
@@ -93,6 +97,7 @@ export function makeQueuePreflightOps(
   return {
     autoMergeStack: opts.autoMergeStack ?? false,
     stackMode: opts.stackMode ?? false,
+    stackOnOpenPrerequisite: opts.stackOnOpenPrerequisite ?? false,
     getPullReviews: async (prNumber) => {
       const { data: pull } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
       selfId ??= octokit.rest.users.getAuthenticated().then(({ data }) => data.id);
@@ -118,7 +123,7 @@ export function makeQueuePreflightOps(
     sleep: opts.sleep ?? defaultSleep,
     getPullRefs: async (prNumber) => {
       const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
-      return { headRef: data.head.ref, baseRef: data.base.ref, headSha: data.head.sha };
+      return { headRef: data.head.ref, baseRef: data.base.ref, headSha: data.head.sha, body: data.body ?? '' };
     },
     branchContains: async (sha, branch) => {
       try {
@@ -159,72 +164,8 @@ export function makeQueuePreflightOps(
       return data.body ?? '';
     },
     getMergedClosingPr: (issue) => findMergedClosingPr(octokit, owner, repo, issue),
-    getPrerequisiteState: async (issue) => {
-      let after: string | null = null;
-      let mergedClosingPr = false;
-      let state: 'open' | 'closed' | undefined;
-      let stateReason: string | undefined;
-      do {
-        const response: unknown = await octokit.graphql(
-          `query QueuePrerequisite($owner: String!, $repo: String!, $number: Int!, $after: String) {
-            repository(owner: $owner, name: $repo) {
-              issue(number: $number) {
-                state
-                stateReason
-                closedByPullRequestsReferences(first: 100, includeClosedPrs: true, after: $after) {
-                  nodes { merged }
-                  pageInfo { hasNextPage endCursor }
-                }
-              }
-            }
-          }`,
-          { owner, repo, number: issue, after },
-        );
-        if (!isRecord(response) || !isRecord(response.repository) || !isRecord(response.repository.issue)) {
-          throw new Error(`prerequisite #${issue} response was incomplete`);
-        }
-        const item = response.repository.issue;
-        if (item.state !== 'OPEN' && item.state !== 'CLOSED')
-          throw new Error(`prerequisite #${issue} state was malformed`);
-        const nextState = item.state === 'OPEN' ? 'open' : 'closed';
-        if (state !== undefined && state !== nextState)
-          throw new Error(`prerequisite #${issue} state changed during pagination`);
-        state = nextState;
-        stateReason ??= typeof item.stateReason === 'string' ? item.stateReason : undefined;
-        if (nextState === 'open') return { state: 'open', mergedClosingPr: false };
-        if (!isRecord(item.closedByPullRequestsReferences))
-          throw new Error(`prerequisite #${issue} closing PR evidence was incomplete`);
-        const connection = item.closedByPullRequestsReferences;
-        if (
-          !Array.isArray(connection.nodes) ||
-          !isRecord(connection.pageInfo) ||
-          typeof connection.pageInfo.hasNextPage !== 'boolean'
-        ) {
-          throw new Error(`prerequisite #${issue} closing PR evidence was malformed`);
-        }
-        for (const node of connection.nodes) {
-          if (!isRecord(node) || typeof node.merged !== 'boolean')
-            throw new Error(`prerequisite #${issue} closing PR node was malformed`);
-          if (node.merged) mergedClosingPr = true;
-        }
-        const hasNextPage = connection.pageInfo.hasNextPage;
-        const cursor = connection.pageInfo.endCursor;
-        if (hasNextPage && (typeof cursor !== 'string' || cursor.length === 0 || cursor === after)) {
-          throw new Error(`prerequisite #${issue} pagination cursor was malformed`);
-        }
-        after = hasNextPage ? (cursor as string) : null;
-      } while (after !== null && !mergedClosingPr);
-      if (state === undefined) throw new Error(`prerequisite #${issue} state was unavailable`);
-      if (state === 'closed' && !mergedClosingPr && stateReason === 'COMPLETED') {
-        return { state, mergedClosingPr, mergedViaChildren: await childrenMerged(octokit, owner, repo, issue) };
-      }
-      return { state, mergedClosingPr };
-    },
+    getPrerequisiteState: (issue) => readPrerequisiteState(octokit, owner, repo, issue),
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** ADR-0147/ADR-0161: walk every pr-open slice PR bottom-up. Merged layers are recorded, a closed layer parks
@@ -432,6 +373,8 @@ export async function preflightQueuedIssue(
   }
   if (closedUnmerged.length > 0) return { kind: 'park', reason: `prerequisite #${closedUnmerged[0]} closed unmerged` };
   if (open.length > 0) {
+    const stacked = await preflightOpenPrerequisites(issue.number, open, deps);
+    if (stacked) return stacked;
     deps.onDeferred?.(
       issue.number,
       `waiting for prerequisites: ${open.map((number) => `#${number}`).join(', ')}`,
@@ -452,6 +395,13 @@ export async function preflightQueuedIssue(
   if (!pr) return slice.hasPlan ? { kind: 'build' } : alreadyLanded(issue.number, deps);
   if (pr.headRepoFullName !== deps.expectedHeadRepoFullName) {
     return { kind: 'park', reason: `PR #${pr.number} head is not in ${deps.expectedHeadRepoFullName}` };
+  }
+
+  try {
+    const stacked = await stackedPullDecision(issue.number, pr, deps);
+    if (stacked) return stacked;
+  } catch (err) {
+    return { kind: 'park', reason: `PR #${pr.number} stacked-prerequisite lookup failed: ${errorDetail(err)}` };
   }
 
   let state: Awaited<ReturnType<typeof getPullRequestLandState>>;

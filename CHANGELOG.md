@@ -7,9 +7,18 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.28 - 2026-11-04
+
+Linear can feed the factory's queue end to end (a `tracker` key, a Linear work source and queue backend, and write-back on ship and park), `factory respond` runs a feedback round on a factory PR, an issue whose prerequisite has an open PR builds a stacked PR on it, `run-issue` gains `--in-place`, `--merge` and per-run config overrides for disposable hosts, and SHIP syncs a branch onto main before opening its PR so sibling CHANGELOG bullets no longer strand drafts (#3872, #3894, #3910, #3916, #3904, #3905, #3906, #3945).
+All seven published `@on-par` packages move to 0.9.28 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - ship: `ship.ciWatchMinutes` sets the CI watch window, and a draft SHIP left for pending CI is landed (or sent to CI rework) by the run-start and between-issue sweep once CI finishes (#3932)
+- Linear runs link their issue: the branch, PR title and body carry the key (`Fixes KEY` on the final slice, `Part of KEY` before it), park, env-failure and slice-plan comments go to the Linear issue, the no-auto-merge hold reads Linear labels, and KPIs count Linear keys (#3894)
+- A queued issue whose prerequisite has an open factory PR now builds on it and opens a stacked PR against that branch, restacks onto main when the prerequisite merges or onto its new head when it moves, parks held when the prerequisite PR closes unmerged, and is never landed while its base is not main; `queue.stackOnOpenPrerequisite: false` restores waiting (#3916)
+- Feedback rounds: review rework reads all trusted PR feedback, re-plans on scope changes, replies to each item, resolves fixed threads and re-requests review; `factory respond <pr>` starts one by hand (#3910)
 - Per-run config and constitution overrides: `--config`/`FACTORY_CONFIG_PATH`/`FACTORY_CONFIG_YAML`, `--constitution`/`FACTORY_CONSTITUTION_PATH`/`FACTORY_CONSTITUTION`, and a `FACTORY_CONFIG_OVERRIDES` fragment; the run log and `factory doctor` name the source (#3906).
 - `factory land` resolves a CHANGELOG.md conflict confined to `## Unreleased` by keeping main's entries and appending the PR's after them, and `.gitattributes` unions CHANGELOG.md on local merges (#3931).
 - `factory run-issue --merge` and `run-brief --merge` drive the PR through the `factory run --auto-merge` gates to a merge, bounded by `--merge-timeout` or `ci.awaitingCiCapHours`, with distinct exit codes (0 merged, 10 held, 11 CI failed, 12 timed out, 13 land failed, 1 parked before a PR) (#3905)
@@ -26,6 +35,7 @@ section to `## X.Y.Z - date`. See
 
 ### Fixed
 
+- SHIP merges origin/main into the branch before it pushes a PR against main, auto-resolving `## Unreleased` CHANGELOG and ADR index conflicts as `factory land` does, so a sibling's CHANGELOG bullet no longer leaves the PR conflicting with no CI and stranded as a CI-pending draft; a conflict it cannot resolve is aborted and the branch ships unsynced as before (#3945).
 - CHECK follows a root workspace fan-out `test` script into the owning npm/pnpm/yarn workspace and runs fail-to-pass selectors there with vitest or jest (#3913).
 
 ### Changed

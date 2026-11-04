@@ -25,7 +25,7 @@ export function reviewReworkCapMessage(input: {
   source?: ReviewReworkSource;
 }): string {
   const { issue, pr, cap, count, reviewIds } = input;
-  const what = input.source === 'comment' ? 'comment' : 'review';
+  const what = input.source === 'comment' ? 'comment' : input.source === 'feedback' ? 'feedback round' : 'review';
   return `#${issue} has had ${count} review-rework runs (cap ${cap}, queue.max_review_rework_runs); PR #${pr} ${what} ${reviewIds.join(', ')} started no new run. Resolve the review by hand, then run \`factory unpark ${issue}\`.`;
 }
 

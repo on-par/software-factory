@@ -83,7 +83,7 @@ While SHIP waits for CI, a PR with no checks reported yet counts as pending. If 
 You can also run one factory command (`run-issue <n>`, `ship <n>` or `doctor`) on a GitHub-hosted runner. Call the reusable workflow from your own repo, pinned to a release tag, and pass your own secrets (`FACTORY_GITHUB_TOKEN` plus the selected provider's key):
 
 ```yaml
-uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.27
+uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.28
 ```
 
 The full caller, inputs, providers and secrets are in [docs/runbooks/github-actions-run.md](docs/runbooks/github-actions-run.md).
@@ -111,7 +111,7 @@ version: 2
 
 Every other key is optional. `pr.footer` defaults to `This PR was made by Software Factory`; set a non-empty string to replace it verbatim, or `""` to remove the footer and its separator. It supports no templating or token substitution. [`docs/config.example.yaml`](docs/config.example.yaml) lists each key the factory reads, with its default and what it does. It is generated from the config schemas (`npm run config-example`) and a test fails when it drifts, so it matches the code. Copy only the keys you want to change (comments included) into `.factory/config.yaml`; `.factory/config.json` is still read for existing repos, and `factory migrate --to-yaml` converts it. `factory status --kpis` prints the effective config. A host such as a disposable container can override the config and constitution for one run without writing into the checkout: see [docs/runbooks/config-overrides.md](docs/runbooks/config-overrides.md).
 
-**Tracker.** The `tracker` key picks the ticket tracker per repo: `kind` is `github` (default) or `linear`. A `linear` block holds `teamKey`, `projects` (Linear project name or id → `owner/repo`), `readyLabel` (default `factory:ready`), `laneLabelGroup` (default `lane`) and `states.ready` / `states.inProgress` / `states.parked` (default `Todo` / `In Progress` / `Todo`). The API key comes only from the `LINEAR_API_KEY` environment variable, never from config. `factory doctor` checks the key and names any project with ready issues but no repo mapping. `factory run`, `factory supervise` and `factory status` read the queue from Linear; building Linear issues in lanes and write-back come in later slices of #3872.
+**Tracker.** The `tracker` key picks the ticket tracker per repo: `kind` is `github` (default) or `linear`. A `linear` block holds `teamKey`, `projects` (Linear project name or id → `owner/repo`), `readyLabel` (default `factory:ready`), `laneLabelGroup` (default `lane`) and `states.ready` / `states.inProgress` / `states.parked` (default `Todo` / `In Progress` / `Todo`). The API key comes only from the `LINEAR_API_KEY` environment variable, never from config. `factory doctor` checks the key and names any project with ready issues but no repo mapping. `factory run`, `factory supervise` and `factory status` read the queue from Linear; a Linear run's branch, PR title and body carry the issue key (`Fixes KEY` on the final slice, `Part of KEY` before it, so Linear's GitHub integration moves the issue), its park, environment-failure and slice-plan comments go to the Linear issue (a failed comment only warns), the no-auto-merge hold reads the issue's Linear labels, and KPIs count Linear keys; building Linear issues in lanes comes in a later slice of #3872.
 
 ## Updating
 
@@ -123,7 +123,7 @@ factory self-update --to <version>          # install that exact stable version 
 
 `factory self-update --to` installs the version next to the running Node, runs `factory doctor`, restarts factoryd, and rolls back if the install or doctor fails. factoryd installed from npm runs the same update on its own when a new stable release appears. Update modes, opting out, and manual rollback are in [docs/ops/updating.md](docs/ops/updating.md). Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
-The `version` fields in this repo's `package.json` files stay at the last committed version (0.9.27). The publish job writes the release or prerelease version at build time and never commits it, so use `factory --version` or `npm view @on-par/factory-cli dist-tags` to see real versions.
+The `version` fields in this repo's `package.json` files stay at the last committed version (0.9.28). The publish job writes the release or prerelease version at build time and never commits it, so use `factory --version` or `npm view @on-par/factory-cli dist-tags` to see real versions.
 
 ## CLI commands
 
@@ -132,6 +132,7 @@ The most-used commands, by the group `factory --help` lists them under. Run `fac
 ```bash
 # Run work
 factory ship <N>                    Plan → build → check one issue and open a ready-for-review PR; never merges
+factory respond <PR>                Run a feedback round on a factory PR: triage trusted feedback, rework or re-plan, push, reply, resolve, re-request review
 factory run-issue <N>               Like ship, but loads the issue first and exits 2 if it cannot be found
 factory run-issue <N> --merge        After SHIP, wait for CI and land the PR through the run merge gates; exits 0 merged, 10 held, 11 CI failed, 12 timed out, 13 land failed, 1 parked before a PR
 factory run-issue <N> --in-place   Build in the current clean checkout, no worktree (disposable containers)
