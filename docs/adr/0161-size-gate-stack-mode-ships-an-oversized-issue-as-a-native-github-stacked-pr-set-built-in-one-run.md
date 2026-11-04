@@ -111,3 +111,24 @@ Changing the default mode to `stack`, or rebuilding upper layers automatically, 
 - A dependency on the `gh stack` CLI extension.
 - Changes to the ADR-0144 trust tiers or ADR-0146 SHA-pinned merges.
 - Changing `file`, `slice` or `off` behavior.
+
+## Addendum: cross-issue stacks (#3916)
+
+The GitHub-labels queue reuses this machinery to stack a dependent issue on its prerequisite's open factory PR, so a chain
+of `Prerequisite:` / `Depends on:` issues builds in parallel instead of waiting for each merge.
+
+- **Stack.** When a queued issue X declares an open prerequisite B and B has an open PR on a same-repo `factory/<B>-`
+  branch, preflight returns `build` with a stack target. X builds from B's branch, opens its PR against that branch, and its
+  body carries a stack-order line plus a `factory:prerequisite-stack` marker (issue, PR, branch, head). With several open
+  prerequisites X stacks on the one whose branch contains the others' heads, otherwise it defers. A prerequisite without a
+  factory PR, a human or fork PR, a lookup error or `queue.stackOnOpenPrerequisite: false` keeps today's defer.
+- **Never landed while stacked.** Preflight never adopts a PR whose marker says it is stacked and whose base is not `main`,
+  and `squashMergeAndDelete` refuses any PR whose base starts with `factory/`.
+- **Restack.** Each preflight compares the marker with B's PR. If B squash-merged, X is rebased `--onto` main from B's
+  recorded head and retargeted to `main`. If B's head moved, X is rebased onto B's new head and the marker is updated. Both
+  use the shared `rebaseAndPushStack` (one leased atomic push, extracted from the slice restack); its push is the CI re-run.
+  A chain restacks bottom-up because each layer's next preflight sees the layer below it move. A human push to X's branch
+  parks the restack.
+- **Held.** If B's PR is closed unmerged, X parks held with a comment naming the PR.
+
+Linear and Jira prerequisites, cross-repo prerequisites, human or fork PRs and `run-issue --stack` are unchanged.

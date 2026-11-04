@@ -8,7 +8,7 @@ import { findOpenPR, isPullAlreadyExistsError } from './ship-pr-lookup.js';
 import { readRisk, readSpecBody } from './ship-spec.js';
 import type { ShipResult } from './ship-types.js';
 import type { lazyWalkthrough } from './ship-walkthrough.js';
-import { renderStackOrderLine, type StackPosition } from './stack-order.js';
+import { prerequisiteStackOrder, renderStackOrderLine, type StackPosition } from './stack-order.js';
 
 export async function openOrFindPr(ctx: {
   opts: ShipPhaseOptions;
@@ -55,7 +55,7 @@ export async function openOrFindPr(ctx: {
       body: renderPrBody({
         summaryLine,
         footer: opts.footer,
-        stackOrder: stack ? renderStackOrderLine(stack) : undefined,
+        stackOrder: stack ? renderStackOrderLine(stack) : prerequisiteStackOrder(opts.prerequisiteStack, issue, base),
         specBody: await readSpecBody(opts.specPath),
         checkSummary,
         reworkRounds: opts.reworkRounds,

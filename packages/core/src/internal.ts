@@ -450,6 +450,7 @@ export {
 } from './kpis/steerability.js';
 export { buildTierEvidence, coverageRatchetEvidence, formatTierEvidence } from './kpis/tier-evidence.js';
 export { restackAfterSquashMerge, type StackRestackOutcome } from './run/stack-restack.js';
+export { restackOnPrerequisite, type PrerequisiteRestackOutcome } from './run/prerequisite-restack.js';
 export {
   checkResumeBaseDrift,
   createCheckResumeStore,

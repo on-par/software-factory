@@ -3,6 +3,7 @@
 import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
+import { renderPrerequisiteStackMarker, type PrerequisiteStackTarget } from '../queue/prerequisite-stack.js';
 import { stackSliceBranch, type SlicePlan } from '../readiness/slice-plan.js';
 
 export const STACK_ORDER_MARKER = '<!-- factory:stack-order -->';
@@ -52,6 +53,27 @@ export function renderStackOrderLine(p: StackPosition): string {
     ? `; next: slice ${p.index + 1} ${p.next.prNumber ? `#${p.next.prNumber}` : `(\`${p.next.branch}\`)`}`
     : ' (top of stack)';
   return `${STACK_ORDER_MARKER}\n**Stack:** slice ${p.index}/${p.count} — stacked on ${stackedOn}${next}`;
+}
+
+/** Stack-order line for an issue stacked on its prerequisite's PR (#3916); `base` is `main` once the prerequisite merged. */
+export function renderPrerequisiteStackLine(p: {
+  prerequisite: PrerequisiteStackTarget;
+  issue: number;
+  base: string;
+}): string {
+  const { prerequisite: b } = p;
+  const tail = p.base === STACK_BASE_BRANCH ? '(prerequisite merged; stacked on `main`)' : `— stacked on \`${p.base}\``;
+  return `${STACK_ORDER_MARKER}\n**Stack:** #${b.issue} PR #${b.prNumber} (\`${b.branch}\`), then #${p.issue} ${tail}`;
+}
+
+/** The PR-body stack section for a prerequisite stack: the order line plus the recovery marker (#3916). */
+export function prerequisiteStackOrder(
+  prerequisite: PrerequisiteStackTarget | undefined,
+  issue: number | string,
+  base: string,
+): string | undefined {
+  if (prerequisite === undefined) return undefined;
+  return `${renderPrerequisiteStackLine({ prerequisite, issue: Number(issue), base })}\n${renderPrerequisiteStackMarker(prerequisite)}`;
 }
 
 /** Replaces the marker line and the line after it; without a marker, inserts after the Summary paragraph or appends. */

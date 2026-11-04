@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { SlicePlan } from '../readiness/slice-plan.js';
 import {
+  prerequisiteStackOrder,
+  renderPrerequisiteStackLine,
   renderStackOrderLine,
   replaceStackOrderLine,
   retargetedStackPosition,
@@ -135,5 +137,25 @@ describe('retargetedStackPosition', () => {
   it('leaves the next PR unnamed when unrecorded, and has no next for the top slice', () => {
     expect(retargetedStackPosition(plan([41, 42]), 2).next).toEqual({ branch: 'factory/7-slice-3' });
     expect(retargetedStackPosition(plan([41, 42, 43]), 3).next).toBeUndefined();
+  });
+});
+
+describe('prerequisite stack order line (#3916)', () => {
+  const prerequisite = { issue: 5, prNumber: 50, branch: 'factory/5-thing', headSha: 'a'.repeat(40) };
+
+  it('renders the prerequisite stack order line', () => {
+    expect(renderPrerequisiteStackLine({ prerequisite, issue: 6, base: 'factory/5-thing' })).toBe(
+      `${STACK_ORDER_MARKER}\n**Stack:** #5 PR #50 (\`factory/5-thing\`), then #6 — stacked on \`factory/5-thing\``,
+    );
+    expect(renderPrerequisiteStackLine({ prerequisite, issue: 6, base: 'main' })).toBe(
+      `${STACK_ORDER_MARKER}\n**Stack:** #5 PR #50 (\`factory/5-thing\`), then #6 (prerequisite merged; stacked on \`main\`)`,
+    );
+  });
+
+  it('adds the recovery marker for a PR body and nothing without a prerequisite', () => {
+    expect(prerequisiteStackOrder(undefined, 6, 'main')).toBeUndefined();
+    expect(prerequisiteStackOrder(prerequisite, '6', 'factory/5-thing')).toContain(
+      'factory:prerequisite-stack issue:5',
+    );
   });
 });

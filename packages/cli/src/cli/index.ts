@@ -3555,6 +3555,7 @@ export function createQueuePreflightOps(
   opts: {
     autoMergeStack?: boolean;
     stackMode?: boolean;
+    stackOnOpenPrerequisite?: boolean;
     onDeferred?: (issue: number, message: string, cause?: QueueDeferCause) => void;
     laneFileHold?: LaneFileHoldLookup;
   } = {},

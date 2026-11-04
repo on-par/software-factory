@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- A queued issue whose prerequisite has an open factory PR now builds on it and opens a stacked PR against that branch, restacks onto main when the prerequisite merges or onto its new head when it moves, parks held when the prerequisite PR closes unmerged, and is never landed while its base is not main; `queue.stackOnOpenPrerequisite: false` restores waiting (#3916)
 - Feedback rounds: review rework reads all trusted PR feedback, re-plans on scope changes, replies to each item, resolves fixed threads and re-requests review; `factory respond <pr>` starts one by hand (#3910)
 - Per-run config and constitution overrides: `--config`/`FACTORY_CONFIG_PATH`/`FACTORY_CONFIG_YAML`, `--constitution`/`FACTORY_CONSTITUTION_PATH`/`FACTORY_CONSTITUTION`, and a `FACTORY_CONFIG_OVERRIDES` fragment; the run log and `factory doctor` name the source (#3906).
 - `factory land` resolves a CHANGELOG.md conflict confined to `## Unreleased` by keeping main's entries and appending the PR's after them, and `.gitattributes` unions CHANGELOG.md on local merges (#3931).

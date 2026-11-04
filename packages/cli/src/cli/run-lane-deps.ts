@@ -8,6 +8,9 @@ import type {
   LoadGuardDecision,
   QueueClaim,
   QueueReleaseOutcome,
+  PrerequisiteRestackDecision,
+  PrerequisiteRestackOutcome,
+  PrerequisiteStackTarget,
   StackRestackOutcome,
 } from '@on-par/factory-core/internal';
 import type { Octokit } from '@octokit/rest';
@@ -33,7 +36,15 @@ export type RunLaneDeps = {
   commentIssue?: (issue: number, body: string) => Promise<void>;
   ship?: (
     issue: number,
-    opts: { product?: string; autoRework?: boolean; interactive?: boolean; approvePlan?: boolean },
+    opts: {
+      product?: string;
+      autoRework?: boolean;
+      interactive?: boolean;
+      approvePlan?: boolean;
+      /** #3916: build on this open prerequisite PR's branch and open the PR against it. */
+      baseBranch?: string;
+      prerequisiteStack?: PrerequisiteStackTarget;
+    },
     ctx?: {
       repoRoot: string;
       ghRepo: string;
@@ -53,6 +64,8 @@ export type RunLaneDeps = {
   recordStackMerge?: (issue: number, prNumber: number) => Promise<void>;
   /** ADR-0161 (#3368): rebases the open layers above a squash-merged layer onto main, model-free. Defaults to a no-op. */
   restack?: (issue: number, merged: { index: number; prNumber: number }) => Promise<StackRestackOutcome>;
+  /** #3916: rebases a PR stacked on a prerequisite onto main (prerequisite merged) or its new head, model-free. Defaults to a park. */
+  restackPrerequisite?: (decision: PrerequisiteRestackDecision) => Promise<PrerequisiteRestackOutcome>;
   pathExists?: (path: string) => boolean;
   emitEvent?: typeof logEvent;
   claimNext?: () => Promise<QueueClaim | null>;
