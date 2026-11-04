@@ -32,7 +32,12 @@ import {
   resolveSizeGateBudget,
   worktreeWorkspace,
 } from '@on-par/factory-core';
-import type { CheckResumeRecord, ProviderOrder, WorktreeSandbox } from '@on-par/factory-core/internal';
+import type {
+  CheckResumeRecord,
+  PrerequisiteStackTarget,
+  ProviderOrder,
+  WorktreeSandbox,
+} from '@on-par/factory-core/internal';
 import {
   findOpenPR,
   isEgressEnforced,
@@ -280,7 +285,14 @@ export interface RunRequestInput {
   product: string | undefined;
   runStartedAt: string;
   lane: string | undefined;
-  opts: { interactive?: boolean; sandbox?: boolean; pr?: boolean; baseBranch?: string; parkOverBudget?: boolean };
+  opts: {
+    interactive?: boolean;
+    sandbox?: boolean;
+    pr?: boolean;
+    baseBranch?: string;
+    prerequisiteStack?: PrerequisiteStackTarget;
+    parkOverBudget?: boolean;
+  };
   ctx?: {
     blockedBehind?: number[];
     workSource?: { kind: WorkRequestSourceKind; params: unknown };
@@ -358,6 +370,7 @@ export function buildRunRequest({
     localOnly: Boolean(ctx?.localOnly),
     noPr: opts.pr === false,
     ...(opts.baseBranch !== undefined ? { parentBaseRef: baseRemoteRef(opts.baseBranch) } : {}),
+    ...(opts.prerequisiteStack ? { prerequisiteStack: opts.prerequisiteStack } : {}),
     blockUnresolvedRegressions: resolveDesignRegressionBlock(factoryConfig),
     hermeticGit: resolveHermeticGit(repoConfig),
     baselineCacheTtlHours: resolveBaselineCacheTtlHours(repoConfig),

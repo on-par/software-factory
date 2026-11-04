@@ -480,6 +480,9 @@ const INTERNAL_API_KEYS = [
     ' ',
   ), // #3380, #3381, #3149
   ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles publishRiskReceipt renderRiskReceipt'.split(' '), // #3386
+  ...'choosePrerequisiteStack parsePrerequisiteStackMarker renderPrerequisiteStackMarker resolveQueueStackOnOpenPrerequisite restackOnPrerequisite'.split(
+    ' ',
+  ), // #3916
   'runBaselineCheckers', // #3851
   'renderPreviewReceipt',
   ...'upsertRiskReceipt riskPolicyConfigFile loadRiskPolicy formatRiskPolicy'.split(' '), // #3387

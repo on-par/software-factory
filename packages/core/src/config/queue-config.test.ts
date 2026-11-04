@@ -32,6 +32,15 @@ describe('loadFactoryConfigForRepo queue.claim_settle_ms', () => {
     expect(resolveQueueClaimSettleMs(config)).toBe(0);
   });
 
+  it('queue.stackOnOpenPrerequisite defaults on, accepts false and treats a non-boolean as the default', async () => {
+    const path = join(dir, 'config.json');
+    expect(loadFactoryConfigForRepo(join(dir, 'missing.json')).queue.stackOnOpenPrerequisite).toBe(true);
+    await writeFile(path, JSON.stringify({ queue: { stackOnOpenPrerequisite: false } }));
+    expect(loadFactoryConfigForRepo(path).queue.stackOnOpenPrerequisite).toBe(false);
+    await writeFile(path, JSON.stringify({ queue: { stackOnOpenPrerequisite: 'no' } }));
+    expect(loadFactoryConfigForRepo(path).queue.stackOnOpenPrerequisite).toBe(true);
+  });
+
   it('queue.max_review_rework_runs defaults to 2 and a configured value overrides it', async () => {
     const path = join(dir, 'config.json');
     expect(loadFactoryConfigForRepo(join(dir, 'missing.json')).queue.max_review_rework_runs).toBe(2);

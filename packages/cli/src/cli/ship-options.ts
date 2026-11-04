@@ -1,5 +1,6 @@
 // packages/cli/src/cli/ship-options.ts — shipIssue's option bag and the --base-branch flag helpers (#3764)
 import type { SizeGateMode } from '@on-par/factory-core';
+import type { PrerequisiteStackTarget } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
 
 export interface ShipIssueOptions {
@@ -24,6 +25,8 @@ export interface ShipIssueOptions {
   pr?: boolean;
   /** --base-branch (#3764): start from origin/<ref> and open the PR against <ref>; undefined = default branch. */
   baseBranch?: string;
+  /** The open prerequisite PR this issue is stacked on (#3916); `baseBranch` is its branch and the size gate stays on. */
+  prerequisiteStack?: PrerequisiteStackTarget;
 }
 
 const FORBIDDEN_CHARS = /[\s~^:?*[\\]/;
@@ -75,4 +78,9 @@ export function baseBranchConflict(opts: {
 /** The remote-tracking ref a --base-branch run starts from. */
 export function baseRemoteRef(baseBranch: string | undefined): string | undefined {
   return baseBranch === undefined ? undefined : `origin/${baseBranch}`;
+}
+
+/** True when `--base-branch` turns the size gate off; a prerequisite stack's base keeps it on (#3916). */
+export function baseBranchGateOff(opts: ShipIssueOptions): boolean {
+  return opts.baseBranch !== undefined && opts.prerequisiteStack === undefined && opts.sizeGate !== 'stack';
 }

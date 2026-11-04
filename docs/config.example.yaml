@@ -364,11 +364,15 @@ auto_failover:
 # runs per issue (#3565); at the cap a further trusted changes-requested review starts no run and
 # parks the issue. Non-negative integer; 0 means a changes-request always parks. maxClockSkewMs: the
 # stale-claim reaper refuses to release expired leases while this host's clock differs from GitHub's
-# Date header by more than this many ms (#3149); non-negative integer.
+# Date header by more than this many ms (#3149); non-negative integer. stackOnOpenPrerequisite
+# (default true): an issue whose prerequisite has an open factory PR builds on it and opens a
+# stacked PR against that branch (#3916), instead of waiting for the prerequisite to merge; false
+# keeps waiting. A non-boolean value uses the default.
 queue:
   claim_settle_ms: 3000
   max_review_rework_runs: 2
   maxClockSkewMs: 60000
+  stackOnOpenPrerequisite: true
 # Always-on auto-ingest. When enabled, `factory supervise` polls each cycle for open issues carrying
 # `label` and appends new ones (deduped against the queue and open factory/* PRs) to the queue under
 # `lane`. Enable per-run with FACTORY_AUTO_INGEST=1; disable with =0.

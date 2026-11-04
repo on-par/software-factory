@@ -334,9 +334,15 @@ export const FactoryConfigSchema = z.object({
         .nonnegative()
         .default(60000)
         .describe('Max ms this clock may differ from GitHub before the stale-claim reaper refuses (#3149).'),
+      stackOnOpenPrerequisite: z.boolean().catch(true).describe('Stack on an open prerequisite PR (#3916).'),
       comment: z.string().optional(),
     })
-    .default({ claim_settle_ms: 3000, max_review_rework_runs: 2, maxClockSkewMs: 60000 }),
+    .default({
+      claim_settle_ms: 3000,
+      max_review_rework_runs: 2,
+      maxClockSkewMs: 60000,
+      stackOnOpenPrerequisite: true,
+    }),
   adr: z.object({ mandate: z.boolean().default(false), comment: z.string().optional() }).default({ mandate: false }),
   /** Ship-it lane workspace isolation (#1535). `'host'` is the existing sibling-worktree
    *  behavior; `'disposable-docker'` opts a repo into a managed, labeled container per

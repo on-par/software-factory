@@ -91,7 +91,7 @@ describe('resolveQueueClaimSettleMs (#3239)', () => {
     expect(
       resolveQueueClaimSettleMs({
         ...loadFactoryConfig(),
-        queue: { claim_settle_ms: 0, max_review_rework_runs: 2, maxClockSkewMs: 60000 },
+        queue: { claim_settle_ms: 0, max_review_rework_runs: 2, maxClockSkewMs: 60000, stackOnOpenPrerequisite: true },
       }),
     ).toBe(0);
   });

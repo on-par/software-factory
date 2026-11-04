@@ -13,7 +13,8 @@ import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import { briefSummaryLine, renderPrBody, stripBriefIds } from '../reports/pr-body.js';
 import { computeDiffStat } from './ship-diff-stat.js';
 import { lazyWalkthrough, type WalkthroughShipOpts } from './ship-walkthrough.js';
-import { renderStackOrderLine, type StackPosition } from './stack-order.js';
+import { prerequisiteStackOrder, renderStackOrderLine, type StackPosition } from './stack-order.js';
+import type { PrerequisiteStackTarget } from '../queue/prerequisite-stack.js';
 import type { ReviewRouting } from '../review/routing.js';
 import {
   type CommandRunner,
@@ -103,6 +104,8 @@ async function shipPhaseImpl(opts: {
   stack?: StackPosition;
   /** PR base for a non-stack run started from another branch (#3764); default main. */
   baseBranch?: string;
+  /** The open prerequisite PR this issue is stacked on (#3916): the body names the stack order and carries the marker. */
+  prerequisiteStack?: PrerequisiteStackTarget;
   /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
   laneId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
@@ -344,7 +347,7 @@ async function shipPhaseImpl(opts: {
         body: renderPrBody({
           summaryLine,
           footer: opts.footer,
-          stackOrder: stack ? renderStackOrderLine(stack) : undefined,
+          stackOrder: stack ? renderStackOrderLine(stack) : prerequisiteStackOrder(opts.prerequisiteStack, issue, base),
           specBody: await readSpecBody(opts.specPath),
           checkSummary,
           reworkRounds: opts.reworkRounds,

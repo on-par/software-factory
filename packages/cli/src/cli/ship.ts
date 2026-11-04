@@ -80,7 +80,7 @@ import {
   stubAwareShipPhase,
   TERMINAL_EVENT_KINDS,
 } from './ship-steps.js';
-import { baseRemoteRef, type ShipIssueOptions } from './ship-options.js';
+import { baseBranchGateOff, baseRemoteRef, type ShipIssueOptions } from './ship-options.js';
 
 type ShipArgs = Parameters<typeof shipIssueFrom> extends [string, ...infer Rest] ? Rest : never;
 
@@ -244,7 +244,7 @@ async function shipIssueFrom(
     } satisfies GithubIssueParams));
   const issueTitle = work.title;
   const noPr = opts.pr === false; // --no-pr never files child issues or slice PRs: size gate off; --base-branch keeps stack mode
-  const gateOff = noPr || (opts.baseBranch !== undefined && opts.sizeGate !== 'stack');
+  const gateOff = noPr || baseBranchGateOff(opts);
   const sizeGateMode = gateOff ? 'off' : (opts.sizeGate ?? resolveSizeGateMode(factoryConfig));
   const explicitStack =
     sizeGateMode === 'stack' &&

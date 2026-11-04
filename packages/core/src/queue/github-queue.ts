@@ -12,6 +12,7 @@ import { createClaimReleaser } from './claim-release.js';
 import { createClaimSettler, type ClaimSettleOptions, type ClaimSettler } from './claim-settle.js';
 import { knownRepoLabels } from './label-cache.js';
 import { createOctokitLabelSweepMethods, dropReplacedRepoLabel, listOpenQueueIssues } from './octokit-label-client.js';
+import type { PrerequisiteQueueDecision, PrerequisiteStackTarget } from './prerequisite-stack.js';
 import type { OrderCollision } from './order-collision.js';
 import type { OrderCollisionRepair } from './order-repair.js';
 import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
@@ -154,7 +155,7 @@ export interface QueueIssue {
 
 /** A no-model classification made before a queue candidate is claimed. */
 export type QueuePreflightDecision =
-  | { kind: 'build' }
+  | { kind: 'build'; stackOn?: PrerequisiteStackTarget }
   | {
       kind: 'adopt';
       branch: string;
@@ -165,6 +166,7 @@ export type QueuePreflightDecision =
     }
   | { kind: 'park'; reason: string }
   | { kind: 'restack'; mergedIndex: number; mergedPrNumber: number }
+  | PrerequisiteQueueDecision
   | { kind: 'defer' };
 
 export type QueuePreflight = (candidate: QueueIssue) => Promise<QueuePreflightDecision>;
@@ -172,7 +174,10 @@ export type QueuePreflight = (candidate: QueueIssue) => Promise<QueuePreflightDe
 /** A successfully claimed issue and the preflight decision that led to the claim. */
 export interface QueueClaim {
   issue: number;
-  decision: Extract<QueuePreflightDecision, { kind: 'build' | 'adopt' | 'park' | 'restack' }>;
+  decision: Extract<
+    QueuePreflightDecision,
+    { kind: 'build' | 'adopt' | 'park' | 'restack' | 'restack-prerequisite' | 'held' }
+  >;
 }
 
 export interface QueueGitHubClient extends QueueCommentClient {
