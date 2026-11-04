@@ -19,15 +19,18 @@ export function runStateFile(runsDir: string, key: WorkKey): string {
   return resolve(runsDir, `issue-${key}.json`);
 }
 
-/** Persists `state` with its string `key` and no numeric `issue` (#3890), filling `repo` from the
- *  run's worktree when the caller did not supply one. Returns the in-memory record (both `key` and
- *  `issue`), so a caller can see the resolved slug. An unresolvable slug omits the key rather than
- *  writing a placeholder. */
+/** Persists `state` with its string `key` (#3890), filling `repo` from the run's worktree when the
+ *  caller did not supply one. A numeric key also persists the numeric `issue`, so a factory binary
+ *  from before #3890 (0.9.27 or earlier) on the same host still reads the record (ADR-0168: no
+ *  on-disk state migrates). A non-numeric key (a Linear or Jira ticket) persists no `issue`.
+ *  Returns the in-memory record (both `key` and `issue`), so a caller can see the resolved slug.
+ *  An unresolvable slug omits the key rather than writing a placeholder. */
 export async function writeIssueRunState(file: string, state: IssueRunState): Promise<IssueRunState> {
   const repo = state.repo ?? resolveRepoSlug(state.worktree) ?? undefined;
   const key = state.key ?? workKeyFromIssue(state.issue);
   const { issue: _issue, key: _key, ...rest } = state;
-  const persisted = repo === undefined ? rest : { ...rest, repo };
+  const legacy = isNumericWorkKey(key) ? { issue: issueNumberOf(key) } : {};
+  const persisted = repo === undefined ? { ...legacy, ...rest } : { ...legacy, ...rest, repo };
   // `repo` must be absent, not undefined, in the JSON: JSON.stringify drops undefined
   // values, so the two shapes serialize identically — keep it that way.
 
