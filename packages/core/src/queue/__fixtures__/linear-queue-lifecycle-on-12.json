@@ -1,0 +1,18 @@
+{
+  "issue": {
+    "id": "issue-on-12",
+    "identifier": "ON-12",
+    "state": "In Progress",
+    "labels": [
+      { "id": "lbl-ready", "name": "factory:ready" },
+      { "id": "lbl-infra", "name": "infra" },
+      { "id": "lbl-claim-a", "name": "factory:claimed-by:host-a-1" }
+    ],
+    "lease": {
+      "attachmentId": "att-lease-12",
+      "metadata": { "kind": "factory-claim-lease", "claimantId": "host-a-1", "expiresAt": 1700000900000 }
+    }
+  },
+  "comments": [],
+  "teamLabels": [{ "id": "lbl-parked", "name": "factory:parked" }]
+}
