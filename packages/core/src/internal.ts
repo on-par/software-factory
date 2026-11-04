@@ -225,7 +225,15 @@ export {
   type QueueBackend,
   type QueueBackendClaim,
   type QueueBackendOptions,
+  type QueueBackendKind,
+  type QueueBackendReapRow,
 } from './queue/queue-backend.js';
+export {
+  createLinearQueueBackend,
+  resolveLinearProjectForRepo,
+  type LinearQueueBackendOptions,
+} from './queue/linear-queue-backend.js';
+export { createLinearQueueGraphqlClient, LINEAR_LEASE_ATTACHMENT_URL } from './queue/linear-queue.js';
 export { formatQueueOrderConflict, type QueueOrderConflict } from './queue/queue-order.js';
 
 // Factory App admission-state compatibility (#1497)

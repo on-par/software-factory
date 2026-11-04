@@ -20,6 +20,7 @@ import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import {
+  fetchCommentFeedback,
   renderReviewFeedback,
   ReviewReworkError,
   runRequestedReviewRework,
@@ -153,6 +154,48 @@ beforeEach(() => {
   shipPhase.mockReset().mockResolvedValue({ ok: true, prNumber: 7 });
   reworkWorker.mockReset().mockResolvedValue({ failovers: [], modelCompleted: true });
   pullsCreate.mockReset();
+});
+
+describe('comment rework (#3882)', () => {
+  const commentRequest: RunRequest = {
+    ...request,
+    reviewRework: { prNumber: 7, reviewId: 300, reviewer: 'alice', source: 'comment' },
+  };
+  const withComment = (body: string | null, pull?: { state: string; head: { ref: string } }) => {
+    const { octokit, getReview } = fakeOctokit(pull);
+    const getComment = vi.fn(async () => ({ data: { body, user: { login: 'alice' } } }));
+    Object.assign((octokit as any).rest, { issues: { getComment } });
+    return { octokit, getReview, getComment };
+  };
+
+  it("a comment rework builds on the PR branch from that comment's feedback only", async () => {
+    const { octokit, getReview } = withComment('/factory rework rename foo to bar\nand tidy up');
+    expect(await runIssue(commentRequest, policy, ports(octokit))).toMatchObject({ state: 'ready' });
+    expect(planPhase).not.toHaveBeenCalled();
+    const details = reworkWorker.mock.calls[0][0].summary.results[0].details ?? '';
+    expect(details).toContain('Comment 300 by @alice on PR #7');
+    expect(details).toContain('rename foo to bar\nand tidy up');
+    expect(details).not.toContain('/factory rework');
+    expect(details).not.toContain('Inline comments:');
+    expect(getReview).not.toHaveBeenCalled();
+    expect(pullsCreate).not.toHaveBeenCalled();
+  });
+
+  it('a comment rework fails closed when the PR is not open on the run branch', async () => {
+    const { octokit, getComment } = withComment('/factory rework x', { state: 'open', head: { ref: 'other' } });
+    expect(await runIssue(commentRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
+    expect(getComment).not.toHaveBeenCalled();
+    expect(reworkWorker).not.toHaveBeenCalled();
+  });
+
+  it('throws ReviewReworkError when the comment is no longer a rework command', async () => {
+    for (const body of ['edited away', '/factory rework', null]) {
+      const { octokit } = withComment(body);
+      await expect(
+        fetchCommentFeedback(octokit, { owner: 'o', repo: 'r', prNumber: 7, commentId: 300 }),
+      ).rejects.toThrow(ReviewReworkError);
+    }
+  });
 });
 
 describe('review rework (#3564)', () => {

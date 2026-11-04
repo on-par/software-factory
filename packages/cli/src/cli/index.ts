@@ -134,7 +134,9 @@ import {
   validateQueue,
   watchUsage,
   writeLocalRunReport,
+  isNumericWorkKey,
   issueNumberOf,
+  type WorkKey,
   workKeyFromIssue,
   writeProxyState,
 } from '@on-par/factory-core';
@@ -3484,10 +3486,16 @@ export interface PlannedLane {
 export function laneQueueDeps(
   queue: QueueBackend,
   lane: string,
+  onUnshippable?: (key: WorkKey) => void,
 ): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining'> {
   return {
     claimNext: async () => {
       const claim = await queue.claimNext(lane);
+      if (claim !== null && !isNumericWorkKey(claim.key)) {
+        await queue.release(claim.key, 'queued');
+        onUnshippable?.(claim.key);
+        return null;
+      }
       return claim === null ? null : { issue: issueNumberOf(claim.key), decision: claim.decision };
     },
     releaseIssue: (issue, outcome) => queue.release(workKeyFromIssue(issue), outcome),
@@ -3522,6 +3530,8 @@ export async function planRunLanes(input: {
   readLocalQueue: () => string | null;
   /** Lazy so the octokit client is never built under --local-queue. */
   queue: () => QueueBackend;
+  /** Called with a claimed non-numeric key the lane released instead of building. */
+  onUnshippable?: (key: WorkKey) => void;
 }): Promise<{ lanes: PlannedLane[]; diagnostics: QueueDiagnostic[] }> {
   if (input.localQueue) {
     const content = input.readLocalQueue();
@@ -3543,7 +3553,7 @@ export async function planRunLanes(input: {
   const backend = input.queue();
   const lanes = await backend.lanes();
   return {
-    lanes: lanes.map((lane) => ({ lane, issues: [], deps: laneQueueDeps(backend, lane) })),
+    lanes: lanes.map((lane) => ({ lane, issues: [], deps: laneQueueDeps(backend, lane, input.onUnshippable) })),
     diagnostics: [],
   };
 }
