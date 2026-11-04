@@ -7,6 +7,8 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, vi } from 'vitest';
 
 import { type CliDeps, main, shipIssue as cliShipIssue } from '../index.js';
+import { checkInPlaceCheckout, setupInPlaceCheckout } from './in-place-doubles.js';
+export { checkInPlaceCheckout, setupInPlaceCheckout };
 
 const tmp = createTempDirs();
 
@@ -186,11 +188,7 @@ export const setupWorktree = vi.fn<NonNullable<CliDeps['setupWorktree']>>(async 
 });
 const cleanupWorktree = vi.fn(async (..._args: Parameters<NonNullable<CliDeps['cleanupWorktree']>>) => {});
 const gitFetch = vi.fn(async (_repoRoot: string) => {});
-const inertGitOps: Pick<CliDeps, 'setupWorktree' | 'cleanupWorktree' | 'gitFetch'> = {
-  setupWorktree,
-  cleanupWorktree,
-  gitFetch,
-};
+const inertGitOps = { setupWorktree, cleanupWorktree, gitFetch, checkInPlaceCheckout, setupInPlaceCheckout };
 
 function makeInternalFakes() {
   return {
@@ -418,6 +416,8 @@ export function installShipHarness(): void {
       host: { loadGuard: { enabled: false, retrySeconds: 1 } },
     };
     h.setupWorktreeImpl = async () => {};
+    checkInPlaceCheckout.mockReset();
+    setupInPlaceCheckout.mockReset();
     h.claudeAvailable = undefined;
     h.dockerAvailable = undefined;
     h.sbxAvailable = undefined;

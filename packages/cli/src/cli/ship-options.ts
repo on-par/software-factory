@@ -1,6 +1,31 @@
 // packages/cli/src/cli/ship-options.ts — shipIssue's option bag and the --base-branch flag helpers (#3764)
-import type { SizeGateMode } from '@on-par/factory-core';
+import {
+  resolveSizeGateMaxSlices,
+  resolveSizeGateMode,
+  type FactoryConfig,
+  type SizeGateMode,
+} from '@on-par/factory-core';
+import { isExplicitStackMode } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
+
+export interface ShipSizeGate {
+  noPr: boolean;
+  sizeGateMode: SizeGateMode;
+  explicitStack: boolean;
+  maxSlices: number;
+}
+
+/** The size gate for one ship (ADR-0147). `--no-pr` never files child issues or slice PRs and `--in-place` builds one
+ *  branch in one checkout (#3904), so both turn it off; `--base-branch` turns it off unless stack mode was asked for. */
+export function resolveShipSizeGate(opts: ShipIssueOptions, config: FactoryConfig): ShipSizeGate {
+  const noPr = opts.pr === false;
+  const gateOff = noPr || opts.inPlace === true || (opts.baseBranch !== undefined && opts.sizeGate !== 'stack');
+  const sizeGateMode = gateOff ? 'off' : (opts.sizeGate ?? resolveSizeGateMode(config));
+  const explicitStack =
+    sizeGateMode === 'stack' &&
+    (opts.sizeGate !== undefined ? opts.explicitStack === true : isExplicitStackMode(config));
+  return { noPr, sizeGateMode, explicitStack, maxSlices: opts.maxSlices ?? resolveSizeGateMaxSlices(config) };
+}
 
 export interface ShipIssueOptions {
   parkOverBudget?: boolean;
@@ -24,6 +49,8 @@ export interface ShipIssueOptions {
   pr?: boolean;
   /** --base-branch (#3764): start from origin/<ref> and open the PR against <ref>; undefined = default branch. */
   baseBranch?: string;
+  /** --in-place / FACTORY_WORKSPACE=in-place (#3904): run in the current checkout, no worktree */
+  inPlace?: boolean;
 }
 
 const FORBIDDEN_CHARS = /[\s~^:?*[\\]/;
@@ -53,6 +80,26 @@ export function baseBranchOrExit(raw: string | undefined): string | undefined {
     );
   }
   return parsed;
+}
+
+/** `--in-place` wins; else FACTORY_WORKSPACE ('worktree' | 'in-place'; unset or empty = worktree). */
+export function resolveWorkspaceMode(flag: boolean | undefined, env: NodeJS.ProcessEnv): 'in-place' | 'worktree' {
+  if (flag === true) return 'in-place';
+  const raw = env.FACTORY_WORKSPACE;
+  if (raw === undefined || raw === '' || raw === 'worktree') return 'worktree';
+  if (raw === 'in-place') return 'in-place';
+  throw new CliExitError(`factory: unknown FACTORY_WORKSPACE '${raw}' — expected 'worktree' or 'in-place'`, 2);
+}
+
+/** A message when `--in-place` is combined with a flag it cannot work with, else undefined. */
+export function inPlaceConflict(opts: { baseBranch?: string; sizeGate?: string }): string | undefined {
+  if (opts.baseBranch !== undefined) {
+    return 'factory: --in-place runs on the default branch — drop --base-branch or drop --in-place';
+  }
+  if (opts.sizeGate === 'stack') {
+    return 'factory: --in-place builds one branch in the checkout — drop --stack/--size-gate stack or drop --in-place';
+  }
+  return undefined;
 }
 
 /** A message when `--base-branch` is combined with a flag it cannot work with, else undefined. */
