@@ -32,6 +32,29 @@ const allOnPath = () => true;
 const rowOf = (rows: VerifyCommandRow[], kind: string) => rows.find((r) => r.kind === kind)!;
 
 describe('resolveVerifyCommands', () => {
+  it('reports npm run typecheck as the build command', async () => {
+    const { rows } = await resolveVerifyCommands(repo({ 'package.json': '{"scripts":{"typecheck":"tsc"}}' }));
+    expect(rowOf(rows, 'build')).toMatchObject({ command: 'npm run typecheck', source: 'package.json' });
+  });
+
+  it('names the detected test runner per workspace', async () => {
+    const dir = repo({
+      'package.json': JSON.stringify({
+        scripts: { test: 'npm run test --workspaces --if-present' },
+        workspaces: ['apps/*'],
+      }),
+      'apps/web/package.json': JSON.stringify({ name: 'web', scripts: { test: 'vitest run' } }),
+    });
+    const resolved = await resolveVerifyCommands(dir);
+    expect(resolved.testRunners).toEqual([{ dir: 'apps/web', runner: 'vitest' }]);
+    expect(verifyCommandChecks(resolved, { requireTests: false, commandAvailable: allOnPath })).toContainEqual({
+      name: 'verify test runner',
+      section: VERIFY_SECTION,
+      ok: true,
+      detail: 'apps/web: vitest',
+    });
+  });
+
   it('shows bash scripts/verify.sh --no-e2e from scripts/verify.sh', async () => {
     const { rows, error } = await resolveVerifyCommands(repo({ 'scripts/verify.sh': '#!/bin/sh\n' }));
     expect(error).toBeUndefined();

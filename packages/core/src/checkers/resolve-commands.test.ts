@@ -109,3 +109,44 @@ describe('checkers run declared commands', () => {
     expect(out.details).toContain('checks.test');
   });
 });
+
+describe('typecheck fallback for the compile command', () => {
+  const tc = JSON.stringify({ scripts: { typecheck: 'tsc --noEmit' } });
+  const ok = (argv: readonly string[]): CommandResult => ({
+    command: argv,
+    stdout: '',
+    stderr: '',
+    exitCode: 0,
+    killed: false,
+    timedOut: false,
+    ok: true,
+  });
+
+  it('uses npm run typecheck when there is no build script', async () => {
+    const dir = repo({ 'package.json': tc });
+    expect(await resolveCompileCommand({ worktree: dir })).toEqual({
+      argv: ['npm', 'run', 'typecheck'],
+      source: 'package.json',
+    });
+    const ran: (readonly string[])[] = [];
+    const runCommand = async (argv: readonly string[]) => (ran.push(argv), ok(argv));
+    expect(await compileChecker({ worktree: dir, specPath: join(dir, 'spec.md'), runCommand })).toMatchObject({
+      result: 'PASS',
+      details: 'npm run typecheck: OK',
+    });
+    expect(ran).toEqual([['npm', 'run', 'typecheck']]);
+  });
+
+  it('prefers checks.build over a typecheck script', async () => {
+    const dir = repo({ 'package.json': tc, '.factory/config.json': config({ build: 'dotnet build' }) });
+    expect(await resolveCompileCommand({ worktree: dir })).toEqual({
+      argv: ['dotnet', 'build'],
+      source: '.factory/config.json',
+    });
+  });
+
+  it('keeps the Makefile ahead of a typecheck script', async () => {
+    const dir = repo({ 'package.json': tc, Makefile: 'all:\n' });
+    expect((await resolveCompileCommand({ worktree: dir }))?.source).toBe('Makefile');
+  });
+});

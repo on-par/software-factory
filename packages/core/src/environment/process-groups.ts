@@ -191,3 +191,26 @@ export class ProcessGroupTracker {
     return Promise.all(alive.map((pgid) => killProcessGroup(pgid, opts)));
   }
 }
+
+const processRegistry = new ProcessGroupTracker();
+
+/** Records a live detached process group for the CLI's signal shutdown (#1615). Returns its deregister. */
+export function registerProcessGroup(pgid: number): () => void {
+  processRegistry.track(pgid);
+  let done = false;
+  return () => {
+    if (!done) {
+      done = true;
+      processRegistry.untrack(pgid);
+    }
+  };
+}
+
+export function trackedProcessGroups(): number[] {
+  return processRegistry.pgids;
+}
+
+/** Sweeps every registered group (SIGTERM → grace → SIGKILL) and clears the registry. */
+export function killTrackedProcessGroups(opts: KillProcessGroupOptions = {}): Promise<KillOutcome[]> {
+  return processRegistry.killAll(opts);
+}

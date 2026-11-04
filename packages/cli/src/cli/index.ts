@@ -348,6 +348,7 @@ import { readRunFlagOverrides, recordDraftPrFlag } from './run-flags.js';
 import { runStalenessGuard } from './staleness.js';
 import { cmdBaselineClear } from './baseline.js';
 import { cmdBreakerReset } from './breaker.js';
+import { withShutdown } from './shutdown.js';
 import { runWorktreeKeep, runWorktreeRelease } from './worktree-keep.js';
 import { gcWorktreeSandbox, reapParkedLane, reapPrlessShip } from './worktree-reap.js';
 
@@ -4319,14 +4320,14 @@ export const PROGRAM_HANDLERS = {
   cmdQueueClear,
   cmdCheck,
   cmdDraft,
-  cmdShip,
-  cmdRunIssue,
-  cmdRunBrief,
+  cmdShip: withShutdown(cmdShip),
+  cmdRunIssue: withShutdown(cmdRunIssue),
+  cmdRunBrief: withShutdown(cmdRunBrief),
   cmdLocalSmallDryRun,
   cmdLocalSmallOvernight,
   cmdLand,
   cmdResumeApproved,
-  cmdRun: runRun,
+  cmdRun: withShutdown(runRun),
   cmdProxy,
   cmdFactoryd,
   cmdDaemonStart,
@@ -4340,7 +4341,7 @@ export const PROGRAM_HANDLERS = {
   cmdBaselineClear,
   cmdBreakerReset,
   cmdReset,
-  cmdSupervise: runSupervise,
+  cmdSupervise: withShutdown(runSupervise),
   cmdStop,
   cmdResume,
   cmdSteer: runSteerCommand,
