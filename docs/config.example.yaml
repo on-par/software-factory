@@ -376,8 +376,8 @@ queue:
   claim_settle_ms: 3000
   max_review_rework_runs: 2
   maxClockSkewMs: 60000
-  discovery_interval_ms: 60000
   stackOnOpenPrerequisite: true
+  discovery_interval_ms: 60000
 # Always-on auto-ingest. When enabled, `factory supervise` polls each cycle for open issues carrying
 # `label` and appends new ones (deduped against the queue and open factory/* PRs) to the queue under
 # `lane`. Enable per-run with FACTORY_AUTO_INGEST=1; disable with =0.
