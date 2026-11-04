@@ -10,6 +10,7 @@ section to `## X.Y.Z - date`. See
 ### Added
 
 - Per-run config and constitution overrides: `--config`/`FACTORY_CONFIG_PATH`/`FACTORY_CONFIG_YAML`, `--constitution`/`FACTORY_CONSTITUTION_PATH`/`FACTORY_CONSTITUTION`, and a `FACTORY_CONFIG_OVERRIDES` fragment; the run log and `factory doctor` name the source (#3906).
+- `factory land` resolves a CHANGELOG.md conflict confined to `## Unreleased` by keeping main's entries and appending the PR's after them, and `.gitattributes` unions CHANGELOG.md on local merges (#3931).
 - `factory run-issue --merge` and `run-brief --merge` drive the PR through the `factory run --auto-merge` gates to a merge, bounded by `--merge-timeout` or `ci.awaitingCiCapHours`, with distinct exit codes (0 merged, 10 held, 11 CI failed, 12 timed out, 13 land failed, 1 parked before a PR) (#3905)
 - The compile gate and `factory doctor` fall back to `npm run typecheck` when no build command resolves, and doctor names the detected test runner per workspace (#3913).
 - `factory run` starts lanes for work queued after it started, restarts finished lanes when new work arrives, and reaps expired claims mid-run; the interval is `queue.discovery_interval_ms` (default 60s) (#3920)
@@ -20,6 +21,7 @@ section to `## X.Y.Z - date`. See
 - A `tracker` config key selects `github` (default) or `linear` per repo, and `factory doctor` checks the Linear setup: a missing or rejected `LINEAR_API_KEY` and any project with ready issues but no repo mapping (#3891).
 - Core has a read-only `linear-issue` work source that resolves `ON-12` or a Linear issue URL into a work request; it reads `LINEAR_API_KEY` only when used (#3889).
 - Core has a Linear queue lifecycle that releases, parks and reaps Linear claims, keeping the claim lease in a factory-owned attachment's metadata; a failed Linear write warns and never fails the run (#3893).
+- Documented an OpenCode Go profile and recipe that pin DeepSeek V4 Pro as the PLAN (boss) model and V4 Flash as the BUILD/CHECK (worker/checker) models.
 
 ### Fixed
 
