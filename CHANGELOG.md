@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- `factory run` starts lanes for work queued after it started, restarts finished lanes when new work arrives, and reaps expired claims mid-run; the interval is `queue.discovery_interval_ms` (default 60s) (#3920)
 - A run persists its resumable state (rework counters, handled reviews, status, spec summary) in a factory-owned PR comment and restores it on a fresh clone (#3909)
 - Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
 - A `tracker` config key selects `github` (default) or `linear` per repo, and `factory doctor` checks the Linear setup: a missing or rejected `LINEAR_API_KEY` and any project with ready issues but no repo mapping (#3891).

@@ -50,4 +50,10 @@ describe('loadFactoryConfigForRepo queue.claim_settle_ms', () => {
     await writeFile(path, JSON.stringify({ queue: { claim_settle_ms: value } }));
     expect(() => loadFactoryConfigForRepo(path)).toThrow(/queue\.claim_settle_ms/);
   });
+
+  it.each([0, -1, 1.5])('queue.discovery_interval_ms rejects %j naming the key path (#3920)', async (value) => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ queue: { discovery_interval_ms: value } }));
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(/queue\.discovery_interval_ms/);
+  });
 });

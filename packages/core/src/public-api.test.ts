@@ -470,7 +470,7 @@ const INTERNAL_API_KEYS = [
   'resolveEffectiveConfig',
   'resolveExperimental',
   'resolveLocalOnly',
-  ...'resolveHostMaxBuilds resolveQueueClaimSettleMs evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL DEFAULT_MAX_CLOCK_SKEW_MS measureGithubClockSkew resolveQueueMaxClockSkewMs'.split(
+  ...'resolveHostMaxBuilds resolveQueueClaimSettleMs resolveLaneDiscoveryIntervalMs evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL DEFAULT_MAX_CLOCK_SKEW_MS measureGithubClockSkew resolveQueueMaxClockSkewMs'.split(
     ' ',
   ), // #3380, #3381, #3149
   ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles publishRiskReceipt renderRiskReceipt'.split(' '), // #3386
