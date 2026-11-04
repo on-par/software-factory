@@ -389,6 +389,8 @@ const INTERNAL_API_KEYS = [
   'fileSlicePlanStore',
   'findSlicePlanComment',
   'publishParkComment',
+  ...'collectFeedbackItems createOctokitFeedbackRoundGitHub feedbackHandledMarker feedbackReworkSummary'.split(' '), // #3910
+  ...'prepareFeedbackRound publishFeedbackRound renderFeedbackReply triageFeedback'.split(' '),
   'recordSliceMerged',
   'renderSlicePlanComment',
   'resolveStateRoot',

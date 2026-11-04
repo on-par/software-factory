@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- Feedback rounds: review rework reads all trusted PR feedback, re-plans on scope changes, replies to each item, resolves fixed threads and re-requests review; `factory respond <pr>` starts one by hand (#3910)
 - `factory run-issue --in-place` (or `FACTORY_WORKSPACE=in-place`) runs the pipeline in the current clean checkout with no worktree, for disposable containers (#3904).
 - With `tracker.kind: linear`, `factory run`, `factory supervise` and `factory status` take their queue from Linear through one composed `QueueBackend`. A claim writes the first lease attachment, and lanes release a Linear claim they cannot build yet (#3918).
 - A run persists its resumable state (rework counters, handled reviews, status, spec summary) in a factory-owned PR comment and restores it on a fresh clone (#3909)

@@ -35,6 +35,16 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     });
 
   program
+    .command('respond <pr>')
+    .description(
+      'Run a feedback round on a factory PR: triage new trusted feedback, re-plan or rework, push, reply, resolve fixed threads and re-request review',
+    )
+    .option('--json', 'Print the result as JSON')
+    .action(async (pr, opts) => {
+      await handlers.cmdRespond(pr, opts);
+    });
+
+  program
     .command('run-issue <issue>')
     .description('Like ship, but loads the issue first and exits 2 before any worktree or PR if it cannot be found')
     .option('--product <name>', 'Override active product constitution')

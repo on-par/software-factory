@@ -37,6 +37,13 @@ export const defaultRoutesConfig: RoutesDefaults = {
       allowedTools: [],
       output: 'json',
     },
+    feedback_triage: {
+      tier: 'triage_cheap',
+      description:
+        'Triage PR feedback items as actionable / question / out-of-scope and flag spec changes, as one tool-less JSON object (#3910)',
+      allowedTools: [],
+      output: 'json',
+    },
     decompose: {
       tier: 'triage',
       description:

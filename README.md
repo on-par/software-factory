@@ -132,6 +132,7 @@ The most-used commands, by the group `factory --help` lists them under. Run `fac
 ```bash
 # Run work
 factory ship <N>                    Plan → build → check one issue and open a ready-for-review PR; never merges
+factory respond <PR>                Run a feedback round on a factory PR: triage trusted feedback, rework or re-plan, push, reply, resolve, re-request review
 factory run-issue <N>               Like ship, but loads the issue first and exits 2 if it cannot be found
 factory run-issue <N> --in-place   Build in the current clean checkout, no worktree (disposable containers)
 factory run-issue <N> --stack        Build an oversized <N> as a stacked PR set in one run (the size gate default)

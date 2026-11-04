@@ -129,6 +129,8 @@ async function shipIssueFrom(
     rebuild?: { branch: string }; // #3325: a fresh branch off origin/main, built from the frozen spec with no PLAN
     /** Run-state slice-plan store for a stacked brief (#3813); becomes RunPorts.slicePlanStore. */
     slicePlanStore?: SlicePlanStore;
+    /** #3910: run a feedback round on this PR (`factory respond`); a claimed review rework sets it too. */
+    feedbackRound?: { prNumber: number };
   },
   deps: Pick<
     CliDeps,
@@ -392,6 +394,8 @@ async function shipIssueFrom(
       providerOrder: resolveProviderOrder(repoConfig, policy.models, log),
     }),
     previousAttempt,
+    feedbackRound: ctx?.feedbackRound,
+    trustedApprovers: factoryConfig.intake?.trustedApprovers,
     ...reworkClaim,
   };
 

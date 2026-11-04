@@ -477,3 +477,22 @@ export { listBlockedBy, type BlockedByItem } from './blockers/dependencies.js';
 
 export { LINEAR_API_KEY_ENV, probeLinearSetup, type LinearPreflightResult } from './work/linear-preflight.js';
 export { resolveTrackerConfig, type TrackerConfig } from './config/tracker-section.js';
+
+// Feedback round (#3910)
+export type {
+  FeedbackDisposition,
+  FeedbackItem,
+  FeedbackRoundPlan,
+  FeedbackRoundTarget,
+} from './run/feedback-round.js';
+export {
+  collectFeedbackItems,
+  feedbackHandledMarker,
+  feedbackReworkSummary,
+  prepareFeedbackRound,
+  publishFeedbackRound,
+  renderFeedbackReply,
+  triageFeedback,
+} from './run/feedback-round.js';
+export type { FeedbackRoundGitHub } from './run/feedback-github.js';
+export { createOctokitFeedbackRoundGitHub } from './run/feedback-github.js';
