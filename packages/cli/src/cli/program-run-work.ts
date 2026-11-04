@@ -30,6 +30,18 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     .option('--no-draft-pr', 'Mark the PR ready for review after CI, overriding run.pr.draft in the repo config')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .option('--base-branch <ref>', BASE_BRANCH_OPTION_DESCRIPTION)
+    .option(
+      '--merge',
+      'After SHIP, wait for CI and land the PR through the factory run --auto-merge gates (CI, base CI, risk, no-auto-merge, classifier); exits 0 merged, 10 held by a gate, 11 CI failed, 12 timed out, 13 land failed, 1 parked/failed before a PR',
+    )
+    .option(
+      '--merge-timeout <duration>',
+      'With --merge: longest wait for CI and merge (e.g. 30m, 2h); default ci.awaitingCiCapHours',
+    )
+    .option(
+      '--admin',
+      'With --merge: admin-merge past unmet branch protection, like FACTORY_MERGE_ADMIN=1; never bypasses red CI',
+    )
     .action(async (issueNum, opts) => {
       await handlers.cmdShip(handlers.parseIssueArg(issueNum), opts);
     });
@@ -102,6 +114,18 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     .option(
       '--stack',
       "Several briefs: open them as a PR stack — each brief starts from and targets the previous brief's PR head branch; a failure or missing PR (e.g. --no-pr) stops the stack and skips the rest. One brief: an over-budget brief is sliced and built as a stacked PR set in one run",
+    )
+    .option(
+      '--merge',
+      'After SHIP, wait for CI and land the PR through the factory run --auto-merge gates (CI, base CI, risk, no-auto-merge, classifier); exits 0 merged, 10 held by a gate, 11 CI failed, 12 timed out, 13 land failed, 1 parked/failed before a PR',
+    )
+    .option(
+      '--merge-timeout <duration>',
+      'With --merge: longest wait for CI and merge (e.g. 30m, 2h); default ci.awaitingCiCapHours',
+    )
+    .option(
+      '--admin',
+      'With --merge: admin-merge past unmet branch protection, like FACTORY_MERGE_ADMIN=1; never bypasses red CI',
     )
     .action(async (file: string, files: string[], opts) => {
       await handlers.cmdRunBrief([file, ...files], opts);

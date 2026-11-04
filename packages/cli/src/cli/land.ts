@@ -30,7 +30,7 @@ import {
   withGitLock,
   worktreeSandboxFor,
 } from '@on-par/factory-core/internal';
-import type { OpenPullRequestEvidence } from './index.js';
+import { findOpenPRForIssue } from './land-open-pr.js';
 import { resolveEffectiveTrustTier } from './tier-demotion.js';
 import {
   AwaitMergeStoppedError,
@@ -48,7 +48,7 @@ import { enforceRiskAtLand } from './land-risk.js';
 import { isPrMerged, latestPrForBranch } from './land-merged.js';
 import { landRuntime } from './land-runtime.js';
 
-export { isPrMerged, latestPrForBranch };
+export { isPrMerged, latestPrForBranch, findOpenPRForIssue };
 import { riskPolicyLines } from './risk-policy.js';
 import { touchIssueActivity } from './ship-run-state.js';
 
@@ -287,36 +287,6 @@ export function prLookupFailure(issueNum: number, branch: string, err: unknown):
     `PR lookup failed for issue #${issueNum} (${branch}): ${landRuntime().errorDetail(err)}`,
     5,
   );
-}
-
-/** queue-preflight only (it must see fork PRs to park them); land uses the core lookup (#3439). */
-export async function findOpenPRForIssue(
-  octokit: Octokit,
-  owner: string,
-  repoName: string,
-  issueNum: number,
-): Promise<OpenPullRequestEvidence | undefined> {
-  const perPage = 100;
-  const matches = new RegExp(`\\bcloses\\s+#${issueNum}\\b`, 'i');
-  for (let page = 1; ; page++) {
-    const { data: prs } = await octokit.rest.pulls.list({
-      owner,
-      repo: repoName,
-      state: 'open',
-      per_page: perPage,
-      page,
-    });
-    const pr = prs.find((p: any) => matches.test(p.body ?? ''));
-    if (pr) {
-      return {
-        number: pr.number,
-        branch: pr.head.ref,
-        headSha: pr.head.sha,
-        headRepoFullName: pr.head.repo?.full_name ?? null,
-      };
-    }
-    if (prs.length < perPage) return undefined;
-  }
 }
 
 /** Consecutive merged-state check failures tolerated before waitForMerge parks the lane.

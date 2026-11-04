@@ -233,8 +233,10 @@ import {
   aliasDeprecatedSizeGateMode,
   checkResumeBaseDrift,
   formatBaseMovedRefusal,
+  resolveAwaitingCiCapMs,
 } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
+import { driveToMerge, exitForMerge, parseMergeTimeout, shouldDriveMerge } from './run-issue-merge.js';
 import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
 import { runIssueStack } from './stack-run.js';
 import { withRepoRunLock } from './repo-run-lock.js';
@@ -2334,6 +2336,9 @@ async function cmdRunIssue(
     stack?: boolean;
     maxSlices?: string;
     draftPr?: boolean;
+    merge?: boolean;
+    mergeTimeout?: string;
+    admin?: boolean;
   },
 ) {
   if (opts.runChildren) throw new CliExitError('--run-children was removed; oversized issues stack with --stack', 2);
@@ -2346,7 +2351,16 @@ async function cmdRunIssue(
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
-  const { runChildren: _removed, sizeGate: rawSizeGate, maxSlices: rawMaxSlices, stack, ...shipOpts } = opts;
+  const {
+    runChildren: _removed,
+    sizeGate: rawSizeGate,
+    maxSlices: rawMaxSlices,
+    stack,
+    merge,
+    mergeTimeout,
+    admin,
+    ...shipOpts
+  } = opts;
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const parsedSizeGate = sizeGateOrExit(rawSizeGate);
   if (stack && parsedSizeGate !== undefined && parsedSizeGate !== 'stack') {
@@ -2364,6 +2378,15 @@ async function cmdRunIssue(
   if (opts.pr === false && sizeGate !== undefined && sizeGate !== 'off') {
     throw new CliExitError('factory: --no-pr runs with the size gate off — drop --size-gate or drop --no-pr', 2);
   }
+
+  if ((mergeTimeout !== undefined || admin) && !merge) {
+    throw new CliExitError('factory: --merge-timeout/--admin need --merge', 2);
+  }
+  if (merge && opts.pr === false) throw new CliExitError('factory: --merge needs a PR — drop --no-pr', 2);
+  if (merge && (stack || rawSizeGate === 'stack')) {
+    throw new CliExitError('factory: --merge lands one PR — drop --stack', 2);
+  }
+  const mergeTimeoutMs = parseMergeTimeout(mergeTimeout);
 
   await withRepoRunLock(
     paths,
@@ -2438,11 +2461,33 @@ async function cmdRunIssue(
           });
           return;
         }
-        await shipIssue(
-          issueNum,
-          { ...shipOpts, branchPrefix, sizeGate, explicitStack, maxSlices },
-          { repoRoot, ghRepo, workRequest: work },
-        );
+        let outcome: RunOutcome | undefined;
+        const driveMerge = async () =>
+          exitForMerge(
+            await driveToMerge({
+              issue: issueNum,
+              outcome,
+              repoRoot,
+              ghRepo,
+              paths,
+              timeoutMs: mergeTimeoutMs ?? resolveAwaitingCiCapMs(configLoaders.loadFactoryConfigForRepo(paths.config)),
+              admin,
+            }),
+            `issue #${issueNum}`,
+          );
+        try {
+          await shipIssue(
+            issueNum,
+            { ...shipOpts, branchPrefix, sizeGate, explicitStack, maxSlices },
+            { repoRoot, ghRepo, workRequest: work, onOutcome: (o) => (outcome = o) },
+          );
+        } catch (err) {
+          const ciParked =
+            outcome?.state === 'parked' && (outcome.reason === 'ci-failed' || outcome.reason === 'ci-infra');
+          if (shouldDriveMerge({ merge }) && ciParked && !(err instanceof IssueSkippedError)) await driveMerge();
+          throw err;
+        }
+        if (shouldDriveMerge({ merge })) await driveMerge();
       } catch (err: any) {
         if (err instanceof CliExitError) throw err;
         if (err instanceof IssueSkippedError) return;
