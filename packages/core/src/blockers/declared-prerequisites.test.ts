@@ -17,11 +17,32 @@ describe('findDeclaredPrerequisites', () => {
     expect(findDeclaredPrerequisites('Notes\n- Prerequisite: #3263 (Slice A runner on main).\n')).toEqual([3263]);
   });
 
-  it('counts only the first reference and accepts indented list markers', () => {
+  it('stops at a non-comma continuation and accepts indented list markers', () => {
     expect(findDeclaredPrerequisites('Prerequisite: #12 and #13\n  * Prerequisite: #4')).toEqual([12, 4]);
     expect(findDeclaredPrerequisites('- Prerequisite: #6\n+ Prerequisite: #5 details\nPrerequisite: #3, #4')).toEqual([
-      6, 5, 3,
+      6, 5, 3, 4,
     ]);
+  });
+
+  it('accepts a Depends on line as a prerequisite (#3915)', () => {
+    expect(findDeclaredPrerequisites('Depends on: #3892')).toEqual([3892]);
+    expect(findDeclaredPrerequisites('- depends on: #7')).toEqual([7]);
+  });
+
+  it('accepts a comma list on a Depends on line (#3915)', () => {
+    expect(findDeclaredPrerequisites('Depends on: #3891, #3892, #3886')).toEqual([3891, 3892, 3886]);
+    expect(findDeclaredPrerequisites('Prerequisite: #3891\nDepends on: #3891, #5')).toEqual([3891, 5]);
+  });
+
+  it('accepts a comma list on a Prerequisite line (#3915)', () => {
+    expect(findDeclaredPrerequisites('Prerequisite: #3, #4')).toEqual([3, 4]);
+    expect(findDeclaredPrerequisites('Prerequisite: #3, #4 (after slice A)')).toEqual([3, 4]);
+  });
+
+  it('ignores fenced and blockquoted Depends on lines (#3915)', () => {
+    expect(findDeclaredPrerequisites('```\nDepends on: #12\n```')).toEqual([]);
+    expect(findDeclaredPrerequisites('> Depends on: #12')).toEqual([]);
+    expect(findDeclaredPrerequisites('Depends on: org/repo#8')).toEqual([]);
   });
 
   it('ignores blockquoted and fenced bullet declarations', () => {

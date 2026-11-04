@@ -1,4 +1,7 @@
-/** Find explicit same-repository prerequisite declarations in an issue body. */
+/**
+ * Find explicit same-repository prerequisite declarations in an issue body: `Prerequisite:` and
+ * `Depends on:` lines, each with one `#N` or a comma list such as `#3, #4`.
+ */
 export function findDeclaredPrerequisites(body: string): number[] {
   const found = new Set<number>();
   let fence: { marker: '`' | '~'; length: number } | undefined;
@@ -14,10 +17,13 @@ export function findDeclaredPrerequisites(body: string): number[] {
       fence = { marker: opening[1][0] as '`' | '~', length: opening[1].length };
       continue;
     }
-    const declaration = /^\s*(?:[-*+]\s+)?Prerequisite:\s*#([1-9]\d*)(?!\d)/i.exec(line);
+    const declaration =
+      /^\s*(?:[-*+]\s+)?(?:Prerequisite|Depends\s+on):\s*(#[1-9]\d*(?!\d)(?:\s*,\s*#[1-9]\d*(?!\d))*)/i.exec(line);
     if (!declaration) continue;
-    const issue = Number(declaration[1]);
-    if (Number.isSafeInteger(issue)) found.add(issue);
+    for (const reference of declaration[1].matchAll(/#(\d+)/g)) {
+      const issue = Number(reference[1]);
+      if (Number.isSafeInteger(issue)) found.add(issue);
+    }
   }
   return [...found];
 }
