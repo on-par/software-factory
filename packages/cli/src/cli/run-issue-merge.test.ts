@@ -41,7 +41,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('driveToMerge', () => {
   it('merges a green ungated PR and returns merged', async () => {
-    const waitMerge = vi.fn(async () => {});
+    const waitMerge = vi.fn(async (..._a: any[]) => {});
     const result = await driveToMerge(input(), { waitMerge });
     expect(result).toMatchObject({ kind: 'merged', prNumber: 55 });
     expect(waitMerge.mock.calls[0]?.[0]).toBe(9);
@@ -54,9 +54,9 @@ describe('driveToMerge', () => {
   });
 
   it('forwards issueless for briefs', async () => {
-    const waitMerge = vi.fn(async () => {});
+    const waitMerge = vi.fn(async (..._a: any[]) => {});
     await driveToMerge(input({ issueless: true }), { waitMerge });
-    expect((waitMerge.mock.calls[0]?.[5] as any).issueless).toBe(true);
+    expect((waitMerge.mock.calls[0]![5] as any).issueless).toBe(true);
   });
 
   it('a high-risk hold exits held and names the risk gate', async () => {
@@ -69,7 +69,7 @@ describe('driveToMerge', () => {
   });
 
   it('a no-auto-merge label exits held immediately instead of polling', async () => {
-    const sleep = vi.fn(async () => {});
+    const sleep = vi.fn(async (..._a: any[]) => {});
     const waitMerge = vi.fn(async () => {
       throw new MergeGatedError('gated', 9, 0, 'no-auto-merge');
     });
@@ -95,12 +95,12 @@ describe('driveToMerge', () => {
   });
 
   it('red CI exits ci-failed and never merges even with admin', async () => {
-    const waitMerge = vi.fn(async () => {
+    const waitMerge = vi.fn(async (..._a: any[]) => {
       throw new CiFailedError('red', 55);
     });
     const result = await driveToMerge(input({ admin: true }), { waitMerge });
     expect(result).toMatchObject({ kind: 'ci-failed', prNumber: 55 });
-    expect((waitMerge.mock.calls[0]?.[5] as any).mergeOverrides).toEqual({ auto: true, admin: true });
+    expect((waitMerge.mock.calls[0]![5] as any).mergeOverrides).toEqual({ auto: true, admin: true });
     expect(() => exitForMerge(result, 'x')).toThrow(expect.objectContaining({ code: MERGE_EXIT.ciFailed }));
   });
 
@@ -145,7 +145,11 @@ describe('driveToMerge', () => {
     const sleep = vi.fn(async (ms: number) => {
       t += ms;
     });
-    const errors = [new AwaitingCiError('pending', 55, 'sha'), new CiUnverifiedError('unk', 55), new BaseCiPendingError()];
+    const errors = [
+      new AwaitingCiError('pending', 55, 'sha'),
+      new CiUnverifiedError('unk', 55),
+      new BaseCiPendingError(),
+    ];
     let n = 0;
     const waitMerge = vi.fn(async () => {
       throw errors[n++ % 3];
@@ -174,7 +178,7 @@ describe('driveToMerge', () => {
 
   it('classifies conflicts and other failures as land-failed', async () => {
     const errs = [
-      new LandConflictError('conflict', 55, 'b', ['a'], 'DIRTY' as any),
+      new LandConflictError('conflict'),
       new AwaitMergeStoppedError('stop', 'b', 55),
       new LandFailureError('nope', 5),
       new Error('boom'),

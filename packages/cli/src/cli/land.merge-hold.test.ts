@@ -80,13 +80,13 @@ describe('waitForMerge merge-hold opt-ins (#3905)', () => {
   });
 
   it('forwards mergeOverrides admin into landIssue', async () => {
-    const land = vi.fn(async () => ({ branch: 'ship-it/7-x', prNumber: 1 }));
+    const land = vi.fn(async (..._a: any[]) => ({ branch: 'ship-it/7-x', prNumber: 1 }));
     await run({ listIssueLabels: async () => [], land, mergeOverrides: { auto: true, admin: true } });
     expect(land.mock.calls[0]?.[7]).toMatchObject({ mergeOverrides: { auto: true, admin: true }, enforceRisk: true });
   });
 
   it('issueless reads labels from the PR, forwards issueless and skips the claim release', async () => {
-    const land = vi.fn(async () => ({ branch: 'ship-it/7-x', prNumber: 1 }));
+    const land = vi.fn(async (..._a: any[]) => ({ branch: 'ship-it/7-x', prNumber: 1 }));
     const listIssueLabels = vi.fn(async () => []);
     await run({
       issueless: true,

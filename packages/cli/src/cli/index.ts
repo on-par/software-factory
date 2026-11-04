@@ -2472,8 +2472,7 @@ async function cmdRunIssue(
               repoRoot,
               ghRepo,
               paths,
-              timeoutMs:
-                mergeTimeoutMs ?? resolveAwaitingCiCapMs(configLoaders.loadFactoryConfigForRepo(paths.config)),
+              timeoutMs: mergeTimeoutMs ?? resolveAwaitingCiCapMs(configLoaders.loadFactoryConfigForRepo(paths.config)),
               ...(admin ? { admin } : {}),
             }),
             `issue #${issueNum}`,
@@ -2485,7 +2484,8 @@ async function cmdRunIssue(
             { repoRoot, ghRepo, workRequest: work, onOutcome: (o) => (outcome = o) },
           );
         } catch (err) {
-          const ciPark = outcome?.state === 'parked' && (outcome.reason === 'ci-failed' || outcome.reason === 'ci-infra');
+          const ciPark =
+            outcome?.state === 'parked' && (outcome.reason === 'ci-failed' || outcome.reason === 'ci-infra');
           if (merge && ciPark && !(err instanceof CliExitError) && !(err instanceof IssueSkippedError)) await drive();
           throw err;
         }

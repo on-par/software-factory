@@ -136,11 +136,7 @@ export async function driveToMerge(input: DriveToMergeInput, deps: DriveToMergeD
       }
       if (err instanceof AwaitingReviewError) return { kind: 'held', gate: err.gate, prNumber: err.prNumber, detail };
       if (err instanceof LandConflictError) return { kind: 'land-failed', ...pr, detail };
-      if (
-        err instanceof CiUnverifiedError ||
-        err instanceof AwaitingCiError ||
-        err instanceof BaseCiPendingError
-      ) {
+      if (err instanceof CiUnverifiedError || err instanceof AwaitingCiError || err instanceof BaseCiPendingError) {
         if (now() < deadline) {
           await doSleep(pollMs);
           continue;
