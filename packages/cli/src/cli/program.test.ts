@@ -83,6 +83,26 @@ describe('buildProgram', () => {
     expect(cmdRunBrief).toHaveBeenCalledWith(['a.md'], expect.objectContaining({ baseBranch: 'feat/x' }));
   });
 
+  it('run-issue and run-brief register --merge, --merge-timeout and --admin (#3905)', async () => {
+    const cmdRunIssue = vi.fn(async () => {});
+    const cmdRunBrief = vi.fn(async () => {});
+    const handlers = { ...PROGRAM_HANDLERS, cmdRunIssue, cmdRunBrief };
+    for (const name of ['run-issue', 'run-brief']) {
+      const cmd = buildProgram(handlers, {}).commands.find((c) => c.name() === name);
+      for (const long of ['--merge', '--merge-timeout', '--admin']) {
+        expect(cmd?.options.some((o) => o.long === long)).toBe(true);
+      }
+    }
+    const parse = (args: string[]) => buildProgram(handlers, {}).parseAsync(['node', 'factory', ...args]);
+    await parse(['run-issue', '5', '--merge', '--merge-timeout', '30m', '--admin']);
+    await parse(['run-brief', 'a.md', '--merge']);
+    expect(cmdRunIssue).toHaveBeenCalledWith(
+      5,
+      expect.objectContaining({ merge: true, mergeTimeout: '30m', admin: true }),
+    );
+    expect(cmdRunBrief).toHaveBeenCalledWith(['a.md'], expect.objectContaining({ merge: true }));
+  });
+
   it('unpark registers --keep-order and passes keepOrder to cmdUnpark (#3554)', async () => {
     const cmdUnpark = vi.fn(async () => {});
     const handlers = { ...PROGRAM_HANDLERS, cmdUnpark };
