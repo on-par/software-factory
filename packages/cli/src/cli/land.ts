@@ -30,7 +30,6 @@ import {
   withGitLock,
   worktreeSandboxFor,
 } from '@on-par/factory-core/internal';
-import type { OpenPullRequestEvidence } from './index.js';
 import { resolveEffectiveTrustTier } from './tier-demotion.js';
 import {
   AwaitMergeStoppedError,
@@ -49,6 +48,7 @@ import { isPrMerged, latestPrForBranch } from './land-merged.js';
 import { landRuntime } from './land-runtime.js';
 
 export { isPrMerged, latestPrForBranch };
+export { findOpenPRForIssue } from './land-find-pr.js';
 import { riskPolicyLines } from './risk-policy.js';
 import { touchIssueActivity } from './ship-run-state.js';
 
@@ -77,10 +77,17 @@ export async function landIssue(
     syncMain?: boolean;
     rebuildOnConflict?: boolean;
     signal?: AbortSignal;
+    /** #3905: per-invocation merge flag overrides (`--admin`). */
+    mergeOverrides?: MergePolicyOverrides;
+    /** #3905: a brief PR with no issue; lands by `branch` and reads only PR labels. */
+    issueless?: boolean;
   } = {},
 ): Promise<{ branch: string; prNumber: number }> {
   const { configLoaders, gitOps, errorDetail, worktreePathFor } = landRuntime();
   const [owner, repoName] = ghRepo.split('/');
+  if (opts.issueless && !opts.branch) {
+    throw new LandFailureError(`landing a brief PR (#${issueNum}) needs its branch`, 1);
+  }
   const log = (
     type: EventKind,
     msg: string,
@@ -96,7 +103,7 @@ export async function landIssue(
   const resolved =
     branchPrefix ??
     resolveEffectiveConfig(repoConfig, process.env, configLoaders.loadFactoryConfigForRepo(paths.config)).branchPrefix;
-  const title = await getIssueTitle(ghRepo, issueNum, octokit);
+  const title = opts.issueless ? '' : await getIssueTitle(ghRepo, issueNum, octokit);
   // ADR-0161: a stack layer lands by its exact branch, never by title guess or the Closes PR (the top layer).
   const guesses = opts.branch
     ? [opts.branch]
@@ -113,7 +120,7 @@ export async function landIssue(
       return { status: 'none' };
     };
     [, lookup] = await Promise.all([gitOps.gitFetch(repoRoot), findByGuess()]);
-    if (lookup.status === 'none' && !opts.branch) {
+    if (lookup.status === 'none' && !opts.branch && !opts.issueless) {
       lookup = await lookupOpenPrByIssue({ octokit, repo: ghRepo, issue: workKeyFromIssue(issueNum) });
     }
     if (lookup.status === 'error') throw new Error(lookup.detail);
@@ -150,7 +157,7 @@ export async function landIssue(
     let where: string | undefined;
     try {
       const [issueLabels, prLabels] = await Promise.all([
-        defaultListIssueLabels(octokit, owner, repoName, issueNum),
+        opts.issueless ? Promise.resolve<string[]>([]) : defaultListIssueLabels(octokit, owner, repoName, issueNum),
         defaultListIssueLabels(octokit, owner, repoName, prNumber),
       ]);
       gateLabels = [...issueLabels, ...prLabels];
@@ -219,7 +226,7 @@ export async function landIssue(
     });
     if (!gate.merge) {
       await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
-      throw new AwaitingReviewError(`PR #${prNumber} held for a human: ${gate.reason}`, prNumber);
+      throw new AwaitingReviewError(`PR #${prNumber} held for a human: ${gate.reason}`, prNumber, 'risk');
     }
   }
 
@@ -240,7 +247,7 @@ export async function landIssue(
         syncMain: opts.syncMain,
         rebuildOnConflict: opts.rebuildOnConflict,
         signal: opts.signal,
-        adminMerge: resolveMergePolicy(landFactoryConfig).admin,
+        adminMerge: resolveMergePolicy(landFactoryConfig, process.env, opts.mergeOverrides).admin,
         withLock: withLandLock,
         baseGate: landBaseGate({
           octokit,
@@ -264,7 +271,7 @@ export async function landIssue(
       throw err;
     }
     log('merged', `squash-merged PR #${prNumber}`);
-    await releaseLandedClaim(paths, ghRepo, issueNum, log);
+    if (!opts.issueless) await releaseLandedClaim(paths, ghRepo, issueNum, log);
     await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
   } catch (err: any) {
     if (err instanceof LandConflictError || isLandLeftOpen(err) || opts.signal?.aborted) throw err;
@@ -280,36 +287,6 @@ export function prLookupFailure(issueNum: number, branch: string, err: unknown):
     `PR lookup failed for issue #${issueNum} (${branch}): ${landRuntime().errorDetail(err)}`,
     5,
   );
-}
-
-/** queue-preflight only (it must see fork PRs to park them); land uses the core lookup (#3439). */
-export async function findOpenPRForIssue(
-  octokit: Octokit,
-  owner: string,
-  repoName: string,
-  issueNum: number,
-): Promise<OpenPullRequestEvidence | undefined> {
-  const perPage = 100;
-  const matches = new RegExp(`\\bcloses\\s+#${issueNum}\\b`, 'i');
-  for (let page = 1; ; page++) {
-    const { data: prs } = await octokit.rest.pulls.list({
-      owner,
-      repo: repoName,
-      state: 'open',
-      per_page: perPage,
-      page,
-    });
-    const pr = prs.find((p: any) => matches.test(p.body ?? ''));
-    if (pr) {
-      return {
-        number: pr.number,
-        branch: pr.head.ref,
-        headSha: pr.head.sha,
-        headRepoFullName: pr.head.repo?.full_name ?? null,
-      };
-    }
-    if (prs.length < perPage) return undefined;
-  }
 }
 
 /** Consecutive merged-state check failures tolerated before waitForMerge parks the lane.
@@ -366,6 +343,10 @@ export type WaitForMergeDeps = {
    *  cmdRun rather than read from disk so a live run's merge gate cannot change underneath
    *  it (#1400). */
   mergeOverrides?: MergePolicyOverrides;
+  /** #3905: throw MergeGatedError on a gated label instead of polling for a human. */
+  holdWhenGated?: boolean;
+  /** #3905: a brief PR with no issue; gate labels are read from the PR, and the issue claim is left alone. */
+  issueless?: boolean;
 };
 
 export async function waitForMerge(
@@ -394,6 +375,8 @@ export async function waitForMerge(
     syncMain,
     rebuildOnConflict,
     signal,
+    holdWhenGated,
+    issueless,
   } = deps;
   const { configLoaders, errorDetail, LaneParkError } = landRuntime();
   const factoryConfig = loadConfig(paths.config);
@@ -443,7 +426,10 @@ export async function waitForMerge(
     if (isMergeEnabled()) {
       let labels: string[] = [];
       try {
-        labels = await listIssueLabels(octokit, owner, repoName, issue);
+        if (issueless) {
+          const pr = await lookupPr(octokit, owner, repoName, branch);
+          labels = pr ? await listIssueLabels(octokit, owner, repoName, pr.number) : [];
+        } else labels = await listIssueLabels(octokit, owner, repoName, issue);
       } catch (err) {
         emitEvent(paths.events, 'warn', issue, `label check failed (treating as blocked): ${errorDetail(err)}`);
         labels = [filingPolicy.selfFixLabel];
@@ -455,6 +441,15 @@ export async function waitForMerge(
           issue,
           `auto-merge blocked by ${filingPolicy.selfFixLabel} — awaiting human approval`,
         );
+        if (holdWhenGated) {
+          const pr = await lookupPr(octokit, owner, repoName, branch).catch(() => null);
+          throw new MergeGatedError(
+            `not merging ${branch}: labelled ${filingPolicy.selfFixLabel} (human approval required)`,
+            issue,
+            pr?.number ?? 0,
+            filingPolicy.selfFixLabel,
+          );
+        }
         writeLine(
           `[factory] #${issue} auto-merge gated (${filingPolicy.selfFixLabel}); awaiting human merge (poll 120s)`,
         );
@@ -467,8 +462,12 @@ export async function waitForMerge(
         ...(syncMain ? { syncMain } : {}),
         ...(rebuildOnConflict ? { rebuildOnConflict } : {}),
         ...(signal ? { signal } : {}),
+        ...(mergeOverrides ? { mergeOverrides } : {}),
+        ...(issueless ? { issueless } : {}),
       });
-      await releaseLandedClaim(paths, ghRepo, issue, (type, msg) => emitEvent(paths.events, type, issue, msg));
+      if (!issueless) {
+        await releaseLandedClaim(paths, ghRepo, issue, (type, msg) => emitEvent(paths.events, type, issue, msg));
+      }
       return;
     }
 

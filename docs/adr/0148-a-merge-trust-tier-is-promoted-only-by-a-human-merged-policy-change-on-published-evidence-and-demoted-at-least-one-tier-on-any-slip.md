@@ -28,6 +28,7 @@ A class moves up one tier (T0 → T1, or T1 → T2) only when all of the followi
 - One slipped defect on a T1 or T2 merged PR drops that PR's class at least one tier (T2 → T1 or lower, T1 → T0). A slip is a defect attributed to the merged PR inside its defect window, which is the ADR-0126 "slipped defect" bucket.
 - This mirrors ADR-0121's demote-on-slip, which demotes one rollout stage on one slipped defect.
 - Demotion needs no evidence threshold and no wait for a human. It applies on the first slip. A human may demote further, but never less than one tier.
+- A recorded demotion stays in force until a human runs `factory classifier ack-demotion`, which clears it and restores the configured tier (#1959).
 - A demoted class re-earns its tier only through a fresh promotion under the rules above. The evidence count restarts after the slip.
 - On doubt, such as an unreadable slip record or an unknown tier, resolve to T0, consistent with ADR-0144 fail closed.
 
@@ -37,6 +38,7 @@ A class moves up one tier (T0 → T1, or T1 → T2) only when all of the followi
 - The demotion asymmetry means one slip costs more than one clean merge earns.
 - Promotion is slow, because the rule-of-three needs many PRs.
 - Promotion is blocked until #804/#805 publish a mutation floor.
+- Promotion also waits on the mutation-summary producer: `factory classifier report` reads `mutation-summary.json`, nothing writes it yet, so mutation evidence reads `unknown`.
 - A single slip can undo a long streak.
 - Changing the evidence list or the demotion rule needs a superseding ADR.
 

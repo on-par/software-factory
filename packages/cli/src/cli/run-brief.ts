@@ -12,6 +12,7 @@ import {
   InvalidArtifactsDirError,
   InvalidWorkRequestInputError,
   InvalidWorkspaceError,
+  loadFactoryConfigForRepo,
   LOCAL_BRIEF_SOURCE,
   readEvents,
   resolveArtifactsDir,
@@ -24,7 +25,12 @@ import {
   type SizeGateMode,
   type WorkRequest,
 } from '@on-par/factory-core';
-import { fileSlicePlanStore, logEvent, type SlicePlanStore } from '@on-par/factory-core/internal';
+import {
+  fileSlicePlanStore,
+  logEvent,
+  resolveAwaitingCiCapMs,
+  type SlicePlanStore,
+} from '@on-par/factory-core/internal';
 
 import { CliExitError } from './errors.js';
 import { availableAgentClis, missingAgentCliMessage, notInitializedMessage } from './first-run.js';
@@ -32,6 +38,13 @@ import { withRepoRunLock } from './repo-run-lock.js';
 import { recordDraftPrFlag } from './run-flags.js';
 import { shipIssue } from './ship.js';
 import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
+import {
+  driveToMerge,
+  exitForMerge,
+  parseMergeTimeout,
+  shouldDriveAfterShipFailure,
+  validateMergeFlags,
+} from './run-issue-merge.js';
 import { consoleStackLog, printStackResult, runSliceStack } from './stack-run.js';
 
 /** index.ts bindings the handler needs; index.ts passes them so this module never imports it at runtime. */
@@ -42,6 +55,10 @@ export interface RunBriefRuntime {
   getOctokit: () => Octokit;
   branchPrefixOrExit: (raw: string | undefined, configPath: string) => string;
   errorDetail: (err: unknown) => string;
+  /** Test seam for `--merge`; defaults to the real driveToMerge. */
+  driveToMerge?: typeof driveToMerge;
+  /** Test seam: the pipeline entry point; defaults to the real shipIssue. */
+  shipIssue?: typeof shipIssue;
 }
 
 /** Deterministic run number for a brief, derived from its content digest.
@@ -65,6 +82,10 @@ export interface RunBriefOptions {
   draftPr?: boolean;
   /** --stack (#3763): brief N+1 bases on brief N's PR head branch; stops at the first failure or missing PR. */
   stack?: boolean;
+  /** `--merge` (#3905): land each brief's PR through the run merge gates and exit with a distinct code. */
+  merge?: boolean;
+  mergeTimeout?: string;
+  admin?: boolean;
 }
 
 /** Runs each brief through the one-shot pipeline in argv order with the same flags. The checks that
@@ -85,6 +106,7 @@ export async function cmdRunBrief(files: readonly string[], opts: RunBriefOption
       2,
     );
   }
+  checkMergeFlags(opts);
   const env = await prepareRunBrief(opts, rt);
   if (files.length === 1 && opts.stack) {
     await runStackedBrief(files[0], opts, env, rt);
@@ -95,6 +117,7 @@ export async function cmdRunBrief(files: readonly string[], opts: RunBriefOption
     return;
   }
 
+  let firstFailureCode: number | undefined;
   console.log(styleText('cyan', `run-brief: ${files.length} briefs — running them in order`));
   if (opts.stack) {
     console.log(styleText('cyan', "run-brief: --stack — each brief bases on the previous brief's PR head"));
@@ -108,7 +131,10 @@ export async function cmdRunBrief(files: readonly string[], opts: RunBriefOption
           opts.stack ? { ...opts, baseBranch: base, sizeGate: 'off' as const } : opts,
           env,
           rt,
-        );
+        ).catch((err: unknown) => {
+          if (firstFailureCode === undefined && err instanceof CliExitError) firstFailureCode = err.code;
+          throw err;
+        });
         return (
           o && { prNumber: 'prNumber' in o ? o.prNumber : undefined, branch: 'branch' in o ? o.branch : undefined }
         );
@@ -116,7 +142,19 @@ export async function cmdRunBrief(files: readonly string[], opts: RunBriefOption
     })),
     { base: opts.baseBranch, chain: opts.stack === true, prefix: 'run-brief', noun: 'brief', log: consoleStackLog },
   );
-  printStackResult(result, 'Run failed for one or more briefs (listed above)');
+  try {
+    printStackResult(result, 'Run failed for one or more briefs (listed above)');
+  } catch (err) {
+    if (opts.merge && firstFailureCode !== undefined && err instanceof CliExitError) {
+      throw new CliExitError(err.message, firstFailureCode);
+    }
+    throw err;
+  }
+}
+
+/** The `--merge` flag conflicts that hold for every brief (#3905); each exits 2 before any run starts. */
+function checkMergeFlags(opts: RunBriefOptions): void {
+  validateMergeFlags(opts, 'brief');
 }
 
 /** The run-brief pre-flight shared by every brief in one invocation; any failure here exits 2. */
@@ -246,8 +284,22 @@ async function runOneBrief(
         });
       }
 
+      const merge = async () => {
+        const result = await (rt.driveToMerge ?? driveToMerge)({
+          issue: runNum,
+          outcome,
+          repoRoot,
+          ghRepo,
+          paths,
+          timeoutMs:
+            parseMergeTimeout(opts.mergeTimeout) ?? resolveAwaitingCiCapMs(loadFactoryConfigForRepo(paths.config)),
+          ...(opts.admin ? { admin: true } : {}),
+          issueless: true,
+        });
+        exitForMerge(result, `brief ${briefPath}`);
+      };
       try {
-        await shipIssue(
+        await (rt.shipIssue ?? shipIssue)(
           runNum,
           { ...opts, branchPrefix },
           {
@@ -264,8 +316,10 @@ async function runOneBrief(
           },
         );
       } catch (err: any) {
+        if (opts.merge && shouldDriveAfterShipFailure(outcome)) await merge();
         throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
       }
+      if (opts.merge) await merge();
     },
     { scope: { kind: 'issue', key: workKeyFromIssue(runNum) } },
   );

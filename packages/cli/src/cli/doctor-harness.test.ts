@@ -4,7 +4,7 @@ import { formatDoctorChecks } from './doctor.js';
 import { harnessInstallChecks } from './doctor-harness.js';
 
 describe('opencode installed version check (#2880)', () => {
-  const RANGE = '>=1.18.0 <2.1.0';
+  const RANGE = '>=1.18.0 <2.3.0';
   const PIN = 'npm install -g opencode-ai@1.18.28';
   const row = (out: string | null) =>
     harnessInstallChecks(
@@ -39,7 +39,9 @@ describe('opencode installed version check (#2880)', () => {
 
   it.each([
     ['1.17.9', false],
-    ['2.1.0', false],
+    ['2.1.0', true],
+    ['2.2.5', true],
+    ['2.3.0', false],
     ['2.0.29', true],
     ['opencode 1.18.0\nextra', true],
   ])('boundary %j -> ok %s', (out, ok) => {

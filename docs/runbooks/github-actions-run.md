@@ -100,6 +100,22 @@ exit 0, so an Actions run-issue or ship is ship then land:
 - `FACTORY_MERGE` unset, or any value other than `1`, skips land. `doctor` never lands.
 - `land` is not a `command` input. The workflow still rejects it.
 
+A one-shot host that has no `land` retry loop can run `factory run-issue <N> --merge` (or
+`run-brief <file> --merge`) instead. After SHIP it waits for CI and lands the PR through the
+`factory run --auto-merge` gates (CI, base CI, risk tier, `no-auto-merge`/`needs-human` labels, the
+PR classifier), bounded by `--merge-timeout <30m|2h>` or `ci.awaitingCiCapHours`. `--admin` merges
+past unmet branch protection but never past red CI. It exits:
+
+| Exit | Meaning                                                         |
+| ---- | --------------------------------------------------------------- |
+| 0    | merged                                                          |
+| 1    | parked or failed before a PR                                    |
+| 2    | usage error (for example `--merge` with `--no-pr` or `--stack`) |
+| 10   | held by a gate (risk, label, draft); the PR stays open          |
+| 11   | CI failed                                                       |
+| 12   | timed out waiting for CI or merge                               |
+| 13   | land failed                                                     |
+
 ## Providers and secrets
 
 Each provider reads only its own repo secrets, under the names the Claude GitHub App and
@@ -135,7 +151,7 @@ cap is 6 h). Claude usage is billed to the given credential.
 
 ## Artifacts
 
-`factory-run-log` holds the run log and `.factory/events.ndjson`, kept 14 days. No state (runs,
+`factory-run-log` holds the run log and `.factory/state/events.ndjson`, kept 14 days. No state (runs,
 baseline cache) persists between runs.
 
 ## Pinning

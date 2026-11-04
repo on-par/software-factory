@@ -41,6 +41,7 @@ fi
 npm ci
 npm run format:check
 npm run build
+bash scripts/cli-help-baseline.sh
 npm run adr:index -- --check
 bash scripts/check-config-json.sh
 bash scripts/check-oxlint-plugin-version.sh

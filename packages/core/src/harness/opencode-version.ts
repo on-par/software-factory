@@ -4,8 +4,8 @@ import type { ExecFn } from '../utils/exec.js';
 
 export type OpenCodeVersionProbe = () => Promise<number | undefined>;
 
-/** Versions the OpenCode adapter supports (#2880). Lower bound inclusive, upper exclusive. */
-export const OPENCODE_SUPPORTED_RANGE = '>=1.18.0 <2.1.0';
+/** Versions the OpenCode adapter supports (#2880). Lower bound inclusive, upper exclusive. 2.x ships outside npm (Homebrew/installer) and is handled by the v2 flag path. */
+export const OPENCODE_SUPPORTED_RANGE = '>=1.18.0 <2.3.0';
 /** The OpenCode version docs/agents.md and the nightly job test against (#2880). */
 export const OPENCODE_PINNED_VERSION = '1.18.28';
 export const OPENCODE_PINNED_INSTALL = `npm install -g opencode-ai@${OPENCODE_PINNED_VERSION}`;
@@ -13,7 +13,7 @@ export const OPENCODE_PINNED_INSTALL = `npm install -g opencode-ai@${OPENCODE_PI
 export type OpenCodeVersion = readonly [major: number, minor: number, patch: number];
 
 const SUPPORTED_MIN: OpenCodeVersion = [1, 18, 0];
-const SUPPORTED_MAX_EXCLUSIVE: OpenCodeVersion = [2, 1, 0];
+const SUPPORTED_MAX_EXCLUSIVE: OpenCodeVersion = [2, 3, 0];
 
 /** First `X.Y.Z` in `opencode --version` output -> [X, Y, Z]; undefined when none. */
 export function parseOpenCodeVersion(stdout: string): OpenCodeVersion | undefined {

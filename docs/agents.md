@@ -22,7 +22,7 @@ see [Bring your own agent](#bring-your-own-agent).
 ## Choosing and routing agents
 
 Models whose CLI is not installed are skipped. On a machine with one CLI, every phase runs on that CLI's
-models and PLAN picks its build route. With several CLIs, pin a phase in `.factory/config.json`
+models and PLAN picks its build route. With several CLIs, pin a phase in `.factory/config.yaml`
 (`models.pins.plan`, `build`, `checker`, `triage`), set `route`, or reorder `tiers`.
 `factory triage --model <id>` picks the triage model for one run. See [models.md](models.md).
 
@@ -141,8 +141,10 @@ unknown, the flag is omitted.
 Run `factory doctor` in the repo. The `coding agent` line lists `opencode`, and the `OpenCode` section
 shows `opencode installed` and `opencode signed in`. `factory models --doctor` probes OpenCode reachability.
 
-Supported OpenCode versions are `>=1.18.0 <2.1.0`. Doctor warns, without failing, when the installed
-version is outside that range. Install the tested version with `npm install -g opencode-ai@1.18.28`.
+Supported OpenCode versions are `>=1.18.0 <2.3.0`. Doctor warns, without failing, when the installed
+version is outside that range. OpenCode 1.x is the npm line: install the tested version with
+`npm install -g opencode-ai@1.18.28`. OpenCode 2.x ships outside npm (Homebrew or the installer), runs
+through the v2 flag path (`--standalone`, `#<effort>`), and is tested at 2.2.5.
 
 Version tested: 1.18.28
 

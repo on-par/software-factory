@@ -35,3 +35,4 @@ export {
   type CommandRunCounts,
   type SummarizeCommandRunOptions,
 } from './command-output.js';
+export { resolveWorkspaceTestRunners } from './evidence-workspace.js';

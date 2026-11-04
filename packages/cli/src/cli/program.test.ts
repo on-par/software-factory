@@ -40,6 +40,11 @@ describe('buildProgram', () => {
     for (const cmd of program.commands) expect(cmd.helpGroup()).not.toBe(OTHER_GROUP);
   });
 
+  it('logs help names .factory/state/events.ndjson', () => {
+    const logs = buildProgram(PROGRAM_HANDLERS, {}).commands.find((c) => c.name() === 'logs');
+    expect(logs?.description()).toContain('.factory/state/events.ndjson');
+  });
+
   it('init registers -y/--yes alongside --force', () => {
     const init = buildProgram(PROGRAM_HANDLERS, {}).commands.find((c) => c.name() === 'init');
     expect(init?.options.some((o) => o.long === '--yes' && o.short === '-y')).toBe(true);
@@ -87,6 +92,26 @@ describe('buildProgram', () => {
     expect(cmdShip).toHaveBeenCalledWith(5, expect.objectContaining({ baseBranch: 'feat/x' }));
     expect(cmdRunIssue).toHaveBeenCalledWith(5, expect.objectContaining({ baseBranch: 'feat/x' }));
     expect(cmdRunBrief).toHaveBeenCalledWith(['a.md'], expect.objectContaining({ baseBranch: 'feat/x' }));
+  });
+
+  it('run-issue and run-brief register --merge, --merge-timeout and --admin (#3905)', async () => {
+    const cmdRunIssue = vi.fn(async () => {});
+    const cmdRunBrief = vi.fn(async () => {});
+    const handlers = { ...PROGRAM_HANDLERS, cmdRunIssue, cmdRunBrief };
+    for (const name of ['run-issue', 'run-brief']) {
+      const cmd = buildProgram(handlers, {}).commands.find((c) => c.name() === name);
+      for (const long of ['--merge', '--merge-timeout', '--admin']) {
+        expect(cmd?.options.some((o) => o.long === long)).toBe(true);
+      }
+    }
+    const parse = (args: string[]) => buildProgram(handlers, {}).parseAsync(['node', 'factory', ...args]);
+    await parse(['run-issue', '5', '--merge', '--merge-timeout', '30m', '--admin']);
+    await parse(['run-brief', 'a.md', '--merge']);
+    expect(cmdRunIssue).toHaveBeenCalledWith(
+      5,
+      expect.objectContaining({ merge: true, mergeTimeout: '30m', admin: true }),
+    );
+    expect(cmdRunBrief).toHaveBeenCalledWith(['a.md'], expect.objectContaining({ merge: true }));
   });
 
   it('unpark registers --keep-order and passes keepOrder to cmdUnpark (#3554)', async () => {

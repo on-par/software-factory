@@ -31,4 +31,4 @@ merge:
 timeouts:
   tests_seconds: 600
 host:
-  maxBuilds: 2
+  maxBuilds: 4

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { QaConfig } from '../config/qa-section.js';
-import { defaultIsProcessGroupAlive, killProcessGroup } from '../environment/process-groups.js';
+import { defaultIsProcessGroupAlive, killProcessGroup, trackedProcessGroups } from '../environment/process-groups.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -251,5 +251,15 @@ describe('app_smoke registry opt-in', () => {
     expect(smoke).toMatchObject({ result: 'SKIP', details: 'no qa.start/qa.smoke in .factory/config.json' });
     const noPort = await runAllCheckers({ ...ctx, qa: qa(), env: {} }, router, constitutionWith(['app_smoke']));
     expect(noPort.results.find((r) => r.checker === 'app_smoke')?.details).toMatch(/^unavailable/);
+  });
+
+  it('defaultStartApp registers the pid while running and removes it after exit', async () => {
+    const app = defaultStartApp([process.execPath, '-e', 'setTimeout(()=>{},200)'], {
+      cwd: process.cwd(),
+      env: process.env,
+    });
+    expect(trackedProcessGroups()).toContain(app.pid);
+    await app.exited;
+    expect(trackedProcessGroups()).not.toContain(app.pid);
   });
 });

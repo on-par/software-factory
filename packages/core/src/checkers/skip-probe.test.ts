@@ -42,7 +42,7 @@ describe('skip details name the probed config file (#3600)', () => {
     const [compile, tests, lint] = await skipDetails(ctxFor(worktree));
 
     expect(compile).toBe(
-      `no build system detected (no checks.build in ${probed}, no package.json build script, Makefile or Cargo.toml) — skipped`,
+      `no build system detected (no checks.build in ${probed}, no package.json build or typecheck script, Makefile or Cargo.toml) — skipped`,
     );
     expect(tests).toContain(`no checks.test in ${probed}, no scripts/verify.sh`);
     expect(lint).toContain(`no checks.lint in ${probed}, no package.json lint script`);
