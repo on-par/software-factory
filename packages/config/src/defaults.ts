@@ -130,6 +130,7 @@ export interface FactoryDefaults {
     claim_settle_ms: number;
     max_review_rework_runs: number;
     maxClockSkewMs: number;
+    discovery_interval_ms: number;
     stackOnOpenPrerequisite: boolean;
     comment?: string;
   };
@@ -756,8 +757,9 @@ export const defaultFactoryConfig: FactoryDefaults = {
     claim_settle_ms: 3000,
     max_review_rework_runs: 2,
     maxClockSkewMs: 60000,
+    discovery_interval_ms: 60000,
     stackOnOpenPrerequisite: true,
     comment:
-      "GitHub-labels queue settings. claim_settle_ms is how long a lane waits after writing its claim before it confirms the claim, so a lane on another host racing for the same issue is seen (#3145). Non-negative integer milliseconds; 0 turns the wait off. max_review_rework_runs caps review-rework runs per issue (#3565); at the cap a further trusted changes-requested review starts no run and parks the issue. Non-negative integer; 0 means a changes-request always parks. maxClockSkewMs: the stale-claim reaper refuses to release expired leases while this host's clock differs from GitHub's Date header by more than this many ms (#3149); non-negative integer. stackOnOpenPrerequisite (default true): an issue whose prerequisite has an open factory PR builds on it and opens a stacked PR against that branch (#3916), instead of waiting for the prerequisite to merge; false keeps waiting. A non-boolean value uses the default.",
+      "GitHub-labels queue settings. claim_settle_ms is how long a lane waits after writing its claim before it confirms the claim, so a lane on another host racing for the same issue is seen (#3145). Non-negative integer milliseconds; 0 turns the wait off. max_review_rework_runs caps review-rework runs per issue (#3565); at the cap a further trusted changes-requested review starts no run and parks the issue. Non-negative integer; 0 means a changes-request always parks. maxClockSkewMs: the stale-claim reaper refuses to release expired leases while this host's clock differs from GitHub's Date header by more than this many ms (#3149); non-negative integer. discovery_interval_ms is how often a running `factory run` reaps expired claims and starts lanes for newly queued work (#3920); positive integer milliseconds. stackOnOpenPrerequisite (default true): an issue whose prerequisite has an open factory PR builds on it and opens a stacked PR against that branch (#3916), instead of waiting for the prerequisite to merge; false keeps waiting. A non-boolean value uses the default.",
   },
 };

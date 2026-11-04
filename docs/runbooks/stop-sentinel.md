@@ -28,6 +28,14 @@ run`](../adr/) for the full rationale.
 iteration — the next `factory run` spawn, or the next issue boundary inside an
 already-running lane — picks it up with no process restart needed.
 
+## Ctrl-C and SIGTERM
+
+Ctrl-C (SIGINT) or SIGTERM on `factory run`, `ship`, `run-issue`, `run-brief` or
+`supervise` stops every agent and checker process group the CLI started (SIGTERM,
+then SIGKILL after a 3 second grace), writes this STOP file, and exits 130. A
+second Ctrl-C exits at once. Because Ctrl-C writes STOP, run `factory resume`
+before the next run.
+
 ## What does _not_ change
 
 This does not pause or reconfigure any particular supervisor (cron, launchd,

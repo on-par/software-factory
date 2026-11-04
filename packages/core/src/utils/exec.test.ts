@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { trackedProcessGroups } from '../environment/process-groups.js';
 import { defaultExecFn } from './exec.js';
 
 function isDead(pid: number): boolean {
@@ -61,6 +62,22 @@ describe('defaultExecFn', () => {
 
     expect(stdout.trim()).toBe('string');
   });
+
+  it.skipIf(process.platform === 'win32')(
+    "registers the detached child's pgid while it runs and deregisters it on exit",
+    async () => {
+      let during = false;
+      let pgid: number | undefined;
+      await defaultExecFn('sleep 0.3', {
+        onPgid: (p) => {
+          pgid = p;
+          during = trackedProcessGroups().includes(p);
+        },
+      });
+      expect(during).toBe(true);
+      expect(trackedProcessGroups()).not.toContain(pgid);
+    },
+  );
 
   describe.skipIf(process.platform === 'win32')('onPgid grandchild sweep', () => {
     it('fires onPgid and, on timeout, kills the grandchild too', async () => {

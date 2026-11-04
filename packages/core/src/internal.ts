@@ -45,6 +45,8 @@ export {
   resolveTrustTier,
 } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix, resolveHostMaxBuilds } from './config/index.js';
+// Signal shutdown registry (#1615)
+export { killTrackedProcessGroups, registerProcessGroup, trackedProcessGroups } from './environment/process-groups.js';
 export { evaluateLoadGuard, formatLoadHold, readHostLoad, type LoadGuardDecision } from './environment/load-guard.js';
 export {
   claimDiskAlert,
@@ -262,6 +264,7 @@ export {
   type PrerequisiteRestackDecision,
   type PrerequisiteStackTarget,
 } from './queue/prerequisite-stack.js';
+export { resolveLaneDiscoveryIntervalMs } from './queue/lane-discovery-interval.js';
 export { DEFAULT_MAX_CLOCK_SKEW_MS, measureGithubClockSkew, resolveQueueMaxClockSkewMs } from './queue/clock-skew.js';
 // Green-and-ready PR reporting (#1000)
 export type { UnmergedGreenPr } from './utils/green-prs.js';

@@ -23,6 +23,7 @@ import {
   logEvent,
   recordSliceMerged,
   resolveBaseHealthChecks,
+  resolveLaneDiscoveryIntervalMs,
   resolveLocalOnly,
   resolveRunUsageHarness,
   restackOnPrerequisite,
@@ -37,6 +38,7 @@ import { keychainPreflightError, type KeychainProbeStatus } from './doctor.js';
 import type {
   CliDeps,
   CliExitError,
+  PlannedLane,
   UsageKnobs,
   createQueuePreflightOps,
   planRunLanes,
@@ -54,6 +56,7 @@ import { waitForMerge } from './land.js';
 import { hostClaimGuards } from './host-claim-guards.js';
 import { DRAIN_MESSAGE, createNotifier, resolveNotifyCommand, withDiskLowNotify, withParkNotify } from './notify.js';
 import { createDeferralTracker, settleDeferredOnly } from './queue-startup.js';
+import { discoverQueuedLanes, superviseLanes } from './run-lane-discovery.js';
 import { runLane } from './run-lane.js';
 import { runReworkPolls } from './run-rework-poll.js';
 import { restackFromSlicePlan } from './run-restack.js';
@@ -156,11 +159,13 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
 
     const runQueue = createRunQueue({ rt, paths, ghRepo, factoryConfig, autoMerge: opts.autoMerge, deferrals });
     if (opts.localQueue !== true) await runQueue.startupLinearReap();
+    const queue = runQueue.queue;
 
+    const readLocalQueue = (): string | null => (existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : null);
     const { lanes, diagnostics } = await rt.planRunLanes({
       localQueue: opts.localQueue === true,
-      readLocalQueue: () => (existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : null),
-      queue: runQueue.queue,
+      readLocalQueue,
+      queue,
       onUnshippable: runQueue.onUnshippable,
     });
     rt.warnQueueDiagnostics(diagnostics);
@@ -241,9 +246,8 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
     const runId = randomUUID();
     const containerEngine = workspaceBackend === 'disposable-docker' ? createDockerEngine({}) : undefined;
 
+    let started: string[] = [];
     try {
-      // Run lanes in parallel
-      const pids: Promise<void>[] = [];
       // Issues in flight on any lane of this run; every lane's between-issues sweep protects them (#2964).
       const inFlightIssues = new Set<number>();
       // #3563: one shared, coalesced review-rework poll for every lane's pre-claim step (GitHub queue only).
@@ -254,14 +258,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
         (reviewPoll ??= runReviewReworkPoll().finally(() => {
           reviewPoll = null;
         }));
-      for (const planned of lanes) {
-        logEvent(
-          paths.events,
-          'lane-start',
-          '-',
-          `lane '${planned.lane}' started${planned.issues.length ? ` (${planned.issues.length} issues)` : ''}`,
-          { lane: planned.lane },
-        );
+      const startLane = async (planned: PlannedLane): Promise<void> => {
         if (containerEngine) {
           const provision = await provisionLaneContainer(
             containerEngine,
@@ -288,94 +285,112 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
             );
           }
         }
-        pids.push(
-          runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
-            ...planned.deps,
-            ...(notifier ? { emitEvent: withDiskLowNotify(withParkNotify(logEvent, notifier), notifier) } : {}),
-            laneBreakerThreshold,
-            octokit: opts.localQueue === true ? undefined : () => rt.getOctokit(),
-            pollReviewRework: opts.localQueue === true ? undefined : pollReviewReworkOnce,
-            ...(opts.localQueue === true
-              ? {}
-              : awaitingCiLaneDeps(() => rt.getOctokit(), ghRepo, paths, factoryConfig)),
-            runId,
-            readParkSha: (branch) =>
-              rt.shellOps
-                .exec(`git rev-parse --verify ${JSON.stringify(`refs/remotes/origin/${branch}`)}`, { cwd: repoRoot })
-                .then((r) => r.stdout.trim()),
-            activeIssues: inFlightIssues,
-            ...hostClaimGuards(factoryConfig, { repoRoot, ghRepo, stateRoot: paths.root }, opts.localQueue === true),
-            baseHoldGate:
-              opts.localQueue === true
-                ? undefined
-                : createBaseHoldGate({
-                    file: paths.baseHold,
-                    repo: ghRepo,
-                    onCleared: (c) =>
-                      logEvent(paths.events, 'base-hold-cleared', planned.lane, formatBaseHoldCleared(c), {
-                        lane: planned.lane,
-                      }),
-                    git: (cmd) => rt.shellOps.exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
-                    requiredChecksVerdict: (sha) => {
-                      const [owner, repoName] = ghRepo.split('/');
-                      return baseChecksVerdict(rt.getOctokit(), owner, repoName, {
-                        checks: baseHealthChecks,
-                        events: paths.events,
-                        lane: planned.lane,
-                      })(sha);
-                    },
-                  }),
-            commentIssue: async (issue, body) => {
-              const [owner, repoName] = ghRepo.split('/');
-              await rt.getOctokit().rest.issues.createComment({ owner, repo: repoName, issue_number: issue, body });
-            },
-            ship: (issue, o, c) => shipIssue(issue, { ...o, branchPrefix, prClassifier: opts.prClassifier }, c),
-            sweepFinished: (issue) =>
-              rt
-                .sweepBetweenLaneIssues(issue, planned.lane, repoRoot, ghRepo, paths, {
-                  protectedIssues: () => inFlightIssues,
-                })
-                .then(() => {}),
-            reapWorktree: (issue) =>
-              rt.reapParkedLaneWorktree(
-                issue,
-                repoRoot,
-                ghRepo,
-                paths,
-                opts.branchPrefix === undefined ? undefined : branchPrefix,
-              ),
-            closeParkedPr: (issue, branch, reason) =>
-              settleParkedPullRequest({
-                octokit: rt.getOctokit(),
-                repo: ghRepo,
-                issue: workKeyFromIssue(issue),
-                branch,
-                reason,
-                greenAndChecked: false,
-                log: (type, msg) => logEvent(paths.events, type, issue, msg, { lane: planned.lane }),
-              }).then(() => {}),
-            recordStackMerge: (issue, prNumber) =>
-              recordSliceMerged({ octokit: rt.getOctokit(), repo: ghRepo, issue, prNumber }).then(() => {}),
-            restack: (issue, merged) =>
-              restackFromSlicePlan({ octokit: rt.getOctokit(), repo: ghRepo, repoRoot, issue, merged }),
-            restackPrerequisite: (d) =>
-              restackOnPrerequisite({
-                octokit: rt.getOctokit(),
-                repo: ghRepo,
-                repoRoot,
-                prNumber: d.prNumber,
-                branch: d.branch,
-                recordedHead: d.recordedHead,
-                stackedOn: d.stackedOn,
-                onto: d.onto,
-              }),
-            waitMerge: (issue, branch, root, gh, p, d = {}) =>
-              waitForMerge(issue, branch, root, gh, p, { ...d, mergeOverrides: { auto: opts.autoMerge } }),
-          }),
-        );
-      }
+        return runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
+          ...planned.deps,
+          ...(notifier ? { emitEvent: withDiskLowNotify(withParkNotify(logEvent, notifier), notifier) } : {}),
+          laneBreakerThreshold,
+          octokit: opts.localQueue === true ? undefined : () => rt.getOctokit(),
+          pollReviewRework: opts.localQueue === true ? undefined : pollReviewReworkOnce,
+          ...(opts.localQueue === true ? {} : awaitingCiLaneDeps(() => rt.getOctokit(), ghRepo, paths, factoryConfig)),
+          runId,
+          readParkSha: (branch) =>
+            rt.shellOps
+              .exec(`git rev-parse --verify ${JSON.stringify(`refs/remotes/origin/${branch}`)}`, { cwd: repoRoot })
+              .then((r) => r.stdout.trim()),
+          activeIssues: inFlightIssues,
+          ...hostClaimGuards(factoryConfig, { repoRoot, ghRepo, stateRoot: paths.root }, opts.localQueue === true),
+          baseHoldGate:
+            opts.localQueue === true
+              ? undefined
+              : createBaseHoldGate({
+                  file: paths.baseHold,
+                  repo: ghRepo,
+                  onCleared: (c) =>
+                    logEvent(paths.events, 'base-hold-cleared', planned.lane, formatBaseHoldCleared(c), {
+                      lane: planned.lane,
+                    }),
+                  git: (cmd) => rt.shellOps.exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
+                  requiredChecksVerdict: (sha) => {
+                    const [owner, repoName] = ghRepo.split('/');
+                    return baseChecksVerdict(rt.getOctokit(), owner, repoName, {
+                      checks: baseHealthChecks,
+                      events: paths.events,
+                      lane: planned.lane,
+                    })(sha);
+                  },
+                }),
+          commentIssue: async (issue, body) => {
+            const [owner, repoName] = ghRepo.split('/');
+            await rt.getOctokit().rest.issues.createComment({ owner, repo: repoName, issue_number: issue, body });
+          },
+          ship: (issue, o, c) => shipIssue(issue, { ...o, branchPrefix, prClassifier: opts.prClassifier }, c),
+          sweepFinished: (issue) =>
+            rt
+              .sweepBetweenLaneIssues(issue, planned.lane, repoRoot, ghRepo, paths, {
+                protectedIssues: () => inFlightIssues,
+              })
+              .then(() => {}),
+          reapWorktree: (issue) =>
+            rt.reapParkedLaneWorktree(
+              issue,
+              repoRoot,
+              ghRepo,
+              paths,
+              opts.branchPrefix === undefined ? undefined : branchPrefix,
+            ),
+          closeParkedPr: (issue, branch, reason) =>
+            settleParkedPullRequest({
+              octokit: rt.getOctokit(),
+              repo: ghRepo,
+              issue: workKeyFromIssue(issue),
+              branch,
+              reason,
+              greenAndChecked: false,
+              log: (type, msg) => logEvent(paths.events, type, issue, msg, { lane: planned.lane }),
+            }).then(() => {}),
+          recordStackMerge: (issue, prNumber) =>
+            recordSliceMerged({ octokit: rt.getOctokit(), repo: ghRepo, issue, prNumber }).then(() => {}),
+          restack: (issue, merged) =>
+            restackFromSlicePlan({ octokit: rt.getOctokit(), repo: ghRepo, repoRoot, issue, merged }),
+          restackPrerequisite: (d) =>
+            restackOnPrerequisite({
+              octokit: rt.getOctokit(),
+              repo: ghRepo,
+              repoRoot,
+              prNumber: d.prNumber,
+              branch: d.branch,
+              recordedHead: d.recordedHead,
+              stackedOn: d.stackedOn,
+              onto: d.onto,
+            }),
+          waitMerge: (issue, branch, root, gh, p, d = {}) =>
+            waitForMerge(issue, branch, root, gh, p, { ...d, mergeOverrides: { auto: opts.autoMerge } }),
+        });
+      };
 
-      await Promise.allSettled(pids);
+      ({ started } = await superviseLanes(
+        lanes.map((planned) => ({ planned, keys: planned.issues.map(String) })),
+        {
+          intervalMs: resolveLaneDiscoveryIntervalMs(factoryConfig),
+          startLane,
+          stopRequested: () => readStopFileStatus(paths).present,
+          reapExpiredClaims:
+            opts.localQueue === true
+              ? undefined
+              : resolveTrackerConfig(factoryConfig).kind === 'linear'
+                ? runQueue.startupLinearReap
+                : () => rt.reapExpiredClaims(paths, ghRepo),
+          discover: () =>
+            discoverQueuedLanes({
+              localQueue: opts.localQueue === true,
+              readLocalQueue,
+              queue,
+              onUnshippable: runQueue.onUnshippable,
+              planRunLanes: rt.planRunLanes,
+            }),
+          log: (type, msg, lane) => logEvent(paths.events, type, '-', msg, lane ? { lane } : undefined),
+        },
+      ));
       controller.abort();
       await watchdog;
       if (opts.localQueue !== true)
@@ -397,6 +412,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
       }
     }
 
-    if (lanes.length > 0) await runEndOfRunKpiSnapshot(paths, repoRoot, branchPrefix, runStartedAt, rt);
+    if (lanes.length > 0 || started.length > 0)
+      await runEndOfRunKpiSnapshot(paths, repoRoot, branchPrefix, runStartedAt, rt);
   });
 }

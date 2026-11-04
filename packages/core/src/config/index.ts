@@ -335,12 +335,19 @@ export const FactoryConfigSchema = z.object({
         .default(60000)
         .describe('Max ms this clock may differ from GitHub before the stale-claim reaper refuses (#3149).'),
       stackOnOpenPrerequisite: z.boolean().catch(true).describe('Stack on an open prerequisite PR (#3916).'),
+      discovery_interval_ms: z
+        .number()
+        .int()
+        .positive()
+        .default(60000)
+        .describe('Milliseconds between lane-discovery passes in a running factory run (#3920).'),
       comment: z.string().optional(),
     })
     .default({
       claim_settle_ms: 3000,
       max_review_rework_runs: 2,
       maxClockSkewMs: 60000,
+      discovery_interval_ms: 60000,
       stackOnOpenPrerequisite: true,
     }),
   adr: z.object({ mandate: z.boolean().default(false), comment: z.string().optional() }).default({ mandate: false }),

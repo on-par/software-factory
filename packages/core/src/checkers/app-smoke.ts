@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 
 import { loadRepoConfig } from '../config/repo.js';
 import type { QaConfig } from '../config/qa-section.js';
-import { killProcessGroup } from '../environment/process-groups.js';
+import { killProcessGroup, registerProcessGroup } from '../environment/process-groups.js';
 import type { CheckerOutput } from '../types/index.js';
 import { checkerParentEnv } from '../environment/checker-env.js';
 import { childProcessEnv } from '../utils/github-credentials.js';
@@ -52,6 +52,9 @@ export const defaultStartApp: AppSmokeDeps['startApp'] = (argv, { cwd, env, onPg
   const collect = (chunk: Buffer): void => {
     buffer = (buffer + chunk.toString()).slice(-OUTPUT_CAP_BYTES);
   };
+  const deregister = child.pid !== undefined ? registerProcessGroup(child.pid) : () => {};
+  child.once('exit', deregister);
+  child.once('error', deregister);
   child.stdout?.on('data', collect);
   child.stderr?.on('data', collect);
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {

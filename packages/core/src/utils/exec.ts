@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 
 import { childProcessEnv, redactExecError } from './github-credentials.js';
 import { spawnSupervisedCommand } from './supervised-exec.js';
-import { killProcessGroup } from '../environment/process-groups.js';
+import { killProcessGroup, registerProcessGroup } from '../environment/process-groups.js';
 
 const exec = promisify(execCb);
 
@@ -73,6 +73,9 @@ function execDetached(
   const child = ownershipFile
     ? spawnSupervisedCommand(cmd, { cwd: opts.cwd, env, ownershipFile })
     : spawnFn(cmd, { shell: true, detached: true, cwd: opts.cwd, env });
+  const deregister = child.pid !== undefined ? registerProcessGroup(child.pid) : () => {};
+  child.once('exit', deregister);
+  child.once('error', deregister);
 
   let stdoutLen = 0;
   let stderrLen = 0;

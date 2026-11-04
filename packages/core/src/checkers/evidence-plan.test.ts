@@ -197,6 +197,48 @@ describe('evidence plan runner', () => {
     expect(calls).toBe(0);
   });
 
+  it('runs a workspace spec with vitest in the owning npm workspace', async () => {
+    const seen: string[] = [];
+    const result = await runEvidencePlan(
+      [entry('fail-to-pass-test', { test: 'apps/web/src/x.spec.ts "does x"' })],
+      new Map([['test', ['npm', 'run', 'test']]]),
+      {
+        worktree: '/tmp/lane',
+        sandbox: policy(),
+        testRunner: null,
+        workspaceTestRunners: [{ dir: 'apps/web', name: 'web', runner: 'vitest', manager: 'npm' }],
+        runCommand: async (argv) => {
+          seen.push(argv[2]!);
+          return commandResult(0);
+        },
+      },
+    );
+    expect(result[0]!.status).not.toBe('SKIP');
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[0]!.replace(/['\\"]/g, '')).toContain('npm exec --workspace apps/web -- vitest run src/x.spec.ts -t');
+  });
+
+  it('keeps skipping when no workspace owns the spec', async () => {
+    let calls = 0;
+    const result = await runEvidencePlan(
+      [entry('fail-to-pass-test', { test: 'libs/y/x.spec.ts "does x"' })],
+      new Map([['test', ['npm', 'run', 'test']]]),
+      {
+        worktree: '/tmp/lane',
+        sandbox: policy(),
+        testRunner: null,
+        workspaceTestRunners: [{ dir: 'apps/web', name: 'web', runner: 'vitest', manager: 'npm' }],
+        runCommand: async () => {
+          calls++;
+          return commandResult(0);
+        },
+      },
+    );
+    expect(result[0]!.status).toBe('SKIP');
+    expect(result[0]!.reason).toMatch(/^selector could not be used: test runner not recognised/);
+    expect(calls).toBe(0);
+  });
+
   it('evidence runner skips unsupported evidence without spawning', async () => {
     let calls = 0;
     const entries = [

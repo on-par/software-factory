@@ -10,6 +10,8 @@ section to `## X.Y.Z - date`. See
 ### Added
 
 - A queued issue whose prerequisite has an open factory PR now builds on it and opens a stacked PR against that branch, restacks onto main when the prerequisite merges or onto its new head when it moves, parks held when the prerequisite PR closes unmerged, and is never landed while its base is not main; `queue.stackOnOpenPrerequisite: false` restores waiting (#3916)
+- The compile gate and `factory doctor` fall back to `npm run typecheck` when no build command resolves, and doctor names the detected test runner per workspace (#3913).
+- `factory run` starts lanes for work queued after it started, restarts finished lanes when new work arrives, and reaps expired claims mid-run; the interval is `queue.discovery_interval_ms` (default 60s) (#3920)
 - `factory run-issue --in-place` (or `FACTORY_WORKSPACE=in-place`) runs the pipeline in the current clean checkout with no worktree, for disposable containers (#3904).
 - With `tracker.kind: linear`, `factory run`, `factory supervise` and `factory status` take their queue from Linear through one composed `QueueBackend`. A claim writes the first lease attachment, and lanes release a Linear claim they cannot build yet (#3918).
 - A run persists its resumable state (rework counters, handled reviews, status, spec summary) in a factory-owned PR comment and restores it on a fresh clone (#3909)
@@ -17,6 +19,10 @@ section to `## X.Y.Z - date`. See
 - A `tracker` config key selects `github` (default) or `linear` per repo, and `factory doctor` checks the Linear setup: a missing or rejected `LINEAR_API_KEY` and any project with ready issues but no repo mapping (#3891).
 - Core has a read-only `linear-issue` work source that resolves `ON-12` or a Linear issue URL into a work request; it reads `LINEAR_API_KEY` only when used (#3889).
 - Core has a Linear queue lifecycle that releases, parks and reaps Linear claims, keeping the claim lease in a factory-owned attachment's metadata; a failed Linear write warns and never fails the run (#3893).
+
+### Fixed
+
+- CHECK follows a root workspace fan-out `test` script into the owning npm/pnpm/yarn workspace and runs fail-to-pass selectors there with vitest or jest (#3913).
 
 ### Changed
 
@@ -37,6 +43,8 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 - A post-merge defect on a PR auto-merged under trust tier T1 or T2 records a tier demotion, lowers the effective tier one step, and comments once on the defect issue; `factory classifier ack-demotion` restores the configured tier (#1959).
 
 ### Fixed
+
+- Ctrl-C / SIGTERM on factory run, ship, run-issue, run-brief and supervise now stops every detached agent process group (SIGTERM, then SIGKILL after 3s), writes STOP and exits 130; a second Ctrl-C exits at once (#1615)
 
 - SHIP no longer marks a PR ready for review when the CI watch itself fails, for example on a GitHub API error. CI counts as unknown: SHIP fails with `CI unknown for PR #N: the CI watch failed (...)`, the PR is not marked ready, also in draft mode, and the run parks `fail` (#3880).
 - An unknown `sizeGate.mode` (for example `Off`, `none`, `bogus`) still runs as stack but now warns at config load and run start, and shows a non-failing ⚠️ `factory doctor` row naming the value and `off, stack` (#3850).
