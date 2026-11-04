@@ -5,6 +5,7 @@ import { loadRepoConfig } from '../config/repo.js';
 import { parseDesignArtifact } from '../design/index.js';
 import { resolveEvidenceAllowlist } from '../checkers/evidence-allowlist.js';
 import { resolveEvidenceTestRunner } from '../checkers/evidence-selector.js';
+import { resolveWorkspaceTestRunners } from '../checkers/evidence-workspace.js';
 import { runEvidencePlan, type EvidencePlanResult } from '../checkers/evidence-plan.js';
 import { createEvidenceSideEffectsGuard } from '../checkers/side-effects.js';
 import { summarizeCheckerOutputs, type CheckerContext } from '../checkers/index.js';
@@ -112,7 +113,10 @@ export async function appendEvidencePlanStep(
         const allowlist = resolveEvidenceAllowlist(packageJsonFromContext(ctx), repoConfig, lockfiles);
         guard = createEvidenceSideEffectsGuard(ctx);
         const testRunner = resolveEvidenceTestRunner(allowlist, packageJsonFromContext(ctx));
-        const results = await runEvidence(entries, allowlist, { ...ctx, testRunner }, guard);
+        const workspaceTestRunners = testRunner
+          ? []
+          : await resolveWorkspaceTestRunners(ctx.worktree, packageJsonFromContext(ctx));
+        const results = await runEvidence(entries, allowlist, { ...ctx, testRunner, workspaceTestRunners }, guard);
         output = outputForResults(results);
       } catch (error) {
         const message = (error instanceof Error ? error.message : String(error)).slice(-MAX_ERROR_LENGTH);

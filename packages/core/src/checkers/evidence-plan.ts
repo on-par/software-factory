@@ -9,6 +9,8 @@ import { runVerificationCommand } from './run-command.js';
 import type { CheckerContext } from './index.js';
 import type { EvidenceTestRunner } from './evidence-selector.js';
 import { SELECTOR_UNUSABLE_PREFIX, parseFailToPassSelector, selectorArgs } from './evidence-selector.js';
+import type { WorkspaceTestRunner } from './evidence-workspace.js';
+import { ownerWorkspace, workspaceSelectorArgv } from './evidence-workspace.js';
 import { verifyFailToPass } from './evidence-plan-false-pass.js';
 
 export interface EvidencePlanResult {
@@ -40,7 +42,7 @@ export interface EvidenceCommandLifecycle {
 export type EvidenceRunnerContext = Pick<
   CheckerContext,
   'worktree' | 'sandbox' | 'env' | 'onPgid' | 'runCommand' | 'testsTimeoutSeconds' | 'diffBase' | 'parentBaseRef'
-> & { testRunner?: EvidenceTestRunner | null };
+> & { testRunner?: EvidenceTestRunner | null; workspaceTestRunners?: readonly WorkspaceTestRunner[] };
 
 const OUTPUT_LIMIT = 2000;
 const DEFAULT_TIMEOUT_SECONDS = 300;
@@ -236,18 +238,27 @@ export async function runEvidencePlan(
         continue;
       }
       const runner = ctx.testRunner;
-      if (!runner) {
-        results.push(
-          result(
-            entry,
-            'SKIP',
-            `${SELECTOR_UNUSABLE_PREFIX}: test runner not recognised (supported: vitest, jest, pytest); the whole suite is never run instead`,
-          ),
+      if (runner) {
+        if (argv[0] === 'npm' && argv[1] === 'run') argv.push('--');
+        argv.push(...selectorArgs(selector, runner));
+      } else {
+        const owner = ownerWorkspace(selector.file, ctx.workspaceTestRunners ?? []);
+        if (!owner) {
+          results.push(
+            result(
+              entry,
+              'SKIP',
+              `${SELECTOR_UNUSABLE_PREFIX}: test runner not recognised (supported: vitest, jest, pytest); the whole suite is never run instead`,
+            ),
+          );
+          continue;
+        }
+        argv.splice(
+          0,
+          argv.length,
+          ...workspaceSelectorArgv(owner.workspace, { file: owner.relativeFile, names: selector.names }),
         );
-        continue;
       }
-      if (argv[0] === 'npm' && argv[1] === 'run') argv.push('--');
-      argv.push(...selectorArgs(selector, runner));
     }
     const policy = evidencePolicy(ctx.sandbox);
     if (!policy) {
