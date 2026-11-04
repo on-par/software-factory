@@ -40,6 +40,7 @@ import {
 } from '@on-par/factory-core';
 import { shipHostBuildSlot } from './host-slot.js';
 import { claimReworkRequests } from './ship-review-rework.js';
+import { shipRunStateRecorder } from './ship-pr-state.js';
 import type { CheckResumeRecord, SlicePlanStore, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   createCheckResumeStore,
@@ -68,7 +69,7 @@ import { restoredLoggingBreaker } from './provider-restored-log.js';
 import type { CliDeps, ConfigLoaderKey, CoreOpKey, GitOpKey, ShellOpKey } from './index.js';
 import { resolveRunBranch } from './run-branch.js';
 import { shipRuntime } from './ship-runtime.js';
-import { phaseRecorder, runStateRecorder } from './ship-run-state.js';
+import { phaseRecorder } from './ship-run-state.js';
 import { maybeWriteBenchmarkArtifacts, maybeWriteLocalRunReport } from './ship-reports.js';
 import { applyMeteredGuard, modelOverrideMessages, resolveProviderOrder } from './model-override-messages.js';
 import {
@@ -355,6 +356,15 @@ async function shipIssueFrom(
 
   // Read before runIssue: the run-state recorder overwrites this file on its first update (#3373).
   const previousAttempt = await readIssueRunState(runStateFile(paths.runs, workKeyFromIssue(issueNum)));
+  const recorderFor = await shipRunStateRecorder(ctx?.resumeFrom || ctx?.localOnly || noPr, {
+    octokit,
+    repo: ghRepo,
+    branch,
+    issueNum,
+    factoryConfig,
+    paths,
+    log,
+  });
   const reworkClaim = claimReworkRequests(paths, issueNum, ctx?.resumeFrom || ctx?.localOnly || noPr, log);
   const request = {
     ...buildRunRequest({
@@ -425,14 +435,7 @@ async function shipIssueFrom(
     recordPhase: phaseRecorder(paths.runs, issueNum),
     claimSignal: ctx?.signal,
     ...(ctx?.slicePlanStore ? { slicePlanStore: ctx.slicePlanStore } : {}),
-    recordRunState: runStateRecorder(paths.runs, {
-      issue: issueNum,
-      lane: lane ?? '',
-      branch,
-      worktree,
-      specPath,
-      startedAt: runStartedAt,
-    }),
+    recordRunState: recorderFor({ lane: lane ?? '', worktree, specPath, startedAt: runStartedAt }),
     onActivity: () =>
       touchRunActivity(phaseSnapshotFile(paths.runs, workKeyFromIssue(issueNum)), new Date().toISOString()),
     writeLocalRunReport: (info) =>
