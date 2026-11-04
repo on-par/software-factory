@@ -18,6 +18,7 @@ export type ParkReason = Extract<
 >;
 
 import type { BuildRoutePin } from '../config/repo.js';
+import type { ShipDraftReason } from '../phases/ship-types.js';
 
 export type BuildRoute = BuildRoutePin;
 
@@ -60,6 +61,8 @@ export type RunOutcome =
       draft?: boolean;
       /** SHIP's CI watch timed out (#3569); the PR was left as draft. */
       ciPending?: boolean;
+      /** Why SHIP left the PR as a draft (#3932). */
+      draftReason?: ShipDraftReason;
       /** the ADR-0147 slice this run shipped */
       slice?: { index: number; count: number };
       attribution?: RunAttribution;

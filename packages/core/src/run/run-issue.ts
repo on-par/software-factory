@@ -1201,6 +1201,7 @@ async function runIssueOnce(
       prNumber: ship.prNumber,
       ...(ship.draft ? { draft: true } : {}),
       ...(ship.ciPending ? { ciPending: true } : {}),
+      ...(ship.draftReason ? { draftReason: ship.draftReason } : {}),
       ...(planSlice ? { slice: { index: planSlice.index, count: planSlice.plan.slices.length } } : {}),
     };
   } catch (err) {

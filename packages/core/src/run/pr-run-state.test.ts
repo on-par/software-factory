@@ -87,6 +87,26 @@ describe('pr run state', () => {
     expect(b64.length).toBeGreaterThan(0);
   });
 
+  it('round-trips draftReason, still parses a comment without it and rejects an unknown value', () => {
+    const body = encodePrRunState(state({ draftReason: 'ci-pending' }));
+    const out = selectTrustedPrRunState([{ id: 1, authorId: SELF, body }], SELF, key);
+    expect(out).toMatchObject({ status: 'found', state: { draftReason: 'ci-pending' } });
+    const plain = decodePrRunState(encodePrRunState(state()), key);
+    expect(plain).toMatchObject({ ok: true });
+    expect(plain && plain.ok && 'draftReason' in plain.state).toBe(false);
+    const { json, b64 } = dataOf(body);
+    const bad = JSON.stringify({ ...JSON.parse(json), draftReason: 'bogus' });
+    const forged = body.replace(b64, Buffer.from(bad).toString('base64'));
+    expect(decodePrRunState(forged, key)).toEqual({ ok: false, reason: 'malformed' });
+  });
+
+  it('reconcile takes draftReason from the later side', () => {
+    const local = state({ updatedAt: '2026-11-04T01:00:00.000Z' });
+    const remote = state({ draftReason: 'ci-pending', updatedAt: '2026-11-04T02:00:00.000Z' });
+    expect(reconcilePrRunState(local, remote)?.draftReason).toBe('ci-pending');
+    expect(reconcilePrRunState(remote, local)?.draftReason).toBe('ci-pending');
+  });
+
   it('returns null for a body with no marker', () => {
     expect(decodePrRunState('hello', key)).toBeNull();
   });

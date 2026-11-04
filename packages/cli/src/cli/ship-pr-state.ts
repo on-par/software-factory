@@ -162,8 +162,10 @@ export function prRunStateRecorder(
       if (prNumber === undefined) return;
       const now = new Date().toISOString();
       const local = await localPrRunState({ ...opts, issueNum, prNumber });
-      const merged = reconcilePrRunState(local, known);
-      if (merged === null) return;
+      const reconciled = reconcilePrRunState(local, known);
+      if (reconciled === null) return;
+      // A new ship supersedes a stale reason: only this update's draftReason survives.
+      const { draftReason: _stale, ...merged } = reconciled;
       const rounds: PrRunRound[] = [...merged.rounds];
       if (update.attempts !== undefined && update.attempts > attempts) {
         let sha: string | undefined;
@@ -179,7 +181,8 @@ export function prRunStateRecorder(
         ...merged,
         prNumber,
         checkRework: { ...merged.checkRework, used: Math.max(merged.checkRework.used, attempts - 1) },
-        status: prRunStatusFor(update.status),
+        status: prRunStatusFor(update.status, update.draftReason === 'ci-pending'),
+        ...(update.draftReason ? { draftReason: update.draftReason } : {}),
         spec: (await readSpecSummary(opts.specPath)) ?? merged.spec,
         rounds,
         updatedAt: now,

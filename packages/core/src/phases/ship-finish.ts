@@ -80,6 +80,7 @@ export async function finishShip(ctx: {
     ...(headSha ? { headSha } : {}),
     ...(opts.draft || ciPending ? { draft: true } : {}),
     ...(ciPending ? { ciPending: true } : {}),
+    ...(opts.draft ? { draftReason: 'requested' as const } : ciPending ? { draftReason: 'ci-pending' as const } : {}),
     ...(previewCheck ? { previewCheck } : {}),
   };
 }
