@@ -8,7 +8,7 @@ import { loadFactoryConfig, loadModelsConfig, loadRepoConfig, resolveEffectiveMo
 import type { FactoryConfig } from '@on-par/factory-core';
 import type { QueueBackend } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { cmdRun } from './run.js';
 import type { RunRuntime } from './run.js';
@@ -68,11 +68,46 @@ describe('factory run lane queue (#3239, #3890)', () => {
     // The seam does not expose claimSettleMs (no claim path sleeps on it yet), so only the shape is observable.
     const config = {
       ...loadFactoryConfig(),
-      queue: { claim_settle_ms: 500, max_review_rework_runs: 2, maxClockSkewMs: 60000 },
+      queue: { claim_settle_ms: 500, max_review_rework_runs: 2, maxClockSkewMs: 60000, discovery_interval_ms: 60000 },
     };
     const backend = await laneQueueFor(config);
     expect(typeof backend.claimNext).toBe('function');
     expect(typeof backend.lanes).toBe('function');
+  });
+
+  it('factory run hands planRunLanes a Linear QueueBackend when tracker.kind is linear', async () => {
+    vi.stubEnv('LINEAR_API_KEY', 'lin_test_key');
+    // The startup reap lists leased issues; an offline 500 is logged by the lifecycle, never thrown.
+    vi.stubGlobal('fetch', async () => new Response('{}', { status: 500 }));
+    try {
+      const getOctokit = vi.fn(() => {
+        throw new Error('GitHub must not be used in Linear mode');
+      });
+      const reapExpiredClaims = vi.fn(async () => {});
+      const config = {
+        ...loadFactoryConfig(),
+        tracker: {
+          kind: 'linear',
+          linear: {
+            teamKey: 'ON',
+            projects: { Foreman: 'o/r' },
+            readyLabel: 'factory:ready',
+            laneLabelGroup: 'lane',
+            states: { ready: 'Todo', inProgress: 'In Progress', parked: 'Todo' },
+          },
+        },
+      } as FactoryConfig;
+      const backend = await laneQueueFor(config, {
+        getOctokit,
+        reapExpiredClaims,
+      });
+      expect(await backend.pollBlockedParks()).toEqual([]);
+      expect(getOctokit).not.toHaveBeenCalled();
+      expect(reapExpiredClaims).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('builds the lane queue when the config has no queue key', async () => {

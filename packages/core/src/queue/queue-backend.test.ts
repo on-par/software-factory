@@ -220,11 +220,11 @@ describe('createQueueBackend', () => {
 
   it('createQueueBackend refuses an unsupported kind', () => {
     const { client } = createFakeStore([]);
-    const options = { kind: 'linear', github: { client, owner: 'o', repo: 'r' } };
+    const options = { kind: 'jira', github: { client, owner: 'o', repo: 'r' } };
 
     expect(() => createQueueBackend(options as never)).toThrow(UnsupportedQueueBackendError);
     expect(() => createQueueBackend(options as never)).toThrow(
-      'unsupported queue backend "linear" — supported: github',
+      'unsupported queue backend "jira" — supported: github, linear',
     );
   });
 });

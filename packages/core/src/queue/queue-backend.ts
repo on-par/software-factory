@@ -8,12 +8,16 @@ import {
   type QueueReleaseOutcome,
 } from './github-queue.js';
 import { issueNumberOf, workKeyFromIssue, type WorkKey } from '../work/work-key.js';
+import { createLinearQueueBackend, type LinearQueueBackendOptions } from './linear-queue-backend.js';
+import type { LinearStaleClaimRelease } from './linear-queue-lifecycle.js';
 import { releaseStaleClaims, type StaleClaimRelease } from './stale-claims.js';
 
 export interface QueueBackendClaim {
   key: WorkKey;
   decision: QueueClaim['decision'];
 }
+
+export type QueueBackendReapRow = StaleClaimRelease | LinearStaleClaimRelease;
 
 export interface QueueBackend {
   /** Claims and returns the next eligible work item in `lane`, or null when none is eligible. */
@@ -27,7 +31,7 @@ export interface QueueBackend {
   /** Lane names that currently have queued work. */
   lanes(): Promise<string[]>;
   /** Detects and releases claims whose TTL lease has expired across the whole queue. */
-  reap(): Promise<StaleClaimRelease[]>;
+  reap(): Promise<QueueBackendReapRow[]>;
   /** Unparks `blocked` parents whose blockers resolved (#2318); [] when no blockedParks store was configured. */
   pollBlockedParks(): Promise<BlockedParkPollResult[]>;
 }
@@ -72,18 +76,16 @@ export function createGithubQueueBackend(options: GithubQueueBackendOptions): Qu
   };
 }
 
-export type QueueBackendKind = 'github';
+export type QueueBackendKind = 'github' | 'linear';
 
-export interface QueueBackendOptions {
-  kind: QueueBackendKind;
-  github: GithubQueueBackendOptions;
-}
+export type QueueBackendOptions =
+  { kind: 'github'; github: GithubQueueBackendOptions } | { kind: 'linear'; linear: LinearQueueBackendOptions };
 
 export class UnsupportedQueueBackendError extends Error {
   readonly kind: string;
 
   constructor(kind: string) {
-    super(`unsupported queue backend "${kind}" — supported: github`);
+    super(`unsupported queue backend "${kind}" — supported: github, linear`);
     this.name = 'UnsupportedQueueBackendError';
     this.kind = kind;
   }
@@ -93,7 +95,11 @@ export function createQueueBackend(options: QueueBackendOptions): QueueBackend {
   switch (options.kind) {
     case 'github':
       return createGithubQueueBackend(options.github);
-    default:
-      throw new UnsupportedQueueBackendError(String(options.kind));
+    case 'linear':
+      return createLinearQueueBackend(options.linear);
+    default: {
+      const unknownOptions: { kind: unknown } = options;
+      throw new UnsupportedQueueBackendError(String(unknownOptions.kind));
+    }
   }
 }

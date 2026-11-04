@@ -41,11 +41,13 @@ import {
   formatOpenFactoryDraftsLine,
   readOpenFactoryDrafts,
   resolveBranchPrefix,
+  resolveTrackerConfig,
 } from '@on-par/factory-core/internal';
 import type { DiskGuard, OpenFactoryDrafts, QueueOrderConflict } from '@on-par/factory-core/internal';
 
 import { formatBaseHoldStatus, readBaseHold } from './base-hold.js';
 import { notInitializedMessage } from './first-run.js';
+import { selectQueueBackend } from './queue-backend-select.js';
 import type { CliDeps, CliExitError, readActiveProduct } from './index.js';
 import { readRunFlagOverrides } from './run-flags.js';
 import { readStopFileStatus, stopSentinelStatusLine } from './stop-sentinel.js';
@@ -282,39 +284,65 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     console.log(`  (host slot lookup failed — ${rt.errorDetail(err)})`);
   }
 
-  console.log(styleText('bold', '\n== Queue =='));
-  if (!rt.hasGitHubToken()) {
-    console.log('  (no GitHub token — run `gh auth login`)');
-  } else {
-    const [owner, repoName] = ghRepo.split('/');
-    const orderConflicts: QueueOrderConflict[] = [];
-    const backend = createQueueBackend({
-      kind: 'github',
-      github: {
-        client: createOctokitQueueClient(rt.getOctokit()),
-        owner,
-        repo: repoName,
-        onOrderConflict: (c) => orderConflicts.push(c),
-      },
-    });
+  const factoryConfig = rt.configLoaders.loadFactoryConfigForRepo(paths.config);
+  if (resolveTrackerConfig(factoryConfig).kind === 'linear') {
+    console.log(styleText('bold', '\n== Queue (Linear) =='));
     try {
-      const lanes = await backend.lanes();
+      const { backend } = selectQueueBackend({
+        factoryConfig,
+        ghRepo,
+        env: process.env,
+        github: () => {
+          throw new Error('GitHub queue is not used when tracker.kind is linear');
+        },
+        warn: () => undefined,
+      });
       let printed = false;
-      for (const lane of lanes) {
-        const keys = await backend.list(lane);
-        for (const key of keys) {
-          console.log(`  ${lane} #${key}`);
+      for (const lane of await backend.lanes()) {
+        for (const key of await backend.list(lane)) {
+          console.log(`  ${lane} ${key}`);
           printed = true;
         }
       }
-      for (const c of orderConflicts) {
-        console.log(styleText('yellow', `  ⚠ ${formatQueueOrderConflict(c)}`));
-      }
-      if (!printed) {
-        console.log('  (no claimable work)');
-      }
+      if (!printed) console.log('  (no claimable work)');
     } catch (err) {
       console.log(`  (queue lookup failed — ${rt.errorDetail(err)})`);
+    }
+  } else {
+    console.log(styleText('bold', '\n== Queue =='));
+    if (!rt.hasGitHubToken()) {
+      console.log('  (no GitHub token — run `gh auth login`)');
+    } else {
+      const [owner, repoName] = ghRepo.split('/');
+      const orderConflicts: QueueOrderConflict[] = [];
+      const backend = createQueueBackend({
+        kind: 'github',
+        github: {
+          client: createOctokitQueueClient(rt.getOctokit()),
+          owner,
+          repo: repoName,
+          onOrderConflict: (c) => orderConflicts.push(c),
+        },
+      });
+      try {
+        const lanes = await backend.lanes();
+        let printed = false;
+        for (const lane of lanes) {
+          const keys = await backend.list(lane);
+          for (const key of keys) {
+            console.log(`  ${lane} #${key}`);
+            printed = true;
+          }
+        }
+        for (const c of orderConflicts) {
+          console.log(styleText('yellow', `  ⚠ ${formatQueueOrderConflict(c)}`));
+        }
+        if (!printed) {
+          console.log('  (no claimable work)');
+        }
+      } catch (err) {
+        console.log(`  (queue lookup failed — ${rt.errorDetail(err)})`);
+      }
     }
   }
 

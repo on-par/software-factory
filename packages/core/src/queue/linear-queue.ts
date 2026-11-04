@@ -6,6 +6,7 @@ import type { LinearTrackerConfig } from '../config/tracker-section.js';
 import { claimedByLabel, CLAIMED_BY_LABEL_PREFIX, defaultClaimantId, PARKED_LABEL } from './github-queue.js';
 import { QUEUE_ORDER_LABEL_PREFIX } from './queue-order.js';
 import type { QueueBackend, QueueBackendClaim } from './queue-backend.js';
+import type { LinearClaimedIssue, LinearClaimLease, LinearQueueLifecycleClient } from './linear-queue-lifecycle.js';
 import { toWorkKey, type WorkKey } from '../work/work-key.js';
 
 export interface LinearQueueLabel {
@@ -34,7 +35,7 @@ export interface LinearQueueClient {
   /** Moves the issue to the team workflow state named `stateName`. */
   moveToState(issueId: string, stateName: string): Promise<void>;
 }
-export type LinearQueue = Pick<QueueBackend, 'list' | 'claimNext'>;
+export type LinearQueue = Pick<QueueBackend, 'list' | 'claimNext' | 'lanes'>;
 export interface LinearQueueOptions {
   client: LinearQueueClient;
   linear: LinearTrackerConfig;
@@ -43,6 +44,8 @@ export interface LinearQueueOptions {
 }
 
 export const LINEAR_DEFAULT_LANE = 'default';
+export const LINEAR_LEASE_ATTACHMENT_URL = 'https://github.com/on-par/software-factory#claim-lease';
+const LINEAR_LEASE_TITLE = 'Factory claim lease';
 
 const EXCLUDED_STATE_TYPES = new Set(['started', 'completed', 'canceled']);
 const ORDER_PATTERN = new RegExp(`^${QUEUE_ORDER_LABEL_PREFIX}(\\d+)$`);
@@ -97,9 +100,10 @@ export function createLinearQueue(options: LinearQueueOptions): LinearQueue {
   const myLabel = claimedByLabel(claimantId);
   let myLabelId: string | undefined;
 
+  const laneOf = (i: LinearQueueIssue): string => linearLaneOf(i, linear.laneLabelGroup, defaultLane);
+
   async function sortedFor(lane?: string): Promise<LinearQueueIssue[]> {
     const issues = await client.listCandidates();
-    const laneOf = (i: LinearQueueIssue): string => linearLaneOf(i, linear.laneLabelGroup, defaultLane);
     const eligible = issues.filter(
       (i) => isLinearCandidate(i, linear.readyLabel) && (lane === undefined || laneOf(i) === lane),
     );
@@ -109,6 +113,10 @@ export function createLinearQueue(options: LinearQueueOptions): LinearQueue {
 
   async function list(lane?: string): Promise<WorkKey[]> {
     return (await sortedFor(lane)).map((i) => toWorkKey(i.identifier));
+  }
+
+  async function lanes(): Promise<string[]> {
+    return [...new Set((await sortedFor()).map(laneOf))].sort();
   }
 
   async function claimNext(lane: string): Promise<QueueBackendClaim | null> {
@@ -127,7 +135,7 @@ export function createLinearQueue(options: LinearQueueOptions): LinearQueue {
     return null;
   }
 
-  return { list, claimNext };
+  return { list, claimNext, lanes };
 }
 
 const MAX_PAGES = 10;
@@ -143,6 +151,17 @@ const CANDIDATES_QUERY = `query($after: String, $team: String!, $project: String
     pageInfo { hasNextPage endCursor }
   }
 }`;
+const ISSUE_FIELDS = `id identifier labels { nodes { id name } } attachments(filter: { url: { eq: $url } }) { nodes { id metadata } }`;
+const FIND_ISSUE_QUERY = `query($id: String!, $url: String!) { issue(id: $id) { ${ISSUE_FIELDS} } }`;
+const LEASED_QUERY = `query($after: String, $team: String!, $project: String!, $url: String!) {
+  issues(first: 100, after: $after, filter: { team: { key: { eq: $team } }, project: { or: [{ name: { eq: $project } }, { id: { eq: $project } }] }, attachments: { some: { url: { eq: $url } } } }) {
+    nodes { ${ISSUE_FIELDS} }
+    pageInfo { hasNextPage endCursor }
+  }
+}`;
+const COMMENT_MUTATION = `mutation($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success } }`;
+const UPSERT_ATTACHMENT_MUTATION = `mutation($issueId: String!, $title: String!, $url: String!, $metadata: JSONObject!) { attachmentCreate(input: { issueId: $issueId, title: $title, url: $url, metadata: $metadata }) { success } }`;
+const DELETE_ATTACHMENT_MUTATION = `mutation($id: String!) { attachmentDelete(id: $id) { success } }`;
 const TEAM_QUERY = `query($team: String!) { teams(filter: { key: { eq: $team } }) { nodes { id states { nodes { id name } } } } }`;
 const FIND_LABEL_QUERY = `query($name: String!, $teamId: ID!) { issueLabels(filter: { name: { eq: $name }, team: { id: { eq: $teamId } } }) { nodes { id } } }`;
 const CREATE_LABEL_MUTATION = `mutation($name: String!, $teamId: String!) { issueLabelCreate(input: { name: $name, teamId: $teamId }) { success issueLabel { id } } }`;
@@ -170,6 +189,22 @@ const CandidatesSchema = z.object({
     pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullish() }),
   }),
 });
+const ClaimedIssueNode = z.object({
+  id: z.string(),
+  identifier: z.string(),
+  labels: z.object({ nodes: z.array(z.object({ id: z.string(), name: z.string() })) }),
+  attachments: z.object({ nodes: z.array(z.object({ id: z.string(), metadata: z.unknown() })) }),
+});
+const FindIssueSchema = z.object({ issue: ClaimedIssueNode.nullable() });
+const LeasedSchema = z.object({
+  issues: z.object({
+    nodes: z.array(ClaimedIssueNode),
+    pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullish() }),
+  }),
+});
+const CommentSchema = z.object({ commentCreate: z.object({ success: z.boolean() }) });
+const UpsertAttachmentSchema = z.object({ attachmentCreate: z.object({ success: z.boolean() }) });
+const DeleteAttachmentSchema = z.object({ attachmentDelete: z.object({ success: z.boolean() }) });
 const TeamSchema = z.object({
   teams: z.object({
     nodes: z.array(
@@ -198,7 +233,7 @@ export function createLinearQueueGraphqlClient(opts: {
   fetch?: typeof globalThis.fetch;
   endpoint?: string;
   timeoutMs?: number;
-}): LinearQueueClient {
+}): LinearQueueClient & LinearQueueLifecycleClient {
   const { apiKey, linear, project } = opts;
   const fetchImpl = opts.fetch ?? globalThis.fetch;
   const endpoint = opts.endpoint ?? 'https://api.linear.app/graphql';
@@ -255,7 +290,58 @@ export function createLinearQueueGraphqlClient(opts: {
     if (!ok) throw new LinearApiError(`Linear ${what} reported success=false`);
   }
 
+  function toClaimed(n: z.infer<typeof ClaimedIssueNode>): LinearClaimedIssue {
+    const att = n.attachments.nodes[0];
+    return {
+      id: n.id,
+      identifier: n.identifier,
+      labels: n.labels.nodes,
+      ...(att ? { lease: { attachmentId: att.id, metadata: att.metadata } } : {}),
+    };
+  }
+
   return {
+    async findIssue(identifier) {
+      let d: z.infer<typeof FindIssueSchema>;
+      try {
+        d = await request(FIND_ISSUE_QUERY, { id: identifier, url: LINEAR_LEASE_ATTACHMENT_URL }, FindIssueSchema);
+      } catch (err) {
+        if (err instanceof LinearApiError && /not found/i.test(err.message)) return null;
+        throw err;
+      }
+      return d.issue ? toClaimed(d.issue) : null;
+    },
+    async listLeasedIssues() {
+      const out: LinearClaimedIssue[] = [];
+      let after: string | null = null as string | null;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const { issues }: z.infer<typeof LeasedSchema> = await request(
+          LEASED_QUERY,
+          { after, team: linear.teamKey, project, url: LINEAR_LEASE_ATTACHMENT_URL },
+          LeasedSchema,
+        );
+        out.push(...issues.nodes.map(toClaimed));
+        if (!issues.pageInfo.hasNextPage) return out;
+        after = issues.pageInfo.endCursor ?? null;
+      }
+      throw new LinearApiError('Linear leased issues exceed 1000 issues');
+    },
+    async addComment(issueId, body) {
+      const d = await request(COMMENT_MUTATION, { issueId, body }, CommentSchema);
+      ensureSuccess(d.commentCreate.success, 'comment create');
+    },
+    async upsertLeaseAttachment(issueId, lease: LinearClaimLease) {
+      const d = await request(
+        UPSERT_ATTACHMENT_MUTATION,
+        { issueId, title: LINEAR_LEASE_TITLE, url: LINEAR_LEASE_ATTACHMENT_URL, metadata: lease },
+        UpsertAttachmentSchema,
+      );
+      ensureSuccess(d.attachmentCreate.success, 'attachment upsert');
+    },
+    async deleteAttachment(id) {
+      const d = await request(DELETE_ATTACHMENT_MUTATION, { id }, DeleteAttachmentSchema);
+      ensureSuccess(d.attachmentDelete.success, 'attachment delete');
+    },
     async listCandidates() {
       const out: LinearQueueIssue[] = [];
       let after: string | null = null as string | null;

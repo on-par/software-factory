@@ -313,6 +313,10 @@ const INTERNAL_API_KEYS = [
   'createGithubQueueBackend', // #3890
   'createQueueBackend', // #3890
   'LINEAR_API_KEY_ENV',
+  'LINEAR_LEASE_ATTACHMENT_URL', // #3918
+  'createLinearQueueBackend', // #3918
+  'createLinearQueueGraphqlClient', // #3918
+  'resolveLinearProjectForRepo', // #3918
   'probeLinearSetup',
   'resolveTrackerConfig',
   'listBlockedBy',
@@ -331,6 +335,9 @@ const INTERNAL_API_KEYS = [
   'BASE_HEALTH_CHECKERS',
   'checkBaseHealth',
   'checkResumeBaseDrift',
+  'checkInPlaceCheckout',
+  'setupInPlaceCheckout',
+  'inPlaceWorkspace',
   'codexChatgptSessionState',
   'hasClaudeLoginEvidence',
   // #3214
@@ -475,7 +482,7 @@ const INTERNAL_API_KEYS = [
   'resolveEffectiveConfig',
   'resolveExperimental',
   'resolveLocalOnly',
-  ...'resolveHostMaxBuilds resolveQueueClaimSettleMs evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL DEFAULT_MAX_CLOCK_SKEW_MS measureGithubClockSkew resolveQueueMaxClockSkewMs'.split(
+  ...'resolveHostMaxBuilds resolveQueueClaimSettleMs resolveLaneDiscoveryIntervalMs evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL DEFAULT_MAX_CLOCK_SKEW_MS measureGithubClockSkew resolveQueueMaxClockSkewMs'.split(
     ' ',
   ), // #3380, #3381, #3149
   ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles publishRiskReceipt renderRiskReceipt'.split(' '), // #3386
