@@ -324,6 +324,9 @@ const INTERNAL_API_KEYS = [
   'BASE_HEALTH_CHECKERS',
   'checkBaseHealth',
   'checkResumeBaseDrift',
+  'checkInPlaceCheckout',
+  'setupInPlaceCheckout',
+  'inPlaceWorkspace',
   'codexChatgptSessionState',
   'hasClaudeLoginEvidence',
   // #3214

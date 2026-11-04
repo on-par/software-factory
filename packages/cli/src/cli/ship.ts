@@ -242,8 +242,8 @@ async function shipIssueFrom(
       issue: issueNum,
     } satisfies GithubIssueParams));
   const issueTitle = work.title;
-  const noPr = opts.pr === false; // --no-pr never files child issues or slice PRs: size gate off; --base-branch keeps stack mode
-  const gateOff = noPr || (opts.baseBranch !== undefined && opts.sizeGate !== 'stack');
+  const noPr = opts.pr === false; // --no-pr never files child issues or slice PRs: size gate off; --base-branch keeps stack mode; in place builds one branch in one checkout
+  const gateOff = noPr || opts.inPlace === true || (opts.baseBranch !== undefined && opts.sizeGate !== 'stack');
   const sizeGateMode = gateOff ? 'off' : (opts.sizeGate ?? resolveSizeGateMode(factoryConfig));
   const explicitStack =
     sizeGateMode === 'stack' &&
@@ -263,7 +263,9 @@ async function shipIssueFrom(
     ? ctx.resumeFrom.worktree
     : ctx?.localOnly
       ? ctx.localOnly.workspace
-      : worktreePathFor(repoRoot, ghRepo, issueNum, branchPrefix, loaders);
+      : opts.inPlace
+        ? repoRoot
+        : worktreePathFor(repoRoot, ghRepo, issueNum, branchPrefix, loaders);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
 
@@ -327,6 +329,7 @@ async function shipIssueFrom(
     git,
     paths,
     startPoint: baseRemoteRef(opts.baseBranch),
+    inPlace: opts.inPlace,
   });
 
   const planApprovalEnabled = opts.approvePlan ?? resolvePlanApproval(factoryConfig);

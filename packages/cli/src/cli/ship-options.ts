@@ -24,6 +24,8 @@ export interface ShipIssueOptions {
   pr?: boolean;
   /** --base-branch (#3764): start from origin/<ref> and open the PR against <ref>; undefined = default branch. */
   baseBranch?: string;
+  /** --in-place / FACTORY_WORKSPACE=in-place (#3904): run in the current checkout, no worktree */
+  inPlace?: boolean;
 }
 
 const FORBIDDEN_CHARS = /[\s~^:?*[\\]/;
@@ -53,6 +55,26 @@ export function baseBranchOrExit(raw: string | undefined): string | undefined {
     );
   }
   return parsed;
+}
+
+/** `--in-place` wins; else FACTORY_WORKSPACE ('worktree' | 'in-place'; unset or empty = worktree). */
+export function resolveWorkspaceMode(flag: boolean | undefined, env: NodeJS.ProcessEnv): 'in-place' | 'worktree' {
+  if (flag === true) return 'in-place';
+  const raw = env.FACTORY_WORKSPACE;
+  if (raw === undefined || raw === '' || raw === 'worktree') return 'worktree';
+  if (raw === 'in-place') return 'in-place';
+  throw new CliExitError(`factory: unknown FACTORY_WORKSPACE '${raw}' — expected 'worktree' or 'in-place'`, 2);
+}
+
+/** A message when `--in-place` is combined with a flag it cannot work with, else undefined. */
+export function inPlaceConflict(opts: { baseBranch?: string; sizeGate?: string }): string | undefined {
+  if (opts.baseBranch !== undefined) {
+    return 'factory: --in-place runs on the default branch — drop --base-branch or drop --in-place';
+  }
+  if (opts.sizeGate === 'stack') {
+    return 'factory: --in-place builds one branch in the checkout — drop --stack/--size-gate stack or drop --in-place';
+  }
+  return undefined;
 }
 
 /** A message when `--base-branch` is combined with a flag it cannot work with, else undefined. */

@@ -31,6 +31,7 @@
   "GateStage",
   "GithubQueue",
   "GithubQueueBackendOptions",
+  "InPlaceCheckoutProblem",
   "LintCommand",
   "NEEDS_HUMAN_LABEL",
   "PROVIDER_LEVEL_REASONS",

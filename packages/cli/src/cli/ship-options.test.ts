@@ -2,7 +2,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { CliExitError } from './errors.js';
-import { baseBranchConflict, baseBranchOrExit, baseRemoteRef, parseBaseBranch } from './ship-options.js';
+import {
+  baseBranchConflict,
+  baseBranchOrExit,
+  baseRemoteRef,
+  inPlaceConflict,
+  parseBaseBranch,
+  resolveWorkspaceMode,
+} from './ship-options.js';
 
 describe('parseBaseBranch', () => {
   it.each(['main', 'feat/x', 'release-1.2'])('accepts a plain branch name (%s)', (ref) => {
@@ -84,5 +91,33 @@ describe('baseRemoteRef', () => {
   it('prefixes origin/', () => {
     expect(baseRemoteRef('feat/x')).toBe('origin/feat/x');
     expect(baseRemoteRef(undefined)).toBeUndefined();
+  });
+});
+
+describe('resolveWorkspaceMode (#3904)', () => {
+  it.each([
+    [undefined, undefined, 'worktree'],
+    [undefined, '', 'worktree'],
+    [undefined, 'worktree', 'worktree'],
+    [undefined, 'in-place', 'in-place'],
+    [true, undefined, 'in-place'],
+    [true, 'worktree', 'in-place'],
+  ] as const)('flag %s with FACTORY_WORKSPACE %s gives %s', (flag, env, expected) => {
+    expect(resolveWorkspaceMode(flag, { FACTORY_WORKSPACE: env })).toBe(expected);
+  });
+
+  it('resolveWorkspaceMode rejects an unknown FACTORY_WORKSPACE value', () => {
+    const call = () => resolveWorkspaceMode(undefined, { FACTORY_WORKSPACE: 'docker' });
+    expect(call).toThrow(CliExitError);
+    expect(call).toThrow("unknown FACTORY_WORKSPACE 'docker'");
+  });
+});
+
+describe('inPlaceConflict (#3904)', () => {
+  it('refuses --base-branch and stack, allows the rest', () => {
+    expect(inPlaceConflict({ baseBranch: 'dev' })).toContain('drop --base-branch');
+    expect(inPlaceConflict({ sizeGate: 'stack' })).toContain('drop --stack');
+    expect(inPlaceConflict({ sizeGate: 'off' })).toBeUndefined();
+    expect(inPlaceConflict({})).toBeUndefined();
   });
 });

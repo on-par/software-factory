@@ -211,11 +211,27 @@ export const checkResumeBaseDrift = vi.fn<NonNullable<CliDeps['checkResumeBaseDr
   ref: 'origin/main',
   sha: 'c'.repeat(40),
 }));
-export const inertGitOps: Pick<CliDeps, 'setupWorktree' | 'cleanupWorktree' | 'gitFetch' | 'checkResumeBaseDrift'> = {
+export const checkInPlaceCheckout = vi.fn<NonNullable<CliDeps['checkInPlaceCheckout']>>(async () => null);
+export const setupInPlaceCheckout = vi.fn<NonNullable<CliDeps['setupInPlaceCheckout']>>(async () => ({
+  base: 'origin/main',
+  head: 'abc',
+  remoteBranch: null,
+}));
+export const inertGitOps: Pick<
+  CliDeps,
+  | 'setupWorktree'
+  | 'cleanupWorktree'
+  | 'gitFetch'
+  | 'checkResumeBaseDrift'
+  | 'checkInPlaceCheckout'
+  | 'setupInPlaceCheckout'
+> = {
   setupWorktree,
   cleanupWorktree,
   gitFetch,
   checkResumeBaseDrift,
+  checkInPlaceCheckout,
+  setupInPlaceCheckout,
 };
 
 export function makeInternalFakes() {
