@@ -18,6 +18,7 @@ import type { WorktreeSandbox } from '../utils/microvm.js';
 import type { PrLookup } from '../phases/ship.js';
 import type { RemoteBranchRecord } from '../types/index.js';
 import { cleanupWorktree, setupWorktree } from '../utils/index.js';
+import { setupInPlaceCheckout } from '../utils/in-place.js';
 import type { LocalOnlyPolicy } from '../work/local-only.js';
 
 /** The workspace-provisioning seam runIssue needs: a working tree the pipeline
@@ -74,6 +75,24 @@ export async function worktreeWorkspace(opts: {
     path: opts.worktreePath,
     ...(result?.remoteBranch ? { remoteBranch: result.remoteBranch } : {}),
     dispose: () => cleanup(opts.repoRoot, opts.worktreePath, opts.log, opts.sandbox),
+  };
+}
+
+/** In-place adapter (#3904): the current checkout IS the working tree. The factory did not
+ *  create it, so dispose never tears it down. Locking stays the caller's responsibility. */
+export async function inPlaceWorkspace(opts: {
+  repoRoot: string;
+  branch: string;
+  log?: (type: EventKind, msg: string) => void;
+  findOpenPr?: (branch: string) => Promise<PrLookup>;
+  setup?: typeof setupInPlaceCheckout;
+}): Promise<Workspace> {
+  const setup = opts.setup ?? setupInPlaceCheckout;
+  const result = await setup(opts.repoRoot, opts.branch, opts.log, { findOpenPr: opts.findOpenPr });
+  return {
+    path: opts.repoRoot,
+    ...(result?.remoteBranch ? { remoteBranch: result.remoteBranch } : {}),
+    dispose: async () => {},
   };
 }
 

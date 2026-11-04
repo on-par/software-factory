@@ -1,54 +1,30 @@
 // src/phases/ship.ts — SHIP phase: create/verify PR, mark ready for review
 
-import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import type { Octokit } from '@octokit/rest';
-
-import type { ApprovalGate } from '../approvals/index.js';
-import { type LifecycleBus, withLifecycle } from '../bus/index.js';
-import type { EventKind } from '../events/kinds.js';
-import { gatherEvidencePack } from '../reports/evidence-pack.js';
-import { briefSummaryLine, renderPrBody, stripBriefIds } from '../reports/pr-body.js';
-import { computeDiffStat } from './ship-diff-stat.js';
-import { lazyWalkthrough, type WalkthroughShipOpts } from './ship-walkthrough.js';
-import { prerequisiteStackOrder, renderStackOrderLine, type StackPosition } from './stack-order.js';
-import type { PrerequisiteStackTarget } from '../queue/prerequisite-stack.js';
-import type { ReviewRouting } from '../review/routing.js';
-import {
-  type CommandRunner,
-  checkRemoteIsAncestor,
-  describePushFailure,
-  pushAndVerifyRemoteHead,
-  readRemoteBranchSha,
-  shortDetail,
-  verifyRemoteHead,
-} from './ship-git.js';
-import type { PreviewCheckResult } from '../checkers/preview-check.js';
-import { publishPreviewReceipt } from '../checkers/preview-receipt.js';
-import { type PreviewGate, previewFailureReason, runPreviewGate } from './ship-preview.js';
-import { recoverOrStop } from './ship-recovery.js';
-import { watchShipCi } from './ship-ci-watch.js';
-import { markPrReadyWithRetry } from './ship-ready.js';
-import { readRisk, readSpecBody } from './ship-spec.js';
-import type { CheckSummary } from '../types/index.js';
-import { type InfraRerunOutcome, type watchChecksWithInfraRerun } from '../utils/ci-watch.js';
-import { shellEscape } from '../utils/index.js';
+import { withLifecycle } from '../bus/index.js';
+import { type InfraRerunOutcome } from '../utils/ci-watch.js';
 import { GITHUB_ISSUE_SOURCE } from '../work/github-issue.js';
-import type { WorkRequest } from '../work/index.js';
-import { findMergedPR, findOpenPR, isPullAlreadyExistsError } from './ship-pr-lookup.js';
+import { requestShipApproval } from './ship-approval.js';
+import { pushNewBranch } from './ship-branch-push.js';
+import { watchShipCi } from './ship-ci-watch.js';
+import { syncExistingPr } from './ship-existing-pr.js';
+import { postEvidenceComment } from './ship-evidence-comment.js';
+import { finishShip } from './ship-finish.js';
+import { openOrFindPr } from './ship-open-pr.js';
+import { SHIP_BASE_BRANCH, type ShipPhaseOptions } from './ship-options.js';
+import { findMergedPR, findOpenPR } from './ship-pr-lookup.js';
+import { pushReentry } from './ship-reentry.js';
 import type { PrLookup, ShipResult } from './ship-types.js';
+import { lazyWalkthrough } from './ship-walkthrough.js';
 
-export { findMergedPR, findOpenPR, isPullAlreadyExistsError };
+export { findMergedPR, findOpenPR };
 export type { PrLookup, ShipResult };
-
-/** Ship opens PRs against, and watches required checks of, this branch. */
-const SHIP_BASE_BRANCH = 'main';
 
 const exec = promisify(execCb);
 
-export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Promise<ShipResult> {
+export async function shipPhase(opts: ShipPhaseOptions): Promise<ShipResult> {
   return withLifecycle(
     {
       bus: opts.bus,
@@ -67,60 +43,7 @@ export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Prom
   );
 }
 
-async function shipPhaseImpl(opts: {
-  issue: WorkKey;
-  repo: string;
-  worktree: string;
-  branch: string;
-  octokit: Octokit;
-  watchCI?: boolean;
-  /** Resolved pr.footer; undefined uses the default, empty string omits it. */
-  footer?: string;
-  /** Stop at the draft PR: skip mark-ready (#3449). */
-  draft?: boolean;
-  /** Post the evidence pack as a PR comment (pr.evidenceComment); default off. */
-  evidenceComment?: boolean;
-  log: (type: EventKind, msg: string) => void;
-  run?: CommandRunner;
-  /** Runs the gh rerun argv for the CI infra rescue (#2365); default runCommand. */
-  rerun?: (argv: readonly string[]) => Promise<{ ok: boolean }>;
-  approvalGate?: ApprovalGate;
-  checkSummary?: CheckSummary;
-  specPath?: string;
-  eventsFile?: string;
-  startedAt?: string;
-  logsDir?: string;
-  reworkRounds?: number;
-  /** PR classifier decision (#1724), rendered into the evidence pack. */
-  reviewRouting?: ReviewRouting;
-  /** Model pins that were not honored (#2511), rendered into the evidence pack. */
-  pinNotes?: string[];
-  /** The run's resolved work request; when its kind is not 'github-issue', the PR
-   *  title/body come from it instead of fetching the (nonexistent) issue (#507). */
-  work?: Pick<WorkRequest, 'id' | 'kind' | 'title' | 'reference'>;
-  /** The ADR-0147 slice this run ships; titles the PR `slice k/n` and only the final slice closes the issue. */
-  slice?: { index: number; count: number };
-  /** Stack-mode (ADR-0161) position: the PR opens on `stack.base` and its body names the stack order. Ignored for inline work. */
-  stack?: StackPosition;
-  /** PR base for a non-stack run started from another branch (#3764); default main. */
-  baseBranch?: string;
-  /** The open prerequisite PR this issue is stacked on (#3916): the body names the stack order and carries the marker. */
-  prerequisiteStack?: PrerequisiteStackTarget;
-  /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
-  laneId?: string;
-  /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
-  bus?: LifecycleBus;
-  /** origin/<branch> SHA recorded at worktree creation (#1868). When set, the new-PR push
-   *  replaces that stale head under a lease on this SHA, and fails closed if the remote moved (#1869). */
-  recordedRemoteSha?: string;
-  /** SHIP re-entry after a CI rework round (#2816): same open PR, plain push, watch the pushed SHA. */
-  reentry?: { prNumber: number; previousHeadSha?: string };
-  /** CI watch deadline (#3569); default DEFAULT_CI_DEADLINE_MS. */
-  ciDeadlineMs?: number;
-  walkthrough?: WalkthroughShipOpts['walkthrough'];
-  previewGate?: PreviewGate;
-  ciWatch?: typeof watchChecksWithInfraRerun;
-}): Promise<ShipResult> {
+async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
   const {
     issue,
     repo,
@@ -141,22 +64,8 @@ async function shipPhaseImpl(opts: {
   const walkthrough = lazyWalkthrough(run, worktree, { ...opts, base }, log);
 
   if (approvalGate) {
-    // Log a 'ship'-typed event before anything else so the TUI's activePhase
-    // advances to SHIP first — otherwise a denial reports failedPhase as
-    // whichever phase (CHECK/BUILD) last logged, which is misleading.
-    log('ship', `Starting ship phase for ${branch}`);
-    const diffStat = await computeDiffStat(run, worktree, base);
-    log(
-      'approval_requested',
-      `awaiting approval to ship ${branch}${checkSummary ? ` (checks: ${checkSummary.passes} pass, ${checkSummary.failures} fail, ${checkSummary.skips} skip)` : ''}`,
-    );
-    const response = await approvalGate({ issue: issueNumberOf(issue), branch, worktree, diffStat, checkSummary });
-    if (!response.approved) {
-      const reason = response.reason ?? 'denied';
-      log('ship_denied', `ship denied for ${branch}: ${reason}`);
-      return { ok: false, denied: true, deniedReason: reason };
-    }
-    log('approval_granted', `approval granted for ${branch}`);
+    const denied = await requestShipApproval({ approvalGate, issue, branch, worktree, base, run, checkSummary, log });
+    if (denied) return denied;
   }
 
   // Check if a PR already exists (claude route may have created one)
@@ -172,81 +81,16 @@ async function shipPhaseImpl(opts: {
   let headSha: string | undefined;
 
   if (reentry) {
-    if (prNumber !== reentry.prNumber) {
-      const reason = `re-entry expected open PR #${reentry.prNumber} for ${branch} but found ${prNumber === undefined ? 'none' : `#${prNumber}`}`;
-      log('ship', reason);
-      return { ok: false, reason };
-    }
-    let localSha: string;
-    try {
-      localSha = (await run('git rev-parse HEAD', { cwd: worktree })).stdout.trim();
-    } catch (err) {
-      const reason = `could not read local HEAD on re-entry (${shortDetail(err)})`;
-      log('ship', reason);
-      return { ok: false, prNumber, reason };
-    }
-    if (localSha && localSha === reentry.previousHeadSha) {
-      const reason = `CI rework produced no new commit on ${branch}`;
-      log('ship', reason);
-      return { ok: false, prNumber, ciOutcome: 'failure', reason, headSha: localSha };
-    }
-    try {
-      await run(`git push origin ${shellEscape(branch)}`, { cwd: worktree });
-    } catch (err) {
-      const { kind, detail } = describePushFailure(err);
-      const reason = `re-entry push of ${branch} failed (${kind}): ${detail}`;
-      log('ship', reason);
-      return { ok: false, prNumber, reason };
-    }
-    const remoteHead = await verifyRemoteHead(run, worktree, branch);
-    if (remoteHead.status !== 'match') {
-      const reason =
-        remoteHead.status === 'mismatch'
-          ? `remote head ${remoteHead.remoteSha} does not match local HEAD ${remoteHead.localSha} for ${branch} after re-entry push`
-          : `could not verify the remote head for ${branch} after re-entry push (${remoteHead.detail})`;
-      log('ship', reason);
-      return { ok: false, prNumber, reason };
-    }
-    watchRef = remoteHead.remoteSha;
-    headSha = remoteHead.remoteSha;
-    log('ship', `re-entry pushed ${branch} @ ${headSha}`);
+    const pushed = await pushReentry({ run, worktree, branch, prNumber, reentry, log });
+    if ('stop' in pushed) return pushed.stop;
+    ({ watchRef, headSha } = pushed);
   } else if (prNumber) {
-    // Rework commits made after BUILD's push must reach the open PR before evidence or ready (#1813).
-    const current = await verifyRemoteHead(run, worktree, branch);
-    if (current.status === 'match') {
-      log(
-        'ship',
-        `remote head ${current.remoteSha} matches local HEAD ${current.localSha} for ${branch} — already in sync, not pushing`,
-      );
-    } else {
-      if (current.status === 'mismatch') {
-        const ancestry = await checkRemoteIsAncestor(run, worktree, current.remoteSha, current.localSha);
-        if (ancestry.status !== 'ancestor') {
-          const reason =
-            ancestry.status === 'diverged'
-              ? `origin/${branch} @ ${current.remoteSha} has diverged from local HEAD ${current.localSha} (remote has commits local HEAD lacks) on open PR #${prNumber} — not force-pushing`
-              : `could not confirm origin/${branch} @ ${current.remoteSha} is an ancestor of local HEAD ${current.localSha} on open PR #${prNumber} (${ancestry.detail})`;
-          log('ship', `${reason} — aborting before evidence`);
-          return { ok: false, prNumber, reason };
-        }
-      }
-      const pushed = await pushAndVerifyRemoteHead(run, worktree, branch, `git push -u origin ${shellEscape(branch)}`);
-      if (pushed.status !== 'pushed') {
-        const reason =
-          pushed.status === 'push-failed'
-            ? `push of ${branch} to open PR #${prNumber} failed (${pushed.kind}): ${pushed.detail}`
-            : pushed.status === 'mismatch'
-              ? `remote head ${pushed.remoteSha} does not match local HEAD ${pushed.localSha} for ${branch} after push to open PR #${prNumber}`
-              : `could not verify the remote head for ${branch} after push to open PR #${prNumber} (${pushed.detail})`;
-        log('ship', `${reason} — aborting before evidence`);
-        return { ok: false, prNumber, reason };
-      }
-      log('ship', `remote head ${pushed.remoteSha} matches local HEAD ${pushed.localSha} for ${branch}`);
-    }
+    const stop = await syncExistingPr({ run, worktree, branch, prNumber, log });
+    if (stop) return stop;
   }
 
   if (!prNumber) {
-    const stop = await recoverOrStop({
+    const stop = await pushNewBranch({
       run,
       worktree,
       branch,
@@ -254,124 +98,13 @@ async function shipPhaseImpl(opts: {
       octokit,
       owner,
       repoName,
+      recordedRemoteSha: opts.recordedRemoteSha,
       log,
     });
     if (stop) return stop;
-
-    // Push branch. A rejected push means the remote head does not contain this run's
-    // commits — opening a PR against it would advertise work that is not there, so the
-    // ship fails closed here rather than continuing to PR creation (#734).
-    let pushCmd = `git push -u origin ${shellEscape(branch)}`;
-    const recorded = opts.recordedRemoteSha;
-    let leased = false;
-    if (recorded) {
-      // A retry rebuilds the branch from origin/main, so an earlier run's push is stale. Replace it
-      // only while the remote is still exactly what was recorded at worktree creation (#1869).
-      const current = await readRemoteBranchSha(run, worktree, branch);
-      if (current.status === 'unreadable') {
-        const reason = `could not read origin/${branch} to check recorded SHA ${recorded} (${current.detail})`;
-        log('ship', `${reason} — aborting before push`);
-        return { ok: false, reason };
-      }
-      if (current.sha === null) {
-        log('ship', `origin/${branch} recorded @ ${recorded} no longer exists — nothing to replace, plain push`);
-      } else if (current.sha !== recorded) {
-        const reason = `origin/${branch} moved since it was recorded: recorded ${recorded}, current ${current.sha}`;
-        log('ship', `${reason} — aborting before push`);
-        return { ok: false, reason };
-      } else {
-        pushCmd = `git push ${shellEscape(`--force-with-lease=${branch}:${recorded}`)} -u origin ${shellEscape(branch)}`;
-        leased = true;
-        log('ship', `replacing stale origin/${branch} @ ${recorded} with a leased push`);
-      }
-    }
-    // A zero-exit push is not proof the remote branch actually carries this run's commits — a
-    // concurrent push or an update that silently applied nothing leaves the remote head elsewhere,
-    // and a PR opened against it advertises work that is not there (#735). Fail closed, like the
-    // push-failure abort (#734).
-    const pushed = await pushAndVerifyRemoteHead(run, worktree, branch, pushCmd);
-    if (pushed.status === 'push-failed') {
-      const pushReason = `git push failed (${pushed.kind}): ${pushed.detail}`;
-      log('ship', `${pushReason} — aborting before PR creation`);
-      if (leased) {
-        return {
-          ok: false,
-          reason: `leased push of ${branch} over recorded ${recorded} was rejected (${pushed.kind})`,
-        };
-      }
-      return { ok: false, reason: pushReason };
-    }
-    if (pushed.status === 'mismatch') {
-      const reason = `remote head ${pushed.remoteSha} does not match local HEAD ${pushed.localSha} for ${branch}`;
-      log('ship', `${reason} — aborting before PR creation`);
-      return { ok: false, reason };
-    }
-    if (pushed.status === 'unreadable') {
-      const reason = `could not verify the remote head for ${branch} (${pushed.detail}); local HEAD ${pushed.localSha ?? 'unknown'}`;
-      log('ship', `${reason} — aborting before PR creation`);
-      return { ok: false, reason };
-    }
-    log('ship', `remote head ${pushed.remoteSha} matches local HEAD ${pushed.localSha} for ${branch}`);
-
-    // Get title from issue (skipped for a non-github work source — no such issue exists)
-    const title = inlineWork
-      ? inlineWork.title
-      : (await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issueNumberOf(issue) })).data.title;
-
-    const slice = inlineWork ? undefined : opts.slice;
-    const finalSlice = !slice || slice.index >= slice.count;
-    // A brief is a local file reviewers cannot open, so the body describes it by its title and links the
-    // open PR it builds on (a --stack or --base-branch base), never its id, digest or path.
-    const basePr =
-      inlineWork && base !== SHIP_BASE_BRANCH ? await findOpenPR(octokit, owner, repoName, base) : undefined;
-    const summaryLine = inlineWork
-      ? briefSummaryLine(title, basePr?.status === 'found' ? basePr.prNumber : undefined)
-      : slice
-        ? `Implements slice ${slice.index}/${slice.count} of #${issue}.`
-        : `Implements #${issue}.`;
-    const prTitle = inlineWork
-      ? stripBriefIds(title)
-      : slice
-        ? `${title} — slice ${slice.index}/${slice.count} (#${issue})`
-        : `${title} (#${issue})`;
-
-    // Create PR
-    try {
-      const { data: pr } = await octokit.rest.pulls.create({
-        owner,
-        repo: repoName,
-        head: branch,
-        base,
-        title: prTitle,
-        draft: true,
-        body: renderPrBody({
-          summaryLine,
-          footer: opts.footer,
-          stackOrder: stack ? renderStackOrderLine(stack) : prerequisiteStackOrder(opts.prerequisiteStack, issue, base),
-          specBody: await readSpecBody(opts.specPath),
-          checkSummary,
-          reworkRounds: opts.reworkRounds,
-          risk: await readRisk(opts.specPath),
-          walkthrough: await walkthrough.walkthrough(),
-          typescriptLines: await walkthrough.counts(),
-          closes: inlineWork || !finalSlice ? undefined : issue,
-          partOf: !inlineWork && !finalSlice ? issue : undefined,
-        }),
-      });
-
-      prNumber = pr.number;
-      log('pr_opened', `opened PR #${prNumber} for committed work on ${branch} (base ${base})`);
-    } catch (err) {
-      if (!isPullAlreadyExistsError(err)) throw err;
-      const existing = await findOpenPR(octokit, owner, repoName, branch);
-      if (existing.status !== 'found') {
-        const reason = `pulls.create reported an existing PR for ${branch} but re-querying did not find it (${existing.status === 'error' ? existing.detail : 'no open PR listed'})`;
-        log('ship', `${reason} — aborting`);
-        return { ok: false, reason };
-      }
-      prNumber = existing.prNumber;
-      log('recovered', `PR #${prNumber} already existed for ${branch}; reusing it`);
-    }
+    const opened = await openOrFindPr({ opts, inlineWork, stack, base, owner, repoName, walkthrough });
+    if ('stop' in opened) return opened.stop;
+    prNumber = opened.prNumber;
   }
 
   if (!prNumber) {
@@ -381,27 +114,7 @@ async function shipPhaseImpl(opts: {
   }
 
   if (!reentry && opts.evidenceComment)
-    try {
-      let checkedSha: string | undefined;
-      try {
-        checkedSha = (await run('git rev-parse HEAD', { cwd: worktree })).stdout.trim() || undefined;
-      } catch {}
-      const body = gatherEvidencePack({
-        issue,
-        checkSummary,
-        reworkRounds: opts.reworkRounds,
-        specPath: opts.specPath,
-        eventsFile: opts.eventsFile,
-        startedAt: opts.startedAt,
-        logsDir: opts.logsDir,
-        reviewRouting: opts.reviewRouting,
-        pinNotes: opts.pinNotes,
-        headSha: checkedSha,
-        walkthrough: await walkthrough.walkthrough(),
-      });
-      await octokit.rest.issues.createComment({ owner, repo: repoName, issue_number: prNumber, body });
-      log('evidence', `posted evidence pack to PR #${prNumber}`);
-    } catch {}
+    await postEvidenceComment({ opts, run, owner, repoName, prNumber, walkthrough });
 
   let ciOutcome: InfraRerunOutcome | undefined;
   let ciWatchError: string | undefined;
@@ -424,65 +137,5 @@ async function shipPhaseImpl(opts: {
     ({ ciOutcome, ciWatchError } = ci);
   }
 
-  const ciPending = ciOutcome === 'timeout' || ciWatchError !== undefined;
-
-  let previewCheck: PreviewCheckResult | undefined;
-  if (opts.previewGate) {
-    const sha = headSha ?? (await run('git rev-parse HEAD', { cwd: worktree })).stdout.trim();
-    const publish = (n: number, r: PreviewCheckResult) => publishPreviewReceipt(octokit, owner, repoName, n, r);
-    const gateCtx = { log, ciPending, publish, ...(opts.logsDir ? { logsDir: opts.logsDir } : {}) };
-    previewCheck = await runPreviewGate(opts.previewGate, { prNumber, headSha: sha }, gateCtx);
-    if (previewCheck.status !== 'pass') {
-      return {
-        ok: false,
-        prNumber,
-        reason: previewFailureReason(prNumber, previewCheck),
-        previewCheck,
-        headSha: sha,
-        ...(ciOutcome ? { ciOutcome } : {}),
-        ...(ciPending ? { ciPending: true, draft: true } : {}),
-      };
-    }
-  }
-
-  if (ciWatchError !== undefined) {
-    const reason = `CI unknown for PR #${prNumber}: the CI watch failed (${ciWatchError}); leaving PR as draft`;
-    log('ship', reason);
-    return { ok: false, prNumber, reason, ciPending: true, draft: true, ...(headSha ? { headSha } : {}) };
-  }
-
-  // Mark ready for review (if draft). REST pulls.update ignores `draft`;
-  // undrafting requires the markPullRequestReadyForReview GraphQL mutation.
-  if (opts.draft || ciPending) {
-    try {
-      const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
-      if (!pr.draft) log('ship', `PR #${prNumber} is already open and not a draft; draft mode leaves it as is`);
-    } catch {}
-  } else {
-    const flip = await markPrReadyWithRetry(octokit, owner, repoName, prNumber);
-    if (!flip.ok) {
-      const reason = `could not mark PR #${prNumber} ready for review after one retry: ${flip.detail}`;
-      log('warn', reason);
-      return {
-        ok: false,
-        prNumber,
-        reason,
-        ...(ciOutcome === undefined ? {} : { ciOutcome }),
-        ...(headSha ? { headSha } : {}),
-      };
-    }
-  }
-
-  const noChecks = ciOutcome === 'no-checks' ? ' (CI skipped: no checks found)' : '';
-  const readyLabel = opts.draft || ciPending ? `left as draft${ciPending ? ' (CI pending)' : ''}` : 'ready for review';
-  log('ready', `PR #${prNumber} ${readyLabel}${noChecks}`);
-  return {
-    ok: true,
-    prNumber,
-    ...(ciOutcome === undefined ? {} : { ciOutcome }),
-    ...(headSha ? { headSha } : {}),
-    ...(opts.draft || ciPending ? { draft: true } : {}),
-    ...(ciPending ? { ciPending: true } : {}),
-    ...(previewCheck ? { previewCheck } : {}),
-  };
+  return finishShip({ opts, run, owner, repoName, prNumber, headSha, ciOutcome, ciWatchError });
 }

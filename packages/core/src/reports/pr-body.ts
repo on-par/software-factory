@@ -40,15 +40,28 @@ export interface PrBodyInput {
 
 const KEY = String.raw`[A-Z][A-Z0-9]{1,9}-\d+`;
 const LEADING_KEY = new RegExp(String.raw`^\s*(?:[\[(]${KEY}[\])]|${KEY}(?=\s*(?:[:\-–—|]|$)))\s*[:\-–—|]?\s*`);
-const TRAILING_KEY = new RegExp(String.raw`\s*[\[(]${KEY}[\])]\s*$`);
-const LOCAL_BRIEF = /[^.\n]*\blocal[ -]brief\b[^.\n]*(?:\.|$)/gim;
+const TRAILING_KEY = new RegExp(String.raw`[\[(]${KEY}[\])]$`);
+const LOCAL_BRIEF = /\blocal[ -]brief\b/i;
+
+/** Drops every sentence (a run up to a `.` or line end) that mentions a "local brief"; linear time. */
+function dropLocalBriefSentences(text: string): string {
+  return text
+    .split('\n')
+    .map((line) =>
+      line
+        .split(/(?<=\.)/)
+        .filter((piece) => !LOCAL_BRIEF.test(piece))
+        .join(''),
+    )
+    .join('\n');
+}
 
 /** A brief's title with its tracker-style id (`ARA-12: …`, `[ARA-12] …`, `… (ARA-12)`) and any "local brief"
  *  mention removed, for PR titles and bodies: reviewers cannot look those ids up. Plain words like UTF-8 stay. */
 export function stripBriefIds(text: string): string {
-  const stripped = text
-    .replace(LOCAL_BRIEF, '')
+  const stripped = dropLocalBriefSentences(text)
     .replace(LEADING_KEY, '')
+    .trimEnd()
     .replace(TRAILING_KEY, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -57,10 +70,10 @@ export function stripBriefIds(text: string): string {
 
 /** Summary line for brief-driven work: what it covers (the brief's title) and the open PR it builds on. Never the brief's id, digest or path. */
 export function briefSummaryLine(title: string, basePr?: number): string {
-  const what = stripBriefIds(title)
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[.!?…]+$/, '');
+  let what = stripBriefIds(title);
+  while (what.length > 0 && '.!?…'.includes(what.charAt(what.length - 1))) {
+    what = what.slice(0, -1);
+  }
   return `${what}.${basePr === undefined ? '' : ` Builds on #${basePr}.`}`;
 }
 
