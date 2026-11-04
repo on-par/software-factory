@@ -28,6 +28,7 @@ section to `## X.Y.Z - date`. See
 
 ### Fixed
 
+- SHIP merges origin/main into the branch before it pushes a PR against main, auto-resolving `## Unreleased` CHANGELOG and ADR index conflicts as `factory land` does, so a sibling's CHANGELOG bullet no longer leaves the PR conflicting with no CI and stranded as a CI-pending draft; a conflict it cannot resolve is aborted and the branch ships unsynced as before (#3945).
 - CHECK follows a root workspace fan-out `test` script into the owning npm/pnpm/yarn workspace and runs fail-to-pass selectors there with vitest or jest (#3913).
 
 ### Changed

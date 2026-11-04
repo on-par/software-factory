@@ -19,6 +19,7 @@ import { findMergedPR, findOpenPR } from './ship-pr-lookup.js';
 import { pushReentry } from './ship-reentry.js';
 import type { PrLookup, ShipResult } from './ship-types.js';
 import { lazyWalkthrough } from './ship-walkthrough.js';
+import { syncShipBranchWithMain } from './ship-main-sync.js';
 
 export { findMergedPR, findOpenPR };
 export type { PrLookup, ShipResult };
@@ -83,6 +84,11 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
   let watchRef = branch;
   let headSha: string | undefined;
 
+  // #3945: open the PR mergeable with main (CHANGELOG/ADR index auto-resolved), or GitHub runs no CI on it.
+  const synced =
+    opts.syncMain && !reentry && base === SHIP_BASE_BRANCH
+      ? await syncShipBranchWithMain({ run, worktree, branch, log })
+      : undefined;
   if (reentry) {
     const pushed = await pushReentry({ run, worktree, branch, prNumber, reentry, log });
     if ('stop' in pushed) return pushed.stop;
@@ -117,7 +123,7 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
   }
 
   if (!reentry && opts.evidenceComment)
-    await postEvidenceComment({ opts, run, owner, repoName, prNumber, walkthrough });
+    await postEvidenceComment({ opts, run, owner, repoName, prNumber, walkthrough, checkedSha: synced?.checkedSha });
 
   let ciOutcome: InfraRerunOutcome | undefined;
   let ciWatchError: string | undefined;
