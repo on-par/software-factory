@@ -22,7 +22,7 @@ see [Bring your own agent](#bring-your-own-agent).
 ## Choosing and routing agents
 
 Models whose CLI is not installed are skipped. On a machine with one CLI, every phase runs on that CLI's
-models and PLAN picks its build route. With several CLIs, pin a phase in `.factory/config.json`
+models and PLAN picks its build route. With several CLIs, pin a phase in `.factory/config.yaml`
 (`models.pins.plan`, `build`, `checker`, `triage`), set `route`, or reorder `tiers`.
 `factory triage --model <id>` picks the triage model for one run. See [models.md](models.md).
 

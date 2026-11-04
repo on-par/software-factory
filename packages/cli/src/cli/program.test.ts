@@ -40,6 +40,11 @@ describe('buildProgram', () => {
     for (const cmd of program.commands) expect(cmd.helpGroup()).not.toBe(OTHER_GROUP);
   });
 
+  it('logs help names .factory/state/events.ndjson', () => {
+    const logs = buildProgram(PROGRAM_HANDLERS, {}).commands.find((c) => c.name() === 'logs');
+    expect(logs?.description()).toContain('.factory/state/events.ndjson');
+  });
+
   it('init registers -y/--yes alongside --force', () => {
     const init = buildProgram(PROGRAM_HANDLERS, {}).commands.find((c) => c.name() === 'init');
     expect(init?.options.some((o) => o.long === '--yes' && o.short === '-y')).toBe(true);

@@ -595,7 +595,7 @@ function resolvePhaseOps(overrides: Partial<PhaseOps>, base: PhaseOps = phaseOps
 export const PREREQUISITES_TEXT = `First step: run \`factory doctor\` to check your setup and see what to fix.
 
 Prerequisites:
-  - Claude Code CLI installed and authenticated (Claude subscription): https://claude.com/claude-code
+  - A supported coding agent CLI installed and authenticated: Claude Code, Codex, OpenCode or Pi (\`factory doctor\` shows which are ready)
   - GitHub CLI authenticated: gh auth login
   - GITHUB_TOKEN or GH_TOKEN set (falls back to \`gh auth token\`)
 Run inside a git repository with a GitHub remote.
