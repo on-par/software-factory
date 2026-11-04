@@ -8,7 +8,21 @@ import { applyLatency, realSimClock, type SimClock, type SimLatency } from './la
 export type SimRecordedCall = [string, ...unknown[]];
 
 export type SimOctokitEndpoint =
-  'issues.get' | 'issues.update' | 'pulls.list' | 'pulls.create' | 'pulls.get' | 'checks.listForRef' | 'graphql';
+  | 'issues.get'
+  | 'issues.update'
+  | 'issues.listComments'
+  | 'issues.createComment'
+  | 'pulls.list'
+  | 'pulls.create'
+  | 'pulls.get'
+  | 'pulls.update'
+  | 'pulls.listReviews'
+  | 'pulls.listReviewComments'
+  | 'pulls.createReplyForReviewComment'
+  | 'pulls.requestReviewers'
+  | 'users.getAuthenticated'
+  | 'checks.listForRef'
+  | 'graphql';
 
 export interface SimOctokitStep {
   /** The EXACT resolved value of the call — REST scripts must include their own `{ data }` wrapper. */
@@ -32,13 +46,26 @@ export interface SimOctokitOptions {
 
 export interface SimOctokit {
   graphql: (query: string, vars: unknown) => Promise<any>;
+  /** Mirrors octokit.paginate for a single page: resolves to the `data` of one call to `route`. */
+  paginate: (route: (args: any) => Promise<any>, args: any) => Promise<any[]>;
   rest: {
-    issues: { get: (args: any) => Promise<any>; update: (args: any) => Promise<any> };
+    issues: {
+      get: (args: any) => Promise<any>;
+      update: (args: any) => Promise<any>;
+      listComments: (args: any) => Promise<any>;
+      createComment: (args: any) => Promise<any>;
+    };
     pulls: {
       list: (args: any) => Promise<any>;
       create: (args: any) => Promise<any>;
       get: (args: any) => Promise<any>;
+      update: (args: any) => Promise<any>;
+      listReviews: (args: any) => Promise<any>;
+      listReviewComments: (args: any) => Promise<any>;
+      createReplyForReviewComment: (args: any) => Promise<any>;
+      requestReviewers: (args: any) => Promise<any>;
     };
+    users: { getAuthenticated: () => Promise<any> };
     checks: { listForRef: (args: any) => Promise<any> };
   };
 }
@@ -70,6 +97,7 @@ export function createSimOctokit(options: SimOctokitOptions = {}): {
       invoke('graphql', ['graphql', query, vars], () => ({
         markPullRequestReadyForReview: { pullRequest: { isDraft: false } },
       })),
+    paginate: async (route, args) => (await route(args)).data,
     rest: {
       issues: {
         get: (args: any) =>
@@ -80,6 +108,9 @@ export function createSimOctokit(options: SimOctokitOptions = {}): {
             },
           })),
         update: (args: any) => invoke('issues.update', ['issues.update', args], () => ({ data: {} })),
+        listComments: (args: any) => invoke('issues.listComments', ['issues.listComments', args], () => ({ data: [] })),
+        createComment: (args: any) =>
+          invoke('issues.createComment', ['issues.createComment', args], () => ({ data: {} })),
       },
       pulls: {
         list: (args: any) => invoke('pulls.list', ['pulls.list', args], () => ({ data: [] })),
@@ -88,6 +119,20 @@ export function createSimOctokit(options: SimOctokitOptions = {}): {
           invoke('pulls.get', ['pulls.get', args], () => ({
             data: { draft: true, node_id: `PR_${args.pull_number}` },
           })),
+        update: (args: any) => invoke('pulls.update', ['pulls.update', args], () => ({ data: {} })),
+        listReviews: (args: any) => invoke('pulls.listReviews', ['pulls.listReviews', args], () => ({ data: [] })),
+        listReviewComments: (args: any) =>
+          invoke('pulls.listReviewComments', ['pulls.listReviewComments', args], () => ({ data: [] })),
+        createReplyForReviewComment: (args: any) =>
+          invoke('pulls.createReplyForReviewComment', ['pulls.createReplyForReviewComment', args], () => ({
+            data: {},
+          })),
+        requestReviewers: (args: any) =>
+          invoke('pulls.requestReviewers', ['pulls.requestReviewers', args], () => ({ data: {} })),
+      },
+      users: {
+        getAuthenticated: () =>
+          invoke('users.getAuthenticated', ['users.getAuthenticated'], () => ({ data: { login: 'factory-bot' } })),
       },
       checks: {
         listForRef: (args: any) =>

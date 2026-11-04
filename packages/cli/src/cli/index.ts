@@ -348,6 +348,7 @@ import { readRunFlagOverrides, recordDraftPrFlag } from './run-flags.js';
 import { runStalenessGuard } from './staleness.js';
 import { cmdBaselineClear } from './baseline.js';
 import { cmdBreakerReset } from './breaker.js';
+import { cmdRespond } from './respond-command.js';
 import { withShutdown } from './shutdown.js';
 import { runWorktreeKeep, runWorktreeRelease } from './worktree-keep.js';
 import { gcWorktreeSandbox, reapParkedLane, reapPrlessShip } from './worktree-reap.js';
@@ -4341,6 +4342,7 @@ export const PROGRAM_HANDLERS = {
   cmdWorktreeRelease,
   cmdBaselineClear,
   cmdBreakerReset,
+  cmdRespond,
   cmdReset,
   cmdSupervise: withShutdown(runSupervise),
   cmdStop,

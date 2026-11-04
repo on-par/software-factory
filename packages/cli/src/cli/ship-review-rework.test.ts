@@ -58,7 +58,10 @@ describe('claimReworkRequests', () => {
     queueReview();
     queueIterate();
     const claim = claimReworkRequests(paths, 42, false, vi.fn());
-    expect(claim).toEqual({ reviewRework: { prNumber: 7, reviewId: 3, reviewer: 'bob' } });
+    expect(claim).toEqual({
+      reviewRework: { prNumber: 7, reviewId: 3, reviewer: 'bob' },
+      feedbackRound: { prNumber: 7 },
+    });
     expect(claimIterateRequest(paths.iterate, 42, false, vi.fn())).toHaveProperty('iterate');
   });
 
@@ -71,6 +74,12 @@ describe('claimReworkRequests', () => {
   it('claimReviewReworkRequest still claims on its own', () => {
     queueReview();
     expect(claimReviewReworkRequest(paths.reviewRework, 42, false, vi.fn())).toHaveProperty('reviewRework');
+  });
+
+  it('a claimed review rework also requests a feedback round', () => {
+    queueReview();
+    expect(claimReviewReworkRequest(paths.reviewRework, 42, false, vi.fn()).feedbackRound).toEqual({ prNumber: 7 });
+    expect(claimReviewReworkRequest(paths.reviewRework, 42, false, vi.fn())).toEqual({});
   });
 
   it('claims a queued comment rework with source comment (#3882)', () => {
@@ -86,6 +95,7 @@ describe('claimReworkRequests', () => {
     const log = vi.fn();
     expect(claimReviewReworkRequest(paths.reviewRework, 42, false, log)).toEqual({
       reviewRework: { prNumber: 7, reviewId: 55, reviewer: 'bob', source: 'comment' },
+      feedbackRound: { prNumber: 7 },
     });
     expect(log).toHaveBeenCalledWith('rework', expect.stringContaining('comment 55'));
   });

@@ -353,6 +353,16 @@ describe('comment-sourced records (#3882)', () => {
     expect(countReviewReworkRuns(store, workKeyFromIssue(42))).toBe(1);
   });
 
+  it('a feedback record round-trips under its own key and never collides with a review or comment id', () => {
+    const file = join(dirs.makeSync('src-'), 's.json');
+    const store = createFileReviewReworkStore(file);
+    store.record({ reviewId: 5, source: 'feedback', ...base });
+    expect(store.has(5, 'feedback')).toBe(true);
+    expect(store.has(5)).toBe(false);
+    expect(store.has(5, 'comment')).toBe(false);
+    expect(createFileReviewReworkStore(file).list()).toMatchObject([{ reviewId: 5, source: 'feedback' }]);
+  });
+
   it('drops a record with an invalid source', () => {
     const file = join(dirs.makeSync('src-'), 's.json');
     writeFileSync(file, JSON.stringify({ reviews: [{ reviewId: 5, source: 'email', ...base }] }));

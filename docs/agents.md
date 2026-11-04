@@ -26,6 +26,10 @@ models and PLAN picks its build route. With several CLIs, pin a phase in `.facto
 (`models.pins.plan`, `build`, `checker`, `triage`), set `route`, or reorder `tiers`.
 `factory triage --model <id>` picks the triage model for one run. See [models.md](models.md).
 
+The `feedback_triage` role is a tool-less JSON call on the `triage_cheap` tier. A feedback round (`factory respond <pr>`
+or a queued review rework) uses it to sort each unhandled trusted PR comment into actionable, question or
+out-of-scope, and to flag feedback that changes the spec so PLAN runs again (#3910).
+
 ## Claude Code
 
 ### Install and log in

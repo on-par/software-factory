@@ -23,6 +23,7 @@ import {
   fetchCommentFeedback,
   renderReviewFeedback,
   ReviewReworkError,
+  reviewReworkResume,
   runRequestedReviewRework,
   runReviewReworkBuild,
 } from './review-rework.js';
@@ -347,5 +348,102 @@ describe('iterate (#3625)', () => {
     await runIssue({ ...iterateRequest, resumeFrom }, policy, ports(octokit));
     expect(octokit.rest.pulls.get).not.toHaveBeenCalled();
     expect(checkPhase).toHaveBeenCalled();
+  });
+});
+
+describe('feedback round rework (#3910)', () => {
+  const feedbackRequest: RunRequest = { ...request, feedbackRound: { prNumber: 7 } };
+  const summary = {
+    failures: 1,
+    passes: 0,
+    skips: 0,
+    total: 1,
+    results: [{ checker: 'review_feedback', result: 'FAIL' as const, details: 'rename it' }],
+  };
+
+  it('resumes at CHECK unless the plan re-plans', () => {
+    expect(reviewReworkResume(feedbackRequest)).toMatchObject({ phase: 'check' });
+    expect(reviewReworkResume(feedbackRequest, { replan: false })).toMatchObject({ phase: 'check' });
+    expect(reviewReworkResume(feedbackRequest, { replan: true })).toBeUndefined();
+    expect(reviewReworkResume(request, { replan: false })).toBeUndefined();
+  });
+
+  it('reworks with the plan summary after the open-PR guard', async () => {
+    const { octokit } = fakeOctokit();
+    const log = vi.fn();
+    await runRequestedReviewRework(feedbackRequest, { octokit, reworkWorker }, { log } as never, {
+      prNumber: 7,
+      summary,
+    });
+    expect(reworkWorker).toHaveBeenCalledTimes(1);
+    expect(reworkWorker.mock.calls[0][0]).toMatchObject({
+      summary,
+      extraInstructions: expect.stringContaining('reviewer'),
+    });
+  });
+
+  it('does nothing when no item is actionable', async () => {
+    const { octokit } = fakeOctokit();
+    await runRequestedReviewRework(feedbackRequest, { octokit, reworkWorker }, { log: vi.fn() } as never, {
+      prNumber: 7,
+      summary: undefined,
+    });
+    expect(reworkWorker).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the PR is closed, and wraps a read error', async () => {
+    const closed = fakeOctokit({ state: 'closed', head: { ref: BRANCH } });
+    const plan = { prNumber: 7, summary };
+    await expect(
+      runRequestedReviewRework(
+        feedbackRequest,
+        { octokit: closed.octokit, reworkWorker },
+        { log: vi.fn() } as never,
+        plan,
+      ),
+    ).rejects.toThrow(ReviewReworkError);
+    const broken = fakeOctokit();
+    vi.mocked(broken.octokit.rest.pulls.get).mockRejectedValueOnce(new Error('Not Found'));
+    await expect(
+      runRequestedReviewRework(
+        feedbackRequest,
+        { octokit: broken.octokit, reworkWorker },
+        { log: vi.fn() } as never,
+        plan,
+      ),
+    ).rejects.toThrow('could not read');
+    expect(reworkWorker).not.toHaveBeenCalled();
+  });
+
+  it('runIssue triages, reworks the actionable feedback at CHECK, ships and answers the comment', async () => {
+    const { octokit } = fakeOctokit();
+    const posted: string[] = [];
+    const listComments = vi.fn();
+    Object.assign(octokit.rest, {
+      issues: {
+        listComments,
+        createComment: vi.fn(async (a: { body: string }) => {
+          posted.push(a.body);
+          return { data: {} };
+        }),
+      },
+      users: { getAuthenticated: vi.fn(async () => ({ data: { login: 'factory-bot' } })) },
+      repos: { getCollaboratorPermissionLevel: vi.fn(async () => ({ data: { permission: 'admin' } })) },
+    });
+    Object.assign(octokit.rest.pulls, { listReviews: vi.fn(), update: vi.fn(), requestReviewers: vi.fn() });
+    Object.assign(octokit, {
+      graphql: vi.fn(async () => ({ repository: { pullRequest: { reviewThreads: { nodes: [] } } } })),
+      paginate: vi.fn(async (route: unknown) =>
+        route === listComments ? [{ id: 5, user: { login: 'maint' }, body: 'please rename foo', html_url: 'u' }] : [],
+      ),
+    });
+    shipPhase.mockResolvedValue({ ok: true, prNumber: 7, headSha: 'abcdef1234567' });
+    const outcome = await runIssue({ ...feedbackRequest, trustedApprovers: ['maint'] }, policy, ports(octokit));
+    expect(outcome).toMatchObject({ state: 'ready' });
+    expect(planPhase).not.toHaveBeenCalled();
+    expect(reworkWorker.mock.calls[0][0].summary.results[0].details).toContain('please rename foo');
+    expect(shipPhase).toHaveBeenCalledTimes(1);
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toContain('Fixed in [`abcdef1`]');
   });
 });

@@ -14,7 +14,7 @@ Each task type maps to a tier, and each tier is a hand-ordered priority list in 
 | triage       | qwen2.5-coder:14b → claude-sonnet-5 → gpt-5.6-luna-high                                                                                    | $15 → $10                   | Issue triage                             |
 | triage_cheap | qwen2.5-coder:14b → claude-haiku-5-5 → claude-sonnet-5 → gpt-5.6-luna-high                                                                 | $0.50 → $15 → $10           | Readiness judge (tool-less JSON verdict) |
 
-`readiness_judge` uses `triage_cheap`, the cheap Haiku-first tier. `models.pins.triage` or `tiers.triage` also set it unless the repo sets `tiers.triage_cheap` explicitly.
+`readiness_judge` and `feedback_triage` (PR feedback triage in a feedback round, #3910) use `triage_cheap`, the cheap Haiku-first tier. `models.pins.triage` or `tiers.triage` also set it unless the repo sets `tiers.triage_cheap` explicitly.
 
 Models whose agent CLI is not on PATH are skipped, so a machine with only the Codex CLI routes every phase (PLAN, BUILD, CHECK, review, triage) to Codex models, and a machine with only Claude Code routes to Claude models. PLAN only picks a build route that can run on the machine and logs a `model-override` line when it reroutes. To send a phase to a specific agent when both are installed, pin it in `.factory/config.yaml` (`models.pins.plan`, `build`, `checker`, `triage`), set `route`, or reorder `tiers`. `factory triage --model <id>` picks the triage model for one run.
 

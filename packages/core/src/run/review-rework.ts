@@ -5,6 +5,7 @@ import { reworkWorker, type checkPhase } from '../phases/check.js';
 import type { CheckSummary } from '../types/index.js';
 import { parseReworkCommand } from '../queue/comment-rework-trigger.js';
 import { UNTRUSTED_REVIEW_FEEDBACK_NOTICE, wrapUntrustedReviewFeedback } from '../utils/untrusted-input.js';
+import type { FeedbackRoundPlan, FeedbackRoundTarget } from './feedback-round.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
 
 export interface ReviewReworkTarget {
@@ -28,6 +29,10 @@ export interface ReworkRequestFields {
   reviewRework?: ReviewReworkTarget;
   /** #3625: a /factory iterate comment — skip PLAN/BUILD and re-run CHECK/rework on the PR branch. */
   iterate?: IterateTarget;
+  /** #3910: a feedback round — read every unhandled trusted PR feedback item, triage, then rework or re-plan. */
+  feedbackRound?: FeedbackRoundTarget;
+  /** Logins trusted to give feedback (intake.trustedApprovers); absent falls back to repo permission (ADR-0128). */
+  trustedApprovers?: readonly string[];
 }
 
 export interface ReviewFeedback {
@@ -145,15 +150,68 @@ export function reviewReworkSummary(feedback: ReviewFeedback): CheckSummary {
 
 /** A synthetic CHECK resume: skips PLAN and BUILD for a review-rework run. */
 export function reviewReworkResume(
-  request: Pick<RunRequest, 'reviewRework' | 'iterate' | 'preferredRoute' | 'modelPins'>,
+  request: Pick<RunRequest, 'reviewRework' | 'iterate' | 'feedbackRound' | 'preferredRoute' | 'modelPins'>,
+  feedbackPlan?: Pick<FeedbackRoundPlan, 'replan'>,
 ): NonNullable<RunRequest['resumeFrom']> | undefined {
-  if (!request.reviewRework && !request.iterate) return undefined;
+  if (feedbackPlan?.replan) return undefined;
+  if (!request.reviewRework && !request.iterate && !request.feedbackRound) return undefined;
   return {
     phase: 'check',
     route: request.preferredRoute ?? 'claude',
     model: request.modelPins.build ?? '',
     buildMinutes: 0,
   };
+}
+
+/** Fails closed unless the PR is open with `branch` as head, so a rework can never ship to a different PR. */
+async function assertOpenPrHead(
+  octokit: Pick<Octokit, 'rest'>,
+  opts: { owner: string; repo: string; prNumber: number; branch: string },
+): Promise<void> {
+  const { data: pull } = await octokit.rest.pulls.get({
+    owner: opts.owner,
+    repo: opts.repo,
+    pull_number: opts.prNumber,
+  });
+  if (pull.state !== 'open' || pull.head.ref !== opts.branch) {
+    throw new ReviewReworkError(
+      `PR #${opts.prNumber} must be open with head ${opts.branch}; found ${pull.state} with head ${pull.head.ref}`,
+    );
+  }
+}
+
+/** One rework worker call on the PR branch for `summary`; throws when the worker never ran. */
+async function runReworkWorker(
+  checkOpts: Parameters<typeof checkPhase>[0],
+  summary: CheckSummary,
+  where: string,
+  rework: typeof reworkWorker,
+): Promise<void> {
+  const worked = await rework({
+    issue: checkOpts.issue,
+    worktree: checkOpts.worktree,
+    specPath: checkOpts.specPath,
+    summary,
+    constitution: checkOpts.constitution,
+    router: checkOpts.router,
+    log: checkOpts.log,
+    buildTimeoutSeconds: checkOpts.buildTimeoutSeconds,
+    sandbox: checkOpts.sandbox,
+    appPort: checkOpts.appPort,
+    appBaseUrl: checkOpts.appBaseUrl,
+    onPgid: checkOpts.onPgid,
+    budgetGuard: checkOpts.budgetGuard,
+    reworkRoute: checkOpts.reworkRoute,
+    reworkModel: checkOpts.reworkModel,
+    runId: checkOpts.runId,
+    onWorkerResult: checkOpts.onWorkerResult,
+    extraInstructions: REVIEW_REWORK_INSTRUCTIONS,
+  });
+  if (!worked.modelCompleted) {
+    throw new ReviewReworkError(
+      `review rework worker never ran for ${where}${worked.failureReason ? `: ${worked.failureReason}` : ''}`,
+    );
+  }
 }
 
 export async function runReviewReworkBuild(opts: {
@@ -170,12 +228,7 @@ export async function runReviewReworkBuild(opts: {
   const where = `PR #${target.prNumber} / ${kind} ${target.reviewId}`;
   let feedback: ReviewFeedback;
   try {
-    const { data: pull } = await octokit.rest.pulls.get({ owner, repo: name, pull_number: target.prNumber });
-    if (pull.state !== 'open' || pull.head.ref !== branch) {
-      throw new ReviewReworkError(
-        `PR #${target.prNumber} must be open with head ${branch}; found ${pull.state} with head ${pull.head.ref}`,
-      );
-    }
+    await assertOpenPrHead(octokit, { owner, repo: name, prNumber: target.prNumber, branch });
     feedback =
       target.source === 'comment'
         ? await fetchCommentFeedback(octokit, {
@@ -198,31 +251,7 @@ export async function runReviewReworkBuild(opts: {
     'rework',
     `review rework: PR #${target.prNumber} ${kind} ${target.reviewId} by @${target.reviewer} — ${feedback.comments.length} inline comment(s) on ${branch}`,
   );
-  const worked = await rework({
-    issue: checkOpts.issue,
-    worktree: checkOpts.worktree,
-    specPath: checkOpts.specPath,
-    summary: reviewReworkSummary(feedback),
-    constitution: checkOpts.constitution,
-    router: checkOpts.router,
-    log: checkOpts.log,
-    buildTimeoutSeconds: checkOpts.buildTimeoutSeconds,
-    sandbox: checkOpts.sandbox,
-    appPort: checkOpts.appPort,
-    appBaseUrl: checkOpts.appBaseUrl,
-    onPgid: checkOpts.onPgid,
-    budgetGuard: checkOpts.budgetGuard,
-    reworkRoute: checkOpts.reworkRoute,
-    reworkModel: checkOpts.reworkModel,
-    runId: checkOpts.runId,
-    onWorkerResult: checkOpts.onWorkerResult,
-    extraInstructions: REVIEW_REWORK_INSTRUCTIONS,
-  });
-  if (!worked.modelCompleted) {
-    throw new ReviewReworkError(
-      `review rework worker never ran for ${where}${worked.failureReason ? `: ${worked.failureReason}` : ''}`,
-    );
-  }
+  await runReworkWorker(checkOpts, reviewReworkSummary(feedback), where, rework);
   return { feedback };
 }
 
@@ -253,11 +282,31 @@ async function guardIterateTarget(
 
 /** runIssue's hook before the first CHECK: reworks the requested review unless a CHECK resume was asked for. */
 export async function runRequestedReviewRework(
-  request: Pick<RunRequest, 'reviewRework' | 'iterate' | 'resumeFrom' | 'repo' | 'branch'>,
+  request: Pick<RunRequest, 'reviewRework' | 'iterate' | 'feedbackRound' | 'resumeFrom' | 'repo' | 'branch'>,
   ports: Pick<RunPorts, 'octokit' | 'reworkWorker'>,
   checkOpts: Parameters<typeof checkPhase>[0],
+  feedbackPlan?: Pick<FeedbackRoundPlan, 'prNumber' | 'summary'>,
 ): Promise<void> {
   if (request.resumeFrom) return;
+  if (feedbackPlan) {
+    if (feedbackPlan.summary === undefined) return;
+    const where = `PR #${feedbackPlan.prNumber} / feedback round`;
+    const [owner = '', name = ''] = request.repo.split('/');
+    try {
+      await assertOpenPrHead(ports.octokit, {
+        owner,
+        repo: name,
+        prNumber: feedbackPlan.prNumber,
+        branch: request.branch,
+      });
+    } catch (err) {
+      if (err instanceof ReviewReworkError) throw err;
+      throw new ReviewReworkError(`could not read ${where}: ${errorMessage(err)}`, { cause: err });
+    }
+    checkOpts.log('rework', `feedback round: reworking PR #${feedbackPlan.prNumber} on ${request.branch}`);
+    await runReworkWorker(checkOpts, feedbackPlan.summary, where, ports.reworkWorker ?? reworkWorker);
+    return;
+  }
   if (!request.reviewRework) {
     if (request.iterate) await guardIterateTarget(request.iterate, request, ports.octokit, checkOpts);
     return;

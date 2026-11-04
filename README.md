@@ -132,6 +132,7 @@ The most-used commands, by the group `factory --help` lists them under. Run `fac
 ```bash
 # Run work
 factory ship <N>                    Plan → build → check one issue and open a ready-for-review PR; never merges
+factory respond <PR>                Run a feedback round on a factory PR: triage trusted feedback, rework or re-plan, push, reply, resolve, re-request review
 factory run-issue <N>               Like ship, but loads the issue first and exits 2 if it cannot be found
 factory run-issue <N> --merge        After SHIP, wait for CI and land the PR through the run merge gates; exits 0 merged, 10 held, 11 CI failed, 12 timed out, 13 land failed, 1 parked before a PR
 factory run-issue <N> --in-place   Build in the current clean checkout, no worktree (disposable containers)

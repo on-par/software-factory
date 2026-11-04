@@ -119,6 +119,7 @@ import { safeRecordRunState, terminalRunStateUpdate, thrownRunStateUpdate } from
 import { runStatusForPhase, type RunStateUpdate } from './state.js';
 import { type ParkedPrDisposition, settleParkedPullRequest } from './park-pr.js';
 import { runParkSteward } from './park-steward.js';
+import * as feedbackRound from './feedback-round-hooks.js';
 import { reviewReworkResume, runRequestedReviewRework, type ReworkRequestFields } from './review-rework.js';
 import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
 import { parkLogExtra } from './ship-park.js';
@@ -346,7 +347,7 @@ async function runIssueOnce(
   // One id per run: BUILD, CHECK and rework share a per-run VBCSCompiler server (#1910).
   // 12 hex chars keeps the compiler's Unix-socket pipe path short under macOS $TMPDIR.
   const runId = randomUUID().replace(/-/g, '').slice(0, 12);
-  const previousAttemptNote = renderPreviousAttempt(request.previousAttempt);
+  let previousAttemptNote = renderPreviousAttempt(request.previousAttempt);
   const phaseLogger = createRunPhaseLogger({
     logsDir: request.logsDir,
     issue: workKey,
@@ -625,7 +626,11 @@ async function runIssueOnce(
     let builtModel: string;
     let pinNote: string | undefined;
     let buildMinutes: number;
-    const resumed = request.resumeFrom ?? reviewReworkResume(request);
+    const feedbackPlan = await feedbackRound.prepareFeedbackForRun(request, ports, log);
+    const idle = await feedbackRound.idleFeedbackRound(feedbackPlan, request, ports, route, log);
+    if (idle) return idle;
+    previousAttemptNote = feedbackRound.feedbackReplanNote(previousAttemptNote, feedbackPlan);
+    const resumed = request.resumeFrom ?? reviewReworkResume(request, feedbackPlan);
     if (resumed) {
       ports.events('check')(
         'check',
@@ -662,7 +667,8 @@ async function runIssueOnce(
         );
       }
 
-      const reused = await loadReusablePlan(ports.planReuse, { ...request, issue: workKey }, log, ports.events('plan'));
+      const planReuse = feedbackPlan?.replan ? undefined : ports.planReuse;
+      const reused = await loadReusablePlan(planReuse, { ...request, issue: workKey }, log, ports.events('plan'));
       const routeCaps = await laneRouteCapabilities(request, ports, ports.events('plan'));
       const planGate = reused ? undefined : await capGate.enterPlan(route, ports.events('plan'));
       if (planGate?.released) return planGate.released;
@@ -927,7 +933,7 @@ async function runIssueOnce(
       requiredChecksVerdict: ports.requiredChecksVerdict,
     };
     capGate.watchCheck(builtRoute, builtModel);
-    await runRequestedReviewRework(request, ports, checkOpts);
+    await runRequestedReviewRework(request, ports, checkOpts, feedbackPlan);
     const check = await (request.providerOrder
       ? runCheckStage(
           runStage,
@@ -1169,6 +1175,7 @@ async function runIssueOnce(
     if (shipped.outcome) return shipped.outcome;
     const { ship, parked } = shipped;
     if (parked) return await terminalParked(parked.reason, parked.message, parked.checkFailure, parked.ciFailure);
+    await feedbackRound.publishFeedbackForRun(request, ports, feedbackPlan, ship.headSha, log);
 
     if (planSlice) {
       const failure = await recordShippedSlice({
