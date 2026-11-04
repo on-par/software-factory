@@ -62,6 +62,14 @@ describe('createLinearTicketWriteback', () => {
     expect(c.addComment).toHaveBeenCalledWith('uuid-1', 'body text');
   });
 
+  it('comment leaves no comment opener behind from nested or unterminated markers', async () => {
+    const c = client({ id: 'uuid-1', labels: [] });
+    await createLinearTicketWriteback(c.client).comment(ON12, 'keep <!<!-- a -->-- b --> me <!-- unterminated');
+    const [, posted] = c.addComment.mock.calls[0] ?? [];
+    expect(posted).not.toContain('<!--');
+    expect(posted).toBe('keep  me');
+  });
+
   it('labels returns the label names', async () => {
     const c = client({ id: 'u', labels: [{ name: 'no-auto-merge' }, { name: 'lane' }] });
     await expect(createLinearTicketWriteback(c.client).labels(ON12)).resolves.toEqual(['no-auto-merge', 'lane']);

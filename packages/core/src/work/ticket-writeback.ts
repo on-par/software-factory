@@ -7,6 +7,7 @@ import { GITHUB_ISSUE_SOURCE } from './github-issue.js';
 import type { WorkRequest } from './index.js';
 import { LINEAR_ISSUE_SOURCE } from './linear-issue.js';
 import type { WorkKey } from './work-key.js';
+import { stripHiddenContent } from '../filing/sanitize.js';
 
 export type TicketTrackerKind = 'github' | 'linear';
 export type LinearTicketClient = Pick<LinearQueueLifecycleClient, 'findIssue' | 'addComment'>;
@@ -33,9 +34,9 @@ export function closesTrailer(tracker: TicketTrackerKind, key: WorkKey, finalSli
   return finalSlice ? `Fixes ${key}` : `Part of ${key}`;
 }
 
-/** Linear renders HTML comments literally, so factory markers are removed before posting. */
+/** Linear renders HTML comments literally, so factory markers (and any hidden content) are removed before posting. */
 function stripMarkers(body: string): string {
-  return body.replace(/<!--[\s\S]*?-->/g, '').trim();
+  return stripHiddenContent(body).trim();
 }
 
 export function createLinearTicketWriteback(client: LinearTicketClient): TicketWriteback {
