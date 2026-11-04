@@ -108,6 +108,6 @@ jobs:
           name: factory-run-log
           path: |
             ${{ runner.temp }}/factory-run.log
-            .factory/events.ndjson
+            .factory/state/events.ndjson
           if-no-files-found: warn
           retention-days: 14

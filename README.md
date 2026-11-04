@@ -38,7 +38,7 @@ packages/
 └── tui/              @on-par/factory-tui        read-only Ink TUI for a live run
 ```
 
-Packages marked (private) are not published to npm. For the dependency graph and per-package detail, see [docs/architecture.md](docs/architecture.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md) and the rules in [AGENTS.md](AGENTS.md).
+For the dependency graph and per-package detail, see [docs/architecture.md](docs/architecture.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md) and the rules in [AGENTS.md](AGENTS.md).
 
 ## Quick start
 

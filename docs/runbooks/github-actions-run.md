@@ -151,7 +151,7 @@ cap is 6 h). Claude usage is billed to the given credential.
 
 ## Artifacts
 
-`factory-run-log` holds the run log and `.factory/events.ndjson`, kept 14 days. No state (runs,
+`factory-run-log` holds the run log and `.factory/state/events.ndjson`, kept 14 days. No state (runs,
 baseline cache) persists between runs.
 
 ## Pinning
