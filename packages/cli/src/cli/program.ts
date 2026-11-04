@@ -8,6 +8,7 @@ import { registerObserveCommands } from './program-observe.js';
 import { registerQueueCommands } from './program-queue.js';
 import { registerRunWorkCommands } from './program-run-work.js';
 import { registerSetupCommands } from './program-setup.js';
+import { applyConfigOverrideOptions } from './config-override-option.js';
 import { applyStateRootOption } from './state-root.js';
 
 export function buildProgram(handlers: ProgramHandlers, deps: CliDeps): Command {
@@ -22,9 +23,23 @@ export function buildProgram(handlers: ProgramHandlers, deps: CliDeps): Command 
     .option(
       '--state-root <path>',
       'Keep factory state and config outside the checkout: an absolute path, ~/..., or "auto" (~/.factory/<owner>/<name>); env FACTORY_STATE_ROOT',
+    )
+    .option(
+      '--config <path>',
+      'Use this config file for the run instead of .factory/config.yaml; env FACTORY_CONFIG_PATH / FACTORY_CONFIG_YAML, merged with FACTORY_CONFIG_OVERRIDES',
+    )
+    .option(
+      '--constitution <path>',
+      'Use this constitution file for the run instead of the repo constitution; env FACTORY_CONSTITUTION_PATH / FACTORY_CONSTITUTION',
     );
 
   program.hook('preAction', async () => {
+    try {
+      const { config, constitution } = program.opts<{ config?: string; constitution?: string }>();
+      applyConfigOverrideOptions({ config, constitution }, process.cwd());
+    } catch (e) {
+      throw new handlers.CliExitError(`factory: ${(e as Error).message}`, 2);
+    }
     const flag = program.opts<{ stateRoot?: string }>().stateRoot;
     if (flag === undefined && !process.env.FACTORY_STATE_ROOT?.trim()) return;
     try {

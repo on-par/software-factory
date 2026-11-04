@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- Per-run config and constitution overrides: `--config`/`FACTORY_CONFIG_PATH`/`FACTORY_CONFIG_YAML`, `--constitution`/`FACTORY_CONSTITUTION_PATH`/`FACTORY_CONSTITUTION`, and a `FACTORY_CONFIG_OVERRIDES` fragment; the run log and `factory doctor` name the source (#3906).
 - `factory land` resolves a CHANGELOG.md conflict confined to `## Unreleased` by keeping main's entries and appending the PR's after them, and `.gitattributes` unions CHANGELOG.md on local merges (#3931).
 - `factory run-issue --merge` and `run-brief --merge` drive the PR through the `factory run --auto-merge` gates to a merge, bounded by `--merge-timeout` or `ci.awaitingCiCapHours`, with distinct exit codes (0 merged, 10 held, 11 CI failed, 12 timed out, 13 land failed, 1 parked before a PR) (#3905)
 - The compile gate and `factory doctor` fall back to `npm run typecheck` when no build command resolves, and doctor names the detected test runner per workspace (#3913).

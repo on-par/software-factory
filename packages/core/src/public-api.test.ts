@@ -326,6 +326,7 @@ const INTERNAL_API_KEYS = [
   ...'renderAgentMemory scanAgentMemory loadAgentMemoryCtx'.split(' '),
   ...'resolveCompileCommand resolveLintCommands resolveTestsCommand resolveWorkspaceTestRunners'.split(' '), // #3473, #1590, #3913
   ...'describeChecksProbe holdRunConfigSnapshot'.split(' '), // #3600
+  ...'describeConfigSources lastRunConfigLadder resolveConstitutionOverride'.split(' '), // #3906
   // `factory init --detect-checks`: heuristics, agent prompt and reply, shell-free tokenizer
   ...'CHECK_KINDS buildDetectChecksPrompt detectCheckHeuristics heuristicProposal parseDetectedChecks'.split(' '),
   ...'tokenizeEvidenceCommand coverageRatchetEvidence'.split(' '), // #1957

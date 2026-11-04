@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
 
 import { readRepoConfigFile, resolveRepoConfigPath } from '../config/repo-config-file.js';
-import { runConfigSource } from '../config/run-config-source.js';
+import { runConfigSource } from '../config/run-config-env.js';
 
 export interface EventLogRotation {
   maxBytes: number;
