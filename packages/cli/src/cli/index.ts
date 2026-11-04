@@ -4149,6 +4149,7 @@ function cmdRunBrief(files: readonly string[], opts: RunBriefOptions): Promise<v
     getOctokit: () => getOctokit(),
     branchPrefixOrExit,
     errorDetail,
+    awaitingCiCapMs: (configPath) => resolveAwaitingCiCapMs(configLoaders.loadFactoryConfigForRepo(configPath)),
   });
 }
 

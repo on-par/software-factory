@@ -30,6 +30,7 @@ import { CliExitError } from './errors.js';
 import { availableAgentClis, missingAgentCliMessage, notInitializedMessage } from './first-run.js';
 import { withRepoRunLock } from './repo-run-lock.js';
 import { recordDraftPrFlag } from './run-flags.js';
+import { driveToMerge as defaultDriveToMerge, exitForMerge, parseMergeTimeout } from './run-issue-merge.js';
 import { shipIssue } from './ship.js';
 import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
 import { consoleStackLog, printStackResult, runSliceStack } from './stack-run.js';
@@ -42,6 +43,12 @@ export interface RunBriefRuntime {
   getOctokit: () => Octokit;
   branchPrefixOrExit: (raw: string | undefined, configPath: string) => string;
   errorDetail: (err: unknown) => string;
+  /** `--merge` wait bound when `--merge-timeout` is absent: ci.awaitingCiCapHours of the repo's config. */
+  awaitingCiCapMs: (configPath: string) => number;
+  /** Injectable for tests; defaults to the real drive-to-merge (#3905). */
+  driveToMerge?: typeof defaultDriveToMerge;
+  /** Injectable for tests; defaults to the real shipIssue. */
+  shipIssue?: typeof shipIssue;
 }
 
 /** Deterministic run number for a brief, derived from its content digest.
@@ -65,6 +72,10 @@ export interface RunBriefOptions {
   draftPr?: boolean;
   /** --stack (#3763): brief N+1 bases on brief N's PR head branch; stops at the first failure or missing PR. */
   stack?: boolean;
+  /** --merge (#3905): after SHIP, wait for CI and land each brief's PR through the run --auto-merge gates. */
+  merge?: boolean;
+  mergeTimeout?: string;
+  admin?: boolean;
 }
 
 /** Runs each brief through the one-shot pipeline in argv order with the same flags. The checks that
@@ -99,6 +110,7 @@ export async function cmdRunBrief(files: readonly string[], opts: RunBriefOption
   if (opts.stack) {
     console.log(styleText('cyan', "run-brief: --stack — each brief bases on the previous brief's PR head"));
   }
+  let firstFailureCode: number | undefined;
   const result = await runStack(
     files.map((file) => ({
       title: file,
@@ -108,7 +120,10 @@ export async function cmdRunBrief(files: readonly string[], opts: RunBriefOption
           opts.stack ? { ...opts, baseBranch: base, sizeGate: 'off' as const } : opts,
           env,
           rt,
-        );
+        ).catch((err: unknown) => {
+          if (firstFailureCode === undefined && err instanceof CliExitError) firstFailureCode = err.code;
+          throw err;
+        });
         return (
           o && { prNumber: 'prNumber' in o ? o.prNumber : undefined, branch: 'branch' in o ? o.branch : undefined }
         );
@@ -116,7 +131,15 @@ export async function cmdRunBrief(files: readonly string[], opts: RunBriefOption
     })),
     { base: opts.baseBranch, chain: opts.stack === true, prefix: 'run-brief', noun: 'brief', log: consoleStackLog },
   );
-  printStackResult(result, 'Run failed for one or more briefs (listed above)');
+  try {
+    printStackResult(result, 'Run failed for one or more briefs (listed above)');
+  } catch (err) {
+    // With --merge the exit code is the first failed brief's, so a host can tell held from CI-failed (#3905).
+    if (opts.merge && err instanceof CliExitError && firstFailureCode !== undefined) {
+      throw new CliExitError(err.message, firstFailureCode);
+    }
+    throw err;
+  }
 }
 
 /** The run-brief pre-flight shared by every brief in one invocation; any failure here exits 2. */
@@ -134,6 +157,15 @@ async function prepareRunBrief(opts: RunBriefOptions, rt: RunBriefRuntime) {
   baseBranchOrExit(opts.baseBranch);
   const conflict = baseBranchConflict({ baseBranch: opts.baseBranch, workspace: opts.workspace });
   if (conflict) throw new CliExitError(conflict, 2);
+  if ((opts.mergeTimeout !== undefined || opts.admin) && !opts.merge) {
+    throw new CliExitError('factory: --merge-timeout/--admin need --merge', 2);
+  }
+  if (opts.merge && opts.pr === false) throw new CliExitError('factory: --merge needs a PR — drop --no-pr', 2);
+  if (opts.merge && opts.workspace !== undefined) {
+    throw new CliExitError('factory: --merge needs GitHub PRs — drop --workspace (local-only runs never merge)', 2);
+  }
+  if (opts.merge && opts.stack) throw new CliExitError('factory: --merge lands one PR per brief — drop --stack', 2);
+  parseMergeTimeout(opts.mergeTimeout);
   if (opts.stack && opts.workspace !== undefined) {
     throw new CliExitError('factory: --stack needs factory worktrees and PRs — drop --workspace or drop --stack', 2);
   }
@@ -246,8 +278,22 @@ async function runOneBrief(
         });
       }
 
+      const driveMerge = async () =>
+        exitForMerge(
+          await (rt.driveToMerge ?? defaultDriveToMerge)({
+            issue: runNum,
+            outcome,
+            repoRoot,
+            ghRepo,
+            paths,
+            timeoutMs: parseMergeTimeout(opts.mergeTimeout) ?? rt.awaitingCiCapMs(paths.config),
+            admin: opts.admin,
+            issueless: true,
+          }),
+          `brief ${briefPath}`,
+        );
       try {
-        await shipIssue(
+        await (rt.shipIssue ?? shipIssue)(
           runNum,
           { ...opts, branchPrefix },
           {
@@ -264,8 +310,12 @@ async function runOneBrief(
           },
         );
       } catch (err: any) {
+        const ciParked =
+          outcome?.state === 'parked' && (outcome.reason === 'ci-failed' || outcome.reason === 'ci-infra');
+        if (opts.merge && ciParked) await driveMerge();
         throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
       }
+      if (opts.merge) await driveMerge();
     },
     { scope: { kind: 'issue', key: workKeyFromIssue(runNum) } },
   );
