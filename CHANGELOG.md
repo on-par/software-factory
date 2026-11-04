@@ -12,6 +12,7 @@ section to `## X.Y.Z - date`. See
 - Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
 - A `tracker` config key selects `github` (default) or `linear` per repo, and `factory doctor` checks the Linear setup: a missing or rejected `LINEAR_API_KEY` and any project with ready issues but no repo mapping (#3891).
 - Core has a read-only `linear-issue` work source that resolves `ON-12` or a Linear issue URL into a work request; it reads `LINEAR_API_KEY` only when used (#3889).
+- Core has a Linear queue lifecycle that releases, parks and reaps Linear claims, keeping the claim lease in a factory-owned attachment's metadata; a failed Linear write warns and never fails the run (#3893).
 
 ### Changed
 
