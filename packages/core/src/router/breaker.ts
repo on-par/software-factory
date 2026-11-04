@@ -2,6 +2,7 @@
 // cooldown state so a quota-tripped provider is skipped by subsequent lanes
 // until the cooldown expires (#369).
 
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
@@ -179,7 +180,7 @@ export class ProviderBreaker {
     return entry;
   }
 
-  /** Upsert (refresh openedAt on repeat trips). Atomic write: mkdir parent, write `${file}.tmp`, rename.
+  /** Upsert (refresh openedAt on repeat trips). Atomic write: mkdir parent, write a unique `${file}.<id>.tmp`, rename.
    *  Reports whether the provider was already open, so callers can emit once-per-transition events. */
   async open(
     provider: string,
@@ -378,7 +379,7 @@ export class ProviderBreaker {
 
   private async write(data: BreakerFile): Promise<void> {
     await mkdir(dirname(this.file), { recursive: true });
-    const tmp = `${this.file}.tmp`;
+    const tmp = `${this.file}.${process.pid}.${randomUUID()}.tmp`;
     await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);
     // Two lanes racing on expiry may both prune-and-rewrite (or both open) —
     // benign, at most a duplicate provider_breaker_close/open event; no lock file.

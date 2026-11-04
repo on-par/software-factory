@@ -140,4 +140,27 @@ describe('factory run lane queue (#3239, #3890)', () => {
     }).catch(() => undefined);
     expect(calls).toEqual(['claims', 'drafts', 'plan']);
   });
+
+  it('cmdRun sweeps CI-pending drafts before the orphan draft sweep, with the repo root (#3932)', async () => {
+    const calls: string[] = [];
+    let args: unknown;
+    await laneQueueFor(
+      { ...loadFactoryConfig() },
+      {
+        sweepCiPendingDrafts: async (_paths, _repo, opts) => {
+          calls.push('ci-pending');
+          args = opts;
+        },
+        sweepOrphanDrafts: async () => {
+          calls.push('drafts');
+        },
+        planRunLanes: async () => {
+          calls.push('plan');
+          throw new StopAtPlan('stop');
+        },
+      },
+    ).catch(() => undefined);
+    expect(calls).toEqual(['ci-pending', 'drafts', 'plan']);
+    expect(args).toEqual({ repoRoot: root, autoMerge: undefined });
+  });
 });

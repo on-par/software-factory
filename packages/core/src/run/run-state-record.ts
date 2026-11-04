@@ -36,6 +36,7 @@ export function terminalRunStateUpdate(outcome: RunOutcome, summary: CheckSummar
     ...(outcome.route === undefined ? {} : { route: outcome.route }),
     ...(typeof outcome.reworkRounds === 'number' ? { attempts: 1 + outcome.reworkRounds } : {}),
     ...('prNumber' in outcome && outcome.prNumber !== undefined ? { prNumber: outcome.prNumber } : {}),
+    ...(outcome.state === 'ready' && outcome.draftReason ? { draftReason: outcome.draftReason } : {}),
     ...(status === 'parked' && failures.length > 0 ? { failures } : {}),
   };
 }

@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- ship: `ship.ciWatchMinutes` sets the CI watch window, and a draft SHIP left for pending CI is landed (or sent to CI rework) by the run-start and between-issue sweep once CI finishes (#3932)
+
 ## 0.9.28 - 2026-11-04
 
 Linear can feed the factory's queue end to end (a `tracker` key, a Linear work source and queue backend, and write-back on ship and park), `factory respond` runs a feedback round on a factory PR, an issue whose prerequisite has an open PR builds a stacked PR on it, `run-issue` gains `--in-place`, `--merge` and per-run config overrides for disposable hosts, and SHIP syncs a branch onto main before opening its PR so sibling CHANGELOG bullets no longer strand drafts (#3872, #3894, #3910, #3916, #3904, #3905, #3906, #3945).

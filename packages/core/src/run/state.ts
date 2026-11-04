@@ -152,6 +152,8 @@ export interface RunStateUpdate {
   attempts?: number;
   prNumber?: number;
   failures?: CheckerOutput[];
+  /** Why SHIP left the PR as a draft (#3932); recorded on the PR run-state comment. */
+  draftReason?: 'ci-pending' | 'requested';
 }
 
 /** Fields the CLI fixes once per run. */

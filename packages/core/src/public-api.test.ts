@@ -633,6 +633,7 @@ const INTERNAL_API_KEYS = [
   'planQueueMigration',
   'QUEUED_LABEL',
   'QUEUE_ORDER_LABEL_PREFIX',
+  'queueCiPendingRework',
   'queueOrderLabel',
   'readGithubQueueSnapshot',
   'formatQueueOrderConflict',
