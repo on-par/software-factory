@@ -107,6 +107,24 @@ describe('mergeChangelogUnreleased', () => {
     expect(text(mergeChangelogUnreleased(base, doc('### Added\n\n- a\n- same\n'), theirs))).toBe(theirs);
   });
 
+  it('keeps two subsections with the same heading apart and adds the PR line to the right one (#3949)', () => {
+    const base = doc('### Fixed\n\n- f1\n\n### Changed\n\n- c1\n\n### Fixed\n\n- f2\n');
+    const ours = doc('### Fixed\n\n- f1\n\n### Changed\n\n- c1\n\n### Fixed\n\n- f2\n- pr fix\n');
+    const theirs = doc('### Fixed\n\n- f1\n- main fix\n\n### Changed\n\n- c1\n\n### Fixed\n\n- f2\n');
+    expect(text(mergeChangelogUnreleased(base, ours, theirs))).toBe(
+      doc('### Fixed\n\n- f1\n- main fix\n\n### Changed\n\n- c1\n\n### Fixed\n\n- f2\n- pr fix\n'),
+    );
+  });
+
+  it('files the PR line under the new empty Unreleased after main released the old one (#3949)', () => {
+    const base = doc('### Added\n\n- a (#1)\n');
+    const ours = doc('### Added\n\n- b (#2)\n- a (#1)\n');
+    const theirs = doc('', `## 0.9.1 - 2026-01-02\n\n### Added\n\n- a (#1)\n\n${RELEASED}`);
+    const merged = text(mergeChangelogUnreleased(base, ours, theirs));
+    expect(merged.indexOf('- b (#2)')).toBeLessThan(merged.indexOf('## 0.9.1'));
+    expect(merged.match(/- a \(#1\)/g)).toHaveLength(1);
+  });
+
   it('local git merge with the repo .gitattributes unions Unreleased additions without conflict markers', () => {
     const repo = tempDirs.makeSync('changelog-union-');
     const git = (...args: string[]): string => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
