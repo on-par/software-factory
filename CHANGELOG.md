@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- Land re-syncs a PR that turns DIRTY again during the CI watch up to merge.maxConflictRounds times (default 2), re-watching CI each round, and parks as conflict with "conflict rounds exhausted (N/N)" instead of ci-failed or fail (#1887)
+
 ## 0.9.28 - 2026-11-04
 
 Linear can feed the factory's queue end to end (a `tracker` key, a Linear work source and queue backend, and write-back on ship and park), `factory respond` runs a feedback round on a factory PR, an issue whose prerequisite has an open PR builds a stacked PR on it, `run-issue` gains `--in-place`, `--merge` and per-run config overrides for disposable hosts, and SHIP syncs a branch onto main before opening its PR so sibling CHANGELOG bullets no longer strand drafts (#3872, #3894, #3910, #3916, #3904, #3905, #3906, #3945).

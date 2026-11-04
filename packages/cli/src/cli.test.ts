@@ -2079,7 +2079,7 @@ describe('cli', () => {
     ).rejects.toBeInstanceOf(LandConflictError);
 
     expect(calls).toEqual([
-      ['log', 'pr_refresh', 'PR #123 refreshed: mergeStateStatus=DIRTY action=merge-main reason=dirty round=1/3'],
+      ['log', 'pr_refresh', 'PR #123 refreshed: mergeStateStatus=DIRTY action=merge-main reason=dirty round=1/2'],
       ['log', 'conflict', 'PR #123 DIRTY on ship-it/20-dirty and worktree gone'],
     ]);
   });

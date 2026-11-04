@@ -29,7 +29,6 @@ import {
 export const CONFIG_EXAMPLE_OMITTED_KEYS: Readonly<Record<string, string>> = {
   $schema: 'accepted and ignored',
   policy: 'written by `factory migrate`; not read at runtime',
-  merge: 'legacy spelling of run.merge; run.merge wins when both are set',
   adr: 'accepted; not read at runtime',
   byok: 'accepted; not read at runtime',
   cost_tracking: 'accepted; not read at runtime',
@@ -397,6 +396,14 @@ function runtimeNamespace(): Node[] {
           ],
         },
       ],
+    },
+    {
+      kind: 'object',
+      key: 'merge',
+      doc:
+        'The legacy `auto`/`admin` spellings live under `run.merge`. ' +
+        'maxConflictRounds (1-10): how many times land merges origin/main into a PR that turned DIRTY, re-watching CI each time; when spent, the run parks as conflict.',
+      children: [{ kind: 'value', key: 'maxConflictRounds', value: defaults.merge.maxConflictRounds }],
     },
     section('timeouts'),
     section('plan_approval'),

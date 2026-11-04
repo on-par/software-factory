@@ -246,6 +246,7 @@ export async function landIssue(
         skipCI,
         syncMain: opts.syncMain,
         rebuildOnConflict: opts.rebuildOnConflict,
+        maxConflictRounds: landFactoryConfig.merge.maxConflictRounds,
         signal: opts.signal,
         adminMerge: resolveMergePolicy(landFactoryConfig, process.env, opts.mergeOverrides).admin,
         withLock: withLandLock,

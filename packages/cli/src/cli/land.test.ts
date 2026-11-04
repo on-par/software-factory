@@ -290,6 +290,31 @@ describe('cmdLand (direct invocation)', () => {
     expect(load).toHaveBeenCalledWith(expect.stringMatching(/\.factory\/config\.(json|yaml)$/));
   });
 
+  it('landIssue forwards merge.maxConflictRounds from the loaded config (#1887)', async () => {
+    h.factoryConfig.merge.maxConflictRounds = 1;
+    h.setupWorktreeImpl = async (_repoRoot, _branch, worktree) => {
+      mkdirSync(worktree, { recursive: true });
+    };
+    const baseExec = h.execImpl;
+    h.execImpl = (cmd: string) => {
+      if (cmd.startsWith('test -e')) return 'no';
+      if (cmd === 'git rev-parse --verify HEAD' || cmd.startsWith('git merge-base')) return 'a'.repeat(40);
+      if (cmd.startsWith('git rev-parse --git-path')) return '.git/operation';
+      if (/^git (status|diff|merge|push|fetch)/.test(cmd)) return '';
+      return baseExec(cmd);
+    };
+    h.octokit.graphql = vi.fn(async (query: string) =>
+      query.trimStart().startsWith('query')
+        ? { repository: { pullRequest: { id: 'PR_ID', isDraft: false, mergeStateStatus: 'DIRTY' } } }
+        : {},
+    );
+    const load = vi.fn(() => h.factoryConfig);
+    await expect(
+      cliCmdLand(5, {}, { ...inertConfigLoaders, ...inertGitOps, ...ops, loadFactoryConfigForRepo: load }),
+    ).rejects.toMatchObject({ code: 3, message: expect.stringMatching(/conflict rounds exhausted \(1\/1\)/) });
+    expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
+  });
+
   describe('cmdLand no-auto-merge gate (#1720)', () => {
     const labelsFor = (gated: number[]) =>
       vi.fn(async ({ issue_number }: { issue_number: number }) => ({

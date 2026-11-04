@@ -92,6 +92,10 @@ describe('docs/config.example.yaml', () => {
     expect(text.replace(/\s*#\s*/g, ' ').replace(/\s+/g, ' ')).toContain('no templating or token substitution');
   });
 
+  it('renders merge.maxConflictRounds in docs/config.example.yaml', () => {
+    expect(renderConfigExample()).toMatch(/^merge:\n(?:\s*#.*\n)*\s+maxConflictRounds: 2$/m);
+  });
+
   it('parses as YAML into a mapping', () => {
     const parsed: unknown = parse(renderConfigExample());
     expect(parsed).not.toBeNull();
