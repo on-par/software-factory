@@ -3,7 +3,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AwaitingReviewError } from './land-pr.js';
-import { IssueSkippedError, LaneParkError } from './index.js';
+import { toWorkKey } from '@on-par/factory-core';
+import { IssueSkippedError, LaneParkError, laneQueueDeps } from './index.js';
 import { runLane } from './run-lane.js';
 
 describe('cli', () => {
@@ -351,5 +352,24 @@ describe('cli', () => {
       await laneA;
       expect(activeIssues.size).toBe(0);
     });
+  });
+});
+
+describe('laneQueueDeps non-numeric claims (#3918)', () => {
+  it('releases a non-numeric claim queued, reports it and claims nothing', async () => {
+    const queue = {
+      claimNext: vi.fn(async () => ({ key: toWorkKey('ON-12'), decision: { kind: 'build' as const } })),
+      release: vi.fn(async () => {}),
+      heartbeat: vi.fn(),
+      list: vi.fn(),
+      lanes: vi.fn(),
+      reap: vi.fn(),
+      pollBlockedParks: vi.fn(),
+    };
+    const onUnshippable = vi.fn();
+    const deps = laneQueueDeps(queue as never, 'infra', onUnshippable);
+    expect(await deps.claimNext!()).toBeNull();
+    expect(queue.release).toHaveBeenCalledWith('ON-12', 'queued');
+    expect(onUnshippable).toHaveBeenCalledWith('ON-12');
   });
 });
