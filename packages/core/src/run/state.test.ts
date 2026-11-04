@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { clearRepoSlugCache } from '../logger/repo-slug.js';
 import type { IssueRunState } from '../types/index.js';
-import { workKeyFromIssue } from '../work/work-key.js';
+import { toWorkKey, workKeyFromIssue } from '../work/work-key.js';
 import {
   isValidIssueRunState,
   listIssueRuns,
@@ -300,7 +300,7 @@ describe('listIssueRuns', () => {
     expect((await listIssueRuns(dir)).runs.map((r) => r.key)).toEqual(['42']);
   });
 
-  it('writes the string key and no numeric issue, and reads it back', async () => {
+  it('writes the string key and the numeric issue for a numeric key, and reads it back', async () => {
     const dir = dirs.makeSync('list-runs-write-');
     const file = runStateFile(dir, workKeyFromIssue(42));
 
@@ -308,10 +308,38 @@ describe('listIssueRuns', () => {
 
     const raw = JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>;
     expect(raw.key).toBe('42');
-    expect('issue' in raw).toBe(false);
+    expect(raw.issue).toBe(42);
     expect(returned).toMatchObject({ key: '42', issue: 42 });
     expect(await readIssueRunState(file)).toMatchObject({ key: '42', issue: 42 });
     expect((await listIssueRuns(dir)).runs.map((r) => r.issue)).toEqual([42]);
+  });
+
+  it('writes a numeric-key record that a pre-#3890 binary (0.9.27) still accepts', async () => {
+    // The validity rule 0.9.27 applies: integer `issue` equal to the file name's number,
+    // string `startedAt` and `updatedAt`. A record that fails it is skipped by that binary.
+    const pre3890Valid = (raw: Record<string, unknown>, fileNumber: number): boolean =>
+      Number.isInteger(raw.issue) &&
+      raw.issue === fileNumber &&
+      typeof raw.startedAt === 'string' &&
+      typeof raw.updatedAt === 'string';
+    const dir = dirs.makeSync('list-runs-compat-');
+    const file = runStateFile(dir, workKeyFromIssue(42));
+
+    await writeIssueRunState(file, fixtureState(dir, { issue: 42, repo: 'o/r' }));
+
+    expect(pre3890Valid(JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>, 42)).toBe(true);
+  });
+
+  it('persists no numeric issue for a non-numeric key', async () => {
+    const dir = dirs.makeSync('list-runs-write-linear-');
+    const key = toWorkKey('ON-12');
+    const file = runStateFile(dir, key);
+
+    await writeIssueRunState(file, { ...fixtureState(dir, { issue: 0, repo: 'o/r' }), key });
+
+    const raw = JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>;
+    expect(raw.key).toBe('ON-12');
+    expect('issue' in raw).toBe(false);
   });
 
   it('skips a string-key record whose key disagrees with the file name', async () => {

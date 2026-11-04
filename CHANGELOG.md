@@ -14,7 +14,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
-- Lanes, `factory supervise` and the `factory status` queue band claim, heartbeat, release and list through the WorkKey queue seam, and run state is written with a string `key`; an older factory binary (0.9.27 or earlier) can't read string keys and skips those state files (#3890).
+- Lanes, `factory supervise` and the `factory status` queue band claim, heartbeat, release and list through the WorkKey queue seam, and run state is written with a string `key`. A GitHub issue's record also keeps its numeric `issue`, so a factory 0.9.27 or earlier on the same host still reads it (#3890).
 
 ## 0.9.27 - 2026-11-03
 
