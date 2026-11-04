@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   closedWorkSkipReason,
@@ -93,12 +93,25 @@ describe('createDefaultWorkSourceRegistry', () => {
     expect(request.title).toBe('A title');
   });
 
-  it('also registers the local-brief adapter', async () => {
+  it('also registers the local-brief and linear-issue adapters', async () => {
     const octokit: any = { rest: { issues: {} } };
     const registry = createDefaultWorkSourceRegistry({ octokit });
 
     expect(registry.has('local-brief')).toBe(true);
-    expect(registry.kinds()).toEqual(['github-issue', 'local-brief']);
+    expect(registry.kinds()).toEqual(['github-issue', 'local-brief', 'linear-issue']);
+  });
+
+  it('builds the default registry without calling fetch or reading LINEAR_API_KEY', () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    vi.stubEnv('LINEAR_API_KEY', '');
+    try {
+      const octokit: any = { rest: { issues: {} } };
+      expect(() => createDefaultWorkSourceRegistry({ octokit })).not.toThrow();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
   });
 
   it('resolves a local brief through an injected briefReader', async () => {

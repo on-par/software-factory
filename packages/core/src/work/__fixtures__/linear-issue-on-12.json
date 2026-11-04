@@ -1,0 +1,13 @@
+{
+  "data": {
+    "issue": {
+      "id": "00000000-0000-4000-8000-000000000012",
+      "identifier": "ON-12",
+      "title": "Sample issue 12",
+      "description": "Add a sample feature.\n\n## Acceptance criteria\n\n- first criterion\n- second criterion\n",
+      "url": "https://linear.app/example/issue/ON-12/sample",
+      "state": { "type": "started" },
+      "labels": { "nodes": [{ "name": "factory:ready" }, { "name": "enhancement" }] }
+    }
+  }
+}
