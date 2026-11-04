@@ -18,6 +18,7 @@ Options:
 Run work:
   ship [options] <issue>                 Plan → build → check one GitHub issue and open a ready-for-review PR; never merges (merge later with land)
   run-issue [options] <issue>            Like ship, but loads the issue first and exits 2 before any worktree or PR if it cannot be found
+  respond [options] <pr>                 Run a feedback round on a factory PR: triage new trusted feedback, re-plan or rework, push, reply, resolve fixed threads and re-request review
   run-brief [options] <file> [files...]  Like run-issue, but the work comes from local Markdown briefs; several run in order with the same flags, a failed one does not stop the rest, and any failure exits non-zero
   run [options]                          Claim queued issues (factory:queued labels) and ship them, lanes in parallel; merges only when auto-merge is on
   supervise [options]                    Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
