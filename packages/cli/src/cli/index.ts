@@ -245,6 +245,8 @@ import { withRepoRunLock } from './repo-run-lock.js';
 
 export { CliExitError, withRepoRunLock };
 import type { StopMarker } from '@on-par/factory-core/internal';
+import { resolveAwaitingCiCapMs } from '@on-par/factory-core/internal';
+import { driveToMerge, exitForMerge, shouldDriveAfterShipFailure, validateMergeFlags } from './run-issue-merge.js';
 import { formatSteerabilityReport } from '@on-par/factory-core/internal';
 import { buildTierEvidence, formatTierEvidence, resolveTrustTier } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
@@ -347,6 +349,7 @@ import { runStalenessGuard } from './staleness.js';
 import { cmdBaselineClear } from './baseline.js';
 import { cmdBreakerReset } from './breaker.js';
 import { cmdRespond } from './respond-command.js';
+import { withShutdown } from './shutdown.js';
 import { runWorktreeKeep, runWorktreeRelease } from './worktree-keep.js';
 import { gcWorktreeSandbox, reapParkedLane, reapPrlessShip } from './worktree-reap.js';
 
@@ -595,7 +598,7 @@ function resolvePhaseOps(overrides: Partial<PhaseOps>, base: PhaseOps = phaseOps
 export const PREREQUISITES_TEXT = `First step: run \`factory doctor\` to check your setup and see what to fix.
 
 Prerequisites:
-  - Claude Code CLI installed and authenticated (Claude subscription): https://claude.com/claude-code
+  - A supported coding agent CLI installed and authenticated: Claude Code, Codex, OpenCode or Pi (\`factory doctor\` shows which are ready)
   - GitHub CLI authenticated: gh auth login
   - GITHUB_TOKEN or GH_TOKEN set (falls back to \`gh auth token\`)
 Run inside a git repository with a GitHub remote.
@@ -2354,6 +2357,10 @@ async function cmdRunIssue(
     stack?: boolean;
     maxSlices?: string;
     draftPr?: boolean;
+    /** `--merge` (#3905): after SHIP, land the PR through the run merge gates and exit with a distinct code. */
+    merge?: boolean;
+    mergeTimeout?: string;
+    admin?: boolean;
     /** --in-place (#3904): run in the current checkout, no worktree. */
     inPlace?: boolean;
   },
@@ -2373,9 +2380,16 @@ async function cmdRunIssue(
     sizeGate: rawSizeGate,
     maxSlices: rawMaxSlices,
     stack,
+    merge,
+    mergeTimeout,
+    admin,
     inPlace: _inPlaceFlag,
     ...shipOpts
   } = opts;
+  const mergeTimeoutMs = validateMergeFlags(
+    { merge, mergeTimeout, admin, pr: opts.pr, stack: stack || rawSizeGate === 'stack' },
+    'issue',
+  );
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const parsedSizeGate = sizeGateOrExit(rawSizeGate);
   if (stack && parsedSizeGate !== undefined && parsedSizeGate !== 'stack') {
@@ -2478,11 +2492,37 @@ async function cmdRunIssue(
           });
           return;
         }
-        await shipIssue(
-          issueNum,
-          { ...shipOpts, branchPrefix, sizeGate, explicitStack, maxSlices, inPlace },
-          { repoRoot, ghRepo, workRequest: work },
-        );
+        let outcome: RunOutcome | undefined;
+        const drive = async () =>
+          exitForMerge(
+            await driveToMerge({
+              issue: issueNum,
+              outcome,
+              repoRoot,
+              ghRepo,
+              paths,
+              timeoutMs: mergeTimeoutMs ?? resolveAwaitingCiCapMs(configLoaders.loadFactoryConfigForRepo(paths.config)),
+              ...(admin ? { admin } : {}),
+            }),
+            `issue #${issueNum}`,
+          );
+        try {
+          await shipIssue(
+            issueNum,
+            { ...shipOpts, branchPrefix, sizeGate, explicitStack, maxSlices, inPlace },
+            { repoRoot, ghRepo, workRequest: work, onOutcome: (o) => (outcome = o) },
+          );
+        } catch (err) {
+          if (
+            merge &&
+            shouldDriveAfterShipFailure(outcome) &&
+            !(err instanceof CliExitError) &&
+            !(err instanceof IssueSkippedError)
+          )
+            await drive();
+          throw err;
+        }
+        if (merge) await drive();
       } catch (err: any) {
         if (err instanceof CliExitError) throw err;
         if (err instanceof IssueSkippedError) return;
@@ -4281,14 +4321,14 @@ export const PROGRAM_HANDLERS = {
   cmdQueueClear,
   cmdCheck,
   cmdDraft,
-  cmdShip,
-  cmdRunIssue,
-  cmdRunBrief,
+  cmdShip: withShutdown(cmdShip),
+  cmdRunIssue: withShutdown(cmdRunIssue),
+  cmdRunBrief: withShutdown(cmdRunBrief),
   cmdLocalSmallDryRun,
   cmdLocalSmallOvernight,
   cmdLand,
   cmdResumeApproved,
-  cmdRun: runRun,
+  cmdRun: withShutdown(runRun),
   cmdProxy,
   cmdFactoryd,
   cmdDaemonStart,
@@ -4303,7 +4343,7 @@ export const PROGRAM_HANDLERS = {
   cmdBreakerReset,
   cmdRespond,
   cmdReset,
-  cmdSupervise: runSupervise,
+  cmdSupervise: withShutdown(runSupervise),
   cmdStop,
   cmdResume,
   cmdSteer: runSteerCommand,

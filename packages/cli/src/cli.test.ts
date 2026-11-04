@@ -3379,6 +3379,13 @@ More prose here.
       expect(PREREQUISITES_TEXT).toMatch(/GITHUB_TOKEN/);
     });
 
+    it('PREREQUISITES_TEXT names any supported coding agent, not only Claude Code', () => {
+      expect(PREREQUISITES_TEXT).toMatch(/supported coding agent/);
+      expect(PREREQUISITES_TEXT).toMatch(/Codex/);
+      expect(PREREQUISITES_TEXT).toMatch(/OpenCode/);
+      expect(PREREQUISITES_TEXT).not.toMatch(/Claude Code CLI installed and authenticated \(Claude subscription\)/);
+    });
+
     it('HELP_FOOTER_TEXT points at the config reference, per-command help, and the docs', () => {
       expect(HELP_FOOTER_TEXT).toContain('Common environment variables:');
       expect(HELP_FOOTER_TEXT).toContain('FACTORY_MERGE=1');

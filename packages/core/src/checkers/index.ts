@@ -149,7 +149,7 @@ export const compileChecker: CheckerFn = async (ctx) => {
   try {
     const argv = (await resolveCompileCommand(ctx))?.argv;
     if (!argv) {
-      const probed = `no checks.build in ${describeChecksProbe(ctx)}, no package.json build script, Makefile or Cargo.toml`;
+      const probed = `no checks.build in ${describeChecksProbe(ctx)}, no package.json build or typecheck script, Makefile or Cargo.toml`;
       return { checker: 'compile', result: 'SKIP', details: `no build system detected (${probed}) — skipped` };
     }
 

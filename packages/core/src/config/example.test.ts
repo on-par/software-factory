@@ -171,4 +171,22 @@ describe('the example, loaded as a repo config, behaves like no config file', ()
       resolveMergePolicy(loadFactoryConfigForRepo(noConfig), env),
     );
   });
+
+  describe('renderConfigExample sizeGate.mode', () => {
+    it('documents sizeGate.mode as a commented off | stack line with one-run stacks', () => {
+      const lines = renderConfigExample().split('\n');
+      const at = lines.findIndex((line) => line === 'sizeGate:');
+      expect(at).toBeGreaterThan(0);
+      expect(lines.slice(at + 1, at + 3)).toContain('  # mode: stack');
+      let start = at;
+      while (start > 0 && lines[start - 1]?.startsWith('#')) start -= 1;
+      const doc = lines
+        .slice(start, at)
+        .map((line) => line.replace(/^#\s?/, ''))
+        .join(' ');
+      expect(doc).toContain('off | stack');
+      expect(doc).toMatch(/`factory run-issue` and `factory run-brief` build every slice in one run/);
+      expect(doc).toMatch(/Only the `factory run` lane goes one slice per run/);
+    });
+  });
 });

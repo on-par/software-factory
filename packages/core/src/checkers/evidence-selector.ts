@@ -82,26 +82,33 @@ const WRAPPERS: readonly (readonly string[])[] = [
   ['poetry', 'run'],
 ];
 
+function runnerFromWords(words: readonly string[]): EvidenceTestRunner | null {
+  const wrapper = WRAPPERS.find((prefix) => prefix.every((part, index) => words[index] === part));
+  const command = words[wrapper ? wrapper.length : 0];
+  const name = command?.slice(command.lastIndexOf('/') + 1);
+  return RUNNERS.find((runner) => runner === name) ?? null;
+}
+
+/** The test runner a package.json script body invokes, or null when it is not a recognised runner. */
+export function runnerFromScript(body: string): EvidenceTestRunner | null {
+  const words = tokenizeEvidenceCommand(body);
+  return words ? runnerFromWords(words) : null;
+}
+
 export function resolveEvidenceTestRunner(
   allowlist: EvidenceAllowlist,
   packageJson: unknown,
 ): EvidenceTestRunner | null {
   const argv = allowlist.get('test');
   if (!argv) return null;
-  let words: readonly string[] | null = argv;
   if (argv.length === 3 && MANAGERS.has(argv[0]!) && argv[1] === 'run' && argv[2] === 'test') {
     if (packageJson === null || typeof packageJson !== 'object' || Array.isArray(packageJson)) return null;
     const scripts = (packageJson as Record<string, unknown>).scripts;
     if (scripts === null || typeof scripts !== 'object' || Array.isArray(scripts)) return null;
     const body = (scripts as Record<string, unknown>).test;
-    if (typeof body !== 'string') return null;
-    words = tokenizeEvidenceCommand(body);
-    if (!words) return null;
+    return typeof body === 'string' ? runnerFromScript(body) : null;
   }
-  const wrapper = WRAPPERS.find((prefix) => prefix.every((part, index) => words[index] === part));
-  const command = words[wrapper ? wrapper.length : 0];
-  const name = command?.slice(command.lastIndexOf('/') + 1);
-  return RUNNERS.find((runner) => runner === name) ?? null;
+  return runnerFromWords(argv);
 }
 
 export function selectorArgs(selector: FailToPassSelector, runner: EvidenceTestRunner): string[] {
