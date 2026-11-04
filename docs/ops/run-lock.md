@@ -51,3 +51,5 @@ Enqueue also repairs races after it writes: it keeps one `factory:order:<n>` lab
 ## Known limitation
 
 `run-flags.json` (used by `factory status` for draft-PR attribution) is per checkout and written without a lock, so across parallel one-shot runs it is last-writer-wins. It is display-only. `events.ndjson` is append-only.
+
+A running `factory run` picks up work queued after it started (new lanes, and lanes that already finished) every `queue.discovery_interval_ms`, so there is no need to restart it. A restart kills in-flight claims (#3920).
