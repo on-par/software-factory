@@ -7,6 +7,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CliExitError } from './errors.js';
 import { cmdRespond, type RespondDeps } from './respond-command.js';
 
+const runtime = vi.hoisted(() => ({ current: undefined as unknown }));
+vi.mock('./ship-runtime.js', () => ({ shipRuntime: () => runtime.current }));
+const publishParkComment = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('@on-par/factory-core/internal', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@on-par/factory-core/internal')>()),
+  publishParkComment,
+}));
+
 const tmp = createTempDirs();
 afterEach(async () => {
   await tmp.cleanup();
@@ -111,5 +119,30 @@ describe('cmdRespond', () => {
         branch: 'factory/42-fix-it',
       }),
     );
+  });
+
+  it('publishes the park comment through the PR octokit and repo at the cap', async () => {
+    const { deps, parkAtCap } = await setup(open, { queue: { max_review_rework_runs: 0 } } as never);
+    const input = { issue: 42 } as never;
+    parkAtCap.mockImplementation(async (args) => {
+      await args.publishComment?.(input);
+    });
+    await expect(cmdRespond('7', {}, deps)).rejects.toMatchObject({ code: 1 });
+    expect(publishParkComment).toHaveBeenCalledWith({ octokit: deps.getOctokit(), repo: 'o/r', input });
+  });
+
+  it('wires the default deps from the ship runtime', async () => {
+    const { deps } = await setup({ ...open, state: 'closed' });
+    const shell = {};
+    const loadFactoryConfigForRepo = vi.fn(() => ({}) as FactoryConfig);
+    runtime.current = {
+      resolveShellOps: vi.fn(() => shell),
+      getRepoRoot: vi.fn(() => deps.getRepoRoot()),
+      getGitHubRepo: vi.fn(async () => 'o/r'),
+      getOctokit: vi.fn(() => deps.getOctokit()),
+      resolveConfigLoaders: vi.fn(() => ({ loadFactoryConfigForRepo })),
+    };
+    await expect(cmdRespond('7', {})).rejects.toMatchObject({ code: 1, message: expect.stringContaining('is closed') });
+    expect(loadFactoryConfigForRepo).toHaveBeenCalledOnce();
   });
 });
