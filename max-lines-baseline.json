@@ -12,7 +12,7 @@
   "packages/core/src/checkers/index.test.ts": 1700,
   "packages/core/src/checkers/index.ts": 845,
   "packages/core/src/config/index.test.ts": 2017,
-  "packages/core/src/config/index.ts": 790,
+  "packages/core/src/config/index.ts": 853,
   "packages/core/src/config/repo.test.ts": 1196,
   "packages/core/src/config/repo.ts": 938,
   "packages/core/src/constitutions/index.test.ts": 580,
