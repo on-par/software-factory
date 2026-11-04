@@ -27,6 +27,9 @@ delete process.env.FACTORY_RUN_CONFIG_ORIGIN;
 delete process.env.FACTORY_STATE_ROOT;
 // Host build slots (#3043) are shared state under ~/.factory/host; tests must never touch the real home.
 process.env.FACTORY_HOST_SLOTS_DIR = join(tmpdir(), `factory-test-host-slots-${process.pid}`);
+// The host disk guard (#2284) reads real free space. On a runner below its 10 GB default, every lane under test
+// waits on `disk_low` until the 30s test timeout. Turn it off; suites that exercise the guard pass their own env.
+process.env.FACTORY_MIN_FREE_GB = '0';
 
 // Tests must never launch the developer's real codex: the router's login probe runs `codex login status`, and a
 // quarantined Homebrew codex shows a macOS "open this app?" dialog on every launch. A fake that exits 1 reads as
