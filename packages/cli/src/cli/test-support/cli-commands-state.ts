@@ -7,6 +7,8 @@ import { vi } from 'vitest';
 import { openPrFixture } from '../__fixtures__/open-pr.js';
 import type { CliDeps } from '../index.js';
 
+import { checkInPlaceCheckout, setupInPlaceCheckout } from './in-place-doubles.js';
+
 // ---------------------------------------------------------------------------
 // Shared mutable state the fakes read from. Set per test by installCliCommandsHarness().
 // ---------------------------------------------------------------------------
@@ -211,12 +213,7 @@ export const checkResumeBaseDrift = vi.fn<NonNullable<CliDeps['checkResumeBaseDr
   ref: 'origin/main',
   sha: 'c'.repeat(40),
 }));
-export const checkInPlaceCheckout = vi.fn<NonNullable<CliDeps['checkInPlaceCheckout']>>(async () => null);
-export const setupInPlaceCheckout = vi.fn<NonNullable<CliDeps['setupInPlaceCheckout']>>(async () => ({
-  base: 'origin/main',
-  head: 'abc',
-  remoteBranch: null,
-}));
+export { checkInPlaceCheckout, setupInPlaceCheckout };
 export const inertGitOps: Pick<
   CliDeps,
   | 'setupWorktree'
