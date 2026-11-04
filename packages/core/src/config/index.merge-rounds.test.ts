@@ -1,18 +1,19 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { loadFactoryConfigForRepo } from './index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 
 describe('merge.maxConflictRounds (#1887)', () => {
+  const temps = createTempDirs();
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'factory-merge-rounds-'));
+    dir = temps.makeSync('factory-merge-rounds-');
   });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await temps.cleanup();
   });
 
   it('defaults merge.maxConflictRounds to 2 when the config has no merge section', () => {
