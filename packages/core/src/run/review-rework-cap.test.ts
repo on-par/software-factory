@@ -141,6 +141,20 @@ describe('review-rework cap helpers', () => {
     expect(msg).toContain('3 review-rework runs (cap 2');
     expect(msg).toContain('PR #900');
     expect(msg).toContain('factory unpark 42');
+    expect(msg).toContain('review 7, 8');
+  });
+
+  it('reviewReworkCapMessage says comment for a comment source (#3882)', () => {
+    const msg = reviewReworkCapMessage({
+      issue: workKeyFromIssue(42),
+      pr: 900,
+      cap: 2,
+      count: 2,
+      reviewIds: [7],
+      source: 'comment',
+    });
+    expect(msg).toContain('PR #900 comment 7');
+    expect(msg).not.toContain('review 7');
   });
 
   describe('parkAtReviewReworkCap', () => {

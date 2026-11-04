@@ -6,6 +6,8 @@ export {
   createOctokitIterateGitHub,
   pollIterateCommands,
 } from './iterate-command.js';
+export { parseReworkCommand, pollCommentRework } from './comment-rework-trigger.js';
+export type { ReviewReworkSource } from './review-rework-trigger.js';
 export {
   claimReviewRework,
   createFileReviewReworkStore,
