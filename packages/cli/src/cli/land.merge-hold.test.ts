@@ -98,4 +98,33 @@ describe('waitForMerge merge-hold opt-ins (#3905)', () => {
     expect(listIssueLabels).toHaveBeenCalledWith(expect.anything(), 'on-par', 'software-factory', 42);
     expect(land.mock.calls[0]?.[7]).toMatchObject({ issueless: true, branch: 'ship-it/7-x' });
   });
+
+  it('does not merge when the Linear issue carries no-auto-merge', async () => {
+    const land = vi.fn();
+    const listIssueLabels = vi.fn(async () => []);
+    const err = await run({
+      holdWhenGated: true,
+      ticketLabels: async () => ['no-auto-merge'],
+      listIssueLabels,
+      lookupPr: async () => ({ number: 42, merged: false }),
+      land,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(MergeGatedError);
+    expect(land).not.toHaveBeenCalled();
+    expect(listIssueLabels).not.toHaveBeenCalled();
+  });
+
+  it('a rejecting Linear label read fails closed', async () => {
+    const land = vi.fn();
+    const err = await run({
+      holdWhenGated: true,
+      ticketLabels: async () => {
+        throw new Error('linear down');
+      },
+      lookupPr: async () => ({ number: 42, merged: false }),
+      land,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(MergeGatedError);
+    expect(land).not.toHaveBeenCalled();
+  });
 });

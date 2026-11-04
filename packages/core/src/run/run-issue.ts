@@ -27,7 +27,6 @@ import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import { installLaneDependencies as installLaneDependenciesDefault } from './lane-install.js';
 import { checkPhase as checkPhaseDefault, type CheckPhaseResult } from '../phases/check.js';
-import { renderEnvironmentReleaseComment } from '../phases/environment-release.js';
 import type { SizeBudget } from '../readiness/size.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
@@ -44,7 +43,7 @@ import { beginBuildRoute, compatibleBuildModel, laneRouteCapabilities } from './
 import { classifyCheckFailure } from './check-verdict.js';
 import { withSingleTerminalEvent } from './terminal-events.js';
 import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
-import { environmentReleaseMarker, parkPayload, publishParkComment, upsertMarkerComment } from './park-comment.js';
+import { parkPayload, postEnvironmentReleaseComment, publishParkComment } from './park-comment.js';
 import { createRunPhaseLogger } from './run-phase-log.js';
 import { providerFailureRecorder } from './provider-failure-recorder.js';
 import { gateBuildTarget, pickOrderedProvider, type ProviderPick } from './provider-breaker-gate.js';
@@ -96,6 +95,7 @@ import { describeSteering, type ConsumedSteering } from '../steering/index.js';
 import type { CiFailureEvidence, CheckSummary, Constitution, FailoverReason, FailurePhase } from '../types/index.js';
 import { type WorkRequest, type WorkRequestSourceKind, workKeyFromIssue } from '../work/index.js';
 import { LOCAL_BRIEF_SOURCE } from '../work/local-brief.js';
+import { linearRunWriteback, type LinearRunPorts } from './linear-run.js';
 import {
   deferOnLaneCollision,
   releaseLaneClaim,
@@ -228,7 +228,7 @@ export interface RunRequest extends ReworkRequestFields {
 /** The injected seams runIssue needs. Effectful, path-bound concerns (Octokit, worktree
  *  layout, approvals/steering directories, report/artifact destinations) are the caller's
  *  responsibility to wire — runIssue only calls the closures it is handed. */
-export interface RunPorts extends CiReworkPorts {
+export interface RunPorts extends CiReworkPorts, LinearRunPorts {
   /** Run-state slice-plan store for briefs (#3813); absent = the issue's slice-plan comment. */
   slicePlanStore?: SlicePlanStore;
   /** ADR-0161 stack mode: creates a slice branch in the worktree. Defaults to createStackSliceBranch. */
@@ -341,6 +341,7 @@ async function runIssueOnce(
   const checkPhase: typeof checkPhaseDefault = (o) => slot('check', () => (ports.checkPhase ?? checkPhaseDefault)(o));
   const shipPhase = ports.shipPhase ?? shipPhaseDefault;
   const log = ports.events();
+  const linear = linearRunWriteback(request.work, ports, log);
   // One id per run: BUILD, CHECK and rework share a per-run VBCSCompiler server (#1910).
   // 12 hex chars keeps the compiler's Unix-socket pipe path short under macOS $TMPDIR.
   const runId = randomUUID().replace(/-/g, '').slice(0, 12);
@@ -465,13 +466,15 @@ async function runIssueOnce(
     }
     let settled: ParkedPrDisposition | undefined;
     if (!request.localOnly && !request.noPr) {
-      if (request.work.kind !== LOCAL_BRIEF_SOURCE) {
+      // prettier-ignore
+      const parkInput = { reason, message: terminalMessage, runId, branch: request.branch, lane: request.lane, blockers: [], ...(designSmell ? { designSmell } : {}) };
+      if (linear) await linear.park(parkInput);
+      else if (request.work.kind !== LOCAL_BRIEF_SOURCE) {
         const posted = await publishParkComment({
           octokit: ports.octokit,
           repo: request.repo,
           worktree: ports.workspace.path,
-          // prettier-ignore
-          input: { issue: workKey, reason, message: terminalMessage, runId, branch: request.branch, lane: request.lane, blockers: [], ...(designSmell ? { designSmell } : {}) },
+          input: { issue: workKey, ...parkInput },
         });
         if (!posted.ok) log('environment_warning', `could not post the issue park comment: ${posted.error}`);
       }
@@ -698,7 +701,7 @@ async function runIssueOnce(
           sizeGateMode: request.sizeGateMode,
           parkOverBudget: request.parkOverBudget,
           sliceIndex: request.sliceIndex,
-          slicePlanStore: ports.slicePlanStore,
+          slicePlanStore: linear?.slicePlanStore ?? ports.slicePlanStore,
           maxSlices: request.maxSlices,
           sizeBudget: request.sizeBudget,
           blockUnresolvedRegressions: request.blockUnresolvedRegressions,
@@ -979,19 +982,16 @@ async function runIssueOnce(
             failure,
           );
         }
-        if (!request.localOnly && !request.noPr) {
-          try {
-            const marker = environmentReleaseMarker(workKey);
-            await upsertMarkerComment({
-              octokit: ports.octokit,
-              repo: request.repo,
-              issue: workKey,
-              marker,
-              body: `${renderEnvironmentReleaseComment(env)}\n${marker}`,
-            });
-          } catch (err) {
-            log('environment_warning', `could not post the environment-failure comment: ${errorMessage(err)}`);
-          }
+        if (linear && !request.localOnly && !request.noPr) await linear.environment(env);
+        else if (!request.localOnly && !request.noPr) {
+          const warn = (message: string) => log('environment_warning', message);
+          await postEnvironmentReleaseComment({
+            octokit: ports.octokit,
+            repo: request.repo,
+            issue: workKey,
+            env,
+            warn,
+          });
         }
         let preserve =
           ports.checkResume !== undefined &&
@@ -1186,7 +1186,7 @@ async function runIssueOnce(
         // Brief PRs carry no stack-order line (shipPhase ignores the stack for inline work), so skip
         // the parent-PR update: its branch names hold the brief's stand-in number (#3813).
         stackMode: request.work.kind !== LOCAL_BRIEF_SOURCE,
-        store: ports.slicePlanStore,
+        store: linear?.slicePlanStore ?? ports.slicePlanStore,
         log,
       });
       if (failure !== undefined) return await terminalParked('fail', failure);

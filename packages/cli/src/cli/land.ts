@@ -333,6 +333,8 @@ export type WaitForMergeDeps = {
   rebuildOnConflict?: boolean;
   signal?: AbortSignal; // #3146: aborts when the lane loses its claim; checked every poll and before the merge
   listIssueLabels?: (octokit: Octokit, owner: string, repo: string, issue: number) => Promise<string[]>;
+  /** Linear hold (#3894): reads the ticket's labels instead of the GitHub issue's; a rejection fails closed. */
+  ticketLabels?: () => Promise<string[]>;
   sleep?: (ms: number) => Promise<void>;
   emitEvent?: typeof logEvent;
   mergeEnabled?: () => boolean;
@@ -365,6 +367,7 @@ export async function waitForMerge(
     loadConfig = landRuntime().configLoaders.loadFactoryConfigForRepo,
     land = landIssue,
     listIssueLabels = defaultListIssueLabels,
+    ticketLabels,
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     emitEvent = logEvent,
     mergeEnabled,
@@ -429,7 +432,7 @@ export async function waitForMerge(
         if (issueless) {
           const pr = await lookupPr(octokit, owner, repoName, branch);
           labels = pr ? await listIssueLabels(octokit, owner, repoName, pr.number) : [];
-        } else labels = await listIssueLabels(octokit, owner, repoName, issue);
+        } else labels = ticketLabels ? await ticketLabels() : await listIssueLabels(octokit, owner, repoName, issue);
       } catch (err) {
         emitEvent(paths.events, 'warn', issue, `label check failed (treating as blocked): ${errorDetail(err)}`);
         labels = [filingPolicy.selfFixLabel];

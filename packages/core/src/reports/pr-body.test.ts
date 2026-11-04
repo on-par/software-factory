@@ -1,5 +1,5 @@
 import { renderPrWalkthrough } from './pr-walkthrough.js';
-import { workKeyFromIssue } from '../work/work-key.js';
+import { toWorkKey, workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -292,5 +292,25 @@ describe('stripBriefIds', () => {
 
   it('keeps the brief id out of the summary line', () => {
     expect(briefSummaryLine('ARA-3: Fix the parser.', 41)).toBe('Fix the parser. Builds on #41.');
+  });
+});
+
+describe('renderPrBody trailer (#3894)', () => {
+  it('renders Fixes KEY for a final Linear slice and keeps Closes #123 for GitHub', () => {
+    const linear = renderPrBody({ summaryLine: 's', tracker: 'linear', closes: toWorkKey('ON-12') });
+    expect(linear).toContain('Fixes ON-12');
+    expect(linear).not.toContain('Closes #');
+    expect(renderPrBody({ summaryLine: 's', closes: workKeyFromIssue(123) })).toContain('Closes #123');
+  });
+
+  it('renders Part of KEY with no closing keyword for a non-final Linear slice', () => {
+    const body = renderPrBody({
+      summaryLine: 'Implements slice 1/2 of ON-12.',
+      footer: '',
+      tracker: 'linear',
+      partOf: toWorkKey('ON-12'),
+    });
+    expect(body).toContain('Part of ON-12');
+    expect(body).not.toMatch(/\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b/i);
   });
 });

@@ -653,7 +653,14 @@ const INTERNAL_API_KEYS = [
   'createOctokitGreenPrClient',
   'findUnmergedGreenPrs',
   // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
-  'wrapCommandInSandbox',
+  'wrapCommandInSandbox', // Linear write-back (#3894)
+  'closesTrailer',
+  'createLinearTicketWriteback',
+  'isTicketKey',
+  'mirrorSlicePlanToTicket',
+  'postTicketComment',
+  'ticketKeyOf',
+  'ticketTrackerOf',
 ];
 describe('public API surface (ADR-0004)', () => {
   it('root export exposes exactly the documented public API', () => {
