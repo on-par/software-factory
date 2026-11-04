@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
 - A `tracker` config key selects `github` (default) or `linear` per repo, and `factory doctor` checks the Linear setup: a missing or rejected `LINEAR_API_KEY` and any project with ready issues but no repo mapping (#3891).
 - Core has a read-only `linear-issue` work source that resolves `ON-12` or a Linear issue URL into a work request; it reads `LINEAR_API_KEY` only when used (#3889).
 
@@ -23,6 +24,8 @@ All seven published `@on-par` packages move to 0.9.27 in lockstep.
 Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
+
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
 
 - Opt-in `preview` config: after CI is green, SHIP finds the PR's preview (deployment status, or a PR comment from an allow-listed author via `authors` / `authorAssociations` that names or postdates the head commit), waits for it, runs a smoke command with `PREVIEW_URL`, and sends fail or `preview-unavailable` back to rework. Only public http(s) hosts are probed: `readyPath` must stay on the preview host, the probe connects only to the address the host check approved, and the host is checked again right before the smoke command starts. CI still pending, or a CI watch that fails, fails the gate closed. Evidence goes to `preview-check.json` (also when the gate throws), artifacts are copied into the run logs, and the result is written to the PR body (#3880).
 - `@on-par/factory-core/testing` exports `createFakeGitHub` and `githubError`: a real `Octokit` answered by an in-memory route table, so tests can fake GitHub with strict types (#3880).
@@ -68,6 +71,8 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
+
 - `sandbox.codexSandbox` config key (`danger-full-access` | `workspace-write`, unset by default); an unknown value is ignored with a run warning and a non-failing `factory doctor` row, and is not read yet (#3829).
 - `factory run-issue <n> --stack` (or `--size-gate stack`) builds every slice of an oversized issue in one run, each slice's PR based on the previous slice's PR head; the stack stops at the first failed slice, `--base-branch` sets slice 1's base, `--no-pr` is refused, and `run-brief --stack` runs through the same stack engine (#3798).
 - `factory run-brief <file> --stack` now slices an over-budget brief and builds the slices as stacked PRs in one run; the slice plan is kept in `.factory/state/slice-plans/` (#3813).
@@ -99,6 +104,8 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
+
 - `factory run-brief <file> [file...] --stack` opens the briefs as a PR stack: each brief starts from and targets the previous brief's PR head branch; a failed brief or one with no PR (`--no-pr`) stops the stack and the rest are skipped and reported (#3763).
 
 ### Changed
@@ -120,6 +127,8 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
+
 - `factory ship`, `run-issue` and `run-brief` take `--base-branch <ref>`: the worktree starts from the freshly fetched `origin/<ref>`, the PR opens against `<ref>`, and pre-PLAN base health and CHECK compare against it; the run has the size gate off, and an empty or `-`-prefixed ref exits 2 before any worktree or PR (#3764).
 - `factory run-brief <file> [file...]` takes several Markdown briefs and runs them one after another in argv order, with the same flags for each (#3762). A failed brief, including a missing or empty path, does not stop the rest. A per-brief summary is printed at the end, and the exit code is 1 if any brief failed. Each brief takes its own run lock as before. `--artifacts` still takes exactly one brief.
 
@@ -130,6 +139,8 @@ All seven published `@on-par` packages move to 0.9.22 in lockstep.
 Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
+
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
 
 - `run.branchPrefix` in `.factory/config.*` sets a lasting default branch-name prefix
   for the repo (#3747). Precedence: `--branch-prefix` > `run.branchPrefix` > `factory`.
@@ -182,6 +193,8 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
+
 - At classifier trust tier T2 an eligible class-A PR goes to the existing auto-merge path with a `t2-auto` receipt (event log and PR body), still behind required CI and the no-auto-merge gate; an active demotion drops the effective tier one rung, so a demoted T2 samples like T1 (#1960).
 - `factory status` shows merged-child coverage of each decomposed parent's criteria, and a merge updates one coverage comment on the parent (#3108)
 - `factory-run.yml` installs `@on-par/factory-cli@0.9.20` (`FACTORY_CLI_VERSION`), the
@@ -198,6 +211,8 @@ criteria, design-smell park findings, and `factory draft`. All seven published
 `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
+
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
 
 - `factory cost` takes `--since <ISO8601>` (scopes rows, perModel and total) and `--limit <n>` (caps rows only), in text and `--json` output (#3187).
 - At trust tier T1 the PR classifier gate holds a deterministic sample of class-A PRs (`sha256(repo#issue)` below `classifier.t1SampleRate`, default 0.25) by applying `no-auto-merge` and logging a `t1-sampled` merge-gated event (#1958).
@@ -245,6 +260,8 @@ seven published `@on-par` packages move to 0.9.18 in lockstep. Install or update
 `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
+
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
 
 - Docs and CHANGELOG process: every user- or ops-visible PR adds a `## Unreleased`
   entry and updates the README, `docs/status.md`, `docs/agents.md`, `docs/models.md`
@@ -331,6 +348,8 @@ lockstep. Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
+
 - Review rework: a queued review rework runs BUILD rework on the same PR branch with
   only that review's comments, then re-runs CHECK. Runs are capped per issue (default
   2), and the issue parks with one comment naming the cap (#3564, #3565).
@@ -382,6 +401,8 @@ with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
+
 - A trusted "changes requested" review on a factory PR queues its issue for review
   rework, once per review id (#3563).
 - `factory status` and `factory kpis` show the count of open factory draft PRs (#3553).
@@ -410,6 +431,8 @@ packages move to 0.9.15 in lockstep. Install or update with
 
 ### Added
 
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
+
 - Repos can declare their build, test and lint commands under `checks`, and
   `factory init --detect-checks` fills them in (#3594).
 - A rejected or revoked credential fails over, holds that provider's breaker open
@@ -434,6 +457,8 @@ rework fixes. All seven published `@on-par` packages move to 0.9.14 in lockstep.
 Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
+
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
 
 - `models.providerOrder` lists the subscription providers in failover order per role.
   OpenCode Zen models are refused there and as failover targets (#3334).
@@ -517,6 +542,8 @@ or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
+
 - `--draft-pr` and `--no-draft-pr` on `factory ship`, `factory run-issue` and
   `factory run-brief`, with a repo default `run.pr.draft`. With draft on, SHIP opens
   the draft PR, waits for CI and runs CI rework as usual, then skips mark-ready and
@@ -561,6 +588,8 @@ inside BUILD, and a stricter CHECK. All seven published `@on-par` packages move 
 0.9.11 in lockstep. Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
+
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
 
 - Risk policy: a deterministic risk evaluator, a risk receipt on each PR, risk in
   `factory land` output and `factory doctor`, a `factory risk` command, and enforcement
@@ -709,6 +738,8 @@ with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
+
 - Pi harness (experimental): PLAN and CHECK with token usage and cost, failure
   classification from the JSON event stream, effort as `--thinking`, BUILD through
   the commit-only route, and the Pi version and `pi auth check` in `factory doctor`.
@@ -791,6 +822,8 @@ with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
+
 - `.factory/config.yaml` can declare harnesses and pin a model to one. Doctor sees
   them, BUILD runs on a pinned agentic harness through a commit-only command route,
   CHECK rework stays on it, and PLAN or repo config can choose `route: command`. A
@@ -825,6 +858,8 @@ in lockstep. Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
+
 - `factory self-update --to <version>` installs an exact stable version next to the
   running Node, runs `factory doctor`, restarts factoryd, and rolls back on failure.
   factoryd runs a preflight before it drains for an update (#2355).
@@ -841,6 +876,8 @@ publishing. All seven published `@on-par` packages move to 0.9.5 in lockstep. In
 or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
+
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
 
 - Preflight and `factory doctor` check the constitution and config before PLAN:
   unknown checker names, unfilled template tokens, placeholder checkers (with
@@ -903,6 +940,8 @@ lockstep. Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
+
 - `factory doctor` walks a fresh install through setup: one section per
   harness with install checks, a sign-in check that makes no model call, git
   authentication to origin, and repo checks that print the next command
@@ -954,6 +993,8 @@ All seven published `@on-par` packages move to 0.9.3 in lockstep. Install or
 update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
+
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
 
 - Command harnesses: you can declare your own harness ids in config, and the
   factory runs a configured command harness with safe placeholder
@@ -1012,6 +1053,8 @@ Public-repo cleanup and first-run reliability fixes. All seven published
 
 ### Added
 
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
+
 - factoryd checks for updates every 30 minutes, drains, self-updates and
   restarts via launchd, and skips versions that failed (#2375).
 
@@ -1043,6 +1086,8 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 - KPIs count landed and admin-merged factory PRs as merges (#2373).
 
 ### Added
+
+- Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
 
 - `factory self-update --check [--json]` compares the running version with
   the npm `latest` dist-tag. It only reports; it installs nothing (#2370).
