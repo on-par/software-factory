@@ -12,14 +12,17 @@ export async function postEvidenceComment(ctx: {
   repoName: string;
   prNumber: number;
   walkthrough: ReturnType<typeof lazyWalkthrough>;
+  /** The commit CHECK ran on, when SHIP merged main after it; unset reads HEAD. */
+  checkedSha?: string;
 }): Promise<void> {
   const { opts, run, owner, repoName, prNumber, walkthrough } = ctx;
   const { issue, octokit, worktree, checkSummary, log } = opts;
   try {
-    let checkedSha: string | undefined;
-    try {
-      checkedSha = (await run('git rev-parse HEAD', { cwd: worktree })).stdout.trim() || undefined;
-    } catch {}
+    let checkedSha = ctx.checkedSha;
+    if (!checkedSha)
+      try {
+        checkedSha = (await run('git rev-parse HEAD', { cwd: worktree })).stdout.trim() || undefined;
+      } catch {}
     const body = gatherEvidencePack({
       issue,
       checkSummary,
