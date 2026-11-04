@@ -1,11 +1,11 @@
 // packages/cli/src/cli/ship-pr-state.test.ts — a run restores its state from the PR on a fresh clone and saves it on each update (#3909)
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { defaultFactoryConfig } from '@on-par/factory-config';
 import type { Octokit } from '@octokit/rest';
 import { workKeyFromIssue, type EventKind } from '@on-par/factory-core';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import {
   countReviewReworkRuns,
   createFileReviewReworkStore,
@@ -90,13 +90,14 @@ describe('ship PR run state', () => {
     log,
   });
 
+  const temp = createTempDirs();
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'pr-state-'));
+    dir = temp.makeSync('pr-state-');
     reviewReworkFile = join(dir, 'state', 'review-rework.json');
     runsDir = join(dir, 'state', 'runs');
     events = [];
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => temp.cleanup());
 
   it('a fresh clone with no local state restores two handled review rounds and the remaining cap', async () => {
     const { octokit } = fakeOctokit();

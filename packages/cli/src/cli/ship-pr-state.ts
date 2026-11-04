@@ -112,8 +112,8 @@ export async function restorePrRunStateForRun(opts: {
   }
 }
 
-/** The frozen spec's sha256 and the text of its `## Goal` section; both empty when the file is unreadable. */
-async function readSpecSummary(specPath: string): Promise<{ sha256: string; summary: string }> {
+/** The frozen spec's sha256 and the text of its `## Goal` section; null when the file is unreadable. */
+async function readSpecSummary(specPath: string): Promise<{ sha256: string; summary: string } | null> {
   try {
     const text = await readFile(specPath, 'utf8');
     const lines = text.split('\n');
@@ -123,7 +123,7 @@ async function readSpecSummary(specPath: string): Promise<{ sha256: string; summ
     const summary = (end < 0 ? body : body.slice(0, end)).join('\n').trim();
     return { sha256: createHash('sha256').update(text).digest('hex'), summary };
   } catch {
-    return { sha256: '', summary: '' };
+    return null;
   }
 }
 
@@ -166,8 +166,13 @@ export function prRunStateRecorder(
       if (merged === null) return;
       const rounds: PrRunRound[] = [...merged.rounds];
       if (update.attempts !== undefined && update.attempts > attempts) {
-        attempts = update.attempts;
-        const sha = await headSha(prNumber).catch(() => undefined);
+        let sha: string | undefined;
+        try {
+          sha = await headSha(prNumber);
+        } catch (err) {
+          log('pr_state_failed', `could not read the PR head sha for the CHECK round: ${errorMessage(err)}`);
+        }
+        if (sha) attempts = update.attempts;
         if (sha) rounds.push({ kind: 'check', headSha: sha, at: now });
       }
       const state: PrRunState = {
@@ -175,7 +180,7 @@ export function prRunStateRecorder(
         prNumber,
         checkRework: { ...merged.checkRework, used: Math.max(merged.checkRework.used, attempts - 1) },
         status: prRunStatusFor(update.status),
-        spec: await readSpecSummary(opts.specPath),
+        spec: (await readSpecSummary(opts.specPath)) ?? merged.spec,
         rounds,
         updatedAt: now,
       };
