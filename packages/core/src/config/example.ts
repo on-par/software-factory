@@ -60,7 +60,7 @@ const RUNTIME_NOTES: Record<string, string> = {
     'after CHECK. FACTORY_BUILD_PUBLISH=1/0 beats it. ' +
     'contextCeiling (default { codex-cli: 120000 }) is the per-harness context ceiling for BUILD and rework: Codex compacts the session at that many tokens; 0 turns it off; only codex-cli honours it today (#3327).',
   sizeGate:
-    'Size gate policy at PLAN (ADR-0147, ADR-0156). mode: unset (default) or `stack` (ADR-0161) ships an oversized issue as stacked slice PRs, one per run, building the next slice only after the PR below is approved or merged; `file` and `slice` are deprecated aliases for stack and print a warning; `off` skips both gates and sends the whole issue to BUILD. ' +
+    'Size gate policy at PLAN (ADR-0147, ADR-0156). mode: `off | stack`. Unset (default) or `stack` (ADR-0161) splits an oversized issue into stacked slice PRs. `factory run-issue` and `factory run-brief` build every slice in one run. Only the `factory run` lane goes one slice per run, building the next slice after the PR below is approved or merged. `file` and `slice` are deprecated aliases for stack and print a warning. `off` skips both gates and sends the whole issue to BUILD. ' +
     'maxSlices (1-20, default 10) caps a slice plan that has not started: an over-cap plan is recorded and parks, and `--max-slices <n>` beats it for one run. ' +
     "tokenBudget (default 150000) and maxFiles (default 12) (#3350): the post-plan gate splits only when the plan's estimated tokens exceed tokenBudget or its changed files exceed maxFiles; a plan changing 3 files or fewer never splits. " +
     '`factory run-issue --size-gate <mode>` / `--stack` beats mode for one run.',
@@ -333,6 +333,10 @@ function runtimeNamespace(): Node[] {
       example: '10',
     });
 
+  const sizeGate = section('sizeGate');
+  if (sizeGate.kind === 'object')
+    sizeGate.children.unshift({ kind: 'unset', key: 'mode', doc: 'off | stack. Unset: stack.', example: 'stack' });
+
   const intake = section('intake');
   if (intake.kind === 'object')
     intake.children.unshift({
@@ -399,7 +403,7 @@ function runtimeNamespace(): Node[] {
     section('design'),
     section('readiness'),
     section('build'),
-    section('sizeGate'),
+    sizeGate,
     ci,
     section('worktree'),
     section('workspace'),
