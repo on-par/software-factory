@@ -35,6 +35,7 @@ import {
 import type { CheckResumeRecord, ProviderOrder, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   findOpenPR,
+  inPlaceWorkspace,
   isEgressEnforced,
   resolveFilingPolicy,
   resolveConfiguredWritablePaths,
@@ -142,6 +143,7 @@ export async function setupRunWorkspace({
   git,
   paths,
   startPoint,
+  inPlace,
 }: {
   ctx?: { localOnly?: LocalOnlyPolicy; resumeFrom?: CheckResumeRecord };
   repoRoot: string;
@@ -156,11 +158,27 @@ export async function setupRunWorkspace({
   paths: ReturnType<typeof getFactoryPaths>;
   /** Remote-tracking ref the worktree starts from (#3764); undefined = the default base. */
   startPoint?: string;
+  /** --in-place (#3904): use repoRoot as the workspace; no factory worktree is created or removed. */
+  inPlace?: boolean;
 }): Promise<Workspace> {
   let workspace: Workspace;
   if (ctx?.resumeFrom) {
     workspace = { path: worktree, dispose: async () => {} };
     log('worktree', `reusing kept worktree at ${worktree} (resume --from check)`);
+  } else if (inPlace) {
+    workspace = await inPlaceWorkspace({
+      repoRoot,
+      branch,
+      log,
+      findOpenPr: (br) => findOpenPR(octokit, ghOwner, ghName, br),
+      setup: (root, br, setupLog, setupOpts) =>
+        withGitLock(root, () =>
+          withFileLock(paths.gitLock, () => git.setupInPlaceCheckout(root, br, setupLog, setupOpts), {
+            onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`),
+          }),
+        ),
+    });
+    log('workspace', `in-place: running in ${repoRoot} (no factory worktree created)`);
   } else if (!ctx?.localOnly) {
     workspace = await worktreeWorkspace({
       repoRoot,

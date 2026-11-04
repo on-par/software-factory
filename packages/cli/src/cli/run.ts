@@ -16,28 +16,19 @@ import {
   resolveLaneBreakerThreshold,
   workKeyFromIssue,
 } from '@on-par/factory-core';
+import { createRunQueue } from './run-queue.js';
 import type { FactoryEvent, HealthKpis, KpiReconstruction, QueueDiagnostic } from '@on-par/factory-core';
 import {
   createDockerEngine,
-  createFileIterateStore,
-  createFileReviewReworkStore,
-  createOctokitCollaboratorPermissionClient,
-  createOctokitQueueClient,
-  createOctokitIterateGitHub,
-  createOctokitReviewReworkGitHub,
   logEvent,
-  parkPayload,
-  pollIterateCommands,
-  pollReviewRework,
-  publishParkComment,
   recordSliceMerged,
   resolveBaseHealthChecks,
   resolveLaneDiscoveryIntervalMs,
   resolveLocalOnly,
-  resolveMaxReviewReworkRuns,
   resolveRunUsageHarness,
   settleParkedPullRequest,
   slugify,
+  resolveTrackerConfig,
 } from '@on-par/factory-core/internal';
 
 import { baseChecksVerdict } from './base-health-ci.js';
@@ -60,13 +51,13 @@ import type {
 } from './index.js';
 import { awaitingCiLaneDeps } from './awaiting-ci-wiring.js';
 import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
-import { createRunQueueBackend } from './run-queue-backend.js';
 import { waitForMerge } from './land.js';
 import { hostClaimGuards } from './host-claim-guards.js';
 import { DRAIN_MESSAGE, createNotifier, resolveNotifyCommand, withDiskLowNotify, withParkNotify } from './notify.js';
 import { createDeferralTracker, settleDeferredOnly } from './queue-startup.js';
 import { discoverQueuedLanes, superviseLanes } from './run-lane-discovery.js';
 import { runLane } from './run-lane.js';
+import { runReworkPolls } from './run-rework-poll.js';
 import { restackFromSlicePlan } from './run-restack.js';
 import { writeRunFlagOverrides } from './run-flags.js';
 import { shipIssue } from './ship.js';
@@ -160,24 +151,21 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
     }
     await rt.runAutoWorktreeGc(repoRoot, paths, ghRepo, 'all');
     await rt.sweepStaleLaneClaims(paths, ghRepo);
-    if (opts.localQueue !== true) await rt.reapExpiredClaims(paths, ghRepo);
+    if (opts.localQueue !== true && resolveTrackerConfig(factoryConfig).kind !== 'linear') {
+      await rt.reapExpiredClaims(paths, ghRepo);
+    }
     await rt.sweepOrphanDrafts(paths, ghRepo);
 
-    const queue = createRunQueueBackend({
-      ghRepo,
-      paths,
-      factoryConfig,
-      getOctokit: rt.getOctokit,
-      preflightQueuedIssue: rt.preflightQueuedIssue,
-      createQueuePreflightOps: rt.createQueuePreflightOps,
-      autoMerge: opts.autoMerge,
-      deferrals,
-    });
+    const runQueue = createRunQueue({ rt, paths, ghRepo, factoryConfig, autoMerge: opts.autoMerge, deferrals });
+    if (opts.localQueue !== true) await runQueue.startupLinearReap();
+    const queue = runQueue.queue;
+
     const readLocalQueue = (): string | null => (existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : null);
     const { lanes, diagnostics } = await rt.planRunLanes({
       localQueue: opts.localQueue === true,
       readLocalQueue,
       queue,
+      onUnshippable: runQueue.onUnshippable,
     });
     rt.warnQueueDiagnostics(diagnostics);
 
@@ -262,73 +250,8 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
       // Issues in flight on any lane of this run; every lane's between-issues sweep protects them (#2964).
       const inFlightIssues = new Set<number>();
       // #3563: one shared, coalesced review-rework poll for every lane's pre-claim step (GitHub queue only).
-      const runReviewReworkPoll = async (): Promise<void> => {
-        const [owner = '', repo = ''] = ghRepo.split('/');
-        const octokit = rt.getOctokit();
-        const results = await pollReviewRework({
-          github: createOctokitReviewReworkGitHub(octokit, owner, repo),
-          queue: createOctokitQueueClient(octokit),
-          owner,
-          repo,
-          branchPrefix,
-          trustedApprovers: factoryConfig.intake?.trustedApprovers,
-          permissions: createOctokitCollaboratorPermissionClient(octokit),
-          store: createFileReviewReworkStore(paths.reviewRework),
-          maxRuns: resolveMaxReviewReworkRuns(factoryConfig),
-          publishParkComment: (input) => publishParkComment({ octokit, repo: ghRepo, input }),
-        });
-        for (const r of results) {
-          if (r.outcome === 'queued') {
-            logEvent(
-              paths.events,
-              'review_rework_queued',
-              r.issue,
-              `#${r.issue} queued for review rework on lane '${r.lane}' — PR #${r.pr} review ${r.reviewIds.join(', ')} by ${r.reviewer}`,
-              { lane: r.lane },
-            );
-          } else if (r.outcome === 'capped') {
-            logEvent(
-              paths.events,
-              'escalate',
-              r.issue,
-              `#${r.issue} parked: review rework cap ${r.cap} reached (${r.count} runs) — PR #${r.pr} review ${r.reviewIds.join(', ')}`,
-              parkPayload('escalate', workKeyFromIssue(r.issue), r.lane, []),
-            );
-          } else if (r.outcome === 'error') {
-            logEvent(paths.events, 'warn', r.issue, `review-rework poll for PR #${r.pr} failed: ${r.detail}`);
-          }
-        }
-        // #3625: `/factory iterate` comments; a failure only warns so the review-rework results above stand.
-        try {
-          const iterated = await pollIterateCommands({
-            github: createOctokitIterateGitHub(octokit, owner, repo),
-            queue: createOctokitQueueClient(octokit),
-            owner,
-            repo,
-            branchPrefix,
-            trustedApprovers: factoryConfig.intake?.trustedApprovers,
-            permissions: createOctokitCollaboratorPermissionClient(octokit),
-            store: createFileIterateStore(paths.iterate),
-          });
-          for (const r of iterated) {
-            if (r.outcome === 'queued' || r.outcome === 'already-queued') {
-              logEvent(
-                paths.events,
-                'iterate_queued',
-                r.issue,
-                `#${r.issue} queued for iterate on lane '${r.lane}' — PR #${r.pr} comment ${r.commentId} by ${r.actor}`,
-                { lane: r.lane },
-              );
-            } else if (r.outcome === 'rejected') {
-              logEvent(paths.events, 'iterate_rejected', r.issue, `iterate on PR #${r.pr} rejected: ${r.detail}`);
-            } else {
-              logEvent(paths.events, 'warn', r.issue, `iterate poll for PR #${r.pr} failed: ${r.detail}`);
-            }
-          }
-        } catch (err) {
-          logEvent(paths.events, 'warn', 0, `iterate poll failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      };
+      const runReviewReworkPoll = (): Promise<void> =>
+        runReworkPolls({ octokit: rt.getOctokit(), ghRepo, branchPrefix, factoryConfig, paths });
       let reviewPoll: Promise<void> | null = null;
       const pollReviewReworkOnce = (): Promise<void> =>
         (reviewPoll ??= runReviewReworkPoll().finally(() => {
@@ -439,12 +362,18 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
           intervalMs: resolveLaneDiscoveryIntervalMs(factoryConfig),
           startLane,
           stopRequested: () => readStopFileStatus(paths).present,
-          reapExpiredClaims: opts.localQueue === true ? undefined : () => rt.reapExpiredClaims(paths, ghRepo),
+          reapExpiredClaims:
+            opts.localQueue === true
+              ? undefined
+              : resolveTrackerConfig(factoryConfig).kind === 'linear'
+                ? runQueue.startupLinearReap
+                : () => rt.reapExpiredClaims(paths, ghRepo),
           discover: () =>
             discoverQueuedLanes({
               localQueue: opts.localQueue === true,
               readLocalQueue,
               queue,
+              onUnshippable: runQueue.onUnshippable,
               planRunLanes: rt.planRunLanes,
             }),
           log: (type, msg, lane) => logEvent(paths.events, type, '-', msg, lane ? { lane } : undefined),

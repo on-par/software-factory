@@ -72,4 +72,21 @@ describe('claimReworkRequests', () => {
     queueReview();
     expect(claimReviewReworkRequest(paths.reviewRework, 42, false, vi.fn())).toHaveProperty('reviewRework');
   });
+
+  it('claims a queued comment rework with source comment (#3882)', () => {
+    createFileReviewReworkStore(paths.reviewRework).record({
+      reviewId: 55,
+      source: 'comment',
+      pr: 7,
+      issue: 42,
+      lane: 'bugfix',
+      reviewer: 'bob',
+      queuedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const log = vi.fn();
+    expect(claimReviewReworkRequest(paths.reviewRework, 42, false, log)).toEqual({
+      reviewRework: { prNumber: 7, reviewId: 55, reviewer: 'bob', source: 'comment' },
+    });
+    expect(log).toHaveBeenCalledWith('rework', expect.stringContaining('comment 55'));
+  });
 });

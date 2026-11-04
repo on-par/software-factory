@@ -66,6 +66,10 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
       '--max-slices <count>',
       'Stack mode: most slices a not-yet-started slice plan may have (1-20); an over-cap plan is recorded and parks; beats sizeGate.maxSlices (default 10)',
     )
+    .option(
+      '--in-place',
+      'Run PLAN → SHIP in the current checkout with no worktree (disposable hosts); the checkout must be clean and at origin/<default>; same as FACTORY_WORKSPACE=in-place',
+    )
     .action(async (issueNum, opts) => {
       await handlers.cmdRunIssue(handlers.parseIssueArg(issueNum), opts);
     });

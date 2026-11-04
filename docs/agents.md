@@ -175,6 +175,10 @@ Run `factory doctor` in the repo. The `coding agent` line lists `pi`, and the Pi
 `pi auth check --model <providerModel> --no-refresh` for each pinned Pi model (exit 0 is ready, 1 is
 not ready, 2 is invalid).
 
+## Running in the current checkout
+
+On a disposable, one-job container the clone is already the isolation boundary. `factory run-issue <N> --in-place` (or `FACTORY_WORKSPACE=in-place`) runs plan, build, check and ship in the current checkout on the normal factory branch, with no second worktree and no second install. It refuses to start, before PLAN, unless the checkout is clean and on the default branch at the fetched `origin/<default>` tip. The size gate is off in place, and `--base-branch` and `--stack` are refused. Worktree mode stays the default.
+
 ## Recipes
 
 Each recipe is a complete, minimal `.factory/config.yaml`. Copy it to the repo, then run `factory doctor`.

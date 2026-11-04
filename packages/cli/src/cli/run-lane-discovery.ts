@@ -2,6 +2,7 @@
 
 import { setTimeout as delay } from 'node:timers/promises';
 
+import type { WorkKey } from '@on-par/factory-core';
 import type { QueueBackend } from '@on-par/factory-core/internal';
 
 import type { PlannedLane, planRunLanes } from './index.js';
@@ -109,12 +110,14 @@ export async function discoverQueuedLanes(input: {
   localQueue: boolean;
   readLocalQueue: () => string | null;
   queue: () => QueueBackend;
+  onUnshippable?: (key: WorkKey) => void;
   planRunLanes: typeof planRunLanes;
 }): Promise<DiscoveredLane[]> {
   const { lanes } = await input.planRunLanes({
     localQueue: input.localQueue,
     readLocalQueue: input.readLocalQueue,
     queue: input.queue,
+    onUnshippable: input.onUnshippable,
   });
   const found: DiscoveredLane[] = [];
   for (const planned of lanes) {
