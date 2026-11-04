@@ -89,7 +89,6 @@
   "classifyPrShadow",
   "computeReviewFloor",
   "computeReviewVerdict",
-  "countReviewReworkRuns",
   "describePullRequestAccessError",
   "describeReviewConstitutionSource",
   "formatPullRequestReference",

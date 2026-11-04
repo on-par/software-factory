@@ -78,7 +78,7 @@ describe('shipIssue (direct)', () => {
         setupWorktree: setup,
         octokit: () => fake,
       });
-      expect(fake.rest.issues.listComments).not.toHaveBeenCalled();
+      expect(fake.rest.issues.listComments).not.toHaveBeenCalledWith(expect.objectContaining({ issue_number: 5 })); // slice-plan lookup only; the PR run-state comment is read on the PR number (#3909)
       expect(setup.mock.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
       expect(phases.planPhase.mock.calls[0]?.[0]).toMatchObject({ sizeGateMode: 'stack', parkOverBudget: true });
     });
@@ -87,7 +87,7 @@ describe('shipIssue (direct)', () => {
       const setup = custom();
       const fake = sliceOctokit(async () => ({ data: [] }));
       await shipIssue(5, { sizeGate: 'off' }, ctx(), { setupWorktree: setup, octokit: () => fake });
-      expect(fake.rest.issues.listComments).not.toHaveBeenCalled();
+      expect(fake.rest.issues.listComments).not.toHaveBeenCalledWith(expect.objectContaining({ issue_number: 5 })); // slice-plan lookup only; the PR run-state comment is read on the PR number (#3909)
       expect(setup.mock.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
     });
 

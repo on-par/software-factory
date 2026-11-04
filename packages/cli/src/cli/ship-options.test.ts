@@ -8,6 +8,7 @@ import {
   baseRemoteRef,
   inPlaceConflict,
   parseBaseBranch,
+  resolveShipSizeGate,
   resolveWorkspaceMode,
 } from './ship-options.js';
 
@@ -119,5 +120,43 @@ describe('inPlaceConflict (#3904)', () => {
     expect(inPlaceConflict({ sizeGate: 'stack' })).toContain('drop --stack');
     expect(inPlaceConflict({ sizeGate: 'off' })).toBeUndefined();
     expect(inPlaceConflict({})).toBeUndefined();
+  });
+});
+
+describe('resolveShipSizeGate', () => {
+  const stackConfig = { sizeGate: { mode: 'stack', maxSlices: 4 } } as Parameters<typeof resolveShipSizeGate>[1];
+  const noConfig = {} as Parameters<typeof resolveShipSizeGate>[1];
+
+  it('takes the config mode, stack flag and slice cap when no flag overrides them', () => {
+    expect(resolveShipSizeGate({}, stackConfig)).toEqual({
+      noPr: false,
+      sizeGateMode: 'stack',
+      explicitStack: true,
+      maxSlices: 4,
+    });
+  });
+
+  it.each([
+    ['--no-pr', { pr: false }],
+    ['--in-place', { inPlace: true }],
+    ['--base-branch without stack', { baseBranch: 'release' }],
+  ])('turns the gate off for %s', (_name, opts) => {
+    const gate = resolveShipSizeGate(opts, stackConfig);
+    expect(gate.sizeGateMode).toBe('off');
+    expect(gate.explicitStack).toBe(false);
+  });
+
+  it('keeps stack for --base-branch with --size-gate stack, explicit only when the flag says so', () => {
+    expect(resolveShipSizeGate({ baseBranch: 'release', sizeGate: 'stack' }, noConfig)).toMatchObject({
+      sizeGateMode: 'stack',
+      explicitStack: false,
+    });
+    expect(
+      resolveShipSizeGate({ baseBranch: 'release', sizeGate: 'stack', explicitStack: true, maxSlices: 2 }, noConfig),
+    ).toMatchObject({ sizeGateMode: 'stack', explicitStack: true, maxSlices: 2 });
+  });
+
+  it('reports noPr for --no-pr', () => {
+    expect(resolveShipSizeGate({ pr: false }, noConfig).noPr).toBe(true);
   });
 });

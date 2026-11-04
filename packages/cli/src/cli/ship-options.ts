@@ -1,6 +1,31 @@
 // packages/cli/src/cli/ship-options.ts — shipIssue's option bag and the --base-branch flag helpers (#3764)
-import type { SizeGateMode } from '@on-par/factory-core';
+import {
+  resolveSizeGateMaxSlices,
+  resolveSizeGateMode,
+  type FactoryConfig,
+  type SizeGateMode,
+} from '@on-par/factory-core';
+import { isExplicitStackMode } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
+
+export interface ShipSizeGate {
+  noPr: boolean;
+  sizeGateMode: SizeGateMode;
+  explicitStack: boolean;
+  maxSlices: number;
+}
+
+/** The size gate for one ship (ADR-0147). `--no-pr` never files child issues or slice PRs and `--in-place` builds one
+ *  branch in one checkout (#3904), so both turn it off; `--base-branch` turns it off unless stack mode was asked for. */
+export function resolveShipSizeGate(opts: ShipIssueOptions, config: FactoryConfig): ShipSizeGate {
+  const noPr = opts.pr === false;
+  const gateOff = noPr || opts.inPlace === true || (opts.baseBranch !== undefined && opts.sizeGate !== 'stack');
+  const sizeGateMode = gateOff ? 'off' : (opts.sizeGate ?? resolveSizeGateMode(config));
+  const explicitStack =
+    sizeGateMode === 'stack' &&
+    (opts.sizeGate !== undefined ? opts.explicitStack === true : isExplicitStackMode(config));
+  return { noPr, sizeGateMode, explicitStack, maxSlices: opts.maxSlices ?? resolveSizeGateMaxSlices(config) };
+}
 
 export interface ShipIssueOptions {
   parkOverBudget?: boolean;

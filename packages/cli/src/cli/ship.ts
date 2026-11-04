@@ -30,8 +30,6 @@ import {
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
   resolveSandboxPolicy,
-  resolveSizeGateMaxSlices,
-  resolveSizeGateMode,
   ReworkHistory,
   runIssue,
   summarizeEvent,
@@ -40,6 +38,7 @@ import {
 } from '@on-par/factory-core';
 import { shipHostBuildSlot } from './host-slot.js';
 import { claimReworkRequests } from './ship-review-rework.js';
+import { shipRunStateRecorder } from './ship-pr-state.js';
 import type { CheckResumeRecord, SlicePlanStore, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   createCheckResumeStore,
@@ -48,7 +47,6 @@ import {
   egressHostMessage,
   egressSummaryMessage,
   holdRunConfigSnapshot,
-  isExplicitStackMode,
   logCost,
   logEvent,
   readIssueRunState,
@@ -68,7 +66,7 @@ import { restoredLoggingBreaker } from './provider-restored-log.js';
 import type { CliDeps, ConfigLoaderKey, CoreOpKey, GitOpKey, ShellOpKey } from './index.js';
 import { resolveRunBranch } from './run-branch.js';
 import { shipRuntime } from './ship-runtime.js';
-import { phaseRecorder, runStateRecorder } from './ship-run-state.js';
+import { phaseRecorder } from './ship-run-state.js';
 import { maybeWriteBenchmarkArtifacts, maybeWriteLocalRunReport } from './ship-reports.js';
 import { applyMeteredGuard, modelOverrideMessages, resolveProviderOrder } from './model-override-messages.js';
 import {
@@ -79,7 +77,7 @@ import {
   stubAwareShipPhase,
   TERMINAL_EVENT_KINDS,
 } from './ship-steps.js';
-import { baseRemoteRef, type ShipIssueOptions } from './ship-options.js';
+import { baseRemoteRef, resolveShipSizeGate, type ShipIssueOptions } from './ship-options.js';
 
 type ShipArgs = Parameters<typeof shipIssueFrom> extends [string, ...infer Rest] ? Rest : never;
 
@@ -242,13 +240,7 @@ async function shipIssueFrom(
       issue: issueNum,
     } satisfies GithubIssueParams));
   const issueTitle = work.title;
-  const noPr = opts.pr === false; // --no-pr never files child issues or slice PRs: size gate off; --base-branch keeps stack mode; in place builds one branch in one checkout
-  const gateOff = noPr || opts.inPlace === true || (opts.baseBranch !== undefined && opts.sizeGate !== 'stack');
-  const sizeGateMode = gateOff ? 'off' : (opts.sizeGate ?? resolveSizeGateMode(factoryConfig));
-  const explicitStack =
-    sizeGateMode === 'stack' &&
-    (opts.sizeGate !== undefined ? opts.explicitStack === true : isExplicitStackMode(factoryConfig));
-  const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
+  const { noPr, sizeGateMode, explicitStack, maxSlices } = resolveShipSizeGate(opts, factoryConfig);
   const { branchPrefix } = policy.effective;
   const claim = { issueNum, issueTitle, ghRepo, sizeGateMode, work, ctx, octokit, baseBranch: opts.baseBranch };
   const branch = await resolveRunBranch({
@@ -358,6 +350,15 @@ async function shipIssueFrom(
 
   // Read before runIssue: the run-state recorder overwrites this file on its first update (#3373).
   const previousAttempt = await readIssueRunState(runStateFile(paths.runs, workKeyFromIssue(issueNum)));
+  const recorderFor = await shipRunStateRecorder(ctx?.resumeFrom || ctx?.localOnly || noPr, {
+    octokit,
+    repo: ghRepo,
+    branch,
+    issueNum,
+    factoryConfig,
+    paths,
+    log,
+  });
   const reworkClaim = claimReworkRequests(paths, issueNum, ctx?.resumeFrom || ctx?.localOnly || noPr, log);
   const request = {
     ...buildRunRequest({
@@ -428,14 +429,7 @@ async function shipIssueFrom(
     recordPhase: phaseRecorder(paths.runs, issueNum),
     claimSignal: ctx?.signal,
     ...(ctx?.slicePlanStore ? { slicePlanStore: ctx.slicePlanStore } : {}),
-    recordRunState: runStateRecorder(paths.runs, {
-      issue: issueNum,
-      lane: lane ?? '',
-      branch,
-      worktree,
-      specPath,
-      startedAt: runStartedAt,
-    }),
+    recordRunState: recorderFor({ lane: lane ?? '', worktree, specPath, startedAt: runStartedAt }),
     onActivity: () =>
       touchRunActivity(phaseSnapshotFile(paths.runs, workKeyFromIssue(issueNum)), new Date().toISOString()),
     writeLocalRunReport: (info) =>
