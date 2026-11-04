@@ -2158,7 +2158,7 @@ export function resolveEnvironmentAcquirer(opts: {
   };
 }
 
-const { sweepStaleLaneClaims, sweepOrphanDrafts, reapExpiredClaims } = startupSweeps(() =>
+const { sweepStaleLaneClaims, sweepOrphanDrafts, sweepCiPendingDrafts, reapExpiredClaims } = startupSweeps(() =>
   hasGitHubToken() ? getOctokit() : undefined,
 );
 
@@ -4250,6 +4250,7 @@ function runRun(opts: RunOptions = {}): Promise<void> {
     runAutoWorktreeGc,
     sweepStaleLaneClaims,
     sweepOrphanDrafts,
+    sweepCiPendingDrafts,
     reapExpiredClaims,
     planRunLanes,
     preflightQueuedIssue,

@@ -271,7 +271,6 @@ export { findOpenPR } from './phases/ship.js';
 export { settleParkedPullRequest } from './run/park-pr.js';
 export { findAdoptablePr, lookupOpenPrByIssue, lookupOpenPrByBranch, type OpenPrLookup } from './run/adopt-pr.js'; // findAdoptablePr + the shared open-PR lookup (#3439)
 export {
-  PR_DRAFT_REASONS,
   loadPrRunState,
   prRunStatusFor,
   reconcilePrRunState,

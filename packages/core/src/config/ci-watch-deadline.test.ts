@@ -1,12 +1,16 @@
-import { describe, expect, it } from 'vitest';
-
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { createTempDirs } from '../harness/temp-dir.js';
 import { loadFactoryConfigForRepo, resolveCiWatchDeadlineMs } from './index.js';
 
+const tmp = createTempDirs();
+
 describe('resolveCiWatchDeadlineMs', () => {
+  afterEach(() => tmp.cleanup());
+
   it('defaults to 10 minutes and reads ci.watchMinutes', () => {
     expect(resolveCiWatchDeadlineMs({})).toBe(600_000);
     expect(resolveCiWatchDeadlineMs({ ci: {} })).toBe(600_000);
@@ -25,7 +29,7 @@ describe('resolveCiWatchDeadlineMs', () => {
   });
 
   it('loads ship.ciWatchMinutes from the repo config file', () => {
-    const root = mkdtempSync(join(tmpdir(), 'factory-ship-cfg-'));
+    const root = tmp.makeSync('factory-ship-cfg-');
     mkdirSync(join(root, '.factory'));
     const path = join(root, '.factory', 'config.yaml');
     writeFileSync(path, 'version: 2\nship:\n  ciWatchMinutes: 25\n');
