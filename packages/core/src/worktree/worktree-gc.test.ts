@@ -1,20 +1,18 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
+
 import { sweepWorktrees } from './worktree-gc.js';
 
 describe('sweepWorktrees and an in-place checkout (#3904)', () => {
-  let parentDir: string;
-  afterEach(() => {
-    if (parentDir) rmSync(parentDir, { recursive: true, force: true });
-  });
+  const dirs = createTempDirs();
+  afterEach(() => dirs.cleanup());
 
   it('never selects the repo root even when it is on a factory lane branch', async () => {
-    parentDir = mkdtempSync(join(tmpdir(), 'gc-in-place-'));
-    const repoRoot = join(parentDir, 'repo');
+    const repoRoot = join(dirs.makeSync('gc-in-place-'), 'repo');
     mkdirSync(repoRoot, { recursive: true });
     writeFileSync(join(repoRoot, '.git'), 'gitdir: /somewhere');
     const commands: string[] = [];
