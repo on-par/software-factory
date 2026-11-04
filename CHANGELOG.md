@@ -10,6 +10,7 @@ section to `## X.Y.Z - date`. See
 ### Added
 
 - A queued issue whose prerequisite has an open factory PR now builds on it and opens a stacked PR against that branch, restacks onto main when the prerequisite merges or onto its new head when it moves, parks held when the prerequisite PR closes unmerged, and is never landed while its base is not main; `queue.stackOnOpenPrerequisite: false` restores waiting (#3916)
+- `factory run-issue --merge` and `run-brief --merge` drive the PR through the `factory run --auto-merge` gates to a merge, bounded by `--merge-timeout` or `ci.awaitingCiCapHours`, with distinct exit codes (0 merged, 10 held, 11 CI failed, 12 timed out, 13 land failed, 1 parked before a PR) (#3905)
 - The compile gate and `factory doctor` fall back to `npm run typecheck` when no build command resolves, and doctor names the detected test runner per workspace (#3913).
 - `factory run` starts lanes for work queued after it started, restarts finished lanes when new work arrives, and reaps expired claims mid-run; the interval is `queue.discovery_interval_ms` (default 60s) (#3920)
 - `factory run-issue --in-place` (or `FACTORY_WORKSPACE=in-place`) runs the pipeline in the current clean checkout with no worktree, for disposable containers (#3904).
@@ -28,6 +29,11 @@ section to `## X.Y.Z - date`. See
 
 - Lanes, `factory supervise` and the `factory status` queue band claim, heartbeat, release and list through the WorkKey queue seam, and run state is written with a string `key`. A GitHub issue's record also keeps its numeric `issue`, so a factory 0.9.27 or earlier on the same host still reads it (#3890).
 - The queue's claim-time prerequisite defer also reads `Depends on: #N` lines, and both `Depends on:` and `Prerequisite:` accept a comma list such as `#3891, #3892` (#3915).
+- The OpenCode supported version range widens to `>=1.18.0 <2.3.0`, so OpenCode 2.x (tested at 2.2.5) no longer triggers a doctor warning.
+
+### Fixed
+
+- The factory-run workflow uploads `.factory/state/events.ndjson`, verify fails when the `factory --help` fixture is stale, and help text, runbooks and the config example (stack mode builds every slice in one run for run-issue and run-brief) match the CLI (#3921).
 
 ## 0.9.27 - 2026-11-03
 

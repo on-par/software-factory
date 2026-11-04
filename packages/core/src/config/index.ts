@@ -37,7 +37,6 @@ import { SandboxConfigSchema, warnCodexSandboxOnce } from './sandbox-schema.js';
 import { TrackerConfigSchema } from './tracker-section.js';
 import { markSizeGateModeWarned, warnSizeGateModeOnce } from './size-gate.js';
 import { ModelEffortsSchema } from './effort.js';
-import { resolvePrecedence, type ConfigSource } from './precedence.js';
 import { HarnessDeclarationSchema, type HarnessDeclaration } from './harness-declaration.js';
 
 export {
@@ -709,76 +708,14 @@ export function resolveProcessGroupGraceMs(config: FactoryConfig): number {
   return config.environment?.processGroups?.graceMs ?? 5000;
 }
 
-/** Where a resolved merge decision came from. `'flag'` is an explicit per-invocation CLI
- *  flag (`--auto-merge`/`--no-auto-merge`) and outranks every other source. */
-export type MergePolicySource = ConfigSource;
-
-export interface EffectiveMergePolicy {
-  auto: boolean;
-  admin: boolean;
-  sources: { auto: MergePolicySource; admin: MergePolicySource };
-}
-
-/** Per-invocation CLI overrides. A field left `undefined` means "the flag was not
- *  supplied" and changes nothing; a boolean wins over config file and env alike. */
-export interface MergePolicyOverrides {
-  auto?: boolean;
-  /** From `--pr-classifier` / `--no-pr-classifier` (#1724). */
-  classifier?: boolean;
-}
-
-export interface EffectivePrClassifierPolicy {
-  enabled: boolean;
-  source: MergePolicySource;
-}
-
-/** Resolve the PR classifier gate (#1724): flag > run.merge.classifier > FACTORY_PR_CLASSIFIER=1 > off. */
-export function resolvePrClassifierPolicy(
-  config: FactoryConfig,
-  env: NodeJS.ProcessEnv = process.env,
-  overrides: MergePolicyOverrides = {},
-): EffectivePrClassifierPolicy {
-  const { value, source } = resolvePrecedence<boolean>(
-    [
-      { source: 'flag', read: () => overrides.classifier },
-      { source: 'repo', read: () => config.run?.merge?.classifier },
-      { source: 'env', read: () => (env.FACTORY_PR_CLASSIFIER === '1' ? true : undefined) },
-    ],
-    false,
-  );
-  return { enabled: value, source };
-}
-
-/** Resolve auto-merge/admin-merge: an explicit per-invocation `overrides.auto` (from
- *  `--auto-merge`/`--no-auto-merge`) is highest-precedence > `run.merge.*` (present ⇒ from
- *  the repo file, and authoritative — an explicit `false` here is NOT overridden by the
- *  legacy env var) > legacy `merge.auto: true` (there is no legacy admin field) >
- *  `FACTORY_MERGE` / `FACTORY_MERGE_ADMIN` env > default `false`. This is a deliberate
- *  behavior change from the prior `merge.auto || FACTORY_MERGE === '1'` OR semantics (see ADR). */
-export function resolveMergePolicy(
-  config: FactoryConfig,
-  env: NodeJS.ProcessEnv = process.env,
-  overrides: MergePolicyOverrides = {},
-): EffectiveMergePolicy {
-  const auto = resolvePrecedence<boolean>(
-    [
-      { source: 'flag', read: () => overrides.auto },
-      { source: 'repo', read: () => config.run?.merge?.auto },
-      { source: 'repo', read: () => (config.merge.auto ? true : undefined) },
-      { source: 'env', read: () => (env.FACTORY_MERGE === '1' ? true : undefined) },
-    ],
-    false,
-  );
-  const admin = resolvePrecedence<boolean>(
-    [
-      { source: 'repo', read: () => config.run?.merge?.admin },
-      { source: 'env', read: () => (env.FACTORY_MERGE_ADMIN === '1' ? true : undefined) },
-    ],
-    false,
-  );
-
-  return { auto: auto.value, admin: admin.value, sources: { auto: auto.source, admin: admin.source } };
-}
+export {
+  resolveMergePolicy,
+  resolvePrClassifierPolicy,
+  type EffectiveMergePolicy,
+  type EffectivePrClassifierPolicy,
+  type MergePolicyOverrides,
+  type MergePolicySource,
+} from './merge-policy.js';
 
 export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {
   const f = config.filing;

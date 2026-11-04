@@ -33,4 +33,17 @@ describe('scripts/verify.sh', () => {
     const end = lines.findIndex((line, i) => i > start && /^fi\b/.test(line));
     expect(lines.slice(start, end).join('\n')).toContain('npm run coverage-ratchet');
   });
+
+  it('runs the factory --help baseline check after the build', () => {
+    const build = lines.findIndex((line) => line === 'npm run build');
+    const baseline = lines.findIndex((line) => line === 'bash scripts/cli-help-baseline.sh');
+    expect(build).toBeGreaterThanOrEqual(0);
+    expect(baseline).toBeGreaterThan(build);
+    const before = lines.slice(0, baseline);
+    const opened = before.filter((line) => noE2eIf.test(line)).length;
+    const closed = before.filter(
+      (line, i) => /^fi\b/.test(line) && before.slice(0, i).some((l) => noE2eIf.test(l)),
+    ).length;
+    expect(opened - closed).toBe(0);
+  });
 });

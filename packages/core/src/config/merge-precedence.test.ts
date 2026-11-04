@@ -21,11 +21,13 @@ describe('resolveMergePolicy / resolvePrClassifierPolicy flag › repo › env �
   });
 
   it.each([
-    ['repo', withRun({ admin: false }), { FACTORY_MERGE_ADMIN: '1' }, false, 'repo'],
-    ['env', config, { FACTORY_MERGE_ADMIN: '1' }, true, 'env'],
-    ['default', config, {}, false, 'default'],
-  ] as const)('admin: %s', (_name, cfg, env, value, source) => {
-    const result = resolveMergePolicy(cfg, env);
+    ['flag beats repo and env', withRun({ admin: false }), { FACTORY_MERGE_ADMIN: '0' }, { admin: true }, true, 'flag'],
+    ['repo', withRun({ admin: false }), { FACTORY_MERGE_ADMIN: '1' }, {}, false, 'repo'],
+    ['repo with undefined flag', withRun({ admin: false }), {}, { admin: undefined }, false, 'repo'],
+    ['env', config, { FACTORY_MERGE_ADMIN: '1' }, {}, true, 'env'],
+    ['default', config, {}, {}, false, 'default'],
+  ] as const)('admin: %s', (_name, cfg, env, overrides, value, source) => {
+    const result = resolveMergePolicy(cfg, env, overrides);
     expect(result.admin).toBe(value);
     expect(result.sources.admin).toBe(source);
   });

@@ -22,6 +22,7 @@ The factory's own CHECK phase runs `bash scripts/verify.sh --no-e2e` in the buil
 1. `npm ci`
 2. `npm run format:check` (Prettier, includes Markdown)
 3. `npm run build` (`tsc -b`)
+   - then `bash scripts/cli-help-baseline.sh` — `factory --help` must match `scripts/fixtures/factory-help.txt`
 4. `npm run adr:index -- --check` — the ADR index table in `docs/adr/README.md` must match the ADR files
 5. `bash scripts/check-config-json.sh` — no JSON may exist under `packages/config/src` or `dist` (#716)
 6. `bash scripts/check-oxlint-plugin-version.sh` — `@oxlint/plugins` must match `oxlint` exactly (#795)
@@ -82,6 +83,7 @@ Local `verify.sh` does not enforce this.
 
 | Failing step                              | Fix                                                                                                                                       |
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `cli-help-baseline`                       | `npm run build && bash scripts/cli-help-baseline.sh --update`, commit the fixture.                                                        |
 | `format:check`                            | `npm run format`, then re-run.                                                                                                            |
 | `adr:index --check`                       | `npm run adr:index`, commit the README change. If it names an unparseable ADR, fix that file's `# ADR-NNNN:` heading or `- Status:` line. |
 | `check-config-json`                       | Move the data into `packages/config/src/defaults.ts` as typed TS. Delete the JSON file.                                                   |

@@ -133,7 +133,7 @@ export function registerObserveCommands(program: Command, handlers: ProgramHandl
   program
     .command('logs')
     .description(
-      'Print pipeline events from .factory/events.ndjson (--follow to tail, --limit/--since to read only part)',
+      'Print pipeline events from .factory/state/events.ndjson (--follow to tail, --limit/--since to read only part)',
     )
     .option('--follow', 'Keep watching for new events')
     .option('--json', 'Emit one JSON object per line')
