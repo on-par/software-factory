@@ -34,3 +34,8 @@ export function issueNumberOf(key: WorkKey): number {
   if (!isNumericWorkKey(key)) throw new Error(`work key "${key}" is not a numeric GitHub issue number`);
   return Number(key);
 }
+
+/** True for a real ticket key in the event log: a GitHub issue number or an upper-case tracker key like ON-12. */
+export function isTicketKey(issue: string): boolean {
+  return /^\d+$/.test(issue) || /^[A-Z][A-Z0-9]*-[1-9]\d*$/.test(issue);
+}

@@ -147,4 +147,12 @@ describe('resolveRunBranch', () => {
     expect(await run(octokit, { work })).toBe(branchFor(workKeyFromIssue(2253), 'New title', 'factory'));
     expect(list).not.toHaveBeenCalled();
   });
+
+  it('a Linear work request branches on its issue key', async () => {
+    const { octokit, list } = stub([pr(7, 'factory/2253-x')]);
+    const work = { kind: 'linear-issue', key: 'ON-12', title: 'New title' } as any;
+    const branch = await run(octokit, { work });
+    expect(branch).toBe('factory/ON-12-new-title');
+    expect(list).not.toHaveBeenCalled();
+  });
 });

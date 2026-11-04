@@ -236,6 +236,18 @@ export {
   type LinearQueueBackendOptions,
 } from './queue/linear-queue-backend.js';
 export { createLinearQueueGraphqlClient, LINEAR_LEASE_ATTACHMENT_URL } from './queue/linear-queue.js';
+export {
+  closesTrailer,
+  createLinearTicketWriteback,
+  mirrorSlicePlanToTicket,
+  postTicketComment,
+  ticketKeyOf,
+  ticketTrackerOf,
+  type LinearTicketClient,
+  type TicketTrackerKind,
+  type TicketWriteback,
+} from './work/ticket-writeback.js';
+export { isTicketKey } from './work/work-key.js';
 export { formatQueueOrderConflict, type QueueOrderConflict } from './queue/queue-order.js';
 
 // Factory App admission-state compatibility (#1497)

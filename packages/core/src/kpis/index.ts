@@ -3,6 +3,7 @@
 import type { CostEntry, FactoryEvent, ReadinessInfo, ReworkCauseTag, RetryCause } from '../types/index.js';
 import { isHumanEvent } from './human.js';
 import { median } from '../utils/median.js';
+import { isTicketKey } from '../work/work-key.js';
 import { computeParkKpis, type ParkKpis } from './park.js';
 import { phaseOfCostEntry } from './phase.js';
 
@@ -55,7 +56,7 @@ export {
 } from './defects.js';
 
 function isRealIssue(issue: string): boolean {
-  return /^\d+$/.test(issue);
+  return isTicketKey(issue);
 }
 
 const PHASE_ORDER = ['plan', 'build', 'check', 'ship'];

@@ -3,7 +3,8 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import type { Octokit } from '@octokit/rest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -19,7 +20,9 @@ import { branchFor, setupWorktree } from '../utils/index.js';
 import { buildPhase } from './build.js';
 import { planPhase } from './plan.js';
 import { findOpenPR, shipPhase } from './ship.js';
-import { workKeyFromIssue } from '../work/work-key.js';
+import { toWorkKey, workKeyFromIssue } from '../work/work-key.js';
+import { openOrFindPr } from './ship-open-pr.js';
+import type { ShipPhaseOptions } from './ship-options.js';
 
 const exec = promisify(execCb);
 const owner = 'on-par';
@@ -133,4 +136,62 @@ describe('ship on an issue with an open factory PR (#3099)', () => {
       ).resolves.toBeTruthy();
     },
   );
+});
+
+describe('openOrFindPr trailers and references (#3894)', () => {
+  const LINEAR = { key: toWorkKey('ON-12'), title: 'Add X' };
+
+  async function open(extra: Partial<ShipPhaseOptions>, ticket: typeof LINEAR | undefined) {
+    const create = vi.fn(async (_args: { title: string; body: string }) => ({ data: { number: 5 } }));
+    const get = vi.fn(async () => ({ data: { title: 'GitHub title' } }));
+    const octokit = Object.assign({} as Octokit, { rest: { pulls: { create }, issues: { get } } });
+    const opts = {
+      issue: workKeyFromIssue(123),
+      repo,
+      worktree: '/tmp/none',
+      branch: 'factory/x',
+      octokit,
+      log: () => {},
+      ...extra,
+    } as ShipPhaseOptions;
+    const result = await openOrFindPr({
+      opts,
+      inlineWork: undefined,
+      ticket,
+      stack: undefined,
+      base: 'main',
+      owner,
+      repoName,
+      walkthrough: { walkthrough: async () => undefined, counts: async () => 'unavailable' as const },
+    });
+    expect(result).toEqual({ prNumber: 5 });
+    return { args: create.mock.calls[0][0], get };
+  }
+
+  it('a Linear run on its final slice opens a PR with Fixes ON-12 and no Closes #', async () => {
+    const { args } = await open({}, LINEAR);
+    expect(args.body).toContain('Fixes ON-12');
+    expect(args.body).not.toContain('Closes #');
+  });
+
+  it('a Linear run on slice 1 of 2 opens a PR with Part of ON-12 and no closing keyword', async () => {
+    const { args } = await open({ slice: { index: 1, count: 2 } }, LINEAR);
+    expect(args.body).toContain('Part of ON-12');
+    expect(args.body).not.toMatch(/\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b/i);
+    expect(args.title).toBe('Add X — slice 1/2 (ON-12)');
+  });
+
+  it('a Linear run titles the PR and summary with ON-12 without reading a GitHub issue', async () => {
+    const { args, get } = await open({}, LINEAR);
+    expect(args.title).toBe('Add X (ON-12)');
+    expect(args.body).toContain('Implements ON-12.');
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('a GitHub run keeps Closes #123 and the issue title', async () => {
+    const { args } = await open({}, undefined);
+    expect(args.title).toBe('GitHub title (#123)');
+    expect(args.body).toContain('Implements #123.');
+    expect(args.body).toContain('Closes #123');
+  });
 });
