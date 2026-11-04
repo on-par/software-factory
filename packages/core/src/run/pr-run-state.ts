@@ -17,6 +17,8 @@ import { upsertMarkerComment } from './park-comment.js';
 export const PR_RUN_STATE_VERSION = 'v1';
 export const PR_RUN_STATUSES = ['building', 'awaiting-ci', 'awaiting-review', 'parked'] as const;
 export type PrRunStatus = (typeof PR_RUN_STATUSES)[number];
+/** Why SHIP left the PR as a draft (#3932): 'ci-pending' lets the sweep land it, 'requested' is intentional. */
+export const PR_DRAFT_REASONS = ['ci-pending', 'requested'] as const;
 
 export const SPEC_SUMMARY_MAX = 1000;
 export const MAX_HANDLED_IDS = 200;
@@ -44,6 +46,7 @@ export interface PrRunState {
   key: WorkKey;
   prNumber: number;
   status: PrRunStatus;
+  draftReason?: (typeof PR_DRAFT_REASONS)[number];
   spec: { sha256: string; summary: string };
   checkRework: { used: number; cap: number };
   reviewRework: { used: number; cap: number };
@@ -75,6 +78,7 @@ const schema = z
     key: z.string().min(1),
     prNumber: count,
     status: z.enum(PR_RUN_STATUSES),
+    draftReason: z.enum(PR_DRAFT_REASONS).optional(),
     spec: z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$|^$/), summary: z.string() }).strict(),
     checkRework: counter,
     reviewRework: counter,
@@ -100,6 +104,7 @@ export function sanitizePrRunState(state: PrRunState, maxIds = MAX_HANDLED_IDS, 
     key: state.key,
     prNumber: clampCount(state.prNumber),
     status: state.status,
+    ...(state.draftReason ? { draftReason: state.draftReason } : {}),
     spec: { sha256: state.spec.sha256, summary: redactSecrets(state.spec.summary).slice(0, SPEC_SUMMARY_MAX) },
     checkRework: { used: clampCount(state.checkRework.used), cap: clampCount(state.checkRework.cap) },
     reviewRework: { used: clampCount(state.reviewRework.used), cap: clampCount(state.reviewRework.cap) },
@@ -210,6 +215,7 @@ export function reconcilePrRunState(local: PrRunState | null, remote: PrRunState
     key: local.key,
     prNumber: later.prNumber,
     status: later.status,
+    ...(later.draftReason ? { draftReason: later.draftReason } : {}),
     spec: later.spec,
     checkRework: { used: Math.max(local.checkRework.used, remote.checkRework.used), cap: local.checkRework.cap },
     reviewRework: { used: Math.max(local.reviewRework.used, remote.reviewRework.used), cap: local.reviewRework.cap },

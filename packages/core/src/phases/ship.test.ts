@@ -1172,7 +1172,14 @@ describe('shipPhase CI watch', () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'timeout', draft: true, ciPending: true });
+      expect(result).toEqual({
+        ok: true,
+        prNumber: 123,
+        ciOutcome: 'timeout',
+        draft: true,
+        ciPending: true,
+        draftReason: 'ci-pending',
+      });
       expect(logs.some(([, msg]) => msg.includes('CI green'))).toBe(false);
       expect(logs.some(([, msg]) => msg.includes('CI failed'))).toBe(false);
       expect(logs).toContainEqual(['ready', 'PR #123 left as draft (CI pending)']);
@@ -1223,7 +1230,14 @@ describe('shipPhase CI watch', () => {
     it('logs a CI pending line and leaves the PR as draft', async () => {
       const { result, logs } = await runShip([pending]);
 
-      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'timeout', draft: true, ciPending: true });
+      expect(result).toEqual({
+        ok: true,
+        prNumber: 123,
+        ciOutcome: 'timeout',
+        draft: true,
+        ciPending: true,
+        draftReason: 'ci-pending',
+      });
       expect(logs).toContainEqual([
         'ship',
         'CI pending for PR #123: CI did not finish within 10 min; leaving PR as draft',
@@ -1267,7 +1281,14 @@ describe('shipPhase CI watch', () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'timeout', draft: true, ciPending: true });
+      expect(result).toEqual({
+        ok: true,
+        prNumber: 123,
+        ciOutcome: 'timeout',
+        draft: true,
+        ciPending: true,
+        draftReason: 'ci-pending',
+      });
       expect(logs).toContainEqual(['ready', 'PR #123 left as draft (CI pending)']);
     } finally {
       vi.useRealTimers();

@@ -61,7 +61,7 @@ describe('shipPhase draft PR (#3449)', () => {
   it('leaves the PR as a draft after green CI and logs "left as draft"', async () => {
     const { octokit, calls } = createOctokit(true);
     const logs: Array<[string, string]> = [];
-    expect(await ship(octokit, logs)).toEqual({ ok: true, prNumber: 123, draft: true });
+    expect(await ship(octokit, logs)).toEqual({ ok: true, prNumber: 123, draft: true, draftReason: 'requested' });
     expect(calls.map(([name]) => name)).not.toContain('graphql');
     expect(calls.find(([name]) => name === 'pulls.create')?.[1].draft).toBe(true);
     expect(logs).toContainEqual(['ready', 'PR #123 left as draft']);
@@ -75,6 +75,18 @@ describe('shipPhase draft PR (#3449)', () => {
     expect(logs.some(([type, msg]) => type === 'ship' && msg.includes('draft mode leaves it as is'))).toBe(true);
   });
 
+  it('sets draftReason requested when draft mode and CI pending coincide', async () => {
+    const { octokit } = createOctokit(true, [{ status: 'in_progress', conclusion: null }]);
+    vi.useFakeTimers();
+    try {
+      const promise = ship(octokit, [], true);
+      await vi.runAllTimersAsync();
+      expect((await promise).draftReason).toBe('requested');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('says it is leaving the PR as draft when CI times out', async () => {
     const { octokit, calls } = createOctokit(true, [{ status: 'in_progress', conclusion: null }]);
     const logs: Array<[string, string]> = [];
@@ -82,7 +94,13 @@ describe('shipPhase draft PR (#3449)', () => {
     try {
       const promise = ship(octokit, logs, true);
       await vi.runAllTimersAsync();
-      expect(await promise).toMatchObject({ ok: true, ciOutcome: 'timeout', draft: true, ciPending: true });
+      expect(await promise).toMatchObject({
+        ok: true,
+        ciOutcome: 'timeout',
+        draft: true,
+        ciPending: true,
+        draftReason: 'requested',
+      });
     } finally {
       vi.useRealTimers();
     }
