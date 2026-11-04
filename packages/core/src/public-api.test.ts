@@ -311,6 +311,10 @@ const INTERNAL_API_KEYS = [
   'createGithubQueueBackend', // #3890
   'createQueueBackend', // #3890
   'LINEAR_API_KEY_ENV',
+  'LINEAR_LEASE_ATTACHMENT_URL', // #3918
+  'createLinearQueueBackend', // #3918
+  'createLinearQueueGraphqlClient', // #3918
+  'resolveLinearProjectForRepo', // #3918
   'probeLinearSetup',
   'resolveTrackerConfig',
   'listBlockedBy',
@@ -329,6 +333,9 @@ const INTERNAL_API_KEYS = [
   'BASE_HEALTH_CHECKERS',
   'checkBaseHealth',
   'checkResumeBaseDrift',
+  'checkInPlaceCheckout',
+  'setupInPlaceCheckout',
+  'inPlaceWorkspace',
   'codexChatgptSessionState',
   'hasClaudeLoginEvidence',
   // #3214

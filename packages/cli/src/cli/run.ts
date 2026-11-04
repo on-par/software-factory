@@ -14,27 +14,22 @@ import {
   resolveEffectiveBuildRoute,
   resolveEnvironmentProxy,
   resolveLaneBreakerThreshold,
-  resolveMergePolicy,
-  resolveSizeGateMode,
   workKeyFromIssue,
 } from '@on-par/factory-core';
+import { createRunQueue } from './run-queue.js';
 import type { FactoryEvent, HealthKpis, KpiReconstruction, QueueDiagnostic } from '@on-par/factory-core';
 import {
   createDockerEngine,
-  createQueueBackend,
-  createOctokitQueueClient,
   logEvent,
   recordSliceMerged,
   resolveBaseHealthChecks,
   resolveLocalOnly,
-  resolveQueueClaimSettleMs,
   resolveRunUsageHarness,
   settleParkedPullRequest,
   slugify,
-  withAdmissionGuard,
+  resolveTrackerConfig,
 } from '@on-par/factory-core/internal';
 
-import { admissionStateReaderFor } from './admission.js';
 import { baseChecksVerdict } from './base-health-ci.js';
 import { createBaseHoldGate, formatBaseHoldCleared } from './base-hold.js';
 import { keychainPreflightError, type KeychainProbeStatus } from './doctor.js';
@@ -54,8 +49,6 @@ import type {
 } from './index.js';
 import { awaitingCiLaneDeps } from './awaiting-ci-wiring.js';
 import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
-import { laneFileHoldLookup } from './lane-file-hold.js';
-import { reportQueueOrderConflict } from './run-order-conflict.js';
 import { waitForMerge } from './land.js';
 import { hostClaimGuards } from './host-claim-guards.js';
 import { DRAIN_MESSAGE, createNotifier, resolveNotifyCommand, withDiskLowNotify, withParkNotify } from './notify.js';
@@ -155,46 +148,19 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
     }
     await rt.runAutoWorktreeGc(repoRoot, paths, ghRepo, 'all');
     await rt.sweepStaleLaneClaims(paths, ghRepo);
-    if (opts.localQueue !== true) await rt.reapExpiredClaims(paths, ghRepo);
+    if (opts.localQueue !== true && resolveTrackerConfig(factoryConfig).kind !== 'linear') {
+      await rt.reapExpiredClaims(paths, ghRepo);
+    }
     await rt.sweepOrphanDrafts(paths, ghRepo);
+
+    const runQueue = createRunQueue({ rt, paths, ghRepo, factoryConfig, autoMerge: opts.autoMerge, deferrals });
+    if (opts.localQueue !== true) await runQueue.startupLinearReap();
 
     const { lanes, diagnostics } = await rt.planRunLanes({
       localQueue: opts.localQueue === true,
       readLocalQueue: () => (existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : null),
-      queue: () => {
-        const [owner, repo] = ghRepo.split('/');
-        const octokit = rt.getOctokit();
-        return createQueueBackend({
-          kind: 'github',
-          github: {
-            client: createOctokitQueueClient(octokit),
-            owner,
-            repo,
-            claimSettleMs: resolveQueueClaimSettleMs(factoryConfig),
-            preflight: withAdmissionGuard({
-              reader: admissionStateReaderFor(paths.state),
-              preflight: (issue) =>
-                rt.preflightQueuedIssue(
-                  issue,
-                  rt.createQueuePreflightOps(octokit, owner, repo, {
-                    autoMergeStack:
-                      resolveSizeGateMode(factoryConfig) === 'stack' &&
-                      resolveMergePolicy(factoryConfig, process.env, { auto: opts.autoMerge }).auto,
-                    stackMode: resolveSizeGateMode(factoryConfig) === 'stack',
-                    laneFileHold: laneFileHoldLookup(paths.laneFiles, ghRepo),
-                    onDeferred: deferrals.onDeferred,
-                  }),
-                ),
-              onConflict: (issue, verdict) => {
-                const line = `#${issue} refused — ${verdict.reason} | repair: ${verdict.repair}`;
-                console.error(styleText('yellow', `factory: ${line}`));
-                logEvent(paths.events, 'queue_admission_conflict', String(issue), line);
-              },
-            }),
-            onOrderConflict: (conflict) => reportQueueOrderConflict(paths.events, conflict),
-          },
-        });
-      },
+      queue: runQueue.queue,
+      onUnshippable: runQueue.onUnshippable,
     });
     rt.warnQueueDiagnostics(diagnostics);
 

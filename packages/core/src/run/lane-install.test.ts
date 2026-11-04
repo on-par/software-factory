@@ -42,6 +42,15 @@ describe('installLaneDependencies', () => {
     expect(log).toHaveBeenCalledWith('lane_install', 'skipped: node_modules already present');
   });
 
+  it('an in-place checkout with node_modules skips the install and runs no command', async () => {
+    const wt = await worktree('package.json', 'package-lock.json');
+    await mkdir(join(wt, 'node_modules'));
+    const runCommand = vi.fn();
+    const r = await installLaneDependencies({ worktree: wt, env: {}, log: vi.fn(), runCommand });
+    expect(r).toEqual({ status: 'skipped', reason: 'node_modules already present' });
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
   it('skips in a docker-sandbox micro-VM', async () => {
     const runCommand = vi.fn();
     const sandbox = { runtime: 'docker-sandbox' } as SandboxPolicy;
