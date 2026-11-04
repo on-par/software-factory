@@ -49,8 +49,9 @@ describe('run-brief --base-branch (#3764)', () => {
 
 describe('run-brief --merge (#3905)', () => {
   // A fake SHIP that reports a shipped PR, so the merge call is the only thing under test.
-  const ship = async (_n: number, _o: unknown, ctx: any) => {
-    ctx.onOutcome({ state: 'shipped', route: 'claude', branch: 'ship-it/9-x', reworkRounds: 0, prNumber: 99 });
+  const ship: NonNullable<RunBriefRuntime['shipIssue']> = async (_n, _o, ctx) => {
+    ctx?.onOutcome?.({ state: 'shipped', route: 'claude', branch: 'ship-it/9-x', reworkRounds: 0, prNumber: 99 });
+    return '';
   };
   const fakeRuntime = (driveToMerge: (...a: any[]) => Promise<MergeResult>): RunBriefRuntime => ({
     isCommandAvailable: () => true,
@@ -61,7 +62,7 @@ describe('run-brief --merge (#3905)', () => {
     errorDetail: (err) => String(err),
     awaitingCiCapMs: () => 3_600_000,
     driveToMerge: driveToMerge as RunBriefRuntime['driveToMerge'],
-    shipIssue: ship as RunBriefRuntime['shipIssue'],
+    shipIssue: ship,
   });
   const second = () => {
     const path = join(h.repoRoot, 'beta.md');
@@ -121,20 +122,20 @@ describe('run-brief --merge (#3905)', () => {
   });
 
   it('several briefs without --merge still exit 1 on failure', async () => {
-    const failing = async () => {
+    const failing: NonNullable<RunBriefRuntime['shipIssue']> = async () => {
       throw new Error('plan blew up');
     };
-    const rt = { ...fakeRuntime(vi.fn()), shipIssue: failing as unknown as RunBriefRuntime['shipIssue'] };
+    const rt = { ...fakeRuntime(vi.fn()), shipIssue: failing };
     await expect(cmdRunBrief([brief(), second()], {}, rt)).rejects.toMatchObject({ code: 1 });
   });
 
   it('a CI-failed park whose SHIP throws is still driven to the ci-failed result with --merge', async () => {
-    const parking = async (_n: number, _o: unknown, ctx: any) => {
-      ctx.onOutcome({ state: 'parked', reason: 'ci-failed', prNumber: 7 });
+    const parking: NonNullable<RunBriefRuntime['shipIssue']> = async (_n, _o, ctx) => {
+      ctx?.onOutcome?.({ state: 'parked', reason: 'ci-failed', prNumber: 7 });
       throw new Error('parked');
     };
     const drive = vi.fn(async (): Promise<MergeResult> => ({ kind: 'ci-failed', prNumber: 7, detail: 'red' }));
-    const rt = { ...fakeRuntime(drive), shipIssue: parking as unknown as RunBriefRuntime['shipIssue'] };
+    const rt = { ...fakeRuntime(drive), shipIssue: parking };
     await expect(cmdRunBrief([brief()], { merge: true }, rt)).rejects.toMatchObject({ code: 11 });
     expect(drive).toHaveBeenCalledTimes(1);
     // without --merge the same park keeps the plain failure exit

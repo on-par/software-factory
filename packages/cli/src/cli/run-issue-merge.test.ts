@@ -46,6 +46,9 @@ function clock() {
   return { now: () => t, sleep };
 }
 
+/** The WaitForMergeDeps argument of the first waitMerge call. */
+const depsOf = (fn: { mock: { calls: unknown[][] } }) => fn.mock.calls[0]?.[5];
+
 afterEach(() => vi.restoreAllMocks());
 
 describe('driveToMerge', () => {
@@ -53,12 +56,12 @@ describe('driveToMerge', () => {
     const waitMerge = vi.fn(async () => {});
     const r = await driveToMerge(base(), { waitMerge });
     expect(r).toMatchObject({ kind: 'merged', prNumber: 55 });
-    expect(waitMerge.mock.calls[0]?.[5]).toMatchObject({
+    expect(depsOf(waitMerge)).toMatchObject({
       landBranch: 'ship-it/9-x',
       holdWhenGated: true,
       mergeOverrides: { auto: true },
     });
-    expect((waitMerge.mock.calls[0]?.[5] as any).issueless).toBeUndefined();
+    expect((depsOf(waitMerge) as any).issueless).toBeUndefined();
   });
 
   it('a high-risk hold exits held and names the risk gate', async () => {
@@ -135,7 +138,7 @@ describe('driveToMerge', () => {
     });
     const r = await driveToMerge(base({ admin: true }), { waitMerge });
     expect(r).toMatchObject({ kind: 'ci-failed', prNumber: 55 });
-    expect(waitMerge.mock.calls[0]?.[5]).toMatchObject({ mergeOverrides: { auto: true, admin: true } });
+    expect(depsOf(waitMerge)).toMatchObject({ mergeOverrides: { auto: true, admin: true } });
   });
 
   it('CiInfraError is ci-failed too', async () => {
@@ -160,7 +163,7 @@ describe('driveToMerge', () => {
     const waitMerge = vi.fn(async () => {});
     const parked: RunOutcome = { state: 'parked', reason: 'escalate' };
     const withPr: RunOutcome = { state: 'parked', reason: 'conflict', prNumber: 4 };
-    const failed: RunOutcome = { state: 'failed' } as any;
+    const failed: RunOutcome = { state: 'escalated' } as any;
     const released: RunOutcome = { state: 'released', reason: 'environment' } as any;
     for (const outcome of [undefined, parked, failed, released]) {
       expect((await driveToMerge(base({ outcome }), { waitMerge })).kind).toBe('failed-before-pr');
@@ -172,7 +175,7 @@ describe('driveToMerge', () => {
   });
 
   it('a ready outcome without a branch is failed-before-pr', async () => {
-    const outcome = { state: 'ready', route: 'claude', reworkRounds: 0 } as unknown as RunOutcome;
+    const outcome: any = { state: 'ready', route: 'claude', reworkRounds: 0 };
     expect((await driveToMerge(base({ outcome }), { waitMerge: vi.fn() })).kind).toBe('failed-before-pr');
   });
 
@@ -237,7 +240,7 @@ describe('driveToMerge', () => {
   it('forwards issueless for briefs', async () => {
     const waitMerge = vi.fn(async () => {});
     await driveToMerge(base({ issueless: true }), { waitMerge });
-    expect(waitMerge.mock.calls[0]?.[5]).toMatchObject({ issueless: true });
+    expect(depsOf(waitMerge)).toMatchObject({ issueless: true });
   });
 
   it('defaults the deadline to the caller-supplied cap (ci.awaitingCiCapHours)', async () => {

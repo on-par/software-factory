@@ -100,6 +100,21 @@ exit 0, so an Actions run-issue or ship is ship then land:
 - `FACTORY_MERGE` unset, or any value other than `1`, skips land. `doctor` never lands.
 - `land` is not a `command` input. The workflow still rejects it.
 
+A one-shot host (a disposable container, for example) can skip the `land` retry loop: `factory run-issue <N> --merge`
+(or `run-brief <file> --merge`) waits for CI and lands the PR through the same gates as `factory run --auto-merge`
+(CI, base CI, risk tiers, `no-auto-merge` / `needs-human`), bounded by `--merge-timeout 2h` or
+`ci.awaitingCiCapHours`. `--admin` merges past unmet branch protection and never past red CI. It exits:
+
+| Code | Meaning                                                         |
+| ---- | --------------------------------------------------------------- |
+| 0    | merged                                                          |
+| 1    | parked or failed before a PR                                    |
+| 2    | usage error (for example `--merge` with `--no-pr` or `--stack`) |
+| 10   | held by a gate (risk, a no-auto-merge label, a draft PR)        |
+| 11   | CI failed                                                       |
+| 12   | timed out waiting for CI                                        |
+| 13   | land failed                                                     |
+
 ## Providers and secrets
 
 Each provider reads only its own repo secrets, under the names the Claude GitHub App and

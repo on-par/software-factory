@@ -84,7 +84,7 @@ describe('waitForMerge holdWhenGated (#3905)', () => {
   });
 
   it('forwards mergeOverrides and issueless into land and reads labels on the PR number', async () => {
-    const land = vi.fn(async () => ({ branch: 'ship-it/7-x', prNumber: 42 }));
+    const land = vi.fn(async (..._args: unknown[]) => ({ branch: 'ship-it/7-x', prNumber: 42 }));
     const listIssueLabels = vi.fn(async () => [] as string[]);
     const mergeOverrides = { auto: true, admin: true };
     await run({
@@ -169,35 +169,38 @@ describe('landIssue mergeOverrides / issueless (#3905)', () => {
       vi.stubEnv(k, undefined);
     exec = vi.fn(async () => ({ stdout: '', stderr: '' }));
     octokit = makeOctokit();
+    const ops: Record<string, Record<string, unknown>> = {
+      configLoaders: {
+        loadFactoryConfigForRepo: () => ({
+          merge: { auto: true, comment: '' },
+          worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: false },
+          sandbox: { enabled: false, network: { allow: [] }, resources: { cpuMs: 1, memMb: 1 } },
+          sweep: { loopIntervalSeconds: 300, staleThresholdMultiplier: 2 },
+          filing: { selfFixLabel: 'no-auto-merge', enabled: false },
+        }),
+        loadRepoConfig: () => ({}),
+      },
+      gitOps: {
+        setupWorktree: vi.fn(async () => undefined),
+        cleanupWorktree: vi.fn(async () => {}),
+        gitFetch: vi.fn(async () => {}),
+      },
+      internalOps: { watchChecks: vi.fn(async () => 'success') },
+      shellOps: {
+        exec,
+        execSync: vi.fn(() => {
+          throw new Error('no cli available');
+        }),
+      },
+    };
     restore = setLandRuntime(() => {
       const rt = restore!();
       return {
         ...rt,
-        configLoaders: {
-          ...rt.configLoaders,
-          loadFactoryConfigForRepo: () => ({
-            merge: { auto: true, comment: '' },
-            worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: false },
-            sandbox: { enabled: false, network: { allow: [] }, resources: { cpuMs: 1, memMb: 1 } },
-            sweep: { loopIntervalSeconds: 300, staleThresholdMultiplier: 2 },
-            filing: { selfFixLabel: 'no-auto-merge', enabled: false },
-          }),
-          loadRepoConfig: () => ({}),
-        },
-        gitOps: {
-          ...rt.gitOps,
-          setupWorktree: vi.fn(async () => undefined),
-          cleanupWorktree: vi.fn(async () => {}),
-          gitFetch: vi.fn(async () => {}),
-        },
-        internalOps: { ...rt.internalOps, watchChecks: vi.fn(async () => 'success') },
-        shellOps: {
-          ...rt.shellOps,
-          exec,
-          execSync: vi.fn(() => {
-            throw new Error('no cli available');
-          }),
-        },
+        configLoaders: { ...rt.configLoaders, ...ops.configLoaders },
+        gitOps: { ...rt.gitOps, ...ops.gitOps },
+        internalOps: { ...rt.internalOps, ...ops.internalOps },
+        shellOps: { ...rt.shellOps, ...ops.shellOps },
       } as LandRuntime;
     });
     vi.spyOn(console, 'log').mockImplementation(() => {});

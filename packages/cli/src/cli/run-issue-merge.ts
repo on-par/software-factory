@@ -72,7 +72,7 @@ export function shouldDriveMerge(opts: { merge?: boolean }): boolean {
 
 function beforePr(outcome: RunOutcome | undefined): MergeResult | undefined {
   if (!outcome) return { kind: 'failed-before-pr', detail: 'the run ended without an outcome' };
-  if (outcome.state === 'failed' || outcome.state === 'released') {
+  if (outcome.state === 'escalated' || outcome.state === 'released') {
     return { kind: 'failed-before-pr', detail: `the run ${outcome.state} before a PR was ready` };
   }
   if (outcome.state === 'parked') {
