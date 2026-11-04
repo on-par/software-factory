@@ -448,6 +448,8 @@ const INTERNAL_API_KEYS = [
   'classifierPolicyVersion',
   'classifyPrShadow',
   'parseClassifierOutput',
+  'parseReworkCommand',
+  'pollCommentRework',
   'toClassificationRecord',
   // PR classifier backtest (#1728)
   'backtestFileName',

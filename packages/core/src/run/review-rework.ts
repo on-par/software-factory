@@ -3,6 +3,7 @@ import type { Octokit } from '@octokit/rest';
 
 import { reworkWorker, type checkPhase } from '../phases/check.js';
 import type { CheckSummary } from '../types/index.js';
+import { parseReworkCommand } from '../queue/comment-rework-trigger.js';
 import { UNTRUSTED_REVIEW_FEEDBACK_NOTICE, wrapUntrustedReviewFeedback } from '../utils/untrusted-input.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
 
@@ -10,6 +11,8 @@ export interface ReviewReworkTarget {
   prNumber: number;
   reviewId: number;
   reviewer: string;
+  /** `'comment'`: `reviewId` is a `/factory rework` issue-comment id (#3882). */
+  source?: 'comment';
 }
 
 /** #3625: a trusted `/factory iterate` comment; the run re-runs CHECK/rework on the PR branch. */
@@ -34,6 +37,7 @@ export interface ReviewFeedback {
   state: string;
   body: string;
   comments: { path: string; line?: number; body: string; author: string }[];
+  source?: 'comment';
 }
 
 export class ReviewReworkError extends Error {
@@ -43,7 +47,7 @@ export class ReviewReworkError extends Error {
 const REVIEW_FEEDBACK_MAX_CHARS = 20_000;
 
 export const REVIEW_REWORK_INSTRUCTIONS =
-  "This round addresses a reviewer's change request on the open PR, not a checker failure. " +
+  "This round addresses a reviewer's change request or feedback comment on the open PR, not a checker failure. " +
   'Make the changes each review comment asks for, scoped to the files and lines it names. ' +
   'Do not change code the review does not ask about. If a comment conflicts with the spec, follow the spec and say so in the commit message.';
 
@@ -84,6 +88,28 @@ export async function fetchReviewFeedback(
   };
 }
 
+/** The feedback of one `/factory rework` comment, re-read from GitHub so only the text after the command is used. */
+export async function fetchCommentFeedback(
+  octokit: Pick<Octokit, 'rest'>,
+  opts: { owner: string; repo: string; prNumber: number; commentId: number },
+): Promise<ReviewFeedback> {
+  const { owner, repo, prNumber, commentId } = opts;
+  const { data: comment } = await octokit.rest.issues.getComment({ owner, repo, comment_id: commentId });
+  const feedback = parseReworkCommand(comment.body ?? '');
+  if (feedback === null || feedback === '') {
+    throw new ReviewReworkError(`comment ${commentId} on PR #${prNumber} is no longer a /factory rework command`);
+  }
+  return {
+    prNumber,
+    reviewId: commentId,
+    reviewer: comment.user?.login ?? '',
+    state: 'COMMENTED',
+    body: feedback,
+    comments: [],
+    source: 'comment',
+  };
+}
+
 export function renderReviewFeedback(feedback: ReviewFeedback): string {
   const comments =
     feedback.comments.length === 0
@@ -91,12 +117,15 @@ export function renderReviewFeedback(feedback: ReviewFeedback): string {
       : feedback.comments.map(
           (c) => `- ${c.path}${c.line === undefined ? '' : `:${c.line}`} (@${c.author}):\n  ${c.body}`,
         );
-  let inner = [
-    `Review ${feedback.reviewId} by @${feedback.reviewer} (${feedback.state}) on PR #${feedback.prNumber}:`,
-    feedback.body === '' ? '(no review body)' : feedback.body,
-    'Inline comments:',
-    ...comments,
-  ].join('\n');
+  let inner =
+    feedback.source === 'comment'
+      ? [`Comment ${feedback.reviewId} by @${feedback.reviewer} on PR #${feedback.prNumber}:`, feedback.body].join('\n')
+      : [
+          `Review ${feedback.reviewId} by @${feedback.reviewer} (${feedback.state}) on PR #${feedback.prNumber}:`,
+          feedback.body === '' ? '(no review body)' : feedback.body,
+          'Inline comments:',
+          ...comments,
+        ].join('\n');
   if (inner.length > REVIEW_FEEDBACK_MAX_CHARS) {
     inner = `${inner.slice(0, REVIEW_FEEDBACK_MAX_CHARS)}\n… (review truncated)`;
   }
@@ -137,7 +166,8 @@ export async function runReviewReworkBuild(opts: {
 }): Promise<{ feedback: ReviewFeedback }> {
   const { target, repo, branch, octokit, checkOpts, rework = reworkWorker } = opts;
   const [owner = '', name = ''] = repo.split('/');
-  const where = `PR #${target.prNumber} / review ${target.reviewId}`;
+  const kind = target.source === 'comment' ? 'comment' : 'review';
+  const where = `PR #${target.prNumber} / ${kind} ${target.reviewId}`;
   let feedback: ReviewFeedback;
   try {
     const { data: pull } = await octokit.rest.pulls.get({ owner, repo: name, pull_number: target.prNumber });
@@ -146,19 +176,27 @@ export async function runReviewReworkBuild(opts: {
         `PR #${target.prNumber} must be open with head ${branch}; found ${pull.state} with head ${pull.head.ref}`,
       );
     }
-    feedback = await fetchReviewFeedback(octokit, {
-      owner,
-      repo: name,
-      prNumber: target.prNumber,
-      reviewId: target.reviewId,
-    });
+    feedback =
+      target.source === 'comment'
+        ? await fetchCommentFeedback(octokit, {
+            owner,
+            repo: name,
+            prNumber: target.prNumber,
+            commentId: target.reviewId,
+          })
+        : await fetchReviewFeedback(octokit, {
+            owner,
+            repo: name,
+            prNumber: target.prNumber,
+            reviewId: target.reviewId,
+          });
   } catch (err) {
     if (err instanceof ReviewReworkError) throw err;
     throw new ReviewReworkError(`could not read ${where}: ${errorMessage(err)}`, { cause: err });
   }
   checkOpts.log(
     'rework',
-    `review rework: PR #${target.prNumber} review ${target.reviewId} by @${target.reviewer} — ${feedback.comments.length} inline comment(s) on ${branch}`,
+    `review rework: PR #${target.prNumber} ${kind} ${target.reviewId} by @${target.reviewer} — ${feedback.comments.length} inline comment(s) on ${branch}`,
   );
   const worked = await rework({
     issue: checkOpts.issue,

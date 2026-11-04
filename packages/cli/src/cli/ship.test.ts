@@ -475,6 +475,16 @@ describe('shipIssue review rework (#3564)', () => {
     expect(saved.reviews[0].startedAt).toEqual(expect.any(String));
   });
 
+  it('a comment rework record skips PLAN and adopts the existing PR (#3882)', async () => {
+    seed({ source: 'comment' });
+    const fake = closedPr();
+    await expect(shipIssue(5, {}, ctx(), { octokit: () => fake })).rejects.toThrow(/PR #77 must be open/);
+    expect(phases.planPhase).not.toHaveBeenCalled();
+    expect(fake.rest.pulls.get).toHaveBeenCalledWith(expect.objectContaining({ pull_number: 77 }));
+    const saved = JSON.parse(readFileSync(join(paths().state, 'review-rework.json'), 'utf-8'));
+    expect(saved.reviews[0].startedAt).toEqual(expect.any(String));
+  });
+
   it('runs normally when the record is already started or absent', async () => {
     seed({ startedAt: '2026-01-02T00:00:00.000Z' });
     await shipIssue(5, {}, ctx());

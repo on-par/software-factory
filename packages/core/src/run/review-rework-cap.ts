@@ -3,7 +3,7 @@ import { defaultFactoryConfig } from '@on-par/factory-config';
 
 import type { FactoryConfig } from '../config/index.js';
 import { PARKED_LABEL, queueLabelSpecs, type QueueGitHubClient } from '../queue/github-queue.js';
-import type { ReviewReworkStore } from '../queue/review-rework-trigger.js';
+import type { ReviewReworkSource, ReviewReworkStore } from '../queue/review-rework-trigger.js';
 import { renderParkComment, type ParkCommentInput } from './park-comment.js';
 import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 
@@ -22,9 +22,11 @@ export function reviewReworkCapMessage(input: {
   cap: number;
   count: number;
   reviewIds: readonly number[];
+  source?: ReviewReworkSource;
 }): string {
   const { issue, pr, cap, count, reviewIds } = input;
-  return `#${issue} has had ${count} review-rework runs (cap ${cap}, queue.max_review_rework_runs); PR #${pr} review ${reviewIds.join(', ')} started no new run. Resolve the review by hand, then run \`factory unpark ${issue}\`.`;
+  const what = input.source === 'comment' ? 'comment' : 'review';
+  return `#${issue} has had ${count} review-rework runs (cap ${cap}, queue.max_review_rework_runs); PR #${pr} ${what} ${reviewIds.join(', ')} started no new run. Resolve the review by hand, then run \`factory unpark ${issue}\`.`;
 }
 
 export async function parkAtReviewReworkCap(deps: {
@@ -38,6 +40,7 @@ export async function parkAtReviewReworkCap(deps: {
   cap: number;
   count: number;
   reviewIds: readonly number[];
+  source?: ReviewReworkSource;
   publishComment?: (input: Omit<ParkCommentInput, 'parkSha' | 'order'>) => Promise<unknown>;
 }): Promise<void> {
   const { queue, owner, repo, issue } = deps;

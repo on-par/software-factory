@@ -7,6 +7,8 @@ import type { Octokit } from '@octokit/rest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
+import { countReviewReworkRuns } from '../run/review-rework-cap.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import { createOctokitCollaboratorPermissionClient } from './approval.js';
 import { fakeIssueComments } from './fake-issue-comments.js';
 import { IN_PROGRESS_LABEL, laneLabel, PARKED_LABEL, QUEUED_LABEL, type QueueGitHubClient } from './github-queue.js';
@@ -314,5 +316,46 @@ describe('claimReviewRework (#3564)', () => {
     expect(
       claimReviewRework(createFileReviewReworkStore(join(dirs.makeSync('claim-'), 'none.json')), 42),
     ).toBeUndefined();
+  });
+});
+
+describe('comment-sourced records (#3882)', () => {
+  const dirs = createTempDirs();
+  afterEach(() => dirs.cleanup());
+  const base = { pr: 9, issue: 42, lane: 'bugfix', reviewer: 'alice', queuedAt: '2026-01-01T00:00:00.000Z' };
+
+  it('a comment id never collides with a review id, and a legacy file loads as reviews', () => {
+    const file = join(dirs.makeSync('src-'), 's.json');
+    writeFileSync(file, JSON.stringify({ reviews: [{ reviewId: 5, ...base }] }));
+    const store = createFileReviewReworkStore(file);
+    expect(store.has(5)).toBe(true);
+    expect(store.has(5, 'comment')).toBe(false);
+    store.record({ reviewId: 5, source: 'comment', ...base });
+    expect(store.has(5, 'comment')).toBe(true);
+    expect(store.list()).toHaveLength(2);
+    expect(createFileReviewReworkStore(file).has(5, 'comment')).toBe(true);
+  });
+
+  it('claimReviewRework stamps a comment record under its comment key', () => {
+    const store = createFileReviewReworkStore(join(dirs.makeSync('src-'), 's.json'));
+    store.record({ reviewId: 5, ...base, queuedAt: '2025-01-01T00:00:00.000Z' });
+    store.record({ reviewId: 5, source: 'comment', ...base });
+    const claimed = claimReviewRework(store, 42);
+    expect(claimed).toMatchObject({ reviewId: 5, source: 'comment' });
+    const byKey = store.list();
+    expect(byKey.find((r) => r.source === 'comment')?.startedAt).toEqual(expect.any(String));
+    expect(byKey.find((r) => r.source === undefined)?.startedAt).toBeUndefined();
+  });
+
+  it('a started comment rework record counts toward the review cap', () => {
+    const store = createFileReviewReworkStore(join(dirs.makeSync('src-'), 's.json'));
+    store.record({ reviewId: 5, source: 'comment', ...base, startedAt: '2026-01-02T00:00:00.000Z' });
+    expect(countReviewReworkRuns(store, workKeyFromIssue(42))).toBe(1);
+  });
+
+  it('drops a record with an invalid source', () => {
+    const file = join(dirs.makeSync('src-'), 's.json');
+    writeFileSync(file, JSON.stringify({ reviews: [{ reviewId: 5, source: 'email', ...base }] }));
+    expect(createFileReviewReworkStore(file).list()).toEqual([]);
   });
 });
