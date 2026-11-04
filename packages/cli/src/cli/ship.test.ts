@@ -315,8 +315,9 @@ describe('shipIssue (direct)', () => {
     const events = readFileSync(paths().events, 'utf-8')
       .trim()
       .split('\n')
-      .map((line) => JSON.parse(line));
-    expect(events[0]).toMatchObject({ type: 'issue-title', issue: '5', msg: 'Fix the bug' });
+      .map((line) => JSON.parse(line))
+      .find((event) => event.type !== 'config_source');
+    expect(events).toMatchObject({ type: 'issue-title', issue: '5', msg: 'Fix the bug' });
   });
 
   it('logs model-override events when overrides are pinned', async () => {

@@ -23,7 +23,7 @@ import { DEFAULT_MAX_FILES, DEFAULT_TOKEN_BUDGET, type SizeBudget } from '../rea
 import { isOpenCodeZenModel } from './provider-order.js';
 import { DEFAULT_CI_DEADLINE_MS } from '../utils/ci-deadline.js';
 import { EventsConfigSchema } from '../events/rotation.js';
-import { runConfigSource } from './run-config-source.js';
+import { runConfigSource } from './run-config-env.js';
 import { RunConfigSectionSchema } from './run-section.js';
 export { resolveBranchPrefix, type BranchPrefixConfig } from './run-section.js';
 import { PrConfigSections } from './pr-section.js';
@@ -408,7 +408,10 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 /** Recursive merge of plain objects only — arrays and tuples (e.g. environment.ports.range)
  *  replace wholesale rather than merging element-wise. */
-function deepMergeConfig(base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> {
+export function deepMergeConfig(
+  base: Record<string, unknown>,
+  overlay: Record<string, unknown>,
+): Record<string, unknown> {
   const out: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(overlay)) {
     const current = out[key];

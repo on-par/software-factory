@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { getFactoryPaths } from './index.js';
 import { loadRepoConfig } from './repo.js';
-import { holdRunConfigSnapshot, runConfigOrigin, runConfigSource } from './run-config-source.js';
+import { holdRunConfigSnapshot, lastRunConfigLadder, runConfigOrigin, runConfigSource } from './run-config-source.js';
 
 const tmp = createTempDirs();
 
@@ -97,5 +97,36 @@ describe('holdRunConfigSnapshot (#3600)', () => {
 
     expect(() => holdRunConfigSnapshot(config)).toThrow(config);
     expect(runConfigSource()).toBeUndefined();
+  });
+
+  it('snapshots a --config file when the checkout has no .factory directory and writes nothing', () => {
+    const root = tmp.makeSync('run-config-bare-');
+    const file = join(tmp.makeSync('run-config-ext-'), 'config.yaml');
+    writeFileSync(file, 'version: 2\nchecks:\n  build: make\n');
+    const env = { FACTORY_CONFIG_PATH: file, FACTORY_CONFIG_PATH_SOURCE: '--config' };
+
+    const release = holdRunConfigSnapshot(getFactoryPaths(root).config, env);
+    expect(JSON.parse(runConfigSource()!)).toMatchObject({ checks: { build: 'make' } });
+    expect(runConfigOrigin()).toBe(file);
+    expect(lastRunConfigLadder()?.source).toBe('--config');
+    release();
+    expect(existsSync(join(root, '.factory'))).toBe(false);
+  });
+
+  it('snapshots an override-only run under the override label', () => {
+    const root = tmp.makeSync('run-config-frag-');
+    const release = holdRunConfigSnapshot(getFactoryPaths(root).config, {
+      FACTORY_CONFIG_OVERRIDES: 'disk:\n  minFreeGb: 2\n',
+    });
+    expect(JSON.parse(runConfigSource()!)).toEqual({ disk: { minFreeGb: 2 } });
+    expect(runConfigOrigin()).toBe('FACTORY_CONFIG_OVERRIDES');
+    release();
+  });
+
+  it('a daemon snapshot still wins over overrides', () => {
+    vi.stubEnv('FACTORY_RUN_CONFIG_JSON', JSON.stringify({ version: 2, route: 'codex' }));
+    const release = holdRunConfigSnapshot(sourceCheckout(), { FACTORY_CONFIG_OVERRIDES: 'disk:\n  minFreeGb: 2\n' });
+    expect(JSON.parse(runConfigSource()!)).toEqual({ version: 2, route: 'codex' });
+    release();
   });
 });

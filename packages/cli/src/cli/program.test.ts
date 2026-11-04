@@ -52,6 +52,12 @@ describe('buildProgram', () => {
     expect(program.options.some((o) => o.long === '--state-root')).toBe(true);
   });
 
+  it('registers the global --config and --constitution options (#3906)', () => {
+    const program = buildProgram(PROGRAM_HANDLERS, {});
+    expect(program.options.some((o) => o.long === '--config')).toBe(true);
+    expect(program.options.some((o) => o.long === '--constitution')).toBe(true);
+  });
+
   it('draft passes --text and --json to cmdDraft (#3171)', async () => {
     const cmdDraft = vi.fn(async () => {});
     await buildProgram({ ...PROGRAM_HANDLERS, cmdDraft }, {}).parseAsync([

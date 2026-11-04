@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- Per-run config and constitution overrides: `--config`/`FACTORY_CONFIG_PATH`/`FACTORY_CONFIG_YAML`, `--constitution`/`FACTORY_CONSTITUTION_PATH`/`FACTORY_CONSTITUTION`, and a `FACTORY_CONFIG_OVERRIDES` fragment; the run log and `factory doctor` name the source (#3906).
 - `factory run-issue --in-place` (or `FACTORY_WORKSPACE=in-place`) runs the pipeline in the current clean checkout with no worktree, for disposable containers (#3904).
 - With `tracker.kind: linear`, `factory run`, `factory supervise` and `factory status` take their queue from Linear through one composed `QueueBackend`. A claim writes the first lease attachment, and lanes release a Linear claim they cannot build yet (#3918).
 - A run persists its resumable state (rework counters, handled reviews, status, spec summary) in a factory-owned PR comment and restores it on a fresh clone (#3909)

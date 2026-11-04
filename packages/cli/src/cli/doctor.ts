@@ -36,6 +36,7 @@ import {
 import { npmCheck, resolveVerifyCommands, verifyCommandChecks, withPathResults } from './doctor-verify.js';
 import { configLintChecks, declaredHarnessChecks, linearTrackerChecks, modelsRegistryChecks } from './doctor-config.js';
 import { failoverProviderChecks } from './doctor-failover-providers.js';
+import { holdDoctorConfigSources } from './doctor-config-sources.js';
 import { codexSandboxNote } from './doctor-codex-sandbox.js';
 import { agentMemoryChecks } from './doctor-agent-memory.js';
 import { factoryIgnoredChecks } from './doctor-factory-ignored.js';
@@ -923,6 +924,7 @@ export async function cmdDoctor(
   } catch {
     repoRoot = null;
   }
+  const held = repoRoot === null ? null : holdDoctorConfigSources(repoRoot, getFactoryPaths(repoRoot).config);
   const harnessView = repoRoot === null ? null : resolveDoctorHarnesses(rt.configLoaders, repoRoot);
   const repoSandbox = () =>
     repoRoot === null ? undefined : rt.configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox;
@@ -961,6 +963,7 @@ export async function cmdDoctor(
     codexSandbox: () => repoSandbox()?.codexSandbox,
   });
   checks.push(...failoverProviderChecks(rt, repoRoot));
+  if (held) checks.push(held.check);
 
   // Only with --probe-inference: these send a real prompt (claude, opencode; uses quota). Plain doctor makes no inference call.
   if (opts.probeInference) {
@@ -1145,15 +1148,10 @@ export async function cmdDoctor(
 
   const skewRow = clockSkewCheck(skew, maxClockSkewMs);
   if (skewRow) checks.push(skewRow);
+  held?.release();
   const text = formatDoctorChecks(checks, { inRepo: repoRoot !== null });
-  console.log(
-    opts.json
-      ? JSON.stringify(
-          { ok: !doctorFailed(checks), checks, verify: verifyRows, clockSkewMs: skew.measured ? skew.skewMs : null },
-          null,
-          2,
-        )
-      : text,
-  );
+  const clockSkewMs = skew.measured ? skew.skewMs : null;
+  const report = { ok: !doctorFailed(checks), checks, verify: verifyRows, clockSkewMs, sources: held?.sources ?? null };
+  console.log(opts.json ? JSON.stringify(report, null, 2) : text);
   if (doctorFailed(checks)) process.exit(1);
 }
