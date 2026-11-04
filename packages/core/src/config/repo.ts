@@ -8,7 +8,7 @@ import { defaultLaneBreakerThreshold } from '@on-par/factory-config';
 import { z } from 'zod';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { resolvePrecedence, type ConfigSource } from './precedence.js';
-import { runConfigSource } from './run-config-source.js';
+import { runConfigSource } from './run-config-env.js';
 import { HealthConfigSections } from './base-health.js';
 import { OptionalConfigSections } from './optional-sections.js';
 import {

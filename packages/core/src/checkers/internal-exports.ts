@@ -12,7 +12,12 @@ export {
 } from './index.js';
 export { type ChecksConfigSource } from './index.js';
 // The source-checkout config snapshot every CHECK resolver reads in a one-shot run (#3600).
-export { holdRunConfigSnapshot } from '../config/run-config-source.js';
+export { holdRunConfigSnapshot, lastRunConfigLadder } from '../config/run-config-source.js';
+export {
+  describeConfigSources,
+  resolveConstitutionOverride,
+  type RunConfigLadder,
+} from '../config/run-config-ladder.js';
 export {
   buildDetectChecksPrompt,
   CHECK_KINDS,
