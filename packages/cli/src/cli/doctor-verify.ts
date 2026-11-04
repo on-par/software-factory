@@ -1,6 +1,7 @@
 // packages/cli/src/cli/doctor-verify.ts — `factory doctor` Verify section: the build/test/lint commands CHECK will run (#3473)
 
-import { basename } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 
 import { getFactoryPaths } from '@on-par/factory-core';
 import {
@@ -8,6 +9,7 @@ import {
   resolveCompileCommand,
   resolveLintCommands,
   resolveTestsCommand,
+  resolveWorkspaceTestRunners,
 } from '@on-par/factory-core/internal';
 
 import { MIN_NODE_MAJOR } from '../node-version.js';
@@ -36,6 +38,8 @@ export interface ResolvedVerifyCommands {
   checksProbe?: string;
   /** The repo config file name shown in fix hints, e.g. `.factory/config.yaml` (#3604). */
   configFile?: string;
+  /** Workspaces whose own test script runs vitest or jest, found through a root fan-out script. */
+  testRunners?: { dir: string; runner: string }[];
 }
 
 const TEST_SOURCES = {
@@ -63,6 +67,13 @@ export async function resolveVerifyCommands(repoRoot: string): Promise<ResolvedV
     const build = await resolveCompileCommand(src);
     const tests = await resolveTestsCommand(src);
     const lint = await resolveLintCommands(src);
+    let testRunners: { dir: string; runner: string }[] = [];
+    try {
+      const pkg: unknown = JSON.parse(await readFile(join(repoRoot, 'package.json'), 'utf8'));
+      testRunners = (await resolveWorkspaceTestRunners(repoRoot, pkg)).map(({ dir, runner }) => ({ dir, runner }));
+    } catch {
+      testRunners = [];
+    }
     return {
       rows: [
         build ? rowFor('build', build.argv, build.source) : emptyRow('build'),
@@ -75,6 +86,7 @@ export async function resolveVerifyCommands(repoRoot: string): Promise<ResolvedV
       ],
       checksProbe,
       configFile,
+      ...(testRunners.length > 0 ? { testRunners } : {}),
     };
   } catch (err) {
     return { rows: [], error: err instanceof Error ? err.message : String(err), checksProbe, configFile };
@@ -126,7 +138,7 @@ function missingRow(
       section,
       ok: false,
       optional: true,
-      detail: `no build system detected (checks.build in ${probe}, package.json build script, Makefile, Cargo.toml); CHECK skips compile`,
+      detail: `no build system detected (checks.build in ${probe}, package.json build or typecheck script, Makefile, Cargo.toml); CHECK skips compile`,
       fix: 'run `factory init --detect-checks` to declare a build command',
     };
   }
@@ -157,7 +169,7 @@ export function verifyCommandChecks(
       },
     ];
   }
-  return resolved.rows.map((row): DoctorCheck => {
+  const checks = resolved.rows.map((row): DoctorCheck => {
     const { command, source, executable } = row;
     if (command === null || executable === null)
       return missingRow(row, opts.requireTests, resolved.checksProbe, resolved.configFile);
@@ -173,6 +185,12 @@ export function verifyCommandChecks(
       fix: `install ${executable} and put it on PATH${executable === 'pwsh' ? ': https://aka.ms/powershell' : ''}`,
     };
   });
+  if (!resolved.testRunners?.length) return checks;
+  const detail = [...resolved.testRunners]
+    .sort((a, b) => (a.dir < b.dir ? -1 : a.dir > b.dir ? 1 : 0))
+    .map((w) => `${w.dir}: ${w.runner}`)
+    .join('; ');
+  return [...checks, { name: 'verify test runner', section, ok: true, detail }];
 }
 
 /** The npm row: required unless doctor runs in a repo with no package.json (`hasPackageJson` false). */

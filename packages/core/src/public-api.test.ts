@@ -324,7 +324,7 @@ const INTERNAL_API_KEYS = [
   'isExplicitStackMode',
   ...'AGENT_MEMORY_DIR AGENT_MEMORY_MAX_BYTES agentMemoryPath readAgentMemory'.split(' '), // #3624
   ...'renderAgentMemory scanAgentMemory loadAgentMemoryCtx'.split(' '),
-  ...'resolveCompileCommand resolveLintCommands resolveTestsCommand'.split(' '), // #3473, #1590
+  ...'resolveCompileCommand resolveLintCommands resolveTestsCommand resolveWorkspaceTestRunners'.split(' '), // #3473, #1590, #3913
   ...'describeChecksProbe holdRunConfigSnapshot'.split(' '), // #3600
   // `factory init --detect-checks`: heuristics, agent prompt and reply, shell-free tokenizer
   ...'CHECK_KINDS buildDetectChecksPrompt detectCheckHeuristics heuristicProposal parseDetectedChecks'.split(' '),
