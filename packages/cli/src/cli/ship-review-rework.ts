@@ -4,6 +4,7 @@ import {
   createFileIterateStore,
   createFileReviewReworkStore,
 } from '@on-par/factory-core/internal';
+import type { ReviewReworkSource } from '@on-par/factory-core/internal';
 
 type Log = (type: 'rework', message: string) => void;
 
@@ -13,14 +14,29 @@ export function claimReviewReworkRequest(
   issueNum: number,
   skip: unknown,
   log: Log,
-): { reviewRework?: { prNumber: number; reviewId: number; reviewer: string } } {
+): {
+  reviewRework?: {
+    prNumber: number;
+    reviewId: number;
+    reviewer: string;
+    source?: Extract<ReviewReworkSource, 'comment'>;
+  };
+} {
   const record = skip ? undefined : claimReviewRework(createFileReviewReworkStore(reviewReworkFile), issueNum);
   if (!record) return {};
+  const comment = record.source === 'comment';
   log(
     'rework',
-    `review rework of PR #${record.pr} review ${record.reviewId} by @${record.reviewer} — PLAN and BUILD skipped (#3564)`,
+    `review rework of PR #${record.pr} ${comment ? 'comment' : 'review'} ${record.reviewId} by @${record.reviewer} — PLAN and BUILD skipped (#3564)`,
   );
-  return { reviewRework: { prNumber: record.pr, reviewId: record.reviewId, reviewer: record.reviewer } };
+  return {
+    reviewRework: {
+      prNumber: record.pr,
+      reviewId: record.reviewId,
+      reviewer: record.reviewer,
+      ...(comment ? { source: 'comment' as const } : {}),
+    },
+  };
 }
 
 /** Claim a queued `/factory iterate` for the issue; returns the request fragment to spread into the run request (#3625). */

@@ -103,6 +103,7 @@
   "parseCommandCounts",
   "parseNumstat",
   "parsePullRequestReference",
+  "parseReworkCommand",
   "pullRequestHeadRef",
   "readAgentMemory",
   "readReviewFloorChanges",
