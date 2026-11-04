@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- ship: `ship.ciWatchMinutes` sets the CI watch window, and a draft SHIP left for pending CI is landed (or sent to CI rework) by the run-start and between-issue sweep once CI finishes (#3932)
+
 ## 0.9.28 - 2026-11-04
 
 Linear can feed the factory's queue end to end (a `tracker` key, a Linear work source and queue backend, and write-back on ship and park), `factory respond` runs a feedback round on a factory PR, an issue whose prerequisite has an open PR builds a stacked PR on it, `run-issue` gains `--in-place`, `--merge` and per-run config overrides for disposable hosts, and SHIP syncs a branch onto main before opening its PR so sibling CHANGELOG bullets no longer strand drafts (#3872, #3894, #3910, #3916, #3904, #3905, #3906, #3945).
@@ -15,7 +19,6 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
-- ship: `ship.ciWatchMinutes` sets the CI watch window, and a draft SHIP left for pending CI is landed (or sent to CI rework) by the run-start and between-issue sweep once CI finishes (#3932)
 - Linear runs link their issue: the branch, PR title and body carry the key (`Fixes KEY` on the final slice, `Part of KEY` before it), park, env-failure and slice-plan comments go to the Linear issue, the no-auto-merge hold reads Linear labels, and KPIs count Linear keys (#3894)
 - A queued issue whose prerequisite has an open factory PR now builds on it and opens a stacked PR against that branch, restacks onto main when the prerequisite merges or onto its new head when it moves, parks held when the prerequisite PR closes unmerged, and is never landed while its base is not main; `queue.stackOnOpenPrerequisite: false` restores waiting (#3916)
 - Feedback rounds: review rework reads all trusted PR feedback, re-plans on scope changes, replies to each item, resolves fixed threads and re-requests review; `factory respond <pr>` starts one by hand (#3910)
