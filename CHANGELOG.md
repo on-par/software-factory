@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- The compile gate and `factory doctor` fall back to `npm run typecheck` when no build command resolves, and doctor names the detected test runner per workspace (#3913).
 - `factory run-issue --in-place` (or `FACTORY_WORKSPACE=in-place`) runs the pipeline in the current clean checkout with no worktree, for disposable containers (#3904).
 - With `tracker.kind: linear`, `factory run`, `factory supervise` and `factory status` take their queue from Linear through one composed `QueueBackend`. A claim writes the first lease attachment, and lanes release a Linear claim they cannot build yet (#3918).
 - A run persists its resumable state (rework counters, handled reviews, status, spec summary) in a factory-owned PR comment and restores it on a fresh clone (#3909)
@@ -16,6 +17,10 @@ section to `## X.Y.Z - date`. See
 - A `tracker` config key selects `github` (default) or `linear` per repo, and `factory doctor` checks the Linear setup: a missing or rejected `LINEAR_API_KEY` and any project with ready issues but no repo mapping (#3891).
 - Core has a read-only `linear-issue` work source that resolves `ON-12` or a Linear issue URL into a work request; it reads `LINEAR_API_KEY` only when used (#3889).
 - Core has a Linear queue lifecycle that releases, parks and reaps Linear claims, keeping the claim lease in a factory-owned attachment's metadata; a failed Linear write warns and never fails the run (#3893).
+
+### Fixed
+
+- CHECK follows a root workspace fan-out `test` script into the owning npm/pnpm/yarn workspace and runs fail-to-pass selectors there with vitest or jest (#3913).
 
 ### Changed
 

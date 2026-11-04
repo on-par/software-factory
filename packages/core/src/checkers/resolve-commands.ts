@@ -67,7 +67,10 @@ export async function resolveCompileCommand(ctx: LintCommandSource): Promise<Com
   if (declared) return declared;
   if ((await getPackageJson(ctx))?.scripts?.build) return { argv: ['npm', 'run', 'build'], source: 'package.json' };
   if (await fileExists(join(w, 'Makefile'))) return { argv: ['make'], source: 'Makefile' };
-  return (await fileExists(join(w, 'Cargo.toml'))) ? { argv: ['cargo', 'build'], source: 'Cargo.toml' } : null;
+  if (await fileExists(join(w, 'Cargo.toml'))) return { argv: ['cargo', 'build'], source: 'Cargo.toml' };
+  return (await getPackageJson(ctx))?.scripts?.typecheck
+    ? { argv: ['npm', 'run', 'typecheck'], source: 'package.json' }
+    : null;
 }
 export type TestsRunner = 'config' | 'verify' | 'verify-ps1' | 'npm' | 'pytest' | 'none';
 

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { parseFailToPassSelector, resolveEvidenceTestRunner, selectorArgs } from './evidence-selector.js';
+import {
+  parseFailToPassSelector,
+  resolveEvidenceTestRunner,
+  runnerFromScript,
+  selectorArgs,
+} from './evidence-selector.js';
 
 describe('parseFailToPassSelector', () => {
   it('parses a file with quoted names and rejects prose', () => {
@@ -59,5 +64,17 @@ describe('selectorArgs', () => {
       't/test_a.py::b',
     ]);
     expect(selectorArgs({ file: 't/test_a.py', names: [] }, 'pytest')).toEqual(['t/test_a.py']);
+  });
+});
+
+describe('runnerFromScript', () => {
+  it('runnerFromScript recognises wrapped vitest, jest and pytest', () => {
+    expect(runnerFromScript('vitest run')).toBe('vitest');
+    expect(runnerFromScript('npx jest --ci')).toBe('jest');
+    expect(runnerFromScript('pnpm exec vitest')).toBe('vitest');
+    expect(runnerFromScript('python -m pytest -q')).toBe('pytest');
+    expect(runnerFromScript('node_modules/.bin/jest')).toBe('jest');
+    expect(runnerFromScript('mocha')).toBeNull();
+    expect(runnerFromScript('vitest "unterminated')).toBeNull();
   });
 });
