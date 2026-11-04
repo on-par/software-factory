@@ -22,6 +22,10 @@ section to `## X.Y.Z - date`. See
 - Lanes, `factory supervise` and the `factory status` queue band claim, heartbeat, release and list through the WorkKey queue seam, and run state is written with a string `key`. A GitHub issue's record also keeps its numeric `issue`, so a factory 0.9.27 or earlier on the same host still reads it (#3890).
 - The queue's claim-time prerequisite defer also reads `Depends on: #N` lines, and both `Depends on:` and `Prerequisite:` accept a comma list such as `#3891, #3892` (#3915).
 
+### Fixed
+
+- The factory-run workflow uploads `.factory/state/events.ndjson`, verify fails when the `factory --help` fixture is stale, and help text, runbooks and the config example (stack mode builds every slice in one run for run-issue and run-brief) match the CLI (#3921).
+
 ## 0.9.27 - 2026-11-03
 
 An opt-in preview gate checks a PR against its preview environment, SHIP fails closed when the CI watch itself fails, and trust-tier promotion evidence and demotion are recorded (#3880, #1957, #1959).

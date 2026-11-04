@@ -29,7 +29,7 @@ A `CodingHarness` has three members:
 ## Outputs (`HarnessResult`)
 
 - `output` (required): the final text, always non-empty after trim. Empty provider output must reject with `empty_response`; it must never resolve `''`. Callers must propagate that rejection.
-- `usage` (optional, `HarnessUsage`): only real provider-reported numbers. Fields: `inputTokens` (all input-side tokens including cache read and creation), `outputTokens`, and optional `rawInputTokens`, `cacheReadTokens`, `cacheCreationTokens`, `numTurns`, `durationMs`, `durationApiMs`, `costUsd`. Usage feeds `.factory/costs.jsonl` (`factory cost`). Never invent numbers; omit `usage` when it cannot be parsed.
+- `usage` (optional, `HarnessUsage`): only real provider-reported numbers. Fields: `inputTokens` (all input-side tokens including cache read and creation), `outputTokens`, and optional `rawInputTokens`, `cacheReadTokens`, `cacheCreationTokens`, `numTurns`, `durationMs`, `durationApiMs`, `costUsd`. Usage feeds `.factory/state/costs.jsonl` (`factory cost`). Never invent numbers; omit `usage` when it cannot be parsed.
 
 ## Failures
 
