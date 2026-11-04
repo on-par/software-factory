@@ -9,7 +9,10 @@ function fakeOctokit() {
   const merge = vi.fn(async () => ({}));
   return {
     octokit: Object.assign({} as Octokit, {
-      rest: { pulls: { merge }, git: { deleteRef: vi.fn(async () => ({})) } },
+      rest: {
+        pulls: { get: vi.fn(async () => ({ data: { base: { ref: 'main' } } })), merge },
+        git: { deleteRef: vi.fn(async () => ({})) },
+      },
     }),
     merge,
   };

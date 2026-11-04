@@ -39,9 +39,7 @@ const harness = (results: Array<LandState | Error>) => {
       throw new Error('unexpected prerequisite lookup');
     },
     getPullState: async () => 'open' as const,
-    getPullRefs: async () => {
-      throw new Error('unexpected refs lookup');
-    },
+    getPullRefs: async () => ({ headRef: 'factory/7-x', baseRef: 'main', headSha: 'abc123', body: '' }),
     branchContains: async () => false,
     sleep,
     onDeferred,

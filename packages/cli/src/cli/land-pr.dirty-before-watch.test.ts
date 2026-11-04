@@ -28,6 +28,7 @@ function setup(
       pulls: {
         get: async () => ({
           data: {
+            base: { ref: 'main' },
             head: {
               sha: synced
                 ? 'synced-sha'

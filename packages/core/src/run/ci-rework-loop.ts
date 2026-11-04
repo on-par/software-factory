@@ -194,7 +194,10 @@ export async function shipWithCiRework(
     ...(inputs.pinNote ? { pinNotes: [inputs.pinNote] } : {}),
     slice: planSlice ? { index: planSlice.index, count: planSlice.plan.slices.length } : undefined,
     ...(request.parentBaseRef !== undefined && request.sizeGateMode !== 'stack'
-      ? { baseBranch: request.parentBaseRef.replace(/^origin\//, '') }
+      ? {
+          baseBranch: request.parentBaseRef.replace(/^origin\//, ''),
+          ...(request.prerequisiteStack ? { prerequisiteStack: request.prerequisiteStack } : {}),
+        }
       : {}),
     ...(request.sizeGateMode === 'stack' && planSlice
       ? { stack: stackPositionFor(planSlice.plan, planSlice.index, request.parentBaseRef) }
