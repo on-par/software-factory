@@ -34,7 +34,7 @@ import { restoredLoggingBreaker } from './provider-restored-log.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
 import { shipIssue } from './ship.js';
 import { ClaimLostError, createClaimLease, laneRenewLogger, onClaimLost, withHeartbeat } from './lane-heartbeat.js';
-import { restackUnderHeartbeat } from './run-lane-restack.js';
+import { restackPrerequisiteUnderHeartbeat, restackUnderHeartbeat } from './run-lane-restack.js';
 import type { RunLaneDeps } from './run-lane-deps.js';
 import { shipRuntime } from './ship-runtime.js';
 import { BaseCiPendingError } from './merge-base-gate.js';
@@ -54,6 +54,7 @@ export async function runLane(
     waitMerge = waitForMerge,
     recordStackMerge = async () => {},
     restack = async () => ({ status: 'nothing', reason: 'restack not wired' }),
+    restackPrerequisite = async () => ({ status: 'park', reason: 'prerequisite restack not wired', files: [] }),
     pathExists = existsSync,
     emitEvent = logEvent,
     claimNext = async () => null,
@@ -248,6 +249,22 @@ export async function runLane(
       await settle(issue, 'queued');
       continue;
     }
+    if (decision.kind === 'held') {
+      await parkIssue(decision.reason);
+      continue;
+    }
+    if (decision.kind === 'restack-prerequisite') {
+      const done = await restackPrerequisiteUnderHeartbeat(issue, heartbeat, restackPrerequisite, decision);
+      if (done.parkReason !== undefined) {
+        await parkIssue(done.parkReason);
+        continue;
+      }
+      emitEvent(paths.events, 'ship', issue, done.note, { lane });
+      streak = null;
+      await settle(issue, 'queued');
+      continue;
+    }
+    const stackOn = decision.kind === 'build' ? decision.stackOn : undefined;
     const layer = decision.kind === 'adopt' ? decision.stackLayer : undefined;
     const sliceOutcome: { value?: RunOutcome } = {};
     let landBranch = decision.kind === 'adopt' ? decision.branch : undefined;
@@ -256,7 +273,16 @@ export async function runLane(
       withHeartbeat(
         issue,
         heartbeat,
-        (signal) => ship(issue, {}, { repoRoot, ghRepo, paths, lane, blockedBehind: queuedBehind(i), signal, ...ctx }),
+        (signal) =>
+          ship(issue, stackOn ? { baseBranch: stackOn.branch, prerequisiteStack: stackOn } : {}, {
+            repoRoot,
+            ghRepo,
+            paths,
+            lane,
+            blockedBehind: queuedBehind(i),
+            signal,
+            ...ctx,
+          }),
         lease,
       );
     try {
@@ -286,6 +312,16 @@ export async function runLane(
       if (shipped?.state === 'ready' && shipped.slice && shipped.slice.index < shipped.slice.count) {
         // ADR-0147: a non-final slice's PR is open; hand the issue back for the next slice
         // instead of waiting for the merge.
+        awaitingReview++;
+        streak = null;
+        await settle(issue, 'queued');
+        continue;
+      }
+      if (stackOn) {
+        // #3916: based on the prerequisite's branch, not main: nothing to merge; the next preflight restacks it.
+        emitEvent(paths.events, 'ship', issue, `PR stacked on prerequisite PR #${stackOn.prNumber}; awaiting it`, {
+          lane,
+        });
         awaitingReview++;
         streak = null;
         await settle(issue, 'queued');

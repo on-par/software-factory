@@ -13,6 +13,7 @@ import type { WorkKey } from '../work/work-key.js';
 import type { CommandRunner } from './ship-git.js';
 import type { PreviewGate } from './ship-preview.js';
 import type { WalkthroughShipOpts } from './ship-walkthrough.js';
+import type { PrerequisiteStackTarget } from '../queue/prerequisite-stack.js';
 import type { StackPosition } from './stack-order.js';
 
 /** Ship opens PRs against, and watches required checks of, this branch. */
@@ -55,6 +56,8 @@ export interface ShipPhaseOptions {
   stack?: StackPosition;
   /** PR base for a non-stack run started from another branch (#3764); default main. */
   baseBranch?: string;
+  /** The open prerequisite PR this issue is stacked on (#3916): the body names the stack order and carries the marker. */
+  prerequisiteStack?: PrerequisiteStackTarget;
   /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
   laneId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */

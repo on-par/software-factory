@@ -191,6 +191,21 @@ describe('restackAfterSquashMerge', () => {
     ).toEqual([]);
   });
 
+  it('delegates the rebase and push to rebaseAndPushStack', async () => {
+    git(root, 'checkout', 'factory/9-slice-2');
+    commit(root, 'a.txt', 'slice two edit\n', 's2 edits a');
+    git(root, 'push', 'origin', 'factory/9-slice-2');
+    plan = withSliceState(plan, 2, 'pr-open', 102, 'factory/9-slice-2', remoteHead('factory/9-slice-2'));
+    git(root, 'checkout', 'main');
+    commit(root, 'a.txt', 'main edit\n', 'main edits a');
+    git(root, 'push', 'origin', 'main');
+    const out = await run({ plan: withSliceState(plan, 3, 'pending') });
+    // The helper's conflict reason, prefixed by restack's slice/PR label.
+    expect(out.status === 'park' && out.reason).toMatch(
+      /^restack of slice 2\/3 PR #102 onto origin\/main conflicted in: a\.txt; nothing was pushed$/,
+    );
+  });
+
   it('pushes nothing when a higher slice conflicts', async () => {
     git(root, 'checkout', 'factory/9-slice-3');
     commit(root, 's2.txt', 'slice three edit\n', 's3 edits s2 file');

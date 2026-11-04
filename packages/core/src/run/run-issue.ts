@@ -128,6 +128,8 @@ import type { IssueRunState } from '../types/index.js';
 import type { RequiredChecksVerdict } from '../utils/required-checks.js';
 import type { RunReportInfo } from './run-report-info.js';
 import { providerProbe, type ProviderProbe } from './provider-probe.js';
+import type { PrerequisiteStackTarget } from '../queue/prerequisite-stack.js';
+import { errorMessage } from '../checkers/preview-wait.js';
 import { renderPreviousAttempt } from './previous-attempt.js';
 import { withoutHumanOnlyLabels } from './max-lines-override.js';
 
@@ -204,6 +206,8 @@ export interface RunRequest extends ReworkRequestFields {
   /** Resume at CHECK on a kept worktree (#2564): PLAN and BUILD are skipped. */
   /** Parent ref of a stacked slice branch (#2716); CHECK and the review floor diff against it. Absent = origin/main. */
   parentBaseRef?: string;
+  /** The open prerequisite PR this issue is stacked on (#3916); its stack line and marker go into the PR body. */
+  prerequisiteStack?: PrerequisiteStackTarget;
   resumeFrom?: { phase: 'check'; diffBase?: string; route: BuildRoute; model: string; buildMinutes: number };
   /** Resolved factory-state paths shipPhase reads/writes directly (unchanged from today —
    *  shipPhase's own surface already takes plain path strings, not a path-resolution port). */
@@ -303,10 +307,6 @@ export interface RunPorts extends CiReworkPorts, LinearRunPorts {
     fallbackBaseRef?: string,
     parentBaseRef?: string,
   ) => Promise<ReviewFloorPathChange[]>;
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 export async function runIssue(request: RunRequest, policy: RunPolicy, rawPorts: RunPorts): Promise<RunOutcome> {

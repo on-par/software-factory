@@ -7,6 +7,7 @@ import {
   createOctokitQueueClient,
   logEvent,
   resolveQueueClaimSettleMs,
+  resolveQueueStackOnOpenPrerequisite,
   resolveTrackerConfig,
   withAdmissionGuard,
   type GithubQueueBackendOptions,
@@ -53,6 +54,7 @@ export function createRunQueue(input: {
                 resolveSizeGateMode(factoryConfig) === 'stack' &&
                 resolveMergePolicy(factoryConfig, process.env, { auto: input.autoMerge }).auto,
               stackMode: resolveSizeGateMode(factoryConfig) === 'stack',
+              stackOnOpenPrerequisite: resolveQueueStackOnOpenPrerequisite(factoryConfig),
               laneFileHold: laneFileHoldLookup(paths.laneFiles, ghRepo),
               onDeferred: input.deferrals.onDeferred,
             }),

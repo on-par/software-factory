@@ -117,12 +117,15 @@ describe('queue preflight branchContains (#3368)', () => {
   });
 
   it('getPullRefs maps a slice PR to its head ref, base ref and head SHA', async () => {
-    const get = vi.fn(async () => ({ data: { head: { ref: 'factory/7-slice-2', sha: 'h2' }, base: { ref: 'main' } } }));
+    const get = vi.fn(async () => ({
+      data: { head: { ref: 'factory/7-slice-2', sha: 'h2' }, base: { ref: 'main' }, body: 'text' },
+    }));
     const ops = createQueuePreflightOps({ rest: { pulls: { get } } } as never, 'o', 'r');
     await expect(ops.getPullRefs(82)).resolves.toEqual({
       headRef: 'factory/7-slice-2',
       baseRef: 'main',
       headSha: 'h2',
+      body: 'text',
     });
     expect(get).toHaveBeenCalledWith({ owner: 'o', repo: 'r', pull_number: 82 });
   });

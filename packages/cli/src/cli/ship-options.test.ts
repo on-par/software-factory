@@ -156,6 +156,13 @@ describe('resolveShipSizeGate', () => {
     ).toMatchObject({ sizeGateMode: 'stack', explicitStack: true, maxSlices: 2 });
   });
 
+  it('keeps the gate on for a prerequisite stack base (#3916)', () => {
+    const prerequisiteStack = { issue: 7, prNumber: 70, branch: 'factory/7-x', headSha: 'abc' };
+    expect(resolveShipSizeGate({ baseBranch: 'factory/7-x', prerequisiteStack }, stackConfig).sizeGateMode).toBe(
+      'stack',
+    );
+  });
+
   it('reports noPr for --no-pr', () => {
     expect(resolveShipSizeGate({ pr: false }, noConfig).noPr).toBe(true);
   });

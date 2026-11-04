@@ -68,7 +68,13 @@ describe('factory run lane queue (#3239, #3890)', () => {
     // The seam does not expose claimSettleMs (no claim path sleeps on it yet), so only the shape is observable.
     const config = {
       ...loadFactoryConfig(),
-      queue: { claim_settle_ms: 500, max_review_rework_runs: 2, maxClockSkewMs: 60000, discovery_interval_ms: 60000 },
+      queue: {
+        claim_settle_ms: 500,
+        max_review_rework_runs: 2,
+        maxClockSkewMs: 60000,
+        discovery_interval_ms: 60000,
+        stackOnOpenPrerequisite: true,
+      },
     };
     const backend = await laneQueueFor(config);
     expect(typeof backend.claimNext).toBe('function');

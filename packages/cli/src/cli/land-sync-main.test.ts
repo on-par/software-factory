@@ -34,7 +34,10 @@ function setup(initial: 'DIRTY' | 'CLEAN', { conflict = false, syncMain = false 
     rest: {
       pulls: {
         get: async () => ({
-          data: { head: { sha: initial === 'DIRTY' ? (synced ? 'new-sha' : 'old-sha') : 'same-sha' } },
+          data: {
+            base: { ref: 'main' },
+            head: { sha: initial === 'DIRTY' ? (synced ? 'new-sha' : 'old-sha') : 'same-sha' },
+          },
         }),
         merge: async (args: { sha?: string }) => {
           merges.push(args.sha);
@@ -105,9 +108,7 @@ const preflightDeps = (mergeStateStatus: string) => ({
     throw new Error('unexpected prerequisite lookup');
   },
   getPullState: async () => 'open' as const,
-  getPullRefs: async () => {
-    throw new Error('unexpected refs lookup');
-  },
+  getPullRefs: async () => ({ headRef: 'factory/7-x', baseRef: 'main', headSha: 'abc123', body: '' }),
   branchContains: async () => false,
   sleep: async () => {},
 });

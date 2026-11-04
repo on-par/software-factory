@@ -1324,6 +1324,7 @@ describe('cli', () => {
     const octokit: any = {
       rest: {
         pulls: {
+          get: async () => ({ data: { base: { ref: 'main' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -1350,6 +1351,7 @@ describe('cli', () => {
     const octokit: any = {
       rest: {
         pulls: {
+          get: async () => ({ data: { base: { ref: 'main' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -1378,7 +1380,7 @@ describe('cli', () => {
   it('does not throw when deleting the merged branch fails', async () => {
     const octokit: any = {
       rest: {
-        pulls: { merge: async () => {} },
+        pulls: { get: async () => ({ data: { base: { ref: 'main' } } }), merge: async () => {} },
         git: {
           deleteRef: async () => {
             throw new Error('not found');
@@ -1396,7 +1398,10 @@ describe('cli', () => {
     const calls: any[] = [];
     const octokit: any = {
       rest: {
-        pulls: { merge: async (args: any) => calls.push(['merge', args]) },
+        pulls: {
+          get: async () => ({ data: { base: { ref: 'main' } } }),
+          merge: async (args: any) => calls.push(['merge', args]),
+        },
         git: { deleteRef: async () => {} },
       },
     };
@@ -1440,7 +1445,7 @@ describe('cli', () => {
         pulls: {
           get: async (args: any) => {
             calls.push(['get', args.pull_number]);
-            return { data: { head: { sha: 'abc123' } } };
+            return { data: { head: { sha: 'abc123' }, base: { ref: 'main' } } };
           },
           merge,
         },
@@ -1477,11 +1482,12 @@ describe('cli', () => {
         },
       });
 
-      // get: pre-watch behind check, the CI watch head read, and the under-lock behind check (#3654).
+      // get: pre-watch behind check, the CI watch head read, the under-lock behind check (#3654) and the base check (#3916).
       expect(calls).toEqual([
         ['get', 123],
         ['get', 123],
         ['watch', 'abc123'],
+        ['get', 123],
         ['get', 123],
         ['merge', 'abc123'],
       ]);
@@ -1674,7 +1680,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -1727,7 +1733,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -1775,7 +1781,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -1823,7 +1829,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -1874,7 +1880,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -1931,7 +1937,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -1978,7 +1984,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }),
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2036,7 +2042,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }),
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2095,7 +2101,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2149,7 +2155,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async () => {
             mergeCalls++;
             if (mergeCalls === 1) throw new Error('Pull Request is still a draft');
@@ -2199,7 +2205,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async () => {
             mergeCalls++;
             if (mergeCalls < 3) throw new Error('Pull Request is not mergeable');
@@ -2246,7 +2252,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async () => {
             mergeCalls++;
             throw mergeError;
@@ -2296,7 +2302,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async () => {
             mergeCalls++;
             throw new Error('At least 1 approving review is required by reviewers with write access.');
@@ -2358,7 +2364,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async () => {
             trace.push('merge');
           },
@@ -2411,7 +2417,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async () => {
             trace.push('merge');
           },
@@ -2491,7 +2497,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async () => {
             trace.push('merge');
           },
@@ -2544,7 +2550,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
+          get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
           merge: async () => {
             mergeCalls++;
             trace.push('merge');

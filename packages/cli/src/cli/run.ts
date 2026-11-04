@@ -26,6 +26,7 @@ import {
   resolveLaneDiscoveryIntervalMs,
   resolveLocalOnly,
   resolveRunUsageHarness,
+  restackOnPrerequisite,
   settleParkedPullRequest,
   slugify,
   resolveTrackerConfig,
@@ -351,6 +352,17 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
             recordSliceMerged({ octokit: rt.getOctokit(), repo: ghRepo, issue, prNumber }).then(() => {}),
           restack: (issue, merged) =>
             restackFromSlicePlan({ octokit: rt.getOctokit(), repo: ghRepo, repoRoot, issue, merged }),
+          restackPrerequisite: (d) =>
+            restackOnPrerequisite({
+              octokit: rt.getOctokit(),
+              repo: ghRepo,
+              repoRoot,
+              prNumber: d.prNumber,
+              branch: d.branch,
+              recordedHead: d.recordedHead,
+              stackedOn: d.stackedOn,
+              onto: d.onto,
+            }),
           waitMerge: (issue, branch, root, gh, p, d = {}) =>
             waitForMerge(issue, branch, root, gh, p, { ...d, mergeOverrides: { auto: opts.autoMerge } }),
         });
