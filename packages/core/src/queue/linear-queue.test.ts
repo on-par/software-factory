@@ -8,6 +8,7 @@ import {
   createLinearQueue,
   createLinearQueueGraphqlClient,
   isLinearCandidate,
+  LINEAR_LEASE_ATTACHMENT_URL,
   linearLaneOf,
   type LinearQueueClient,
   type LinearQueueIssue,
@@ -280,5 +281,77 @@ describe('linear queue graphql client', () => {
     await expect(make(respond({ data: { teams: { nodes: [] } } })).ensureLabel('x')).rejects.toThrow(
       'team ON not found',
     );
+  });
+});
+
+describe('linear queue lifecycle client methods and lanes (#3918)', () => {
+  const apiKey = 'lin_api_SECRET';
+  const issueNode = {
+    id: 'i1',
+    identifier: 'ON-12',
+    labels: { nodes: [{ id: 'l1', name: 'factory:ready' }] },
+    attachments: { nodes: [{ id: 'a1', metadata: { kind: 'factory-claim-lease' } }] },
+  };
+
+  it('createLinearQueueGraphqlClient serves the lifecycle methods over the same endpoint', async () => {
+    const seen: Array<{ url: string; auth: string; query: string; variables: Record<string, unknown> }> = [];
+    const f: typeof fetch = async (url, init) => {
+      const body = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
+      seen.push({
+        url: String(url),
+        auth: new Headers(init?.headers).get('Authorization') ?? '',
+        query: body.query,
+        variables: body.variables,
+      });
+      let data: unknown = { teams: { nodes: [{ id: 't1', states: { nodes: [] } }] } };
+      if (body.query.includes('issue(id')) data = { issue: issueNode };
+      else if (body.query.includes('issues(')) {
+        data = { issues: { nodes: [issueNode], pageInfo: { hasNextPage: false } } };
+      } else if (body.query.includes('commentCreate')) data = { commentCreate: { success: true } };
+      else if (body.query.includes('attachmentCreate')) data = { attachmentCreate: { success: true } };
+      else if (body.query.includes('attachmentDelete')) data = { attachmentDelete: { success: true } };
+      return new Response(JSON.stringify({ data }), { status: 200 });
+    };
+    const client = createLinearQueueGraphqlClient({ apiKey, linear, project: 'Foreman', fetch: f });
+
+    expect(await client.findIssue('ON-12')).toEqual({
+      id: 'i1',
+      identifier: 'ON-12',
+      labels: [{ id: 'l1', name: 'factory:ready' }],
+      lease: { attachmentId: 'a1', metadata: { kind: 'factory-claim-lease' } },
+    });
+    expect(await client.listLeasedIssues()).toHaveLength(1);
+    await client.addComment('i1', 'hello');
+    await client.upsertLeaseAttachment('i1', { kind: 'factory-claim-lease', claimantId: 'h', expiresAt: 5 });
+    await client.deleteAttachment('a1');
+
+    expect(seen).toHaveLength(5);
+    expect(new Set(seen.map((s) => s.url))).toEqual(new Set(['https://api.linear.app/graphql']));
+    expect(seen.every((s) => s.auth === apiKey)).toBe(true);
+    expect(seen[3]?.variables).toMatchObject({ url: LINEAR_LEASE_ATTACHMENT_URL, metadata: { expiresAt: 5 } });
+  });
+
+  it('findIssue returns null for a missing issue or a not-found error, and rethrows others', async () => {
+    const respond = (body: unknown) => async () => new Response(JSON.stringify(body), { status: 200 });
+    const make = (f: typeof fetch) => createLinearQueueGraphqlClient({ apiKey, linear, project: 'Foreman', fetch: f });
+    expect(await make(respond({ data: { issue: null } })).findIssue('ON-1')).toBeNull();
+    expect(await make(respond({ errors: [{ message: 'Entity not found: Issue' }] })).findIssue('ON-1')).toBeNull();
+    await expect(make(respond({ errors: [{ message: 'rate limited' }] })).findIssue('ON-1')).rejects.toBeInstanceOf(
+      LinearApiError,
+    );
+  });
+
+  it('lifecycle mutations raise LinearApiError on success=false', async () => {
+    const f: typeof fetch = async () =>
+      new Response(JSON.stringify({ data: { commentCreate: { success: false } } }), { status: 200 });
+    const client = createLinearQueueGraphqlClient({ apiKey, linear, project: 'Foreman', fetch: f });
+    await expect(client.addComment('i1', 'x')).rejects.toBeInstanceOf(LinearApiError);
+  });
+
+  it('lanes returns the sorted distinct lanes of the candidates', async () => {
+    const { client } = fakeClient(fixture);
+    const lanes = await createLinearQueue({ client, linear }).lanes();
+    expect(lanes).toContain('infra');
+    expect(lanes).toEqual([...new Set(lanes)].sort());
   });
 });

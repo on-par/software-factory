@@ -5,7 +5,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { Octokit } from '@octokit/rest';
 import { getFactoryPaths, parseQueue, resolveIngestConfig } from '@on-par/factory-core';
 import type { QueueDiagnostic } from '@on-par/factory-core';
-import { createOctokitQueueClient, createQueueBackend, resolveQueueClaimSettleMs } from '@on-par/factory-core/internal';
+import { createOctokitQueueClient, resolveQueueClaimSettleMs } from '@on-par/factory-core/internal';
+
+import { selectQueueBackend } from './queue-backend-select.js';
 
 import type {
   CliDeps,
@@ -63,15 +65,19 @@ export async function cmdSupervise(opts: SuperviseOptions, rt: SuperviseRuntime)
       rt.warnQueueDiagnostics(parsed.diagnostics);
       return parsed.entries.length;
     }
-    const [owner, repo] = (await rt.getGitHubRepo()).split('/');
-    const backend = createQueueBackend({
-      kind: 'github',
-      github: {
+    const ghRepo = await rt.getGitHubRepo();
+    const [owner, repo] = ghRepo.split('/');
+    const { backend } = selectQueueBackend({
+      factoryConfig,
+      ghRepo,
+      env: process.env,
+      github: () => ({
         client: createOctokitQueueClient(rt.getOctokit()),
         owner,
         repo,
         claimSettleMs: resolveQueueClaimSettleMs(factoryConfig),
-      },
+      }),
+      warn: () => undefined,
     });
     return (await backend.list()).length;
   };
