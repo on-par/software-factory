@@ -262,6 +262,10 @@ ci:
   awaitingCiCapHours: 24
   # Minutes SHIP waits for CI before reporting CI pending and leaving the PR as draft. Unset: 10.
   # watchMinutes: 10
+# ship:
+  # Minutes SHIP waits for CI before leaving the PR as a draft (CI pending); the between-issue sweep
+  # lands it once CI passes. Overrides ci.watchMinutes. Unset: 10.
+  # ciWatchMinutes: 10
 # Where lane worktrees are created. "~/..." or an absolute path is a shared root, namespaced as
 # <parent>/<owner>/<repo>/. A repo-relative path is used as-is: "../" gives the old sibling layout;
 # ".factory/worktrees" keeps them inside the repo (auto-added to .git/info/exclude) but the repo's
