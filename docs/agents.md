@@ -247,6 +247,23 @@ route: opencode
 
 Version tested: 1.18.28
 
+### Recipe: OpenCode Go — DeepSeek V4 Pro boss + V4 Flash worker/checker
+
+Put DeepSeek V4 Pro on PLAN (the boss tier) and the cheaper V4 Flash on BUILD and CHECK (worker/checker) when plan quality and bulk-work cost both matter. Pro has a lower Go monthly quota, so keep it on the boss phase only.
+
+```yaml
+version: 2
+models:
+  pins:
+    plan: opencode-deepseek-v4-pro
+    build: opencode-deepseek-v4-flash
+    checker: opencode-deepseek-v4-flash
+    triage: opencode-deepseek-v4-flash
+route: opencode
+```
+
+Version tested: 1.18.28
+
 ### Recipe: DeepSeek on Pi through OpenRouter
 
 DeepSeek runs on Pi only through OpenRouter, never the native `deepseek/` provider or `DEEPSEEK_API_KEY`
