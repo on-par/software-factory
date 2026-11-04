@@ -30,8 +30,6 @@ import {
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
   resolveSandboxPolicy,
-  resolveSizeGateMaxSlices,
-  resolveSizeGateMode,
   ReworkHistory,
   runIssue,
   summarizeEvent,
@@ -49,7 +47,6 @@ import {
   egressHostMessage,
   egressSummaryMessage,
   holdRunConfigSnapshot,
-  isExplicitStackMode,
   logCost,
   logEvent,
   readIssueRunState,
@@ -80,7 +77,7 @@ import {
   stubAwareShipPhase,
   TERMINAL_EVENT_KINDS,
 } from './ship-steps.js';
-import { baseRemoteRef, type ShipIssueOptions } from './ship-options.js';
+import { baseRemoteRef, resolveShipSizeGate, type ShipIssueOptions } from './ship-options.js';
 
 type ShipArgs = Parameters<typeof shipIssueFrom> extends [string, ...infer Rest] ? Rest : never;
 
@@ -243,13 +240,7 @@ async function shipIssueFrom(
       issue: issueNum,
     } satisfies GithubIssueParams));
   const issueTitle = work.title;
-  const noPr = opts.pr === false; // --no-pr never files child issues or slice PRs: size gate off; --base-branch keeps stack mode
-  const gateOff = noPr || (opts.baseBranch !== undefined && opts.sizeGate !== 'stack');
-  const sizeGateMode = gateOff ? 'off' : (opts.sizeGate ?? resolveSizeGateMode(factoryConfig));
-  const explicitStack =
-    sizeGateMode === 'stack' &&
-    (opts.sizeGate !== undefined ? opts.explicitStack === true : isExplicitStackMode(factoryConfig));
-  const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
+  const { noPr, sizeGateMode, explicitStack, maxSlices } = resolveShipSizeGate(opts, factoryConfig);
   const { branchPrefix } = policy.effective;
   const claim = { issueNum, issueTitle, ghRepo, sizeGateMode, work, ctx, octokit, baseBranch: opts.baseBranch };
   const branch = await resolveRunBranch({
@@ -264,7 +255,9 @@ async function shipIssueFrom(
     ? ctx.resumeFrom.worktree
     : ctx?.localOnly
       ? ctx.localOnly.workspace
-      : worktreePathFor(repoRoot, ghRepo, issueNum, branchPrefix, loaders);
+      : opts.inPlace
+        ? repoRoot
+        : worktreePathFor(repoRoot, ghRepo, issueNum, branchPrefix, loaders);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
 
@@ -328,6 +321,7 @@ async function shipIssueFrom(
     git,
     paths,
     startPoint: baseRemoteRef(opts.baseBranch),
+    inPlace: opts.inPlace,
   });
 
   const planApprovalEnabled = opts.approvePlan ?? resolvePlanApproval(factoryConfig);

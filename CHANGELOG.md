@@ -10,6 +10,7 @@ section to `## X.Y.Z - date`. See
 ### Added
 
 - `factory run-issue --merge` and `run-brief --merge` drive the PR through the `factory run --auto-merge` gates to a merge, bounded by `--merge-timeout` or `ci.awaitingCiCapHours`, with distinct exit codes (0 merged, 10 held, 11 CI failed, 12 timed out, 13 land failed, 1 parked before a PR) (#3905)
+- `factory run-issue --in-place` (or `FACTORY_WORKSPACE=in-place`) runs the pipeline in the current clean checkout with no worktree, for disposable containers (#3904).
 - With `tracker.kind: linear`, `factory run`, `factory supervise` and `factory status` take their queue from Linear through one composed `QueueBackend`. A claim writes the first lease attachment, and lanes release a Linear claim they cannot build yet (#3918).
 - A run persists its resumable state (rework counters, handled reviews, status, spec summary) in a factory-owned PR comment and restores it on a fresh clone (#3909)
 - Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).

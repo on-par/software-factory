@@ -134,6 +134,7 @@ The most-used commands, by the group `factory --help` lists them under. Run `fac
 factory ship <N>                    Plan → build → check one issue and open a ready-for-review PR; never merges
 factory run-issue <N>               Like ship, but loads the issue first and exits 2 if it cannot be found
 factory run-issue <N> --merge        After SHIP, wait for CI and land the PR through the run merge gates; exits 0 merged, 10 held, 11 CI failed, 12 timed out, 13 land failed, 1 parked before a PR
+factory run-issue <N> --in-place   Build in the current clean checkout, no worktree (disposable containers)
 factory run-issue <N> --stack        Build an oversized <N> as a stacked PR set in one run (the size gate default)
 factory run-issue <N> --base-branch <ref>  Start from origin/<ref> and open the PR against <ref> (also ship, run-brief)
 factory run-brief a.md b.md --stack   Open the briefs as a PR stack (each on the previous brief's PR head)
