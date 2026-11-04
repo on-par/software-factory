@@ -712,6 +712,8 @@ export interface MergePolicyOverrides {
   auto?: boolean;
   /** From `--pr-classifier` / `--no-pr-classifier` (#1724). */
   classifier?: boolean;
+  /** From `--admin` (#3905). */
+  admin?: boolean;
 }
 
 export interface EffectivePrClassifierPolicy {
@@ -758,6 +760,7 @@ export function resolveMergePolicy(
   );
   const admin = resolvePrecedence<boolean>(
     [
+      { source: 'flag', read: () => overrides.admin },
       { source: 'repo', read: () => config.run?.merge?.admin },
       { source: 'env', read: () => (env.FACTORY_MERGE_ADMIN === '1' ? true : undefined) },
     ],

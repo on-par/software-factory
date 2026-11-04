@@ -21,6 +21,17 @@ describe('resolveMergePolicy / resolvePrClassifierPolicy flag › repo › env �
   });
 
   it.each([
+    ['flag beats repo and env', withRun({ admin: false }), { FACTORY_MERGE_ADMIN: '0' }, { admin: true }, true, 'flag'],
+    ['flag false beats env', config, { FACTORY_MERGE_ADMIN: '1' }, { admin: false }, false, 'flag'],
+    ['undefined flag falls through to repo', withRun({ admin: true }), {}, { admin: undefined }, true, 'repo'],
+    ['undefined flag falls through to default', config, {}, {}, false, 'default'],
+  ] as const)('admin override (#3905): %s', (_name, cfg, env, overrides, value, source) => {
+    const result = resolveMergePolicy(cfg, env, overrides);
+    expect(result.admin).toBe(value);
+    expect(result.sources.admin).toBe(source);
+  });
+
+  it.each([
     ['repo', withRun({ admin: false }), { FACTORY_MERGE_ADMIN: '1' }, false, 'repo'],
     ['env', config, { FACTORY_MERGE_ADMIN: '1' }, true, 'env'],
     ['default', config, {}, false, 'default'],

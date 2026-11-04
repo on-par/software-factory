@@ -50,6 +50,7 @@ export class AwaitingReviewError extends Error {
   constructor(
     message: string,
     readonly prNumber: number,
+    readonly gate: 'risk' | 'review' = 'review',
   ) {
     super(message);
   }

@@ -157,6 +157,7 @@ describe('landIssue risk gate (#3381)', () => {
     const err = await land(true).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AwaitingReviewError);
     expect((err as AwaitingReviewError).prNumber).toBe(77);
+    expect((err as AwaitingReviewError).gate).toBe('risk');
     expect(octokit.rest.pulls.merge).not.toHaveBeenCalled();
     expect(octokit.rest.issues.addLabels).toHaveBeenCalledWith(
       expect.objectContaining({ issue_number: 77, labels: ['risk:high', 'needs-human'] }),
