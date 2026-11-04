@@ -28,7 +28,9 @@ describe('isOpenCodeVersionSupported', () => {
     [[1, 17, 99], false],
     [[1, 18, 28], true],
     [[2, 0, 99], true],
-    [[2, 1, 0], false],
+    [[2, 1, 0], true],
+    [[2, 2, 99], true],
+    [[2, 3, 0], false],
     [[3, 0, 1], false],
     [[0, 9, 1], false],
   ] as const)('%j -> %s', (v, expected) => {
@@ -36,7 +38,7 @@ describe('isOpenCodeVersionSupported', () => {
   });
 
   it('exposes the range, pin and install command', () => {
-    expect(OPENCODE_SUPPORTED_RANGE).toBe('>=1.18.0 <2.1.0');
+    expect(OPENCODE_SUPPORTED_RANGE).toBe('>=1.18.0 <2.3.0');
     expect(OPENCODE_PINNED_VERSION).toBe('1.18.28');
     expect(OPENCODE_PINNED_INSTALL).toBe('npm install -g opencode-ai@1.18.28');
   });

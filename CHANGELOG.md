@@ -28,6 +28,7 @@ section to `## X.Y.Z - date`. See
 
 - Lanes, `factory supervise` and the `factory status` queue band claim, heartbeat, release and list through the WorkKey queue seam, and run state is written with a string `key`. A GitHub issue's record also keeps its numeric `issue`, so a factory 0.9.27 or earlier on the same host still reads it (#3890).
 - The queue's claim-time prerequisite defer also reads `Depends on: #N` lines, and both `Depends on:` and `Prerequisite:` accept a comma list such as `#3891, #3892` (#3915).
+- The OpenCode supported version range widens to `>=1.18.0 <2.3.0`, so OpenCode 2.x (tested at 2.2.5) no longer triggers a doctor warning.
 
 ### Fixed
 
