@@ -6,6 +6,7 @@ import { basename, join, resolve } from 'node:path';
 import matter from 'gray-matter';
 
 import { getConstitutionsDir } from '../config/index.js';
+import { resolveConstitutionOverride } from '../config/run-config-ladder.js';
 import type { Constitution } from '../types/index.js';
 
 /**
@@ -87,6 +88,13 @@ export class ConstitutionLoader {
    * differs — so a valid instance is returned with `source: 'bundled'`.
    */
   loadRepoConstitution(repoDir: string, relPath: string = DEFAULT_REPO_CONSTITUTION_PATH): Constitution | null {
+    const override = resolveConstitutionOverride();
+    if (override) {
+      const parsed = parseConstitution(override.text, override.path ?? override.source, 'repo-override');
+      return override.path === undefined
+        ? parsed
+        : { ...parsed, repoInstance: { relPath: override.path, absPath: override.path } };
+    }
     const path = resolve(repoDir, relPath);
     let raw: string;
     try {
