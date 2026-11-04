@@ -117,6 +117,28 @@ past unmet branch protection but never past red CI. It exits:
 | 12   | timed out waiting for CI or merge                               |
 | 13   | land failed                                                     |
 
+## Carry one issue to a terminal state
+
+`factory run --issue <N>` (alias `factory run-issue <N> --until-done`) finds or opens the issue's
+factory PR. With auto-merge on it merges the PR through the same gates as `--merge`. With auto-merge
+off it runs one feedback round each time new trusted feedback arrives, until a human merges or closes
+the PR, or the review-rework cap or a failure parks it. `--wait stay` (default) polls in-process until
+`--max-wait` (default `ci.awaitingCiCapHours`); `--wait exit` saves `awaiting-review` to the PR state
+comment and exits as soon as the run only waits on a human. `--json` prints the final outcome as one
+object. It exits:
+
+| Exit | Meaning                                                              |
+| ---- | -------------------------------------------------------------------- |
+| 0    | merged                                                               |
+| 1    | parked (failed before a PR, CI or land failed, or the rework cap)    |
+| 2    | usage error (for example `--merge`, `--no-pr`, `--stack`)            |
+| 14   | the PR was closed without merging                                    |
+| 15   | awaiting review (`--wait exit`, or `--max-wait` elapsed with `stay`) |
+
+On a disposable host, call the command with `--wait exit` on the first run and again on each PR event
+(a review, a review comment or an issue comment). A fresh clone continues from the existing PR: it
+does not build again or open a second PR, and it answers only feedback not yet handled.
+
 ## Providers and secrets
 
 Each provider reads only its own repo secrets, under the names the Claude GitHub App and

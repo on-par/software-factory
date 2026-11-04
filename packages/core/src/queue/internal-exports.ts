@@ -34,3 +34,4 @@ export {
   type PrerequisiteRestackDecision,
   type PrerequisiteStackTarget,
 } from './prerequisite-stack.js';
+export { isTrustedApprover } from './approval.js'; // feedback-round trust for `factory run --issue` (#3908)

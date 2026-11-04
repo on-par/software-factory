@@ -114,6 +114,47 @@ describe('buildProgram', () => {
     expect(cmdRunBrief).toHaveBeenCalledWith(['a.md'], expect.objectContaining({ merge: true }));
   });
 
+  it('run without --issue calls cmdRun', async () => {
+    const cmdRun = vi.fn(async () => {});
+    const cmdRunIssue = vi.fn(async () => {});
+    const handlers = { ...PROGRAM_HANDLERS, cmdRun, cmdRunIssue };
+    await buildProgram(handlers, {}).parseAsync(['node', 'factory', 'run', '--auto-merge']);
+    expect(cmdRun).toHaveBeenCalledWith({ autoMerge: true });
+    expect(cmdRunIssue).not.toHaveBeenCalled();
+  });
+
+  it('run --issue calls cmdRunIssue with untilDone (#3908)', async () => {
+    const cmdRun = vi.fn(async () => {});
+    const cmdRunIssue = vi.fn(async () => {});
+    const handlers = { ...PROGRAM_HANDLERS, cmdRun, cmdRunIssue };
+    await buildProgram(handlers, {}).parseAsync(
+      'node factory run --issue 5 --wait exit --max-wait 2h --json --no-auto-merge'.split(' '),
+    );
+    expect(cmdRun).not.toHaveBeenCalled();
+    expect(cmdRunIssue).toHaveBeenCalledWith(5, {
+      untilDone: true,
+      wait: 'exit',
+      maxWait: '2h',
+      json: true,
+      autoMerge: false,
+    });
+  });
+
+  it('run --issue with --local-queue, and --wait without --issue, exit 2 (#3908)', async () => {
+    const handlers = { ...PROGRAM_HANDLERS, cmdRun: vi.fn(async () => {}), cmdRunIssue: vi.fn(async () => {}) };
+    const parse = (args: string[]) => buildProgram(handlers, {}).parseAsync(['node', 'factory', 'run', ...args]);
+    await expect(parse(['--issue', '5', '--local-queue'])).rejects.toMatchObject({ code: 2 });
+    await expect(parse(['--wait', 'exit'])).rejects.toMatchObject({ code: 2 });
+    expect(handlers.cmdRun).not.toHaveBeenCalled();
+  });
+
+  it('run-issue registers --until-done, --wait, --max-wait and --json (#3908)', () => {
+    const cmd = buildProgram(PROGRAM_HANDLERS, {}).commands.find((c) => c.name() === 'run-issue');
+    for (const long of ['--until-done', '--wait', '--max-wait', '--json']) {
+      expect(cmd?.options.some((o) => o.long === long)).toBe(true);
+    }
+  });
+
   it('unpark registers --keep-order and passes keepOrder to cmdUnpark (#3554)', async () => {
     const cmdUnpark = vi.fn(async () => {});
     const handlers = { ...PROGRAM_HANDLERS, cmdUnpark };

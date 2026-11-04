@@ -63,14 +63,19 @@ export function respondDepsFrom<Shell>(runtime: RespondRuntime<Shell>): RespondD
   };
 }
 
-/** Run a feedback round on the factory PR `pr`: triage new trusted feedback, re-plan or rework, push, reply, resolve and re-request review. */
-export async function cmdRespond(
-  pr: string,
-  opts: { json?: boolean },
-  deps: RespondDeps = respondDepsFrom(shipRuntime()),
-): Promise<void> {
-  if (!/^#?\d+$/.test(pr.trim())) throw new CliExitError(`factory respond: '${pr}' is not a pull request number`, 2);
-  const prNumber = Number(pr.trim().replace('#', ''));
+export type RespondToPrResult =
+  { issue: number; result: string } | { parked: true; issue: number; count: number; cap: number };
+
+/**
+ * One feedback round on the open factory PR `prNumber`, or a park at the review-rework cap. `ctx.minUsed` lifts the
+ * cap count above the local store's (a fresh clone has an empty store); `ctx.lock: false` is for a caller that
+ * already holds the repo run lock (#3908).
+ */
+export async function respondToPr(
+  prNumber: number,
+  deps: RespondDeps,
+  ctx: { minUsed?: number; lock?: boolean } = {},
+): Promise<RespondToPrResult> {
   const repoRoot = await deps.getRepoRoot();
   const ghRepo = await deps.getGitHubRepo();
   const [owner = '', repo = ''] = ghRepo.split('/');
@@ -94,7 +99,7 @@ export async function cmdRespond(
   const store = createFileReviewReworkStore(paths.reviewRework);
   const key = workKeyFromIssue(issue);
   const cap = resolveMaxReviewReworkRuns(config);
-  const count = countReviewReworkRuns(store, key);
+  const count = Math.max(countReviewReworkRuns(store, key), ctx.minUsed ?? 0);
   const earlier = store.list().filter((r) => r.source === 'feedback' && r.issue === issue).length;
   const reviewId = prNumber * 10_000 + earlier + 1;
   const queue = createOctokitQueueClient(octokit);
@@ -116,20 +121,36 @@ export async function cmdRespond(
       source: 'feedback',
       publishComment: (input) => deps.publishParkComment({ octokit, repo: ghRepo, input }),
     });
-    throw new CliExitError(
-      `factory respond: #${issue} is parked at the review-rework cap (${count} of ${cap}); resolve by hand, then run \`factory unpark ${issue}\``,
-      1,
-    );
+    return { parked: true, issue, count, cap };
   }
   store.record({ reviewId, source: 'feedback', pr: prNumber, issue, lane, reviewer: '', queuedAt: at, startedAt: at });
 
-  const result = await withRepoRunLock(paths, 'factory respond', () =>
+  const ship = () =>
     deps.shipIssue(
       issue,
       { branchPrefix: prefix, autoRework: true, interactive: false },
       { repoRoot, ghRepo, feedbackRound: { prNumber } },
-    ),
-  );
+    );
+  const result = ctx.lock === false ? await ship() : await withRepoRunLock(paths, 'factory respond', ship);
+  return { issue, result };
+}
+
+/** Run a feedback round on the factory PR `pr`: triage new trusted feedback, re-plan or rework, push, reply, resolve fixed threads and re-request review. */
+export async function cmdRespond(
+  pr: string,
+  opts: { json?: boolean },
+  deps: RespondDeps = respondDepsFrom(shipRuntime()),
+): Promise<void> {
+  if (!/^#?\d+$/.test(pr.trim())) throw new CliExitError(`factory respond: '${pr}' is not a pull request number`, 2);
+  const prNumber = Number(pr.trim().replace('#', ''));
+  const round = await respondToPr(prNumber, deps);
+  if ('parked' in round) {
+    throw new CliExitError(
+      `factory respond: #${round.issue} is parked at the review-rework cap (${round.count} of ${round.cap}); resolve by hand, then run \`factory unpark ${round.issue}\``,
+      1,
+    );
+  }
+  const { issue, result } = round;
   deps.out(
     opts.json
       ? JSON.stringify({ pr: prNumber, issue, result })

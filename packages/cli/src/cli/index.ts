@@ -349,6 +349,7 @@ import { runStalenessGuard } from './staleness.js';
 import { cmdBaselineClear } from './baseline.js';
 import { cmdBreakerReset } from './breaker.js';
 import { cmdRespond } from './respond-command.js';
+import { driveUntilDone, validateUntilDoneFlags } from './run-until-done.js';
 import { withShutdown } from './shutdown.js';
 import { runWorktreeKeep, runWorktreeRelease } from './worktree-keep.js';
 import { gcWorktreeSandbox, reapParkedLane, reapPrlessShip } from './worktree-reap.js';
@@ -2363,6 +2364,12 @@ async function cmdRunIssue(
     admin?: boolean;
     /** --in-place (#3904): run in the current checkout, no worktree. */
     inPlace?: boolean;
+    /** `--until-done` / `run --issue` (#3908): carry the issue to merged, closed or parked. */
+    untilDone?: boolean;
+    wait?: string;
+    maxWait?: string;
+    json?: boolean;
+    autoMerge?: boolean;
   },
 ) {
   if (opts.runChildren) throw new CliExitError('--run-children was removed; oversized issues stack with --stack', 2);
@@ -2384,8 +2391,14 @@ async function cmdRunIssue(
     mergeTimeout,
     admin,
     inPlace: _inPlaceFlag,
+    untilDone: _untilDone,
+    wait: _wait,
+    maxWait: _maxWait,
+    json,
+    autoMerge,
     ...shipOpts
   } = opts;
+  const untilDoneFlags = validateUntilDoneFlags({ ...opts, stack: stack || rawSizeGate === 'stack' });
   const mergeTimeoutMs = validateMergeFlags(
     { merge, mergeTimeout, admin, pr: opts.pr, stack: stack || rawSizeGate === 'stack' },
     'issue',
@@ -2489,6 +2502,28 @@ async function cmdRunIssue(
                 { repoRoot, ghRepo, workRequest: work, onOutcome },
               );
             },
+          });
+          return;
+        }
+        if (untilDoneFlags) {
+          await driveUntilDone({
+            ...untilDoneFlags,
+            issue: issueNum,
+            ghRepo,
+            repoRoot,
+            paths,
+            branchPrefix,
+            config: configLoaders.loadFactoryConfigForRepo(paths.config),
+            autoMerge,
+            admin,
+            json,
+            octokit: getOctokit(),
+            ship: (onOutcome) =>
+              shipIssue(
+                issueNum,
+                { ...shipOpts, branchPrefix, sizeGate, explicitStack, maxSlices, inPlace },
+                { repoRoot, ghRepo, workRequest: work, onOutcome },
+              ),
           });
           return;
         }

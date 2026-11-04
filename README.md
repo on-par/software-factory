@@ -141,6 +141,8 @@ factory run-issue <N> --base-branch <ref>  Start from origin/<ref> and open the 
 factory run-brief a.md b.md --stack   Open the briefs as a PR stack (each on the previous brief's PR head)
 factory run-brief big.md --stack       Slice an over-budget brief and build the slices as a PR stack in one run
 factory run-issue 42 --stack        Build open same-repo prerequisites in order as a PR stack; otherwise stack an oversized issue's slices
+factory run --issue <N>             Carry one issue to merged, closed or parked: merge when auto-merge is on, else answer each round of trusted review feedback; exits 0 merged, 1 parked, 14 closed, 15 awaiting review
+factory run --issue <N> --wait exit Return 15 as soon as the run only waits on a human (disposable hosts); re-run on a PR event to answer new feedback; `--wait stay` (default) polls until `--max-wait`
 factory run                         Claim queued issues and ship them, lanes in parallel; merges only when auto-merge is on
 factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
 factory land <N>                    Squash-merge the issue's open PR once CI is green, then remove its worktree

@@ -2,6 +2,7 @@
 
 import type { Command } from 'commander';
 import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION, BRANCH_PREFIX_OPTION_DESCRIPTION } from './branch-prefix.js';
+import { CliExitError } from './errors.js';
 import type { ProgramHandlers } from './index.js';
 import type { SteerOptions } from './steer.js';
 
@@ -92,6 +93,19 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
       '--in-place',
       'Run PLAN → SHIP in the current checkout with no worktree (disposable hosts); the checkout must be clean and at origin/<default>; same as FACTORY_WORKSPACE=in-place',
     )
+    .option(
+      '--until-done',
+      'Carry the issue to merged, closed or parked: merge when auto-merge is on, else answer each round of trusted review feedback; exits 0 merged, 1 parked, 14 closed, 15 awaiting review',
+    )
+    .option(
+      '--wait <mode>',
+      'With --until-done: stay (default) polls in-process until --max-wait; exit returns 15 as soon as the run only waits on a human',
+    )
+    .option(
+      '--max-wait <duration>',
+      'With --until-done: longest wait for CI, merge or review (e.g. 30m, 2h); default ci.awaitingCiCapHours',
+    )
+    .option('--json', 'With --until-done: print the final outcome as one JSON object')
     .action(async (issueNum, opts) => {
       await handlers.cmdRunIssue(handlers.parseIssueArg(issueNum), opts);
     });
@@ -203,8 +217,21 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
       'Shell command spawned once per park and once when the queue drains, with a JSON summary on stdin; overrides FACTORY_NOTIFY_CMD',
     )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
+    .option(
+      '--issue <n>',
+      'Carry one issue to merged, closed or parked instead of draining the queue: finds or opens its PR, merges when auto-merge is on, else answers each round of trusted review feedback; exits 0 merged, 1 parked, 14 closed, 15 awaiting review',
+    )
+    .option(
+      '--wait <mode>',
+      'With --issue: stay (default) polls in-process until --max-wait; exit returns 15 as soon as the run only waits on a human',
+    )
+    .option(
+      '--max-wait <duration>',
+      'With --issue: longest wait for CI, merge or review (e.g. 30m, 2h); default ci.awaitingCiCapHours',
+    )
+    .option('--json', 'With --issue: print the final outcome as one JSON object')
     .action(
-      (opts: {
+      async (opts: {
         localQueue?: boolean;
         autoMerge?: boolean;
         usageWatch?: boolean;
@@ -212,7 +239,31 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
         usagePoll?: string;
         branchPrefix?: string;
         notify?: string;
-      }) => handlers.cmdRun(opts),
+        issue?: string;
+        wait?: string;
+        maxWait?: string;
+        json?: boolean;
+      }) => {
+        const { issue, wait, maxWait, json, ...queueOpts } = opts;
+        if (issue === undefined) {
+          if (wait !== undefined || maxWait !== undefined || json) {
+            throw new CliExitError('factory: --wait/--max-wait/--json need --issue', 2);
+          }
+          await handlers.cmdRun(queueOpts);
+          return;
+        }
+        if (queueOpts.localQueue) {
+          throw new CliExitError('factory: --issue works on a GitHub issue — drop --local-queue', 2);
+        }
+        await handlers.cmdRunIssue(handlers.parseIssueArg(issue), {
+          untilDone: true,
+          ...(wait === undefined ? {} : { wait }),
+          ...(maxWait === undefined ? {} : { maxWait }),
+          ...(json ? { json } : {}),
+          ...(queueOpts.autoMerge === undefined ? {} : { autoMerge: queueOpts.autoMerge }),
+          ...(queueOpts.branchPrefix === undefined ? {} : { branchPrefix: queueOpts.branchPrefix }),
+        });
+      },
     );
 
   program

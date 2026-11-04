@@ -5,7 +5,7 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CliExitError } from './errors.js';
-import { cmdRespond, respondDepsFrom, type RespondDeps, type RespondRuntime } from './respond-command.js';
+import { cmdRespond, respondDepsFrom, respondToPr, type RespondDeps, type RespondRuntime } from './respond-command.js';
 
 const tmp = createTempDirs();
 afterEach(async () => {
@@ -40,6 +40,21 @@ async function setup(pull: Pull = open, config: Partial<FactoryConfig> = {}) {
   };
   return { deps, out, shipIssue, parkAtCap, publishParkComment, repoRoot };
 }
+
+describe('respondToPr', () => {
+  it('returns parked at the cap counted from minUsed', async () => {
+    const { deps, shipIssue, parkAtCap } = await setup(open, { queue: { max_review_rework_runs: 2 } } as never);
+    await expect(respondToPr(7, deps, { minUsed: 2 })).resolves.toEqual({ parked: true, issue: 42, count: 2, cap: 2 });
+    expect(shipIssue).not.toHaveBeenCalled();
+    expect(parkAtCap).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs a round below the cap and returns the ship result', async () => {
+    const { deps, shipIssue } = await setup(open, { queue: { max_review_rework_runs: 2 } } as never);
+    await expect(respondToPr(7, deps, { minUsed: 1, lock: false })).resolves.toEqual({ issue: 42, result: 'shipped' });
+    expect(shipIssue).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('cmdRespond', () => {
   it("respond starts a feedback round for the PR's issue", async () => {

@@ -500,7 +500,7 @@ const INTERNAL_API_KEYS = [
   ...'createRunSlotGate withRunAndHostBuildSlot formatDiskHold'.split(' '), // #3049, #2284
   ...'claimDiskAlert createDiskGuard'.split(' '), // #2284
   ...'FACTORY_RUNTIME_CONFIG_KEYS hostDiskAlertFile'.split(' '),
-  'createOctokitCollaboratorPermissionClient',
+  ...'createOctokitCollaboratorPermissionClient isTrustedApprover'.split(' '), // isTrustedApprover: #3908
   ...'renderConfigExample resolveT1SampleRate'.split(' '),
   'resolveEvidenceAllowlist',
   'runEvidencePlan',
