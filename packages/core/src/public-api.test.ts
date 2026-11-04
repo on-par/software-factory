@@ -302,10 +302,19 @@ const EXTRA_INTERNAL_KEYS = [
   ...ITERATE_INTERNAL_KEYS,
 ];
 const INTERNAL_API_KEYS = [
+  'MAX_REWORK_ROUNDS',
+  'loadPrRunState',
+  'prRunStatusFor',
+  'reconcilePrRunState',
+  'savePrRunState',
   'UnsupportedQueueBackendError', // #3890
   'createGithubQueueBackend', // #3890
   'createQueueBackend', // #3890
   'LINEAR_API_KEY_ENV',
+  'LINEAR_LEASE_ATTACHMENT_URL', // #3918
+  'createLinearQueueBackend', // #3918
+  'createLinearQueueGraphqlClient', // #3918
+  'resolveLinearProjectForRepo', // #3918
   'probeLinearSetup',
   'resolveTrackerConfig',
   'listBlockedBy',
@@ -448,6 +457,8 @@ const INTERNAL_API_KEYS = [
   'classifierPolicyVersion',
   'classifyPrShadow',
   'parseClassifierOutput',
+  'parseReworkCommand',
+  'pollCommentRework',
   'toClassificationRecord',
   // PR classifier backtest (#1728)
   'backtestFileName',

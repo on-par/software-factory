@@ -9,6 +9,8 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- With `tracker.kind: linear`, `factory run`, `factory supervise` and `factory status` take their queue from Linear through one composed `QueueBackend`. A claim writes the first lease attachment, and lanes release a Linear claim they cannot build yet (#3918).
+- A run persists its resumable state (rework counters, handled reviews, status, spec summary) in a factory-owned PR comment and restores it on a fresh clone (#3909)
 - Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
 - A `tracker` config key selects `github` (default) or `linear` per repo, and `factory doctor` checks the Linear setup: a missing or rejected `LINEAR_API_KEY` and any project with ready issues but no repo mapping (#3891).
 - Core has a read-only `linear-issue` work source that resolves `ON-12` or a Linear issue URL into a work request; it reads `LINEAR_API_KEY` only when used (#3889).

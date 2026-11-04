@@ -78,7 +78,7 @@ describe('shipIssue (direct)', () => {
         setupWorktree: setup,
         octokit: () => fake,
       });
-      expect(fake.rest.issues.listComments).not.toHaveBeenCalled();
+      expect(fake.rest.issues.listComments).not.toHaveBeenCalledWith(expect.objectContaining({ issue_number: 5 })); // slice-plan lookup only; the PR run-state comment is read on the PR number (#3909)
       expect(setup.mock.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
       expect(phases.planPhase.mock.calls[0]?.[0]).toMatchObject({ sizeGateMode: 'stack', parkOverBudget: true });
     });
@@ -87,7 +87,7 @@ describe('shipIssue (direct)', () => {
       const setup = custom();
       const fake = sliceOctokit(async () => ({ data: [] }));
       await shipIssue(5, { sizeGate: 'off' }, ctx(), { setupWorktree: setup, octokit: () => fake });
-      expect(fake.rest.issues.listComments).not.toHaveBeenCalled();
+      expect(fake.rest.issues.listComments).not.toHaveBeenCalledWith(expect.objectContaining({ issue_number: 5 })); // slice-plan lookup only; the PR run-state comment is read on the PR number (#3909)
       expect(setup.mock.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
     });
 
@@ -467,6 +467,16 @@ describe('shipIssue review rework (#3564)', () => {
 
   it('claims a pending record: skips PLAN, sends reviewRework on the request and marks it started', async () => {
     seed();
+    const fake = closedPr();
+    await expect(shipIssue(5, {}, ctx(), { octokit: () => fake })).rejects.toThrow(/PR #77 must be open/);
+    expect(phases.planPhase).not.toHaveBeenCalled();
+    expect(fake.rest.pulls.get).toHaveBeenCalledWith(expect.objectContaining({ pull_number: 77 }));
+    const saved = JSON.parse(readFileSync(join(paths().state, 'review-rework.json'), 'utf-8'));
+    expect(saved.reviews[0].startedAt).toEqual(expect.any(String));
+  });
+
+  it('a comment rework record skips PLAN and adopts the existing PR (#3882)', async () => {
+    seed({ source: 'comment' });
     const fake = closedPr();
     await expect(shipIssue(5, {}, ctx(), { octokit: () => fake })).rejects.toThrow(/PR #77 must be open/);
     expect(phases.planPhase).not.toHaveBeenCalled();

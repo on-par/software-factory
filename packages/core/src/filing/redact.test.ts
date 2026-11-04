@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { REDACTION_PLACEHOLDERS, redactText } from './redact.js';
+import { REDACTION_PLACEHOLDERS, redactSecrets, redactText } from './redact.js';
 
 const ctx = {
   repoSlugs: ['acme/private-app'],
@@ -82,5 +82,12 @@ describe('redactText', () => {
     expect(redactText('TypeError: cannot read properties of undefined')).toBe(
       'TypeError: cannot read properties of undefined',
     );
+  });
+});
+
+describe('redactSecrets', () => {
+  it('redactSecrets replaces a GitHub token', () => {
+    const out = redactSecrets(`token ghp_${'a'.repeat(30)} end`);
+    expect(out).toBe(`token ${REDACTION_PLACEHOLDERS.secret} end`);
   });
 });

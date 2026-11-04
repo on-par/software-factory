@@ -50,7 +50,7 @@ function word(text: string, value: string, placeholder: string): string {
   return text.replace(new RegExp(`(?<![\\w-])${escapeRe(value)}(?![\\w-])`, 'gi'), placeholder);
 }
 
-function redactSecrets(input: string): string {
+export function redactSecrets(input: string): string {
   let t = input;
   t = t.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, P.secret);
   t = t.replace(/gh[pousr]_[A-Za-z0-9]{20,}/g, P.secret);
