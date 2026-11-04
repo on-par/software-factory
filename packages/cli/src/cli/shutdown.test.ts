@@ -1,12 +1,12 @@
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { defaultIsProcessGroupAlive } from '@on-par/factory-core';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import {
   killTrackedProcessGroups,
   readStopMarker,
@@ -18,7 +18,9 @@ import { installShutdown, withShutdown, type ShutdownSignals } from './shutdown.
 
 const originalExitCode = process.exitCode;
 const cleanups: Array<() => void> = [];
-afterEach(() => {
+const tempDirs = createTempDirs();
+afterEach(async () => {
+  await tempDirs.cleanup();
   process.exitCode = originalExitCode;
   for (const c of cleanups.splice(0)) c();
 });
@@ -75,8 +77,7 @@ describe('installShutdown', () => {
 
   describe('STOP file', () => {
     it('SIGTERM writes the STOP file and aborts the controller', async () => {
-      const dir = mkdtempSync(join(tmpdir(), 'shutdown-'));
-      cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+      const dir = tempDirs.makeSync('shutdown-');
       const path = join(dir, 'state', 'STOP');
       const controller = new AbortController();
       const signals = fakeSignals();
@@ -96,8 +97,7 @@ describe('installShutdown', () => {
     });
 
     it('leaves an existing STOP file as is', async () => {
-      const dir = mkdtempSync(join(tmpdir(), 'shutdown-'));
-      cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+      const dir = tempDirs.makeSync('shutdown-');
       const path = join(dir, 'STOP');
       writeFileSync(path, 'existing');
       const signals = fakeSignals();
