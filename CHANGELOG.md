@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- Documented an OpenCode Go profile and recipe that pin DeepSeek V4 Pro as the PLAN (boss) model and V4 Flash as the BUILD/CHECK (worker/checker) models.
 - A run persists its resumable state (rework counters, handled reviews, status, spec summary) in a factory-owned PR comment and restores it on a fresh clone (#3909)
 - Core has a Linear queue backend whose `list` orders a lane's ready Linear issues by priority, order label and age, and whose `claimNext` claims one with the claimed-by CAS; a Linear API error fails closed (#3892).
 - A `tracker` config key selects `github` (default) or `linear` per repo, and `factory doctor` checks the Linear setup: a missing or rejected `LINEAR_API_KEY` and any project with ready issues but no repo mapping (#3891).

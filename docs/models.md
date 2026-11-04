@@ -117,6 +117,24 @@ route: opencode
 
 Pin `opencode-sonnet` for any phase. `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL` still override plan/build per run, and the repo file wins over env.
 
+### DeepSeek V4 Pro boss + V4 Flash worker/checker
+
+Put the stronger `opencode-deepseek-v4-pro` on PLAN (the boss tier) and the cheaper `opencode-deepseek-v4-flash` on BUILD and CHECK (worker/checker) by pinning them separately. Pro has a lower Go monthly quota, so reserve it for the phase that benefits most from it.
+
+```yaml
+# .factory/config.yaml
+version: 2
+models:
+  pins:
+    plan: opencode-deepseek-v4-pro
+    build: opencode-deepseek-v4-flash
+    checker: opencode-deepseek-v4-flash
+    triage: opencode-deepseek-v4-flash
+route: opencode
+```
+
+Everything else in this profile applies: set `FACTORY_EXPERIMENTAL=1` and sign in with `opencode auth login` (or set `OPENCODE_API_KEY`).
+
 ## Provider order
 
 `models.providerOrder` lists, per role (`boss`, `worker`, `checker`, `triage`), the subscription providers in failover order as model ids, at most one per provider (claude, codex, opencode-go). An unset role keeps today's tier order for that role with opencode-go last:
