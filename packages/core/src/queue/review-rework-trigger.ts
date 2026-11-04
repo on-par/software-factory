@@ -33,8 +33,14 @@ export interface ReviewReworkGitHub {
   listReviews(pr: number): Promise<ReviewReworkReview[]>;
 }
 
+/** What triggered a rework: a formal review, or a `/factory rework` PR comment (#3882). */
+export type ReviewReworkSource = 'review' | 'comment';
+
 export interface ReviewReworkRecord {
+  /** The GitHub review id, or the issue-comment id when `source` is `'comment'`. */
   reviewId: number;
+  /** Absent or `'review'` is a formal review (legacy files have no source). */
+  source?: ReviewReworkSource;
   pr: number;
   issue: number;
   lane: string;
@@ -47,11 +53,11 @@ export interface ReviewReworkRecord {
 }
 
 export interface ReviewReworkStore {
-  has(reviewId: number): boolean;
+  has(reviewId: number, source?: ReviewReworkSource): boolean;
   record(entry: ReviewReworkRecord): void;
   list(): ReviewReworkRecord[];
   /** Stamp `startedAt` on a record; an unknown id does nothing. */
-  markStarted(reviewId: number, at: string): void;
+  markStarted(reviewId: number, at: string, source?: ReviewReworkSource): void;
 }
 
 export type ReviewReworkOutcome = 'queued' | 'already-queued' | 'capped' | 'skipped' | 'error';
@@ -230,9 +236,13 @@ export function createOctokitReviewReworkGitHub(octokit: Octokit, owner: string,
   };
 }
 
+/** Map key: a comment id can never collide with a review id. */
+const recordKey = (id: number, source?: ReviewReworkSource): string =>
+  source === 'comment' ? `comment:${id}` : String(id);
+
 export function createFileReviewReworkStore(file: string): ReviewReworkStore {
-  let entries: Map<number, ReviewReworkRecord> | null = null;
-  const load = (): Map<number, ReviewReworkRecord> => {
+  let entries: Map<string, ReviewReworkRecord> | null = null;
+  const load = (): Map<string, ReviewReworkRecord> => {
     if (entries) return entries;
     entries = new Map();
     try {
@@ -240,7 +250,7 @@ export function createFileReviewReworkStore(file: string): ReviewReworkStore {
       const list = typeof parsed === 'object' && parsed !== null && 'reviews' in parsed ? parsed.reviews : undefined;
       if (Array.isArray(list)) {
         for (const item of list) {
-          if (isRecord(item)) entries.set(item.reviewId, item);
+          if (isRecord(item)) entries.set(recordKey(item.reviewId, item.source), item);
         }
       }
     } catch {
@@ -248,24 +258,25 @@ export function createFileReviewReworkStore(file: string): ReviewReworkStore {
     }
     return entries;
   };
-  const persist = (map: Map<number, ReviewReworkRecord>): void => {
+  const persist = (map: Map<string, ReviewReworkRecord>): void => {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(`${file}.tmp`, `${JSON.stringify({ reviews: [...map.values()] }, null, 2)}\n`);
     renameSync(`${file}.tmp`, file);
   };
   return {
-    has: (reviewId) => load().has(reviewId),
+    has: (reviewId, source) => load().has(recordKey(reviewId, source)),
     list: () => [...load().values()],
     record(entry) {
       const map = load();
-      map.set(entry.reviewId, entry);
+      map.set(recordKey(entry.reviewId, entry.source), entry);
       persist(map);
     },
-    markStarted(reviewId, at) {
+    markStarted(reviewId, at, source) {
       const map = load();
-      const entry = map.get(reviewId);
+      const key = recordKey(reviewId, source);
+      const entry = map.get(key);
       if (!entry) return;
-      map.set(reviewId, { ...entry, startedAt: at });
+      map.set(key, { ...entry, startedAt: at });
       persist(map);
     },
   };
@@ -282,7 +293,7 @@ export function claimReviewRework(
   const picked = pending[0];
   if (!picked) return undefined;
   const startedAt = now().toISOString();
-  store.markStarted(picked.reviewId, startedAt);
+  store.markStarted(picked.reviewId, startedAt, picked.source);
   return { ...picked, startedAt };
 }
 
@@ -300,6 +311,7 @@ function isRecord(value: unknown): value is ReviewReworkRecord {
     'reviewer' in value &&
     typeof value.reviewer === 'string' &&
     'queuedAt' in value &&
-    typeof value.queuedAt === 'string'
+    typeof value.queuedAt === 'string' &&
+    (!('source' in value) || value.source === undefined || value.source === 'review' || value.source === 'comment')
   );
 }
