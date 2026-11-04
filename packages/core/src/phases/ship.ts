@@ -30,38 +30,22 @@ import { type PreviewGate, previewFailureReason, runPreviewGate } from './ship-p
 import { commitLeftoverBuildOutput } from './ship-leftover.js';
 import { markPrReadyWithRetry } from './ship-ready.js';
 import { readRisk, readSpecBody } from './ship-spec.js';
-import type { CheckSummary, CiFailureEvidence } from '../types/index.js';
+import type { CheckSummary } from '../types/index.js';
 import { collectCiFailureEvidence } from '../utils/ci-evidence.js';
 import { DEFAULT_CI_DEADLINE_MS, type InfraRerunOutcome, watchChecksWithInfraRerun } from '../utils/ci-watch.js';
 import { shellEscape } from '../utils/index.js';
 import { GITHUB_ISSUE_SOURCE } from '../work/github-issue.js';
 import type { WorkRequest } from '../work/index.js';
+import { findMergedPR, findOpenPR, isPullAlreadyExistsError } from './ship-pr-lookup.js';
+import type { PrLookup, ShipResult } from './ship-types.js';
+
+export { findMergedPR, findOpenPR, isPullAlreadyExistsError };
+export type { PrLookup, ShipResult };
 
 /** Ship opens PRs against, and watches required checks of, this branch. */
 const SHIP_BASE_BRANCH = 'main';
 
 const exec = promisify(execCb);
-
-export interface ShipResult {
-  ok: boolean;
-  prNumber?: number;
-  denied?: boolean;
-  deniedReason?: string;
-  reason?: string;
-  ciOutcome?: InfraRerunOutcome;
-  /** Bounded evidence for a CI-watch 'failure' (#2814). */
-  ciFailure?: CiFailureEvidence;
-  /** True when the branch's content had already landed on main (e.g. a retry after a
-   *  squash merge) — nothing was pushed and no PR was created (#520). */
-  alreadyDelivered?: boolean;
-  /** The head SHA watched on a CI rework re-entry (#2816). */
-  headSha?: string;
-  /** Draft mode (#3449): mark-ready skipped; callers must not merge. */
-  draft?: boolean;
-  /** CI watch timed out before a verdict (#3569): the PR was left as draft. */
-  ciPending?: boolean;
-  previewCheck?: PreviewCheckResult;
-}
 
 export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Promise<ShipResult> {
   return withLifecycle(
@@ -592,49 +576,6 @@ async function shipPhaseImpl(opts: {
   };
 }
 
-export async function findOpenPR(octokit: Octokit, owner: string, repo: string, branch: string): Promise<PrLookup> {
-  try {
-    const { data: prs } = await octokit.rest.pulls.list({
-      owner,
-      repo,
-      state: 'open',
-      head: `${owner}:${branch}`,
-    });
-    const prNumber = prs[0]?.number;
-    return prNumber === undefined ? { status: 'absent' } : { status: 'found', prNumber };
-  } catch (err) {
-    return { status: 'error', detail: shortDetail(err) };
-  }
-}
-
-export async function findMergedPR(octokit: Octokit, owner: string, repo: string, branch: string): Promise<PrLookup> {
-  try {
-    const { data: prs } = await octokit.rest.pulls.list({
-      owner,
-      repo,
-      state: 'closed',
-      head: `${owner}:${branch}`,
-    });
-    const prNumber = prs.find((pr) => pr.merged_at != null)?.number;
-    return prNumber === undefined ? { status: 'absent' } : { status: 'found', prNumber };
-  } catch (err) {
-    return { status: 'error', detail: shortDetail(err) };
-  }
-}
-
-/** A `pulls.create` 422 whose message says the PR already exists — recoverable by re-querying,
- *  unlike every other 422 (e.g. "No commits between ..."), which still propagates (#641). */
-export function isPullAlreadyExistsError(err: unknown): boolean {
-  const e = err as {
-    status?: number;
-    message?: string;
-    response?: { data?: { errors?: Array<{ message?: string }> } };
-  } | null;
-  if (e?.status !== 422) return false;
-  const messages = [e.message ?? '', ...(e.response?.data?.errors ?? []).map((x) => x?.message ?? '')];
-  return messages.some((m) => /already exists/i.test(m));
-}
-
 async function inspectRecoveryState(
   worktree: string,
   run: CommandRunner,
@@ -672,9 +613,3 @@ function conflictedPaths(statusLines: string[]): string[] {
     })
     .map((line) => line.slice(3));
 }
-
-/** The result of asking GitHub whether a PR exists for a branch. `error` is never collapsed
- *  into `absent` — an unanswered lookup makes ship fail closed rather than open a duplicate
- *  PR (#641). */
-export type PrLookup =
-  { status: 'found'; prNumber: number } | { status: 'absent' } | { status: 'error'; detail: string };
