@@ -90,7 +90,6 @@
   "classifyPrShadow",
   "computeReviewFloor",
   "computeReviewVerdict",
-  "countReviewReworkRuns",
   "createLinearQueueBackend",
   "describePullRequestAccessError",
   "describeReviewConstitutionSource",

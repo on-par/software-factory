@@ -22,3 +22,15 @@ global byte stream of every event line ever written. Rotated segments live in
 `state/logs/events/` as `events-<16-digit start offset>.ndjson`. The live file's id is the newest
 rotated segment's id plus its size (0 when none exist), so renaming the live file to its segment
 name keeps old cursors valid. Retention must not delete the newest rotated segment.
+
+## PR-persisted run state events
+
+A run for an issue with an open factory PR keeps its resumable state in one hidden factory comment on that PR
+(ADR-0174), so a fresh clone on a disposable host can continue. Three event kinds report it:
+
+- `pr_state_loaded` (info): the run restored state from the PR, with the handled review-rework rounds, the rounds
+  remaining under the cap, the CHECK rework rounds and the status.
+- `pr_state_ignored` (warn): a state comment on the PR was not trusted. The reason is `untrusted-author`,
+  `digest-mismatch`, `key-mismatch`, `malformed` or `identity-unavailable` (the token's identity could not be read,
+  for example a GitHub App installation token).
+- `pr_state_failed` (info): the PR lookup, restore or save failed. The run continues on local state.

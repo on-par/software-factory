@@ -302,6 +302,11 @@ const EXTRA_INTERNAL_KEYS = [
   ...ITERATE_INTERNAL_KEYS,
 ];
 const INTERNAL_API_KEYS = [
+  'MAX_REWORK_ROUNDS',
+  'loadPrRunState',
+  'prRunStatusFor',
+  'reconcilePrRunState',
+  'savePrRunState',
   'UnsupportedQueueBackendError', // #3890
   'createGithubQueueBackend', // #3890
   'createQueueBackend', // #3890
