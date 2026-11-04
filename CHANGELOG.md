@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.28 - 2026-11-04
+
+Linear can feed the factory's queue end to end (a `tracker` key, a Linear work source and queue backend, and write-back on ship and park), `factory respond` runs a feedback round on a factory PR, an issue whose prerequisite has an open PR builds a stacked PR on it, `run-issue` gains `--in-place`, `--merge` and per-run config overrides for disposable hosts, and SHIP syncs a branch onto main before opening its PR so sibling CHANGELOG bullets no longer strand drafts (#3872, #3894, #3910, #3916, #3904, #3905, #3906, #3945).
+All seven published `@on-par` packages move to 0.9.28 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - Linear runs link their issue: the branch, PR title and body carry the key (`Fixes KEY` on the final slice, `Part of KEY` before it), park, env-failure and slice-plan comments go to the Linear issue, the no-auto-merge hold reads Linear labels, and KPIs count Linear keys (#3894)
