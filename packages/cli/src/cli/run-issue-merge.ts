@@ -65,9 +65,24 @@ export function parseMergeTimeout(raw: string | undefined): number | undefined {
   return ms;
 }
 
-/** True only when the operator passed `--merge`; without it no run reaches waitForMerge. */
-export function shouldDriveMerge(opts: { merge?: boolean }): boolean {
-  return opts.merge === true;
+/** Shared usage checks for `run-issue --merge` and `run-brief --merge`; returns the parsed `--merge-timeout`. */
+export function validateMergeFlags(opts: {
+  merge?: boolean;
+  mergeTimeout?: string;
+  admin?: boolean;
+  pr?: boolean;
+  stack?: boolean;
+  workspace?: string;
+}): number | undefined {
+  if ((opts.mergeTimeout !== undefined || opts.admin) && !opts.merge) {
+    throw new CliExitError('factory: --merge-timeout/--admin need --merge', 2);
+  }
+  if (opts.merge && opts.pr === false) throw new CliExitError('factory: --merge needs a PR — drop --no-pr', 2);
+  if (opts.merge && opts.workspace !== undefined) {
+    throw new CliExitError('factory: --merge needs GitHub PRs — drop --workspace (local-only runs never merge)', 2);
+  }
+  if (opts.merge && opts.stack) throw new CliExitError('factory: --merge lands one PR — drop --stack', 2);
+  return parseMergeTimeout(opts.mergeTimeout);
 }
 
 function beforePr(outcome: RunOutcome | undefined): MergeResult | undefined {

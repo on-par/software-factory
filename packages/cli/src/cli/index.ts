@@ -236,7 +236,7 @@ import {
   resolveAwaitingCiCapMs,
 } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
-import { driveToMerge, exitForMerge, parseMergeTimeout, shouldDriveMerge } from './run-issue-merge.js';
+import { driveToMerge, exitForMerge, validateMergeFlags } from './run-issue-merge.js';
 import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
 import { runIssueStack } from './stack-run.js';
 import { withRepoRunLock } from './repo-run-lock.js';
@@ -2379,14 +2379,13 @@ async function cmdRunIssue(
     throw new CliExitError('factory: --no-pr runs with the size gate off — drop --size-gate or drop --no-pr', 2);
   }
 
-  if ((mergeTimeout !== undefined || admin) && !merge) {
-    throw new CliExitError('factory: --merge-timeout/--admin need --merge', 2);
-  }
-  if (merge && opts.pr === false) throw new CliExitError('factory: --merge needs a PR — drop --no-pr', 2);
-  if (merge && (stack || rawSizeGate === 'stack')) {
-    throw new CliExitError('factory: --merge lands one PR — drop --stack', 2);
-  }
-  const mergeTimeoutMs = parseMergeTimeout(mergeTimeout);
+  const mergeTimeoutMs = validateMergeFlags({
+    merge,
+    mergeTimeout,
+    admin,
+    pr: opts.pr,
+    stack: stack || rawSizeGate === 'stack',
+  });
 
   await withRepoRunLock(
     paths,
@@ -2484,10 +2483,10 @@ async function cmdRunIssue(
         } catch (err) {
           const ciParked =
             outcome?.state === 'parked' && (outcome.reason === 'ci-failed' || outcome.reason === 'ci-infra');
-          if (shouldDriveMerge({ merge }) && ciParked && !(err instanceof IssueSkippedError)) await driveMerge();
+          if (merge && ciParked && !(err instanceof IssueSkippedError)) await driveMerge();
           throw err;
         }
-        if (shouldDriveMerge({ merge })) await driveMerge();
+        if (merge) await driveMerge();
       } catch (err: any) {
         if (err instanceof CliExitError) throw err;
         if (err instanceof IssueSkippedError) return;

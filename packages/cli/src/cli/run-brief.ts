@@ -30,7 +30,12 @@ import { CliExitError } from './errors.js';
 import { availableAgentClis, missingAgentCliMessage, notInitializedMessage } from './first-run.js';
 import { withRepoRunLock } from './repo-run-lock.js';
 import { recordDraftPrFlag } from './run-flags.js';
-import { driveToMerge as defaultDriveToMerge, exitForMerge, parseMergeTimeout } from './run-issue-merge.js';
+import {
+  driveToMerge as defaultDriveToMerge,
+  exitForMerge,
+  parseMergeTimeout,
+  validateMergeFlags,
+} from './run-issue-merge.js';
 import { shipIssue } from './ship.js';
 import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
 import { consoleStackLog, printStackResult, runSliceStack } from './stack-run.js';
@@ -157,15 +162,7 @@ async function prepareRunBrief(opts: RunBriefOptions, rt: RunBriefRuntime) {
   baseBranchOrExit(opts.baseBranch);
   const conflict = baseBranchConflict({ baseBranch: opts.baseBranch, workspace: opts.workspace });
   if (conflict) throw new CliExitError(conflict, 2);
-  if ((opts.mergeTimeout !== undefined || opts.admin) && !opts.merge) {
-    throw new CliExitError('factory: --merge-timeout/--admin need --merge', 2);
-  }
-  if (opts.merge && opts.pr === false) throw new CliExitError('factory: --merge needs a PR — drop --no-pr', 2);
-  if (opts.merge && opts.workspace !== undefined) {
-    throw new CliExitError('factory: --merge needs GitHub PRs — drop --workspace (local-only runs never merge)', 2);
-  }
-  if (opts.merge && opts.stack) throw new CliExitError('factory: --merge lands one PR per brief — drop --stack', 2);
-  parseMergeTimeout(opts.mergeTimeout);
+  validateMergeFlags(opts);
   if (opts.stack && opts.workspace !== undefined) {
     throw new CliExitError('factory: --stack needs factory worktrees and PRs — drop --workspace or drop --stack', 2);
   }

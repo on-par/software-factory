@@ -19,7 +19,7 @@ import {
 import { BaseCiPendingError } from './merge-base-gate.js';
 import { MERGE_EXIT, driveToMerge, exitForMerge, parseMergeTimeout } from './run-issue-merge.js';
 import type { DriveToMergeInput } from './run-issue-merge.js';
-import { shouldDriveMerge } from './run-issue-merge.js';
+import { validateMergeFlags } from './run-issue-merge.js';
 
 const shipped: RunOutcome = {
   state: 'shipped',
@@ -311,10 +311,19 @@ describe('exitForMerge', () => {
   });
 });
 
-describe('shouldDriveMerge', () => {
-  it('without merge the run never calls waitForMerge', () => {
-    expect(shouldDriveMerge({})).toBe(false);
-    expect(shouldDriveMerge({ merge: false })).toBe(false);
-    expect(shouldDriveMerge({ merge: true })).toBe(true);
+describe('validateMergeFlags', () => {
+  it('passes without --merge and parses the timeout with it', () => {
+    expect(validateMergeFlags({})).toBeUndefined();
+    expect(validateMergeFlags({ merge: true, mergeTimeout: '2h' })).toBe(7_200_000);
+  });
+  it.each([
+    [{ mergeTimeout: '1h' }, /need --merge/],
+    [{ admin: true }, /need --merge/],
+    [{ merge: true, pr: false }, /needs a PR/],
+    [{ merge: true, workspace: 'w' }, /--workspace/],
+    [{ merge: true, stack: true }, /--stack/],
+    [{ merge: true, mergeTimeout: 'soon' }, /positive duration/],
+  ])('rejects %j', (flags, msg) => {
+    expect(() => validateMergeFlags(flags)).toThrow(msg);
   });
 });
