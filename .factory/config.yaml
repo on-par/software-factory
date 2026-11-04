@@ -32,3 +32,113 @@ timeouts:
   tests_seconds: 600
 host:
   maxBuilds: 2
+# 2026-11-03 Patrick: disk guard trigger at 15 GB free (was CLI default 10).
+disk:
+  minFreeGb: 15
+
+# 2026-10-30 Patrick: fully autonomous mode (auto-merge, admin merge, PR classifier off, trust tier T2).
+# Revert: restore config.yaml.bak-pre-autonomous-20261030-0918
+classifier:
+  trustTier: T2
+run:
+  merge:
+    auto: true
+    admin: true
+    classifier: false
+
+# 2026-10-30 Patrick: packaged risk rules with every high rule downgraded to med (no rule resolves to risk:high).
+# Revert: restore config.yaml.bak-pre-riskhigh-20261030-0922
+risk:
+  rules:
+    - id: migrations-schema
+      tier: med
+      description: Database migrations and schema definitions (was high; downgraded
+        2026-10-30 per Patrick)
+      globs:
+        - "**/migrations/**"
+        - "**/migrate/**"
+        - "**/*.sql"
+        - "**/schema.prisma"
+      patterns:
+        - (^|/)schema(\.[a-z]+)?$
+    - id: auth
+      tier: med
+      description: Authentication and sessions (was high; downgraded 2026-10-30 per Patrick)
+      patterns:
+        - (^|[/._-])(auth\w*|oauth|sso|login|session)([/._-]|$)
+    - id: secrets-env
+      tier: med
+      description: Secrets and environment files (was high; downgraded 2026-10-30 per
+        Patrick)
+      globs:
+        - "**/.env"
+        - "**/.env.*"
+      patterns:
+        - secret|credential|(^|[/._-])(tokens?|keys?)([/._-]|$)
+    - id: billing
+      tier: med
+      description: Billing and payments (was high; downgraded 2026-10-30 per Patrick)
+      patterns:
+        - billing|payment|invoice|stripe|subscription
+    - id: customer-data
+      tier: med
+      description: Customer and personal data (was high; downgraded 2026-10-30 per Patrick)
+      patterns:
+        - stomp|customer|(^|[/._-])pii([/._-]|$)|gdpr|user-?data
+    - id: permissions-acl
+      tier: med
+      description: Permissions and access control (was high; downgraded 2026-10-30 per
+        Patrick)
+      patterns:
+        - permission|(^|[/._-])(acl|rbac|roles?)([/._-]|$)
+    - id: crypto
+      tier: med
+      description: Cryptography (was high; downgraded 2026-10-30 per Patrick)
+      patterns:
+        - crypto|encrypt|decrypt|cipher|(^|[/._-])(kms|hmac|signing)([/._-]|$)
+    - id: public-api
+      tier: med
+      description: Public API surface
+      globs:
+        - "**/index.ts"
+        - "**/*.d.ts"
+        - "**/api/**"
+        - "**/openapi*"
+    - id: workers-crons
+      tier: med
+      description: Background workers and scheduled jobs
+      patterns:
+        - (^|[/._-])(workers?|crons?|jobs?|scheduler)([/._-]|$)
+    - id: build-release
+      tier: med
+      description: Build and release tooling
+      globs:
+        - scripts/**
+        - .github/workflows/**
+        - "**/Dockerfile"
+        - "**/Makefile"
+      patterns:
+        - (^|/)(build|release)[^/]*$
+    - id: docs
+      tier: low
+      description: Documentation
+      globs:
+        - docs/**
+        - "**/*.md"
+        - "**/*.mdx"
+    - id: tests-only
+      tier: low
+      description: Tests and fixtures
+      globs:
+        - "**/*.test.ts"
+        - "**/*.spec.ts"
+        - "**/__tests__/**"
+        - "**/__fixtures__/**"
+        - "**/test/**"
+        - "**/tests/**"
+    - id: changelog
+      tier: low
+      description: Changelogs
+      globs:
+        - "**/CHANGELOG*"
+  refactorAllowlist: []
