@@ -129,6 +129,7 @@ import type { RequiredChecksVerdict } from '../utils/required-checks.js';
 import type { RunReportInfo } from './run-report-info.js';
 import { providerProbe, type ProviderProbe } from './provider-probe.js';
 import type { PrerequisiteStackTarget } from '../queue/prerequisite-stack.js';
+import { errorMessage } from '../checkers/preview-wait.js';
 import { renderPreviousAttempt } from './previous-attempt.js';
 import { withoutHumanOnlyLabels } from './max-lines-override.js';
 
@@ -306,10 +307,6 @@ export interface RunPorts extends CiReworkPorts {
     fallbackBaseRef?: string,
     parentBaseRef?: string,
   ) => Promise<ReviewFloorPathChange[]>;
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 export async function runIssue(request: RunRequest, policy: RunPolicy, rawPorts: RunPorts): Promise<RunOutcome> {

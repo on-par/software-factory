@@ -256,14 +256,6 @@ export { runUnpark, UnparkError } from './queue/unpark.js';
 export type { OrderCollision, UnparkInput, UnparkJson } from './queue/unpark.js';
 export { sweepOrphanDrafts } from './queue/orphan-drafts.js';
 export { resolveQueueClaimSettleMs } from './queue/claim-settle.js';
-export {
-  choosePrerequisiteStack,
-  parsePrerequisiteStackMarker,
-  renderPrerequisiteStackMarker,
-  resolveQueueStackOnOpenPrerequisite,
-  type PrerequisiteRestackDecision,
-  type PrerequisiteStackTarget,
-} from './queue/prerequisite-stack.js';
 export { resolveLaneDiscoveryIntervalMs } from './queue/lane-discovery-interval.js';
 export { DEFAULT_MAX_CLOCK_SKEW_MS, measureGithubClockSkew, resolveQueueMaxClockSkewMs } from './queue/clock-skew.js';
 // Green-and-ready PR reporting (#1000)
