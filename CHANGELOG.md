@@ -43,6 +43,8 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Fixed
 
+- Ctrl-C / SIGTERM on factory run, ship, run-issue, run-brief and supervise now stops every detached agent process group (SIGTERM, then SIGKILL after 3s), writes STOP and exits 130; a second Ctrl-C exits at once (#1615)
+
 - SHIP no longer marks a PR ready for review when the CI watch itself fails, for example on a GitHub API error. CI counts as unknown: SHIP fails with `CI unknown for PR #N: the CI watch failed (...)`, the PR is not marked ready, also in draft mode, and the run parks `fail` (#3880).
 - An unknown `sizeGate.mode` (for example `Off`, `none`, `bogus`) still runs as stack but now warns at config load and run start, and shows a non-failing ⚠️ `factory doctor` row naming the value and `off, stack` (#3850).
 - A CHECK environment release whose fresh base re-run fails while GitHub CI is green now writes a `confirmedLocally` base hold, so the lane no longer re-claims and rebuilds the issue every poll; `factory status` names the waiting issue (#3851).

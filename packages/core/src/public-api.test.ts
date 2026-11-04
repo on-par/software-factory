@@ -303,9 +303,11 @@ const EXTRA_INTERNAL_KEYS = [
 ];
 const INTERNAL_API_KEYS = [
   'MAX_REWORK_ROUNDS',
+  'killTrackedProcessGroups',
   'loadPrRunState',
   'prRunStatusFor',
   'reconcilePrRunState',
+  'registerProcessGroup',
   'savePrRunState',
   'UnsupportedQueueBackendError', // #3890
   'createGithubQueueBackend', // #3890
@@ -354,6 +356,7 @@ const INTERNAL_API_KEYS = [
   'readOpenFactoryDrafts',
   'formatOpenFactoryDraftsLine',
   'runStateFile',
+  'trackedProcessGroups',
   'writeIssueRunState',
   'createPlanReuseStore',
   // Check-resume record (#2564)

@@ -3,11 +3,14 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   defaultIsProcessGroupAlive,
   killProcessGroup,
+  killTrackedProcessGroups,
+  registerProcessGroup,
+  trackedProcessGroups,
   ProcessGroupTracker,
   type TaskkillResult,
 } from './process-groups.js';
@@ -357,4 +360,44 @@ describe.skipIf(process.platform === 'win32')('killProcessGroup (real process in
       await rm(dir, { recursive: true, force: true });
     }
   }, 10000);
+});
+
+describe('process-group registry', () => {
+  const cleanups: Array<() => void> = [];
+  afterEach(() => {
+    for (const c of cleanups.splice(0)) c();
+  });
+
+  it('lists a registered pgid', () => {
+    cleanups.push(registerProcessGroup(900001));
+    expect(trackedProcessGroups()).toContain(900001);
+  });
+
+  it('deregister removes the pgid and a second call is a no-op', () => {
+    const dereg = registerProcessGroup(900002);
+    const other = registerProcessGroup(900003);
+    cleanups.push(other);
+    dereg();
+    expect(trackedProcessGroups()).not.toContain(900002);
+    // A re-registered pgid must not be removed by the stale deregister.
+    cleanups.push(registerProcessGroup(900002));
+    dereg();
+    expect(trackedProcessGroups()).toContain(900002);
+  });
+
+  it('killTrackedProcessGroups signals each registered pgid and clears the registry', async () => {
+    registerProcessGroup(900004);
+    registerProcessGroup(900005);
+    const killFn = vi.fn();
+    const alive = new Set([900004, 900005]);
+    const isAliveFn = vi.fn((pgid: number) => alive.has(pgid));
+    killFn.mockImplementation((pid: number) => {
+      alive.delete(-pid);
+    });
+    await killTrackedProcessGroups({ isAliveFn, killFn, sleepFn: noopSleep, graceMs: 10 });
+    expect(killFn).toHaveBeenCalledWith(-900004, 'SIGTERM');
+    expect(killFn).toHaveBeenCalledWith(-900005, 'SIGTERM');
+    expect(trackedProcessGroups()).not.toContain(900004);
+    expect(trackedProcessGroups()).not.toContain(900005);
+  });
 });
