@@ -305,6 +305,9 @@ const INTERNAL_API_KEYS = [
   'UnsupportedQueueBackendError', // #3890
   'createGithubQueueBackend', // #3890
   'createQueueBackend', // #3890
+  'LINEAR_API_KEY_ENV',
+  'probeLinearSetup',
+  'resolveTrackerConfig',
   'listBlockedBy',
   'aliasDeprecatedSizeGateMode', // #3832
   'isExplicitStackMode',

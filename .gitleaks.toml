@@ -14,5 +14,5 @@ description = "Fake AWS access-key fixture in packages/core/src/filing/redact.te
 regexes = ['''AKIAABCDEFGHIJKLMNOP''']
 
 [[allowlists]]
-description = "Fake Linear API key fixture in linear-preflight.test.ts and doctor-linear.test.ts (also present in git history)"
+description = "Fake Linear API key fixture in packages/core/src/work/linear-preflight.test.ts and packages/cli/src/cli/doctor-linear.test.ts (also present in git history)"
 regexes = ['''lin_api_SECRET123''']

@@ -403,6 +403,12 @@ function runtimeNamespace(): Node[] {
     ci,
     section('worktree'),
     section('workspace'),
+    {
+      kind: 'unset',
+      key: 'tracker',
+      doc: 'Ticket tracker (ADR-0168, ADR-0173). kind: github (default) or linear. linear needs teamKey; projects maps a Linear project name or id to owner/repo; readyLabel (default factory:ready), laneLabelGroup (default lane), states.ready/inProgress/parked (default Todo/In Progress/Todo). The API key is read only from LINEAR_API_KEY, never from config; `factory doctor` checks it (#3891).',
+      example: '{ kind: "linear", linear: { teamKey: "ENG", projects: { "Factory": "owner/repo" } } }',
+    },
     section('sandbox'),
     section('environment'),
     section('host'),

@@ -30,4 +30,5 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'queue',
   'adr',
   'workspace',
+  'tracker',
 ];

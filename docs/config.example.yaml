@@ -271,6 +271,11 @@ worktree:
 # lane).
 workspace:
   backend: "host"
+# Ticket tracker (ADR-0168, ADR-0173). kind: github (default) or linear. linear needs teamKey;
+# projects maps a Linear project name or id to owner/repo; readyLabel (default factory:ready),
+# laneLabelGroup (default lane), states.ready/inProgress/parked (default Todo/In Progress/Todo). The
+# API key is read only from LINEAR_API_KEY, never from config; `factory doctor` checks it (#3891).
+# tracker: { kind: "linear", linear: { teamKey: "ENG", projects: { "Factory": "owner/repo" } } }
 # Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty
 # network.allow denies all egress; non-empty leaves egress open in report mode. Set sandbox.runtime
 # (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime;

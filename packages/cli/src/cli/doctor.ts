@@ -18,7 +18,7 @@ import {
   resolveProcessGroupGraceMs,
   resolveSandboxPolicy,
 } from '@on-par/factory-core';
-import type { ConfigLintInput, WorktreeSandbox } from '@on-par/factory-core/internal';
+import { type ConfigLintInput, type WorktreeSandbox, resolveTrackerConfig } from '@on-par/factory-core/internal';
 import {
   claudeStoredSessionState,
   codexChatgptSessionState,
@@ -34,7 +34,7 @@ import {
 } from '@on-par/factory-core/internal';
 
 import { npmCheck, resolveVerifyCommands, verifyCommandChecks, withPathResults } from './doctor-verify.js';
-import { configLintChecks, declaredHarnessChecks, modelsRegistryChecks } from './doctor-config.js';
+import { configLintChecks, declaredHarnessChecks, linearTrackerChecks, modelsRegistryChecks } from './doctor-config.js';
 import { failoverProviderChecks } from './doctor-failover-providers.js';
 import { codexSandboxNote } from './doctor-codex-sandbox.js';
 import { agentMemoryChecks } from './doctor-agent-memory.js';
@@ -1031,6 +1031,7 @@ export async function cmdDoctor(
     } catch {
       factoryConfig = loadFactoryConfig(); // schema errors are reported by the config row (#2611)
     }
+    checks.push(...(await linearTrackerChecks(resolveTrackerConfig(factoryConfig), process.env)));
     maxClockSkewMs = resolveQueueMaxClockSkewMs(factoryConfig);
     const health = await inspectPortLeases({ registryFile: paths.ports });
     checks.push(...leaseChecks(health.map(rt.toLeaseRow)));

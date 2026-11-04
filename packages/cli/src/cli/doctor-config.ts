@@ -16,6 +16,8 @@ import {
 
 import { type DoctorCheck, REPO_SECTION } from './doctor.js';
 
+export { linearTrackerChecks } from './doctor-linear.js';
+
 /** One doctor check per user-declared harness, from its `probe` result. */
 export function declaredHarnessChecks(probes: DeclaredHarnessProbe[]): DoctorCheck[] {
   return probes.map((p): DoctorCheck => {
