@@ -482,12 +482,6 @@ export { LINEAR_API_KEY_ENV, probeLinearSetup, type LinearPreflightResult } from
 export { resolveTrackerConfig, type TrackerConfig } from './config/tracker-section.js';
 
 // Feedback round (#3910)
-export type {
-  FeedbackDisposition,
-  FeedbackItem,
-  FeedbackRoundPlan,
-  FeedbackRoundTarget,
-} from './run/feedback-round.js';
 export {
   collectFeedbackItems,
   feedbackHandledMarker,
@@ -496,6 +490,9 @@ export {
   publishFeedbackRound,
   renderFeedbackReply,
   triageFeedback,
+  type FeedbackDisposition,
+  type FeedbackItem,
+  type FeedbackRoundPlan,
+  type FeedbackRoundTarget,
 } from './run/feedback-round.js';
-export type { FeedbackRoundGitHub } from './run/feedback-github.js';
-export { createOctokitFeedbackRoundGitHub } from './run/feedback-github.js';
+export { createOctokitFeedbackRoundGitHub, type FeedbackRoundGitHub } from './run/feedback-github.js';
