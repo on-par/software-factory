@@ -27,7 +27,6 @@ import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import { installLaneDependencies as installLaneDependenciesDefault } from './lane-install.js';
 import { checkPhase as checkPhaseDefault, type CheckPhaseResult } from '../phases/check.js';
-import { renderEnvironmentReleaseComment } from '../phases/environment-release.js';
 import type { SizeBudget } from '../readiness/size.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
@@ -44,7 +43,7 @@ import { beginBuildRoute, compatibleBuildModel, laneRouteCapabilities } from './
 import { classifyCheckFailure } from './check-verdict.js';
 import { withSingleTerminalEvent } from './terminal-events.js';
 import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
-import { environmentReleaseMarker, parkPayload, publishParkComment, upsertMarkerComment } from './park-comment.js';
+import { parkPayload, postEnvironmentReleaseComment, publishParkComment } from './park-comment.js';
 import { createRunPhaseLogger } from './run-phase-log.js';
 import { providerFailureRecorder } from './provider-failure-recorder.js';
 import { gateBuildTarget, pickOrderedProvider, type ProviderPick } from './provider-breaker-gate.js';
@@ -985,18 +984,14 @@ async function runIssueOnce(
         }
         if (linear && !request.localOnly && !request.noPr) await linear.environment(env);
         else if (!request.localOnly && !request.noPr) {
-          try {
-            const marker = environmentReleaseMarker(workKey);
-            await upsertMarkerComment({
-              octokit: ports.octokit,
-              repo: request.repo,
-              issue: workKey,
-              marker,
-              body: `${renderEnvironmentReleaseComment(env)}\n${marker}`,
-            });
-          } catch (err) {
-            log('environment_warning', `could not post the environment-failure comment: ${errorMessage(err)}`);
-          }
+          const warn = (message: string) => log('environment_warning', message);
+          await postEnvironmentReleaseComment({
+            octokit: ports.octokit,
+            repo: request.repo,
+            issue: workKey,
+            env,
+            warn,
+          });
         }
         let preserve =
           ports.checkResume !== undefined &&
