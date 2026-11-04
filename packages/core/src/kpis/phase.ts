@@ -23,6 +23,7 @@ const TASK_PHASE: Record<string, string> = {
   readiness_enrich: 'plan',
   readiness_judge: 'plan',
   decompose: 'plan',
+  feedback_triage: 'plan',
   steward: 'ship',
 };
 

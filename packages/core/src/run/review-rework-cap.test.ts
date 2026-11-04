@@ -123,6 +123,32 @@ describe('review-rework cap (#3565)', () => {
   });
 });
 
+describe('feedback round cap (#3910)', () => {
+  it('a feedback round record counts toward the cap and parks with one comment', async () => {
+    const e = env(1);
+    e.store.record({ ...rec(900_001, 42, '2026-01-03T00:00:00.000Z'), source: 'feedback' });
+    const count = countReviewReworkRuns(e.store, workKeyFromIssue(42));
+    expect(count).toBe(2);
+    await parkAtReviewReworkCap({
+      queue: e.queue,
+      owner: 'o',
+      repo: 'r',
+      issue: workKeyFromIssue(42),
+      pr: 900,
+      lane: 'bugfix',
+      branch: 'factory/42-fix',
+      cap: 2,
+      count,
+      reviewIds: [900_002],
+      source: 'feedback',
+    });
+    expect(e.added).toEqual([[PARKED_LABEL]]);
+    const comments = await e.comments();
+    expect(comments).toHaveLength(1);
+    expect(comments[0]?.body).toContain('PR #900 feedback round 900002');
+  });
+});
+
 describe('review-rework cap helpers', () => {
   it('countReviewReworkRuns counts only started records for the issue', () => {
     const store = { list: () => [rec(1, 42, 'x'), rec(2, 42), rec(3, 7, 'x')] };

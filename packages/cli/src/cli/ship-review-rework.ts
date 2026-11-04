@@ -21,6 +21,8 @@ export function claimReviewReworkRequest(
     reviewer: string;
     source?: Extract<ReviewReworkSource, 'comment'>;
   };
+  /** The queued run also answers every unhandled trusted PR comment (#3910). */
+  feedbackRound?: { prNumber: number };
 } {
   const record = skip ? undefined : claimReviewRework(createFileReviewReworkStore(reviewReworkFile), issueNum);
   if (!record) return {};
@@ -36,6 +38,7 @@ export function claimReviewReworkRequest(
       reviewer: record.reviewer,
       ...(comment ? { source: 'comment' as const } : {}),
     },
+    feedbackRound: { prNumber: record.pr },
   };
 }
 
