@@ -50,7 +50,7 @@ export async function superviseLanes(
     deps.log('lane-start', `lane '${lane}' started${count ? ` (${count} issues)` : ''}`, lane);
     const p = deps
       .startLane(d.planned)
-      .catch(() => {})
+      .catch((e: unknown) => deps.log('warn', `lane '${lane}' failed: ${errorMessage(e)}`, lane))
       .finally(() => running.delete(lane));
     running.set(lane, p);
     started.push(lane);

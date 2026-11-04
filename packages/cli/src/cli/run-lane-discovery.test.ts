@@ -188,6 +188,7 @@ describe('superviseLanes (#3920)', () => {
   it('survives a lane whose startLane rejects', async () => {
     const h = harness({ startLane: async () => Promise.reject(new Error('lane died')) });
     await expect(superviseLanes([lane('a')], h.deps)).resolves.toEqual({ started: ['a'] });
+    expect(h.log).toHaveBeenCalledWith('warn', "lane 'a' failed: lane died", 'a');
   });
 
   it('logs the issue count for a seeded lane', async () => {
