@@ -30,6 +30,7 @@
   "EvidenceRunnerContext",
   "GateStage",
   "GithubQueue",
+  "InPlaceCheckoutProblem",
   "LINEAR_LEASE_ATTACHMENT_URL",
   "LinearQueueBackendOptions",
   "LintCommand",
