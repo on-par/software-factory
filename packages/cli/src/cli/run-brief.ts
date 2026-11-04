@@ -38,7 +38,13 @@ import { withRepoRunLock } from './repo-run-lock.js';
 import { recordDraftPrFlag } from './run-flags.js';
 import { shipIssue } from './ship.js';
 import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
-import { driveToMerge, exitForMerge, parseMergeTimeout } from './run-issue-merge.js';
+import {
+  driveToMerge,
+  exitForMerge,
+  parseMergeTimeout,
+  shouldDriveAfterShipFailure,
+  validateMergeFlags,
+} from './run-issue-merge.js';
 import { consoleStackLog, printStackResult, runSliceStack } from './stack-run.js';
 
 /** index.ts bindings the handler needs; index.ts passes them so this module never imports it at runtime. */
@@ -148,16 +154,7 @@ export async function cmdRunBrief(files: readonly string[], opts: RunBriefOption
 
 /** The `--merge` flag conflicts that hold for every brief (#3905); each exits 2 before any run starts. */
 function checkMergeFlags(opts: RunBriefOptions): void {
-  if ((opts.mergeTimeout !== undefined || opts.admin) && !opts.merge) {
-    throw new CliExitError('factory: --merge-timeout/--admin need --merge', 2);
-  }
-  if (!opts.merge) return;
-  if (opts.pr === false) throw new CliExitError('factory: --merge needs a PR — drop --no-pr', 2);
-  if (opts.workspace !== undefined) {
-    throw new CliExitError('factory: --merge needs a PR — local-only (--workspace) runs never merge', 2);
-  }
-  if (opts.stack) throw new CliExitError('factory: --merge lands one PR per brief — drop --stack', 2);
-  parseMergeTimeout(opts.mergeTimeout);
+  validateMergeFlags(opts, 'brief');
 }
 
 /** The run-brief pre-flight shared by every brief in one invocation; any failure here exits 2. */
@@ -319,8 +316,7 @@ async function runOneBrief(
           },
         );
       } catch (err: any) {
-        const ciPark = outcome?.state === 'parked' && (outcome.reason === 'ci-failed' || outcome.reason === 'ci-infra');
-        if (opts.merge && ciPark) await merge();
+        if (opts.merge && shouldDriveAfterShipFailure(outcome)) await merge();
         throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
       }
       if (opts.merge) await merge();

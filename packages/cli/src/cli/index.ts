@@ -244,7 +244,7 @@ import { withRepoRunLock } from './repo-run-lock.js';
 export { CliExitError, withRepoRunLock };
 import type { StopMarker } from '@on-par/factory-core/internal';
 import { resolveAwaitingCiCapMs } from '@on-par/factory-core/internal';
-import { driveToMerge, exitForMerge, parseMergeTimeout } from './run-issue-merge.js';
+import { driveToMerge, exitForMerge, shouldDriveAfterShipFailure, validateMergeFlags } from './run-issue-merge.js';
 import { formatSteerabilityReport } from '@on-par/factory-core/internal';
 import { buildTierEvidence, formatTierEvidence, resolveTrustTier } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
@@ -2364,14 +2364,10 @@ async function cmdRunIssue(
     admin,
     ...shipOpts
   } = opts;
-  if ((mergeTimeout !== undefined || admin) && !merge) {
-    throw new CliExitError('factory: --merge-timeout/--admin need --merge', 2);
-  }
-  if (merge && opts.pr === false) throw new CliExitError('factory: --merge needs a PR — drop --no-pr', 2);
-  if (merge && (stack || rawSizeGate === 'stack')) {
-    throw new CliExitError('factory: --merge lands one PR — drop --stack', 2);
-  }
-  const mergeTimeoutMs = merge ? parseMergeTimeout(mergeTimeout) : undefined;
+  const mergeTimeoutMs = validateMergeFlags(
+    { merge, mergeTimeout, admin, pr: opts.pr, stack: stack || rawSizeGate === 'stack' },
+    'issue',
+  );
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const parsedSizeGate = sizeGateOrExit(rawSizeGate);
   if (stack && parsedSizeGate !== undefined && parsedSizeGate !== 'stack') {
@@ -2484,9 +2480,13 @@ async function cmdRunIssue(
             { repoRoot, ghRepo, workRequest: work, onOutcome: (o) => (outcome = o) },
           );
         } catch (err) {
-          const ciPark =
-            outcome?.state === 'parked' && (outcome.reason === 'ci-failed' || outcome.reason === 'ci-infra');
-          if (merge && ciPark && !(err instanceof CliExitError) && !(err instanceof IssueSkippedError)) await drive();
+          if (
+            merge &&
+            shouldDriveAfterShipFailure(outcome) &&
+            !(err instanceof CliExitError) &&
+            !(err instanceof IssueSkippedError)
+          )
+            await drive();
           throw err;
         }
         if (merge) await drive();

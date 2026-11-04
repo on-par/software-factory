@@ -5,7 +5,6 @@ import { styleText } from 'node:util';
 import type { getFactoryPaths, RunOutcome } from '@on-par/factory-core';
 
 import { CliExitError } from './errors.js';
-import { errorDetail } from './index.js';
 import { waitForMerge } from './land.js';
 import {
   AwaitingCiError,
@@ -15,6 +14,7 @@ import {
   LandConflictError,
   MergeGatedError,
 } from './land-pr.js';
+import { landRuntime } from './land-runtime.js';
 import { BaseCiPendingError } from './merge-base-gate.js';
 
 export const MERGE_EXIT = {
@@ -66,40 +66,76 @@ export function parseMergeTimeout(raw: string | undefined): number | undefined {
 
 const CI_PARKS: ReadonlySet<string> = new Set(['ci-failed', 'ci-infra']);
 
-function preMergeResult(outcome: RunOutcome | undefined): MergeResult | undefined {
-  if (!outcome) return { kind: 'failed-before-pr', detail: 'the run produced no outcome' };
+/** A run that parked on CI still has a PR worth driving to its CI verdict under --merge. */
+export function shouldDriveAfterShipFailure(outcome: RunOutcome | undefined): boolean {
+  return outcome?.state === 'parked' && CI_PARKS.has(outcome.reason);
+}
+
+export interface MergeFlagOptions {
+  merge?: boolean | undefined;
+  mergeTimeout?: string | undefined;
+  admin?: boolean | undefined;
+  /** `--no-pr` sets false. */
+  pr?: boolean | undefined;
+  /** `--stack` (or `--size-gate stack`). */
+  stack?: boolean | undefined;
+  /** `--workspace` runs stay local, so they never merge (run-brief only). */
+  workspace?: unknown;
+}
+
+/** The `--merge` flag conflicts shared by run-issue and run-brief; each exits 2 before any run starts. Returns the timeout in ms. */
+export function validateMergeFlags(opts: MergeFlagOptions, unit: 'issue' | 'brief'): number | undefined {
+  if ((opts.mergeTimeout !== undefined || opts.admin) && !opts.merge) {
+    throw new CliExitError('factory: --merge-timeout/--admin need --merge', 2);
+  }
+  if (!opts.merge) return undefined;
+  if (opts.pr === false) throw new CliExitError('factory: --merge needs a PR — drop --no-pr', 2);
+  if (opts.workspace !== undefined) {
+    throw new CliExitError('factory: --merge needs a PR — local-only (--workspace) runs never merge', 2);
+  }
+  if (opts.stack) {
+    throw new CliExitError(`factory: --merge lands one PR${unit === 'brief' ? ' per brief' : ''} — drop --stack`, 2);
+  }
+  return parseMergeTimeout(opts.mergeTimeout);
+}
+
+type Mergeable = Extract<RunOutcome, { state: 'ready' | 'shipped' }>;
+
+function preMergeResult(outcome: RunOutcome | undefined): { early: MergeResult } | { mergeable: Mergeable } {
+  const early = (result: MergeResult) => ({ early: result });
+  if (!outcome) return early({ kind: 'failed-before-pr', detail: 'the run produced no outcome' });
   if (outcome.state === 'parked') {
     if (CI_PARKS.has(outcome.reason)) {
-      return {
+      return early({
         kind: 'ci-failed',
         ...(outcome.prNumber ? { prNumber: outcome.prNumber } : {}),
         detail: `parked: ${outcome.reason}`,
-      };
+      });
     }
-    return {
+    return early({
       kind: 'failed-before-pr',
       ...(outcome.prNumber ? { prNumber: outcome.prNumber } : {}),
       detail: `parked: ${outcome.reason}`,
-    };
+    });
   }
   if (outcome.state === 'released' || outcome.state === 'escalated') {
-    return { kind: 'failed-before-pr', detail: `run ${outcome.state}: ${outcome.reason}` };
+    return early({ kind: 'failed-before-pr', detail: `run ${outcome.state}: ${outcome.reason}` });
   }
   const prNumber = outcome.prNumber;
   const pr = prNumber === undefined ? {} : { prNumber };
   if (outcome.state === 'ready' && outcome.draft) {
-    return { kind: 'held', gate: 'draft', ...pr, detail: 'the PR was left as a draft' };
+    return early({ kind: 'held', gate: 'draft', ...pr, detail: 'the PR was left as a draft' });
   }
   if (outcome.state === 'ready' && outcome.slice && outcome.slice.index < outcome.slice.count) {
-    return {
+    return early({
       kind: 'held',
       gate: 'stack-slice',
       ...pr,
       detail: `slice ${outcome.slice.index} of ${outcome.slice.count}; later slices still to land`,
-    };
+    });
   }
-  if (!outcome.branch) return { kind: 'failed-before-pr', detail: 'the run produced no branch' };
-  return undefined;
+  if (!outcome.branch) return early({ kind: 'failed-before-pr', detail: 'the run produced no branch' });
+  return { mergeable: outcome };
 }
 
 function isTimeout(err: unknown, signal: AbortSignal): boolean {
@@ -108,9 +144,9 @@ function isTimeout(err: unknown, signal: AbortSignal): boolean {
 }
 
 export async function driveToMerge(input: DriveToMergeInput, deps: DriveToMergeDeps = {}): Promise<MergeResult> {
-  const early = preMergeResult(input.outcome);
-  if (early) return early;
-  const outcome = input.outcome as Extract<RunOutcome, { state: 'ready' | 'shipped' }>;
+  const pre = preMergeResult(input.outcome);
+  if ('early' in pre) return pre.early;
+  const outcome = pre.mergeable;
   const branch = outcome.branch;
   const prNumber = outcome.prNumber;
   const pr = prNumber === undefined ? {} : { prNumber };
@@ -130,7 +166,7 @@ export async function driveToMerge(input: DriveToMergeInput, deps: DriveToMergeD
       });
       return { kind: 'merged', ...pr, detail: 'merged' };
     } catch (err) {
-      const detail = errorDetail(err);
+      const detail = landRuntime().errorDetail(err);
       if (err instanceof MergeGatedError) {
         return { kind: 'held', gate: err.label, prNumber: err.prNumber || prNumber, detail };
       }
