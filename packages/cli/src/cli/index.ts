@@ -134,7 +134,9 @@ import {
   validateQueue,
   watchUsage,
   writeLocalRunReport,
+  isNumericWorkKey,
   issueNumberOf,
+  type WorkKey,
   workKeyFromIssue,
   writeProxyState,
 } from '@on-par/factory-core';
@@ -215,6 +217,8 @@ import {
   runOvernightQueue,
   parseRemoteSlug,
   setupWorktree,
+  checkInPlaceCheckout,
+  setupInPlaceCheckout,
   shellEscape,
   listBuiltInCheckers,
   sweepWorktrees,
@@ -235,12 +239,14 @@ import {
   formatBaseMovedRefusal,
 } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
-import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
+import { baseBranchConflict, baseBranchOrExit, inPlaceConflict, resolveWorkspaceMode } from './ship-options.js';
 import { runIssueStack } from './stack-run.js';
 import { withRepoRunLock } from './repo-run-lock.js';
 
 export { CliExitError, withRepoRunLock };
 import type { StopMarker } from '@on-par/factory-core/internal';
+import { resolveAwaitingCiCapMs } from '@on-par/factory-core/internal';
+import { driveToMerge, exitForMerge, shouldDriveAfterShipFailure, validateMergeFlags } from './run-issue-merge.js';
 import { formatSteerabilityReport } from '@on-par/factory-core/internal';
 import { buildTierEvidence, formatTierEvidence, resolveTrustTier } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
@@ -342,6 +348,7 @@ import { readRunFlagOverrides, recordDraftPrFlag } from './run-flags.js';
 import { runStalenessGuard } from './staleness.js';
 import { cmdBaselineClear } from './baseline.js';
 import { cmdBreakerReset } from './breaker.js';
+import { withShutdown } from './shutdown.js';
 import { runWorktreeKeep, runWorktreeRelease } from './worktree-keep.js';
 import { gcWorktreeSandbox, reapParkedLane, reapPrlessShip } from './worktree-reap.js';
 
@@ -390,10 +397,23 @@ function resolveConfigLoaders(overrides: Partial<ConfigLoaders>, base: ConfigLoa
   };
 }
 
-export type GitOpKey = 'setupWorktree' | 'cleanupWorktree' | 'gitFetch' | 'checkResumeBaseDrift';
+export type GitOpKey =
+  | 'setupWorktree'
+  | 'cleanupWorktree'
+  | 'gitFetch'
+  | 'checkResumeBaseDrift'
+  | 'checkInPlaceCheckout'
+  | 'setupInPlaceCheckout';
 type GitOps = Required<Pick<CliDeps, GitOpKey>>;
 
-const DEFAULT_GIT_OPS: GitOps = { setupWorktree, cleanupWorktree, gitFetch, checkResumeBaseDrift };
+const DEFAULT_GIT_OPS: GitOps = {
+  setupWorktree,
+  cleanupWorktree,
+  gitFetch,
+  checkResumeBaseDrift,
+  checkInPlaceCheckout,
+  setupInPlaceCheckout,
+};
 
 /** Git worktree/fetch ops for the current main() or cmdLand invocation; DEFAULT_GIT_OPS outside them. */
 let gitOps: GitOps = DEFAULT_GIT_OPS;
@@ -405,6 +425,8 @@ function resolveGitOps(overrides: Partial<GitOps>, base: GitOps = gitOps): GitOp
     cleanupWorktree: overrides.cleanupWorktree ?? base.cleanupWorktree,
     gitFetch: overrides.gitFetch ?? base.gitFetch,
     checkResumeBaseDrift: overrides.checkResumeBaseDrift ?? base.checkResumeBaseDrift,
+    checkInPlaceCheckout: overrides.checkInPlaceCheckout ?? base.checkInPlaceCheckout,
+    setupInPlaceCheckout: overrides.setupInPlaceCheckout ?? base.setupInPlaceCheckout,
   };
 }
 
@@ -575,7 +597,7 @@ function resolvePhaseOps(overrides: Partial<PhaseOps>, base: PhaseOps = phaseOps
 export const PREREQUISITES_TEXT = `First step: run \`factory doctor\` to check your setup and see what to fix.
 
 Prerequisites:
-  - Claude Code CLI installed and authenticated (Claude subscription): https://claude.com/claude-code
+  - A supported coding agent CLI installed and authenticated: Claude Code, Codex, OpenCode or Pi (\`factory doctor\` shows which are ready)
   - GitHub CLI authenticated: gh auth login
   - GITHUB_TOKEN or GH_TOKEN set (falls back to \`gh auth token\`)
 Run inside a git repository with a GitHub remote.
@@ -2334,6 +2356,12 @@ async function cmdRunIssue(
     stack?: boolean;
     maxSlices?: string;
     draftPr?: boolean;
+    /** `--merge` (#3905): after SHIP, land the PR through the run merge gates and exit with a distinct code. */
+    merge?: boolean;
+    mergeTimeout?: string;
+    admin?: boolean;
+    /** --in-place (#3904): run in the current checkout, no worktree. */
+    inPlace?: boolean;
   },
 ) {
   if (opts.runChildren) throw new CliExitError('--run-children was removed; oversized issues stack with --stack', 2);
@@ -2346,7 +2374,21 @@ async function cmdRunIssue(
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
-  const { runChildren: _removed, sizeGate: rawSizeGate, maxSlices: rawMaxSlices, stack, ...shipOpts } = opts;
+  const {
+    runChildren: _removed,
+    sizeGate: rawSizeGate,
+    maxSlices: rawMaxSlices,
+    stack,
+    merge,
+    mergeTimeout,
+    admin,
+    inPlace: _inPlaceFlag,
+    ...shipOpts
+  } = opts;
+  const mergeTimeoutMs = validateMergeFlags(
+    { merge, mergeTimeout, admin, pr: opts.pr, stack: stack || rawSizeGate === 'stack' },
+    'issue',
+  );
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const parsedSizeGate = sizeGateOrExit(rawSizeGate);
   if (stack && parsedSizeGate !== undefined && parsedSizeGate !== 'stack') {
@@ -2364,12 +2406,22 @@ async function cmdRunIssue(
   if (opts.pr === false && sizeGate !== undefined && sizeGate !== 'off') {
     throw new CliExitError('factory: --no-pr runs with the size gate off — drop --size-gate or drop --no-pr', 2);
   }
+  const inPlace = resolveWorkspaceMode(opts.inPlace, process.env) === 'in-place';
+  if (inPlace) {
+    const inPlaceMsg = inPlaceConflict({ baseBranch, sizeGate });
+    if (inPlaceMsg) throw new CliExitError(inPlaceMsg, 2);
+  }
 
   await withRepoRunLock(
     paths,
     'factory run-issue',
     async () => {
       recordDraftPrFlag(paths.runFlags, opts.draftPr);
+      if (inPlace) {
+        // Refuse before the issue lookup and PLAN, under the run lock (#3904).
+        const problem = await gitOps.checkInPlaceCheckout(repoRoot);
+        if (problem) throw new CliExitError(`factory: ${problem.message}`, 2);
+      }
       const ghRepo = await getGitHubRepo();
 
       // Pre-flight: resolve the issue through the canonical work-request seam
@@ -2391,7 +2443,8 @@ async function cmdRunIssue(
         );
       }
       console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
-      await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
+      // A one-job in-place container has no other lanes to collect.
+      if (!inPlace) await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
 
       const priorEvents = readEvents(paths.events, { includeSegments: true });
       if (hasUnresolvedPark(priorEvents, String(issueNum))) {
@@ -2438,11 +2491,37 @@ async function cmdRunIssue(
           });
           return;
         }
-        await shipIssue(
-          issueNum,
-          { ...shipOpts, branchPrefix, sizeGate, explicitStack, maxSlices },
-          { repoRoot, ghRepo, workRequest: work },
-        );
+        let outcome: RunOutcome | undefined;
+        const drive = async () =>
+          exitForMerge(
+            await driveToMerge({
+              issue: issueNum,
+              outcome,
+              repoRoot,
+              ghRepo,
+              paths,
+              timeoutMs: mergeTimeoutMs ?? resolveAwaitingCiCapMs(configLoaders.loadFactoryConfigForRepo(paths.config)),
+              ...(admin ? { admin } : {}),
+            }),
+            `issue #${issueNum}`,
+          );
+        try {
+          await shipIssue(
+            issueNum,
+            { ...shipOpts, branchPrefix, sizeGate, explicitStack, maxSlices, inPlace },
+            { repoRoot, ghRepo, workRequest: work, onOutcome: (o) => (outcome = o) },
+          );
+        } catch (err) {
+          if (
+            merge &&
+            shouldDriveAfterShipFailure(outcome) &&
+            !(err instanceof CliExitError) &&
+            !(err instanceof IssueSkippedError)
+          )
+            await drive();
+          throw err;
+        }
+        if (merge) await drive();
       } catch (err: any) {
         if (err instanceof CliExitError) throw err;
         if (err instanceof IssueSkippedError) return;
@@ -3447,10 +3526,16 @@ export interface PlannedLane {
 export function laneQueueDeps(
   queue: QueueBackend,
   lane: string,
+  onUnshippable?: (key: WorkKey) => void,
 ): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining'> {
   return {
     claimNext: async () => {
       const claim = await queue.claimNext(lane);
+      if (claim !== null && !isNumericWorkKey(claim.key)) {
+        await queue.release(claim.key, 'queued');
+        onUnshippable?.(claim.key);
+        return null;
+      }
       return claim === null ? null : { issue: issueNumberOf(claim.key), decision: claim.decision };
     },
     releaseIssue: (issue, outcome) => queue.release(workKeyFromIssue(issue), outcome),
@@ -3485,6 +3570,8 @@ export async function planRunLanes(input: {
   readLocalQueue: () => string | null;
   /** Lazy so the octokit client is never built under --local-queue. */
   queue: () => QueueBackend;
+  /** Called with a claimed non-numeric key the lane released instead of building. */
+  onUnshippable?: (key: WorkKey) => void;
 }): Promise<{ lanes: PlannedLane[]; diagnostics: QueueDiagnostic[] }> {
   if (input.localQueue) {
     const content = input.readLocalQueue();
@@ -3506,7 +3593,7 @@ export async function planRunLanes(input: {
   const backend = input.queue();
   const lanes = await backend.lanes();
   return {
-    lanes: lanes.map((lane) => ({ lane, issues: [], deps: laneQueueDeps(backend, lane) })),
+    lanes: lanes.map((lane) => ({ lane, issues: [], deps: laneQueueDeps(backend, lane, input.onUnshippable) })),
     diagnostics: [],
   };
 }
@@ -3918,6 +4005,8 @@ export interface CliDeps {
   cleanupWorktree?: typeof cleanupWorktree;
   gitFetch?: typeof gitFetch;
   checkResumeBaseDrift?: typeof checkResumeBaseDrift;
+  checkInPlaceCheckout?: typeof checkInPlaceCheckout;
+  setupInPlaceCheckout?: typeof setupInPlaceCheckout;
   /** factory-core/internal ops (CI watch, costs, worktree GC, reconcile reaps, local-small). Each defaults to the export of the same name. */
   watchChecks?: typeof watchChecks;
   createLocalSmallDryRun?: typeof createLocalSmallDryRun;
@@ -4231,14 +4320,14 @@ export const PROGRAM_HANDLERS = {
   cmdQueueClear,
   cmdCheck,
   cmdDraft,
-  cmdShip,
-  cmdRunIssue,
-  cmdRunBrief,
+  cmdShip: withShutdown(cmdShip),
+  cmdRunIssue: withShutdown(cmdRunIssue),
+  cmdRunBrief: withShutdown(cmdRunBrief),
   cmdLocalSmallDryRun,
   cmdLocalSmallOvernight,
   cmdLand,
   cmdResumeApproved,
-  cmdRun: runRun,
+  cmdRun: withShutdown(runRun),
   cmdProxy,
   cmdFactoryd,
   cmdDaemonStart,
@@ -4252,7 +4341,7 @@ export const PROGRAM_HANDLERS = {
   cmdBaselineClear,
   cmdBreakerReset,
   cmdReset,
-  cmdSupervise: runSupervise,
+  cmdSupervise: withShutdown(runSupervise),
   cmdStop,
   cmdResume,
   cmdSteer: runSteerCommand,

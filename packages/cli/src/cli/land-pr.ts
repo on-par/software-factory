@@ -50,6 +50,8 @@ export class AwaitingReviewError extends Error {
   constructor(
     message: string,
     readonly prNumber: number,
+    /** Which gate held the PR: the risk tier at land, or a pending human review (#3905). */
+    readonly gate: 'risk' | 'review' = 'review',
   ) {
     super(message);
   }

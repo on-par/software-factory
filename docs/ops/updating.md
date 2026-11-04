@@ -32,7 +32,7 @@ A non-npm install that asks for `stable` or `prerelease` prints
 ## Opting out
 
 ```sh
-factory factoryd --update-mode manual
+factory daemon run --update-mode manual
 ```
 
 or in `~/.factory/daemon.json`:

@@ -144,6 +144,26 @@ const land = (enforceRisk: boolean) =>
   landIssue(5, repoRoot, 'on-par/software-factory', paths(), octokit, false, undefined, { enforceRisk });
 
 describe('landIssue risk gate (#3381)', () => {
+  it('issueless lands by branch without reading the issue title or issue labels (#3905)', async () => {
+    octokit = makeOctokit(['docs/readme.md']);
+    const res = await landIssue(900, repoRoot, 'on-par/software-factory', paths(), octokit, false, undefined, {
+      branch: 'ship-it/5-fix-the-bug',
+      issueless: true,
+    });
+    expect(res).toEqual({ branch: 'ship-it/5-fix-the-bug', prNumber: 77 });
+    expect(octokit.rest.issues.get).not.toHaveBeenCalled();
+    expect(octokit.rest.issues.listLabelsOnIssue).toHaveBeenCalledTimes(1);
+    expect(octokit.rest.issues.listLabelsOnIssue).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 77 }));
+    expect(octokit.rest.pulls.merge).toHaveBeenCalled();
+  });
+
+  it('issueless without a branch fails with exit 1 (#3905)', async () => {
+    octokit = makeOctokit([]);
+    await expect(
+      landIssue(900, repoRoot, 'on-par/software-factory', paths(), octokit, false, undefined, { issueless: true }),
+    ).rejects.toMatchObject({ code: 1 });
+  });
+
   it('merges a low-risk PR on the default trust tier, with no risk labels', async () => {
     octokit = makeOctokit(['docs/readme.md']);
     await expect(land(true)).resolves.toMatchObject({ prNumber: 77 });
@@ -157,6 +177,7 @@ describe('landIssue risk gate (#3381)', () => {
     const err = await land(true).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AwaitingReviewError);
     expect((err as AwaitingReviewError).prNumber).toBe(77);
+    expect((err as AwaitingReviewError).gate).toBe('risk');
     expect(octokit.rest.pulls.merge).not.toHaveBeenCalled();
     expect(octokit.rest.issues.addLabels).toHaveBeenCalledWith(
       expect.objectContaining({ issue_number: 77, labels: ['risk:high', 'needs-human'] }),

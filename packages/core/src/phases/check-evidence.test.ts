@@ -122,6 +122,24 @@ describe('appendEvidencePlanStep', () => {
     expect(seen).toBe('vitest');
   });
 
+  it('passes workspace test runners found through a root fan-out script to the evidence runner', async () => {
+    const { ctx, worktree } = await fixture([{ kind: 'command', claim: 'build', command: 'test', passWhen: 'ok' }]);
+    const root = { scripts: { test: 'npm run test --workspaces --if-present' }, workspaces: ['apps/*'] };
+    await writeFile(join(worktree, '.factory', 'config.json'), JSON.stringify({ version: 2 }));
+    await mkdir(join(worktree, 'apps', 'web'), { recursive: true });
+    await writeFile(
+      join(worktree, 'apps', 'web', 'package.json'),
+      JSON.stringify({ name: 'web', scripts: { test: 'vitest run' } }),
+    );
+    ctx.probe = { ...ctx.probe!, packageJson: { status: 'loaded', value: root } };
+    let seen: unknown;
+    await appendEvidencePlanStep(summary, ctx, null, async (_entries, _allowlist, runnerContext) => {
+      seen = [runnerContext.testRunner, runnerContext.workspaceTestRunners];
+      return [];
+    });
+    expect(seen).toEqual([null, [{ dir: 'apps/web', name: 'web', runner: 'vitest', manager: 'npm' }]]);
+  });
+
   it('fails weak fail-to-pass proof with structured base and head outcomes for rework', async () => {
     const { ctx } = await fixture([{ kind: 'fail-to-pass-test', claim: 'new behavior', test: 'src/new.test.ts' }]);
     const weakProof = {

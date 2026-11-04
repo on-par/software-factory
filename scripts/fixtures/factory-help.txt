@@ -1,7 +1,7 @@
 First step: run `factory doctor` to check your setup and see what to fix.
 
 Prerequisites:
-  - Claude Code CLI installed and authenticated (Claude subscription): https://claude.com/claude-code
+  - A supported coding agent CLI installed and authenticated: Claude Code, Codex, OpenCode or Pi (`factory doctor` shows which are ready)
   - GitHub CLI authenticated: gh auth login
   - GITHUB_TOKEN or GH_TOKEN set (falls back to `gh auth token`)
 Run inside a git repository with a GitHub remote.
@@ -22,13 +22,14 @@ Run work:
   run [options]                          Claim queued issues (factory:queued labels) and ship them, lanes in parallel; merges only when auto-merge is on
   supervise [options]                    Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
   land [options] <issue>                 Squash-merge the issue's open PR once CI is green, then remove its worktree (left open if CI fails or review is pending)
-  resume-approved [options]              Land open factory PRs (factory/*, plus legacy ship-it/*) whose review is now approved; skip the rest
+  resume-approved [options]              Land open factory PRs (factory/* or the configured prefix) whose review is now approved; skip the rest
   stop [options]                         Tell running lanes to halt after their current issue
   resume [options] [issue]               Clear a stop so lanes pick up new issues again; with <issue> --from check, re-run CHECK on a build kept after an environment failure
+  steer [options] <ref>                  Record a human or bot steer on the run for an issue or PR (appended to state/runs/issue-<n>.json)
 
 Setup:
   init [options]                         Set up .factory/ in this repo (config, constitution, queue file, .gitignore) and check model reachability
-  doctor [options]                       Check your environment (git, agent install and sign-in, gh auth, GitHub token, npm, sandbox, .factory/)
+  doctor [options]                       Check your environment (git, agent install and sign-in, gh auth, GitHub token, npm, sandbox, .factory/, and the build/test/lint commands CHECK will run)
   constitution [options]                 Manage product constitutions — .factory/constitution.md in this repo is the source of truth
   models [options]                       List models with their tiers, cost per 1M tokens, and availability
   harness                                Check a harness declared under harnesses: in .factory/config
@@ -37,25 +38,30 @@ Setup:
 
 Queue:
   queue                                  Manage the GitHub-label work queue (list, add, clear, reconcile, migrate)
-  unpark [options] <issue>               Unpark a factory:parked issue: remove factory:parked and re-queue it in its lane with a fresh order label (same path as `queue add`)
+  unpark [options] <issue>               Unpark a factory:parked issue: remove factory:parked and re-queue it at the back of its lane with a fresh order label (same path as `queue add`)
   triage [options]                       Have a model propose a queue from open issues into .factory/state/queue.proposed
-  check|ready [options] <issue>          Check an issue before queuing: required fields and whether the size gate runs it as-is or would split it, plus an advisory INVEST report (read-only, optional --deep model review; exit 0 ready, 1 missing fields or ungradeable criteria, 2 invalid --deep output, 3 would split)
+  check|ready [options] <issue>          Check an issue before queuing: the model readiness verdict (ready, ready-with-assumptions, not-ready) with its questions or assumptions, plus advisory fields, criteria, size and INVEST (read-only; exit 0 ready, 1 not-ready, 2 judge or --deep error, 3 would split; --no-judge: heading check, exit 1 missing fields)
+  draft [options]                        Draft a factory-check-ready issue from a free-text idea (--text, --file, or stdin): one triage-tier model call plus at most one repair, scored like `check --no-judge`. Prints Markdown, or one JSON object with --json. Never files, writes the queue or writes files (exit 0 ready, 1 not ready, 2 model or input error, 3 would split)
   feedback [options] <pr-url>            File one factory issue (bug, factory:needs-triage) from a PR's human review findings
   filing                                 Inspect upstream factory reports (nothing is sent)
 
 Observe:
   status [options]                       Show active runs, the GitHub queue, provider health, and recent events
   runs [options]                         Print per-issue run state from the local runs directory as one JSON object, newest first (read-only)
-  logs [options]                         Print pipeline events from .factory/events.ndjson (--follow to tail)
+  logs [options]                         Print pipeline events from .factory/state/events.ndjson (--follow to tail, --limit/--since to read only part)
   tui [options]                          Live read-only view of the current run (q to quit)
   cost [options]                         Show recorded model spend by model (--issue, --since, --limit to narrow)
   usage [options]                        Report 5-hour subscription usage (falls back to a list-price estimate)
   kpis [options]                         Compute factory health KPIs and record a trend snapshot
   classifier                             Inspect or backtest the shadow PR classifier track record
+  report [options]                       Print autonomy reports from local factory state
+  risk [options] <pr>                    Print a PR's risk tier and each matched rule (read-only)
   garden [options]                       Read-only report of recurring failure patterns in local events, deduped against open issues by GitHub search
 
 Advanced / experimental:
-  worktree                               Clean up stale factory worktrees (gc)
+  worktree                               Clean up stale factory worktrees (gc) and keep/release one for manual work
+  breaker                                Inspect and reset provider circuit breakers
+  baseline                               Inspect and clear the baseline (base SHA) checker result cache
   reset [options] <issue...>             Remove an issue's local factory state (worktree, local branch, plan/phase files, rework history, logs, leases) so the next run starts fresh. A worktree or branch with uncommitted changes or unpushed commits is kept unless --force is passed. Do not run while that issue's lane is active. Preview with --dry-run
   daemon                                 Manage factoryd, the long-running background service for this user
   self-update [options]                  Check npm for a newer factory release (--check), or install an exact stable release (--to)

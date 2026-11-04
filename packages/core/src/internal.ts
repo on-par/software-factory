@@ -19,6 +19,8 @@ export { dedupGardenClusters, filterGardenOnlyNew, markGardenTrackingUnknown } f
 // Failure fingerprint & evidence
 export type { FingerprintedFailure } from './types/index.js';
 export * from './config/provider-order-exports.js';
+export { checkInPlaceCheckout, setupInPlaceCheckout, type InPlaceCheckoutProblem } from './utils/in-place.js';
+export { inPlaceWorkspace } from './run/ports.js';
 // Auto-file a fingerprinted bug (#373)
 export type { FileBugResult, FilingGitHubClient } from './filing/index.js';
 export { createOctokitFilingClient, DEFAULT_BUG_LABELS, fileBug } from './filing/index.js';
@@ -43,6 +45,8 @@ export {
   resolveTrustTier,
 } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix, resolveHostMaxBuilds } from './config/index.js';
+// Signal shutdown registry (#1615)
+export { killTrackedProcessGroups, registerProcessGroup, trackedProcessGroups } from './environment/process-groups.js';
 export { evaluateLoadGuard, formatLoadHold, readHostLoad, type LoadGuardDecision } from './environment/load-guard.js';
 export {
   claimDiskAlert,
@@ -223,7 +227,15 @@ export {
   type QueueBackend,
   type QueueBackendClaim,
   type QueueBackendOptions,
+  type QueueBackendKind,
+  type QueueBackendReapRow,
 } from './queue/queue-backend.js';
+export {
+  createLinearQueueBackend,
+  resolveLinearProjectForRepo,
+  type LinearQueueBackendOptions,
+} from './queue/linear-queue-backend.js';
+export { createLinearQueueGraphqlClient, LINEAR_LEASE_ATTACHMENT_URL } from './queue/linear-queue.js';
 export { formatQueueOrderConflict, type QueueOrderConflict } from './queue/queue-order.js';
 
 // Factory App admission-state compatibility (#1497)
@@ -244,6 +256,7 @@ export { runUnpark, UnparkError } from './queue/unpark.js';
 export type { OrderCollision, UnparkInput, UnparkJson } from './queue/unpark.js';
 export { sweepOrphanDrafts } from './queue/orphan-drafts.js';
 export { resolveQueueClaimSettleMs } from './queue/claim-settle.js';
+export { resolveLaneDiscoveryIntervalMs } from './queue/lane-discovery-interval.js';
 export { DEFAULT_MAX_CLOCK_SKEW_MS, measureGithubClockSkew, resolveQueueMaxClockSkewMs } from './queue/clock-skew.js';
 // Green-and-ready PR reporting (#1000)
 export type { UnmergedGreenPr } from './utils/green-prs.js';

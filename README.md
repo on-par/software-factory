@@ -38,7 +38,7 @@ packages/
 └── tui/              @on-par/factory-tui        read-only Ink TUI for a live run
 ```
 
-Packages marked (private) are not published to npm. For the dependency graph and per-package detail, see [docs/architecture.md](docs/architecture.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md) and the rules in [AGENTS.md](AGENTS.md).
+For the dependency graph and per-package detail, see [docs/architecture.md](docs/architecture.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md) and the rules in [AGENTS.md](AGENTS.md).
 
 ## Quick start
 
@@ -97,7 +97,7 @@ To run unattended, the factory starts agent CLIs with their permission prompts t
 
 Each build runs in a separate git worktree (under `~/.factory/worktrees/<owner>/<repo>/` on a `factory/` branch; set `worktree.parent` to move it and `--branch-prefix` to change the prefix), never in your main checkout. Where available, agent runs are wrapped in an OS sandbox (`sandbox-exec` on macOS, `firejail` on Linux). The sandbox denies agent reads of `~/.ssh`, `~/.aws`, `~/.gnupg` and `~/.config/gh`. The files agents need to sign in stay readable: `~/.claude`, `~/.claude.json`, a `CLAUDE_CONFIG_DIR` profile, `~/.codex` and the macOS keychain. git over ssh, gpg signing and `gh` therefore do not work inside the sandbox. `factory doctor` warns when no sandbox runtime is found; its `codex installed` line then reports the preflight result: Codex runs without its own sandbox (`--sandbox danger-full-access`) by default. To opt in to Codex's `--sandbox workspace-write` sandbox, set `sandbox.codexSandbox: workspace-write`; under it, list tasks under `sandbox.codexFullAccessTasks` to grant full access. The agents still run as you, with your file permissions and your GitHub token, and builds run the target repo's tests and install its dependencies. Only point the factory at repos and issues you trust. Which hosts agents may reach, the registry hosts pre-allowed per ecosystem, and telemetry handling are in [docs/egress.md](docs/egress.md).
 
-The factory never merges by default. `factory ship` and `factory run-issue` never merge; they stop at the PR, which is marked ready for review once CI passes. `factory run` and `factory supervise` merge only if you turn auto-merge on (`FACTORY_MERGE=1`, `run.merge.auto: true`, or `--auto-merge`). The GitHub Actions wrapper (`factory-run.yml`) sets `FACTORY_MERGE=1` and runs `factory land <N>` after a successful `run-issue` or `ship`; see [docs/runbooks/github-actions-run.md](docs/runbooks/github-actions-run.md#merging). `FACTORY_MERGE_ADMIN=1` lets the token merge through unmet branch protection; set it only when you mean to. Full rules: [docs/config.example.yaml](docs/config.example.yaml).
+The factory never merges by default. `factory ship` and `factory run-issue` never merge unless you pass `--merge` to `run-issue` or `run-brief`; otherwise they stop at the PR, which is marked ready for review once CI passes. `factory run` and `factory supervise` merge only if you turn auto-merge on (`FACTORY_MERGE=1`, `run.merge.auto: true`, or `--auto-merge`). The GitHub Actions wrapper (`factory-run.yml`) sets `FACTORY_MERGE=1` and runs `factory land <N>` after a successful `run-issue` or `ship`; see [docs/runbooks/github-actions-run.md](docs/runbooks/github-actions-run.md#merging). `FACTORY_MERGE_ADMIN=1` lets the token merge through unmet branch protection; set it only when you mean to. Full rules: [docs/config.example.yaml](docs/config.example.yaml).
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
@@ -111,7 +111,7 @@ version: 2
 
 Every other key is optional. `pr.footer` defaults to `This PR was made by Software Factory`; set a non-empty string to replace it verbatim, or `""` to remove the footer and its separator. It supports no templating or token substitution. [`docs/config.example.yaml`](docs/config.example.yaml) lists each key the factory reads, with its default and what it does. It is generated from the config schemas (`npm run config-example`) and a test fails when it drifts, so it matches the code. Copy only the keys you want to change (comments included) into `.factory/config.yaml`; `.factory/config.json` is still read for existing repos, and `factory migrate --to-yaml` converts it. `factory status --kpis` prints the effective config.
 
-**Tracker.** The `tracker` key picks the ticket tracker per repo: `kind` is `github` (default) or `linear`. A `linear` block holds `teamKey`, `projects` (Linear project name or id → `owner/repo`), `readyLabel` (default `factory:ready`), `laneLabelGroup` (default `lane`) and `states.ready` / `states.inProgress` / `states.parked` (default `Todo` / `In Progress` / `Todo`). The API key comes only from the `LINEAR_API_KEY` environment variable, never from config. So far only `factory doctor` reads Linear: it checks the key and names any project with ready issues but no repo mapping. The Linear queue and lanes come in later slices of #3872.
+**Tracker.** The `tracker` key picks the ticket tracker per repo: `kind` is `github` (default) or `linear`. A `linear` block holds `teamKey`, `projects` (Linear project name or id → `owner/repo`), `readyLabel` (default `factory:ready`), `laneLabelGroup` (default `lane`) and `states.ready` / `states.inProgress` / `states.parked` (default `Todo` / `In Progress` / `Todo`). The API key comes only from the `LINEAR_API_KEY` environment variable, never from config. `factory doctor` checks the key and names any project with ready issues but no repo mapping. `factory run`, `factory supervise` and `factory status` read the queue from Linear; building Linear issues in lanes and write-back come in later slices of #3872.
 
 ## Updating
 
@@ -133,6 +133,8 @@ The most-used commands, by the group `factory --help` lists them under. Run `fac
 # Run work
 factory ship <N>                    Plan → build → check one issue and open a ready-for-review PR; never merges
 factory run-issue <N>               Like ship, but loads the issue first and exits 2 if it cannot be found
+factory run-issue <N> --merge        After SHIP, wait for CI and land the PR through the run merge gates; exits 0 merged, 10 held, 11 CI failed, 12 timed out, 13 land failed, 1 parked before a PR
+factory run-issue <N> --in-place   Build in the current clean checkout, no worktree (disposable containers)
 factory run-issue <N> --stack        Build an oversized <N> as a stacked PR set in one run (the size gate default)
 factory run-issue <N> --base-branch <ref>  Start from origin/<ref> and open the PR against <ref> (also ship, run-brief)
 factory run-brief a.md b.md --stack   Open the briefs as a PR stack (each on the previous brief's PR head)

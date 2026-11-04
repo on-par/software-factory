@@ -22,7 +22,7 @@ see [Bring your own agent](#bring-your-own-agent).
 ## Choosing and routing agents
 
 Models whose CLI is not installed are skipped. On a machine with one CLI, every phase runs on that CLI's
-models and PLAN picks its build route. With several CLIs, pin a phase in `.factory/config.json`
+models and PLAN picks its build route. With several CLIs, pin a phase in `.factory/config.yaml`
 (`models.pins.plan`, `build`, `checker`, `triage`), set `route`, or reorder `tiers`.
 `factory triage --model <id>` picks the triage model for one run. See [models.md](models.md).
 
@@ -174,6 +174,10 @@ Run `factory doctor` in the repo. The `coding agent` line lists `pi`, and the Pi
 `AZURE_OPENAI_API_KEY` in the environment. `factory models --doctor` runs
 `pi auth check --model <providerModel> --no-refresh` for each pinned Pi model (exit 0 is ready, 1 is
 not ready, 2 is invalid).
+
+## Running in the current checkout
+
+On a disposable, one-job container the clone is already the isolation boundary. `factory run-issue <N> --in-place` (or `FACTORY_WORKSPACE=in-place`) runs plan, build, check and ship in the current checkout on the normal factory branch, with no second worktree and no second install. It refuses to start, before PLAN, unless the checkout is clean and on the default branch at the fetched `origin/<default>` tip. The size gate is off in place, and `--base-branch` and `--stack` are refused. Worktree mode stays the default.
 
 ## Recipes
 

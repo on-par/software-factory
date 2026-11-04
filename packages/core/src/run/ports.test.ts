@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +13,7 @@ import type { LocalOnlyPolicy } from '../work/local-only.js';
 import {
   acquireLaneEnvironment,
   type Environment,
+  inPlaceWorkspace,
   localOnlyWorkspace,
   simWorkspace,
   type Workspace,
@@ -35,6 +37,27 @@ describe('localOnlyWorkspace', () => {
     const ws: Workspace = localOnlyWorkspace(policy);
     expect(ws.path).toBe(policy.workspace);
     await expect(ws.dispose()).resolves.toBeUndefined();
+  });
+});
+
+describe('inPlaceWorkspace', () => {
+  it('inPlaceWorkspace path is the repo root and forwards the remote branch', async () => {
+    const setup = vi.fn().mockResolvedValue({ base: 'origin/main', head: 'x', remoteBranch: { sha: 'abc' } });
+    const findOpenPr = vi.fn();
+    const ws = await inPlaceWorkspace({ repoRoot: '/repo', branch: 'b', findOpenPr, setup });
+    expect(ws.path).toBe('/repo');
+    expect(ws.remoteBranch).toEqual({ sha: 'abc' });
+    expect(setup).toHaveBeenCalledWith('/repo', 'b', undefined, { findOpenPr });
+  });
+
+  it('inPlaceWorkspace dispose leaves the checkout in place', async () => {
+    await withTmpDir(async (dir) => {
+      const setup = vi.fn().mockResolvedValue({ base: 'origin/main', head: 'x', remoteBranch: null });
+      const ws = await inPlaceWorkspace({ repoRoot: dir, branch: 'b', setup });
+      expect(ws.remoteBranch).toBeUndefined();
+      await ws.dispose();
+      expect(existsSync(dir)).toBe(true);
+    });
   });
 });
 

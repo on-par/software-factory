@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { KillOutcome } from '../environment/process-groups.js';
+import { trackedProcessGroups } from '../environment/process-groups.js';
 import { runCommand } from './command-runner.js';
 
 const tempDirs = new Set<string>();
@@ -30,6 +31,19 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 describe('runCommand', () => {
+  it('registers the detached pid while running and removes it after exit', async () => {
+    let during = false;
+    let pid: number | undefined;
+    await runCommand([process.execPath, '-e', 'setTimeout(()=>{},200)'], {
+      onPgid: (p) => {
+        pid = p;
+        during = trackedProcessGroups().includes(p);
+      },
+    });
+    expect(during).toBe(true);
+    expect(trackedProcessGroups()).not.toContain(pid);
+  });
+
   it('resolves with ok: true on success', async () => {
     const result = await runCommand([process.execPath, '-e', 'console.log("hi")']);
 

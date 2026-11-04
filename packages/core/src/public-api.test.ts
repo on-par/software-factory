@@ -303,14 +303,20 @@ const EXTRA_INTERNAL_KEYS = [
 ];
 const INTERNAL_API_KEYS = [
   'MAX_REWORK_ROUNDS',
+  'killTrackedProcessGroups',
   'loadPrRunState',
   'prRunStatusFor',
   'reconcilePrRunState',
+  'registerProcessGroup',
   'savePrRunState',
   'UnsupportedQueueBackendError', // #3890
   'createGithubQueueBackend', // #3890
   'createQueueBackend', // #3890
   'LINEAR_API_KEY_ENV',
+  'LINEAR_LEASE_ATTACHMENT_URL', // #3918
+  'createLinearQueueBackend', // #3918
+  'createLinearQueueGraphqlClient', // #3918
+  'resolveLinearProjectForRepo', // #3918
   'probeLinearSetup',
   'resolveTrackerConfig',
   'listBlockedBy',
@@ -318,7 +324,7 @@ const INTERNAL_API_KEYS = [
   'isExplicitStackMode',
   ...'AGENT_MEMORY_DIR AGENT_MEMORY_MAX_BYTES agentMemoryPath readAgentMemory'.split(' '), // #3624
   ...'renderAgentMemory scanAgentMemory loadAgentMemoryCtx'.split(' '),
-  ...'resolveCompileCommand resolveLintCommands resolveTestsCommand'.split(' '), // #3473, #1590
+  ...'resolveCompileCommand resolveLintCommands resolveTestsCommand resolveWorkspaceTestRunners'.split(' '), // #3473, #1590, #3913
   ...'describeChecksProbe holdRunConfigSnapshot'.split(' '), // #3600
   // `factory init --detect-checks`: heuristics, agent prompt and reply, shell-free tokenizer
   ...'CHECK_KINDS buildDetectChecksPrompt detectCheckHeuristics heuristicProposal parseDetectedChecks'.split(' '),
@@ -329,6 +335,9 @@ const INTERNAL_API_KEYS = [
   'BASE_HEALTH_CHECKERS',
   'checkBaseHealth',
   'checkResumeBaseDrift',
+  'checkInPlaceCheckout',
+  'setupInPlaceCheckout',
+  'inPlaceWorkspace',
   'codexChatgptSessionState',
   'hasClaudeLoginEvidence',
   // #3214
@@ -347,6 +356,7 @@ const INTERNAL_API_KEYS = [
   'readOpenFactoryDrafts',
   'formatOpenFactoryDraftsLine',
   'runStateFile',
+  'trackedProcessGroups',
   'writeIssueRunState',
   'createPlanReuseStore',
   // Check-resume record (#2564)
@@ -472,7 +482,7 @@ const INTERNAL_API_KEYS = [
   'resolveEffectiveConfig',
   'resolveExperimental',
   'resolveLocalOnly',
-  ...'resolveHostMaxBuilds resolveQueueClaimSettleMs evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL DEFAULT_MAX_CLOCK_SKEW_MS measureGithubClockSkew resolveQueueMaxClockSkewMs'.split(
+  ...'resolveHostMaxBuilds resolveQueueClaimSettleMs resolveLaneDiscoveryIntervalMs evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL DEFAULT_MAX_CLOCK_SKEW_MS measureGithubClockSkew resolveQueueMaxClockSkewMs'.split(
     ' ',
   ), // #3380, #3381, #3149
   ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles publishRiskReceipt renderRiskReceipt'.split(' '), // #3386
