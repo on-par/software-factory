@@ -70,10 +70,10 @@ export function stripBriefIds(text: string): string {
 
 /** Summary line for brief-driven work: what it covers (the brief's title) and the open PR it builds on. Never the brief's id, digest or path. */
 export function briefSummaryLine(title: string, basePr?: number): string {
-  const what = stripBriefIds(title)
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[.!?…]+$/, '');
+  let what = stripBriefIds(title);
+  while (what.length > 0 && '.!?…'.includes(what.charAt(what.length - 1))) {
+    what = what.slice(0, -1);
+  }
   return `${what}.${basePr === undefined ? '' : ` Builds on #${basePr}.`}`;
 }
 
