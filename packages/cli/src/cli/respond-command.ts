@@ -31,12 +31,24 @@ export interface RespondDeps {
   ) => Promise<string>;
   /** Parks the issue at the review-rework cap with one comment. */
   parkAtCap: typeof parkAtReviewReworkCap;
+  publishParkComment: typeof publishParkComment;
   now: () => Date;
   out: (line: string) => void;
 }
 
-function defaultDeps(): RespondDeps {
-  const runtime = shipRuntime();
+/** The slice of the ship runtime that respond's production deps are wired from. */
+export interface RespondRuntime<Shell> {
+  resolveShellOps: (overrides: Record<string, never>) => Shell;
+  getRepoRoot: (shell: Shell) => Promise<string>;
+  getGitHubRepo: (shell: Shell) => Promise<string>;
+  getOctokit: (shell: Shell) => Octokit;
+  resolveConfigLoaders: (overrides: Record<string, never>) => {
+    loadFactoryConfigForRepo: (configPath: string) => FactoryConfig;
+  };
+}
+
+/** The production deps, wired from the ship runtime. */
+export function respondDepsFrom<Shell>(runtime: RespondRuntime<Shell>): RespondDeps {
   const shell = runtime.resolveShellOps({});
   return {
     getRepoRoot: () => runtime.getRepoRoot(shell),
@@ -45,6 +57,7 @@ function defaultDeps(): RespondDeps {
     loadConfig: (configPath) => runtime.resolveConfigLoaders({}).loadFactoryConfigForRepo(configPath),
     shipIssue,
     parkAtCap: parkAtReviewReworkCap,
+    publishParkComment,
     now: () => new Date(),
     out: console.log,
   };
@@ -54,7 +67,7 @@ function defaultDeps(): RespondDeps {
 export async function cmdRespond(
   pr: string,
   opts: { json?: boolean },
-  deps: RespondDeps = defaultDeps(),
+  deps: RespondDeps = respondDepsFrom(shipRuntime()),
 ): Promise<void> {
   if (!/^#?\d+$/.test(pr.trim())) throw new CliExitError(`factory respond: '${pr}' is not a pull request number`, 2);
   const prNumber = Number(pr.trim().replace('#', ''));
@@ -101,7 +114,7 @@ export async function cmdRespond(
       count,
       reviewIds: [reviewId],
       source: 'feedback',
-      publishComment: (input) => publishParkComment({ octokit, repo: ghRepo, input }),
+      publishComment: (input) => deps.publishParkComment({ octokit, repo: ghRepo, input }),
     });
     throw new CliExitError(
       `factory respond: #${issue} is parked at the review-rework cap (${count} of ${cap}); resolve by hand, then run \`factory unpark ${issue}\``,

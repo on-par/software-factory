@@ -5,15 +5,7 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CliExitError } from './errors.js';
-import { cmdRespond, type RespondDeps } from './respond-command.js';
-
-const runtime = vi.hoisted(() => ({ current: undefined as unknown }));
-vi.mock('./ship-runtime.js', () => ({ shipRuntime: () => runtime.current }));
-const publishParkComment = vi.hoisted(() => vi.fn(async () => {}));
-vi.mock('@on-par/factory-core/internal', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@on-par/factory-core/internal')>()),
-  publishParkComment,
-}));
+import { cmdRespond, respondDepsFrom, type RespondDeps, type RespondRuntime } from './respond-command.js';
 
 const tmp = createTempDirs();
 afterEach(async () => {
@@ -34,6 +26,7 @@ async function setup(pull: Pull = open, config: Partial<FactoryConfig> = {}) {
   });
   const shipIssue = vi.fn<RespondDeps['shipIssue']>(async () => 'shipped');
   const parkAtCap = vi.fn<RespondDeps['parkAtCap']>(async () => {});
+  const publishParkComment = vi.fn<RespondDeps['publishParkComment']>(async () => ({ ok: true }) as never);
   const deps: RespondDeps = {
     getRepoRoot: async () => repoRoot,
     getGitHubRepo: async () => 'o/r',
@@ -41,10 +34,11 @@ async function setup(pull: Pull = open, config: Partial<FactoryConfig> = {}) {
     loadConfig: () => config as FactoryConfig,
     shipIssue,
     parkAtCap,
+    publishParkComment,
     now: () => new Date('2026-01-02T00:00:00.000Z'),
     out: (l) => out.push(l),
   };
-  return { deps, out, shipIssue, parkAtCap, repoRoot };
+  return { deps, out, shipIssue, parkAtCap, publishParkComment, repoRoot };
 }
 
 describe('cmdRespond', () => {
@@ -122,7 +116,9 @@ describe('cmdRespond', () => {
   });
 
   it('publishes the park comment through the PR octokit and repo at the cap', async () => {
-    const { deps, parkAtCap } = await setup(open, { queue: { max_review_rework_runs: 0 } } as never);
+    const { deps, parkAtCap, publishParkComment } = await setup(open, {
+      queue: { max_review_rework_runs: 0 },
+    } as never);
     const input = { issue: 42 } as never;
     parkAtCap.mockImplementation(async (args) => {
       await args.publishComment?.(input);
@@ -133,16 +129,22 @@ describe('cmdRespond', () => {
 
   it('wires the default deps from the ship runtime', async () => {
     const { deps } = await setup({ ...open, state: 'closed' });
-    const shell = {};
+    const shell = { kind: 'fake-shell' };
     const loadFactoryConfigForRepo = vi.fn(() => ({}) as FactoryConfig);
-    runtime.current = {
+    const runtime: RespondRuntime<typeof shell> = {
       resolveShellOps: vi.fn(() => shell),
       getRepoRoot: vi.fn(() => deps.getRepoRoot()),
       getGitHubRepo: vi.fn(async () => 'o/r'),
       getOctokit: vi.fn(() => deps.getOctokit()),
       resolveConfigLoaders: vi.fn(() => ({ loadFactoryConfigForRepo })),
     };
-    await expect(cmdRespond('7', {})).rejects.toMatchObject({ code: 1, message: expect.stringContaining('is closed') });
+    const wired = respondDepsFrom(runtime);
+    expect(wired.now()).toBeInstanceOf(Date);
+    await expect(cmdRespond('7', {}, wired)).rejects.toMatchObject({
+      code: 1,
+      message: expect.stringContaining('is closed'),
+    });
+    expect(runtime.getOctokit).toHaveBeenCalledWith(shell);
     expect(loadFactoryConfigForRepo).toHaveBeenCalledOnce();
   });
 });
