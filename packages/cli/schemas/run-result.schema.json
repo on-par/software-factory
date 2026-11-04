@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "issue": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "repo": {
+      "type": ["string", "null"]
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["merged", "pr-open", "held", "ci-failed", "parked", "failed"]
+    },
+    "exitReason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pr": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "number": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "url": {
+              "type": ["string", "null"]
+            },
+            "state": {
+              "type": "string",
+              "enum": ["open", "draft", "merged"]
+            }
+          },
+          "required": ["number", "url", "state"],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "branch": {
+      "type": ["string", "null"]
+    },
+    "baseSha": {
+      "type": ["string", "null"]
+    },
+    "headSha": {
+      "type": ["string", "null"]
+    },
+    "startedAt": {
+      "type": "string"
+    },
+    "finishedAt": {
+      "type": "string"
+    },
+    "phases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": ["string", "null"]
+          },
+          "model": {
+            "type": ["string", "null"]
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": ["name", "startedAt", "finishedAt", "model", "attempts"],
+        "additionalProperties": false
+      }
+    },
+    "cost": {
+      "type": "object",
+      "properties": {
+        "usd": {
+          "type": "number"
+        },
+        "byModel": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "number"
+          }
+        }
+      },
+      "required": ["usd", "byModel"],
+      "additionalProperties": false
+    },
+    "reworkRounds": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "issue",
+    "repo",
+    "outcome",
+    "exitReason",
+    "pr",
+    "branch",
+    "baseSha",
+    "headSha",
+    "startedAt",
+    "finishedAt",
+    "phases",
+    "cost",
+    "reworkRounds"
+  ],
+  "additionalProperties": false
+}

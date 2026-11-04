@@ -29,6 +29,7 @@ import {
   queueAddJsonSchema,
   resumeJsonSchema,
   runDiffstatJsonSchema,
+  runResultJsonSchema,
   runsJsonSchema,
   statusJsonSchema,
   stopJsonSchema,
@@ -93,6 +94,7 @@ const generatedContracts = [
   ['unpark.schema.json', 'unpark.json', unparkJsonSchema],
   ['check.schema.json', 'check.json', checkJsonSchema],
   ['draft.schema.json', 'draft.json', draftJsonSchema],
+  ['run-result.schema.json', 'run-result.json', runResultJsonSchema],
 ] as const;
 
 const queueLabels = (position: number): string[] => ['factory:queued', 'factory:lane:ops', `factory:order:${position}`];

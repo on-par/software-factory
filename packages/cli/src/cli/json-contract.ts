@@ -427,3 +427,33 @@ export type QueueAddJson = z.infer<typeof queueAddJsonSchema>;
 export type StopResumeJson = z.infer<typeof stopJsonSchema> | z.infer<typeof resumeJsonSchema>;
 /** Unpark result (#2277): `collision` reports an order held without `factory:queued` (#2988). Additive changes only; bump schemaVersion on a breaking change. */
 export type UnparkJson = z.infer<typeof unparkJsonSchema>;
+
+/** `factory run-issue|run-brief|ship --json` final run result (#3907). Additive changes only; bump schemaVersion on a breaking change. */
+export const runResultJsonSchema = z.object({
+  schemaVersion: z.literal(1),
+  issue: z.number().int(),
+  repo: z.string().nullable(),
+  outcome: z.enum(['merged', 'pr-open', 'held', 'ci-failed', 'parked', 'failed']),
+  exitReason: z.string().min(1),
+  pr: z
+    .object({ number: z.number().int(), url: z.string().nullable(), state: z.enum(['open', 'draft', 'merged']) })
+    .nullable(),
+  branch: z.string().nullable(),
+  baseSha: z.string().nullable(),
+  headSha: z.string().nullable(),
+  startedAt: z.string(),
+  finishedAt: z.string(),
+  phases: z.array(
+    z.object({
+      name: z.string(),
+      startedAt: z.string(),
+      finishedAt: z.string().nullable(),
+      model: z.string().nullable(),
+      attempts: z.number().int(),
+    }),
+  ),
+  cost: z.object({ usd: z.number(), byModel: z.record(z.string(), z.number()) }),
+  reworkRounds: z.number().int(),
+});
+export type RunResultJson = z.infer<typeof runResultJsonSchema>;
+export type RunResultOutcome = RunResultJson['outcome'];

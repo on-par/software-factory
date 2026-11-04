@@ -36,6 +36,7 @@ import { CliExitError } from './errors.js';
 import { availableAgentClis, missingAgentCliMessage, notInitializedMessage } from './first-run.js';
 import { withRepoRunLock } from './repo-run-lock.js';
 import { recordDraftPrFlag } from './run-flags.js';
+import { validateRunReportFlags, withRunReport } from './run-report.js';
 import { shipIssue } from './ship.js';
 import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
 import {
@@ -86,6 +87,9 @@ export interface RunBriefOptions {
   merge?: boolean;
   mergeTimeout?: string;
   admin?: boolean;
+  /** `--json` / `--export` (#3907): report the run result and copy its state out. */
+  json?: boolean;
+  export?: string;
 }
 
 /** Runs each brief through the one-shot pipeline in argv order with the same flags. The checks that
@@ -107,6 +111,7 @@ export async function cmdRunBrief(files: readonly string[], opts: RunBriefOption
     );
   }
   checkMergeFlags(opts);
+  validateRunReportFlags({ json: opts.json, export: opts.export, stack: opts.stack, briefCount: files.length });
   const env = await prepareRunBrief(opts, rt);
   if (files.length === 1 && opts.stack) {
     await runStackedBrief(files[0], opts, env, rt);
@@ -259,69 +264,77 @@ async function runOneBrief(
   // Pre-flight: a malformed brief exits here, so BUILD never starts.
   const { work, digest, runNum } = await resolveBrief(briefPath, env, rt);
 
+  const { json, export: exportDir, ...shipFlags } = opts;
   let outcome: RunOutcome | undefined;
-  await withRepoRunLock(
-    paths,
-    'factory run-brief',
-    async () => {
-      recordDraftPrFlag(paths.runFlags, opts.draftPr);
-      console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
-      logEvent(paths.events, 'work-source', runNum, `inline local brief ${briefPath} (sha256 ${digest})`);
-      if (localOnly) {
-        console.log(styleText('cyan', `local-only: workspace ${localOnly.workspace} — publishing disabled`));
-        logEvent(
-          paths.events,
-          'local-only',
-          runNum,
-          `caller-provided workspace ${localOnly.workspace} — publishing disabled`,
-        );
-      }
+  await withRunReport(
+    { json, export: exportDir },
+    { issue: runNum, repoRoot, paths, getRepo: async () => ghRepo },
+    (report) =>
+      withRepoRunLock(
+        paths,
+        'factory run-brief',
+        async () => {
+          recordDraftPrFlag(paths.runFlags, opts.draftPr);
+          console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
+          logEvent(paths.events, 'work-source', runNum, `inline local brief ${briefPath} (sha256 ${digest})`);
+          if (localOnly) {
+            console.log(styleText('cyan', `local-only: workspace ${localOnly.workspace} — publishing disabled`));
+            logEvent(
+              paths.events,
+              'local-only',
+              runNum,
+              `caller-provided workspace ${localOnly.workspace} — publishing disabled`,
+            );
+          }
 
-      const priorEvents = readEvents(paths.events, { includeSegments: true });
-      if (hasUnresolvedPark(priorEvents, String(runNum))) {
-        logEvent(paths.events, 'human-restarted', runNum, 'manual retry of a previously parked/failed run', {
-          actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
-        });
-      }
+          const priorEvents = readEvents(paths.events, { includeSegments: true });
+          if (hasUnresolvedPark(priorEvents, String(runNum))) {
+            logEvent(paths.events, 'human-restarted', runNum, 'manual retry of a previously parked/failed run', {
+              actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
+            });
+          }
 
-      const merge = async () => {
-        const result = await (rt.driveToMerge ?? driveToMerge)({
-          issue: runNum,
-          outcome,
-          repoRoot,
-          ghRepo,
-          paths,
-          timeoutMs:
-            parseMergeTimeout(opts.mergeTimeout) ?? resolveAwaitingCiCapMs(loadFactoryConfigForRepo(paths.config)),
-          ...(opts.admin ? { admin: true } : {}),
-          issueless: true,
-        });
-        exitForMerge(result, `brief ${briefPath}`);
-      };
-      try {
-        await (rt.shipIssue ?? shipIssue)(
-          runNum,
-          { ...opts, branchPrefix },
-          {
-            repoRoot,
-            ghRepo,
-            workRequest: work,
-            workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
-            localOnly,
-            artifactsDir,
-            slicePlanStore: extra?.slicePlanStore,
-            onOutcome: (o) => {
-              outcome = o;
-            },
-          },
-        );
-      } catch (err: any) {
-        if (opts.merge && shouldDriveAfterShipFailure(outcome)) await merge();
-        throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
-      }
-      if (opts.merge) await merge();
-    },
-    { scope: { kind: 'issue', key: workKeyFromIssue(runNum) } },
+          const merge = async () => {
+            const result = await (rt.driveToMerge ?? driveToMerge)({
+              issue: runNum,
+              outcome,
+              repoRoot,
+              ghRepo,
+              paths,
+              timeoutMs:
+                parseMergeTimeout(opts.mergeTimeout) ?? resolveAwaitingCiCapMs(loadFactoryConfigForRepo(paths.config)),
+              ...(opts.admin ? { admin: true } : {}),
+              issueless: true,
+            });
+            report.recordMerge(result);
+            exitForMerge(result, `brief ${briefPath}`);
+          };
+          try {
+            await (rt.shipIssue ?? shipIssue)(
+              runNum,
+              { ...shipFlags, branchPrefix },
+              {
+                repoRoot,
+                ghRepo,
+                workRequest: work,
+                workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
+                localOnly,
+                artifactsDir,
+                slicePlanStore: extra?.slicePlanStore,
+                onOutcome: (o) => {
+                  outcome = o;
+                  report.recordOutcome(o);
+                },
+              },
+            );
+          } catch (err: any) {
+            if (opts.merge && shouldDriveAfterShipFailure(outcome)) await merge();
+            throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
+          }
+          if (opts.merge) await merge();
+        },
+        { scope: { kind: 'issue', key: workKeyFromIssue(runNum) } },
+      ),
   );
   return outcome;
 }
