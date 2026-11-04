@@ -5,7 +5,7 @@ import { execa } from 'execa';
 
 import { basename } from 'node:path';
 
-import { killProcessGroup } from '../environment/process-groups.js';
+import { killProcessGroup, registerProcessGroup } from '../environment/process-groups.js';
 import { childProcessEnv, redactGitHubCredentials } from './github-credentials.js';
 import { spawnSupervisedCommand } from './supervised-exec.js';
 
@@ -83,7 +83,10 @@ async function runCommandDetached(
       });
 
   const pid = child.pid;
+  const deregister = pid !== undefined ? registerProcessGroup(pid) : () => {};
   if (pid !== undefined) options.onPgid?.(pid);
+  child.once('exit', deregister);
+  child.once('error', deregister);
 
   let stdoutLen = 0;
   let stderrLen = 0;

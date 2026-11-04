@@ -43,6 +43,8 @@ export {
   resolveTrustTier,
 } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix, resolveHostMaxBuilds } from './config/index.js';
+// Signal shutdown registry (#1615)
+export { killTrackedProcessGroups, registerProcessGroup, trackedProcessGroups } from './environment/process-groups.js';
 export { evaluateLoadGuard, formatLoadHold, readHostLoad, type LoadGuardDecision } from './environment/load-guard.js';
 export {
   claimDiskAlert,
