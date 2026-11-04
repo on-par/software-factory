@@ -455,3 +455,6 @@ export {
 } from './utils/open-factory-drafts.js';
 
 export { listBlockedBy, type BlockedByItem } from './blockers/dependencies.js';
+
+export { LINEAR_API_KEY_ENV, probeLinearSetup, type LinearPreflightResult } from './work/linear-preflight.js';
+export { resolveTrackerConfig, type TrackerConfig } from './config/tracker-section.js';

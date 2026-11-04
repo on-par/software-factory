@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- A `tracker` config key selects `github` (default) or `linear` per repo, and `factory doctor` checks the Linear setup: a missing or rejected `LINEAR_API_KEY` and any project with ready issues but no repo mapping (#3891).
+
 ### Changed
 
 - Lanes, `factory supervise` and the `factory status` queue band claim, heartbeat, release and list through the WorkKey queue seam, and run state is written with a string `key`; an older factory binary (0.9.27 or earlier) can't read string keys and skips those state files (#3890).
