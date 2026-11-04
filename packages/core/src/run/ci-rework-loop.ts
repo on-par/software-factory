@@ -174,6 +174,7 @@ export async function shipWithCiRework(
     recordedRemoteSha: ports.workspace.remoteBranch?.sha,
     octokit: ports.octokit,
     watchCI: !request.skipCI,
+    syncMain: true,
     ...(request.ciDeadlineMs === undefined ? {} : { ciDeadlineMs: request.ciDeadlineMs }),
     ...(inputs.pr?.draft ? { draft: true } : {}),
     footer: inputs.pr?.footer,

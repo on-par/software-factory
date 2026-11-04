@@ -25,6 +25,8 @@ export interface ShipPhaseOptions {
   branch: string;
   octokit: Octokit;
   watchCI?: boolean;
+  /** Merge origin/main into the branch before pushing a PR against main (#3945). */
+  syncMain?: boolean;
   /** Resolved pr.footer; undefined uses the default, empty string omits it. */
   footer?: string;
   /** Stop at the draft PR: skip mark-ready (#3449). */
