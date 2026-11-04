@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import {
@@ -234,6 +234,26 @@ describe('ConstitutionLoader repo-first resolution', () => {
       expect(c.checkers).toEqual(['compile']);
       expect(c.body).toContain('Consumer body.');
       expect(c.source).toBe('bundled');
+    });
+
+    it('a constitution override replaces the repo constitution instance', async () => {
+      await mkdir(join(repoDir, '.factory'), { recursive: true });
+      await writeFile(join(repoDir, DEFAULT_REPO_CONSTITUTION_PATH), '---\nproduct: repo-one\n---\nRepo body.\n');
+      const file = join(repoDir, 'override.md');
+      await writeFile(file, '---\nproduct: override-one\n---\nOverride body.\n');
+      vi.stubEnv('FACTORY_CONSTITUTION_PATH', file);
+      try {
+        const c = loader.loadRepoConstitution(repoDir)!;
+        expect(c.product).toBe('override-one');
+        expect(c.repoInstance).toEqual({ relPath: file, absPath: file });
+        vi.stubEnv('FACTORY_CONSTITUTION_PATH', '');
+        vi.stubEnv('FACTORY_CONSTITUTION', 'Inline body.');
+        const inline = loader.loadRepoConstitution(repoDir)!;
+        expect(inline.body).toContain('Inline body.');
+        expect(inline.repoInstance).toBeUndefined();
+      } finally {
+        vi.unstubAllEnvs();
+      }
     });
 
     it('honors a non-default relPath argument', async () => {

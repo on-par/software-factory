@@ -20,6 +20,7 @@ export const HELP_GROUPS: readonly HelpGroup[] = [
     commands: [
       'ship',
       'run-issue',
+      'respond',
       'run-brief',
       'run',
       'supervise',

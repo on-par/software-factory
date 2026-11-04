@@ -13,11 +13,14 @@ Multi-agent software factory with boss-worker-checker orchestration
 Options:
   -V, --version                          output the version number
   --state-root <path>                    Keep factory state and config outside the checkout: an absolute path, ~/..., or "auto" (~/.factory/<owner>/<name>); env FACTORY_STATE_ROOT
+  --config <path>                        Use this config file for the run instead of .factory/config.yaml; env FACTORY_CONFIG_PATH / FACTORY_CONFIG_YAML, merged with FACTORY_CONFIG_OVERRIDES
+  --constitution <path>                  Use this constitution file for the run instead of the repo constitution; env FACTORY_CONSTITUTION_PATH / FACTORY_CONSTITUTION
   -h, --help                             display help for command
 
 Run work:
   ship [options] <issue>                 Plan → build → check one GitHub issue and open a ready-for-review PR; never merges (merge later with land)
   run-issue [options] <issue>            Like ship, but loads the issue first and exits 2 before any worktree or PR if it cannot be found
+  respond [options] <pr>                 Run a feedback round on a factory PR: triage new trusted feedback, re-plan or rework, push, reply, resolve fixed threads and re-request review
   run-brief [options] <file> [files...]  Like run-issue, but the work comes from local Markdown briefs; several run in order with the same flags, a failed one does not stop the rest, and any failure exits non-zero
   run [options]                          Claim queued issues (factory:queued labels) and ship them, lanes in parallel; merges only when auto-merge is on
   supervise [options]                    Unattended loop: wait for usage headroom, run the queue, repeat until it is empty

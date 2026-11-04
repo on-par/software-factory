@@ -34,3 +34,10 @@ A run for an issue with an open factory PR keeps its resumable state in one hidd
   `digest-mismatch`, `key-mismatch`, `malformed` or `identity-unavailable` (the token's identity could not be read,
   for example a GitHub App installation token).
 - `pr_state_failed` (info): the PR lookup, restore or save failed. The run continues on local state.
+
+A feedback round on a factory PR (`factory respond <pr>` or a queued review rework, #3910) logs two more:
+
+- `feedback_round_triaged` (info): the round read the PR's unhandled trusted feedback, with the item count and the
+  number triaged actionable, question and out-of-scope.
+- `feedback_round_replied` (info): the round answered its items, with the replies posted, the threads resolved and
+  the reviewers re-requested. A failed reply, resolve or review request logs a `rework` warning and the round goes on.

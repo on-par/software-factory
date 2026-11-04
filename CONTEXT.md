@@ -45,6 +45,10 @@ Giving a claim back: `release(issue, outcome)` in [packages/core/src/queue/githu
 
 One BUILD re-run fed with CHECK failures, capped by `MAX_REWORK_ROUNDS = 3` in [packages/core/src/phases/check.ts](packages/core/src/phases/check.ts); see [ADR-0017](docs/adr/0017-a-rework-round-where-no-model-ran-is-neutral-for-stuck-accounting-and-classified-by-the-router-s-own-failure-reason.md) and [ADR-0141](docs/adr/0141-a-rework-round-is-classified-as-environment-when-every-round-1-failing-checker-also-fails-on-the-base-sha-decided-before-the-rework-loop.md). CI rework rounds are a separate budget ([packages/core/src/run/ci-rework-loop.ts](packages/core/src/run/ci-rework-loop.ts), [ADR-0162](docs/adr/0162-ci-rework-diffs-are-guarded-against-suppression-and-park-as-ci-failed-suppression-attempt.md)).
 
+### Feedback round
+
+One pass over every unhandled trusted piece of feedback on a factory PR (review bodies, inline comments, plain PR comments): triage each item, re-plan if the scope changed, otherwise rework, run CHECK, push to the same branch, then reply to each item, resolve the threads it fixed and re-request review. It counts as one review-rework run against `queue.max_review_rework_runs`. Started by `factory respond <pr>` or a queued review rework; see [packages/core/src/run/feedback-round.ts](packages/core/src/run/feedback-round.ts).
+
 ### CHECK round
 
 One pass of the CHECK phase: probe the worktree once, run every checker, produce a verdict. The first round plus each rework round is a CHECK round. See [packages/core/src/phases/check.ts](packages/core/src/phases/check.ts) and [ADR-0022](docs/adr/0022-check-probes-the-worktree-once-per-round-and-checkers-consume-those-facts.md).

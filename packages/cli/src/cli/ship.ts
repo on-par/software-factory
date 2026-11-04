@@ -38,6 +38,7 @@ import {
 } from '@on-par/factory-core';
 import { shipHostBuildSlot } from './host-slot.js';
 import { claimReworkRequests } from './ship-review-rework.js';
+import { reportConfigSource } from './config-override-option.js';
 import { shipRunStateRecorder } from './ship-pr-state.js';
 import type { CheckResumeRecord, SlicePlanStore, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
@@ -91,8 +92,10 @@ export async function shipIssue(
 ): Promise<string> {
   const runtime = shipRuntime();
   const repoRoot = ctx?.repoRoot ?? (await runtime.getRepoRoot(runtime.resolveShellOps(deps)));
-  const release = holdRunConfigSnapshot((ctx?.paths ?? getFactoryPaths(repoRoot)).config);
+  const configPaths = ctx?.paths ?? getFactoryPaths(repoRoot);
+  const release = holdRunConfigSnapshot(configPaths.config);
   try {
+    reportConfigSource(repoRoot, configPaths.events, issueNum);
     return await shipIssueFrom(repoRoot, issueNum, opts, ctx, deps);
   } finally {
     release();
@@ -129,6 +132,7 @@ async function shipIssueFrom(
     rebuild?: { branch: string }; // #3325: a fresh branch off origin/main, built from the frozen spec with no PLAN
     /** Run-state slice-plan store for a stacked brief (#3813); becomes RunPorts.slicePlanStore. */
     slicePlanStore?: SlicePlanStore;
+    feedbackRound?: { prNumber: number }; // #3910: a feedback round on this PR (`factory respond` or a claimed review rework)
   },
   deps: Pick<
     CliDeps,
@@ -392,6 +396,8 @@ async function shipIssueFrom(
       providerOrder: resolveProviderOrder(repoConfig, policy.models, log),
     }),
     previousAttempt,
+    feedbackRound: ctx?.feedbackRound,
+    trustedApprovers: factoryConfig.intake?.trustedApprovers,
     ...reworkClaim,
   };
 

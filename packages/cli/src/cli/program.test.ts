@@ -15,8 +15,8 @@ import { registerSetupCommands } from './program-setup.js';
 const countCommands = (cmd: Command): number => cmd.commands.reduce((n, c) => n + 1 + countCommands(c), 0);
 
 describe('buildProgram', () => {
-  it('buildProgram registers 65 commands', () => {
-    expect(countCommands(buildProgram(PROGRAM_HANDLERS, {}))).toBe(65);
+  it('buildProgram registers 66 commands', () => {
+    expect(countCommands(buildProgram(PROGRAM_HANDLERS, {}))).toBe(66);
   });
 
   it('each help-group registrar registers exactly its HELP_GROUPS commands', () => {
@@ -55,6 +55,12 @@ describe('buildProgram', () => {
     const program = buildProgram(PROGRAM_HANDLERS, {});
     expect(program.commands.find((c) => c.name() === 'check')?.aliases()).toEqual(['ready']);
     expect(program.options.some((o) => o.long === '--state-root')).toBe(true);
+  });
+
+  it('registers the global --config and --constitution options (#3906)', () => {
+    const program = buildProgram(PROGRAM_HANDLERS, {});
+    expect(program.options.some((o) => o.long === '--config')).toBe(true);
+    expect(program.options.some((o) => o.long === '--constitution')).toBe(true);
   });
 
   it('draft passes --text and --json to cmdDraft (#3171)', async () => {

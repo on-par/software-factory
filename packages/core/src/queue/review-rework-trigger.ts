@@ -33,8 +33,8 @@ export interface ReviewReworkGitHub {
   listReviews(pr: number): Promise<ReviewReworkReview[]>;
 }
 
-/** What triggered a rework: a formal review, or a `/factory rework` PR comment (#3882). */
-export type ReviewReworkSource = 'review' | 'comment';
+/** What triggered a rework: a formal review, a `/factory rework` PR comment (#3882), or a manual feedback round (#3910). */
+export type ReviewReworkSource = 'review' | 'comment' | 'feedback';
 
 export interface ReviewReworkRecord {
   /** The GitHub review id, or the issue-comment id when `source` is `'comment'`. */
@@ -238,7 +238,7 @@ export function createOctokitReviewReworkGitHub(octokit: Octokit, owner: string,
 
 /** Map key: a comment id can never collide with a review id. */
 const recordKey = (id: number, source?: ReviewReworkSource): string =>
-  source === 'comment' ? `comment:${id}` : String(id);
+  source === 'comment' || source === 'feedback' ? `${source}:${id}` : String(id);
 
 export function createFileReviewReworkStore(file: string): ReviewReworkStore {
   let entries: Map<string, ReviewReworkRecord> | null = null;
@@ -312,6 +312,10 @@ function isRecord(value: unknown): value is ReviewReworkRecord {
     typeof value.reviewer === 'string' &&
     'queuedAt' in value &&
     typeof value.queuedAt === 'string' &&
-    (!('source' in value) || value.source === undefined || value.source === 'review' || value.source === 'comment')
+    (!('source' in value) ||
+      value.source === undefined ||
+      value.source === 'review' ||
+      value.source === 'comment' ||
+      value.source === 'feedback')
   );
 }

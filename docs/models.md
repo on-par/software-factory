@@ -14,7 +14,7 @@ Each task type maps to a tier, and each tier is a hand-ordered priority list in 
 | triage       | qwen2.5-coder:14b → claude-sonnet-5 → gpt-5.6-luna-high                                                                                    | $15 → $10                   | Issue triage                             |
 | triage_cheap | qwen2.5-coder:14b → claude-haiku-5-5 → claude-sonnet-5 → gpt-5.6-luna-high                                                                 | $0.50 → $15 → $10           | Readiness judge (tool-less JSON verdict) |
 
-`readiness_judge` uses `triage_cheap`, the cheap Haiku-first tier. `models.pins.triage` or `tiers.triage` also set it unless the repo sets `tiers.triage_cheap` explicitly.
+`readiness_judge` and `feedback_triage` (PR feedback triage in a feedback round, #3910) use `triage_cheap`, the cheap Haiku-first tier. `models.pins.triage` or `tiers.triage` also set it unless the repo sets `tiers.triage_cheap` explicitly.
 
 Models whose agent CLI is not on PATH are skipped, so a machine with only the Codex CLI routes every phase (PLAN, BUILD, CHECK, review, triage) to Codex models, and a machine with only Claude Code routes to Claude models. PLAN only picks a build route that can run on the machine and logs a `model-override` line when it reroutes. To send a phase to a specific agent when both are installed, pin it in `.factory/config.yaml` (`models.pins.plan`, `build`, `checker`, `triage`), set `route`, or reorder `tiers`. `factory triage --model <id>` picks the triage model for one run.
 
@@ -116,6 +116,24 @@ route: opencode
 `opencode-deepseek-v4-flash` is served as `opencode-go/deepseek-v4.1-flash` at $0.30/$1.20 per 1M tokens. `opencode-deepseek-v4-pro` (`opencode-go/deepseek-v4-pro`, $1.74/$3.48 per 1M) is a pin-only, stronger option for any phase, with a lower Go monthly quota.
 
 Pin `opencode-sonnet` for any phase. `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL` still override plan/build per run, and the repo file wins over env.
+
+### DeepSeek V4 Pro boss + V4 Flash worker/checker
+
+Put the stronger `opencode-deepseek-v4-pro` on PLAN (the boss tier) and the cheaper `opencode-deepseek-v4-flash` on BUILD and CHECK (worker/checker) by pinning them separately. Pro has a lower Go monthly quota, so reserve it for the phase that benefits most from it.
+
+```yaml
+# .factory/config.yaml
+version: 2
+models:
+  pins:
+    plan: opencode-deepseek-v4-pro
+    build: opencode-deepseek-v4-flash
+    checker: opencode-deepseek-v4-flash
+    triage: opencode-deepseek-v4-flash
+route: opencode
+```
+
+Everything else in this profile applies: set `FACTORY_EXPERIMENTAL=1` and sign in with `opencode auth login` (or set `OPENCODE_API_KEY`).
 
 ## Provider order
 

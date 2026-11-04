@@ -45,6 +45,33 @@ function fixture(): { root: string; main: string; lane: string; origin: string }
   return { root, main, lane, origin };
 }
 
+const RELEASED = '## 0.9.0 - 2026-01-01\n\n### Added\n\n- old (#1)\n';
+function changelog(added: string[], released = RELEASED): string {
+  return `# Changelog\n\n## Unreleased\n\n### Added\n\n${added.map((l) => `- ${l}\n`).join('')}\n${released}`;
+}
+function seedChangelog(f: ReturnType<typeof fixture>, attributes = false): void {
+  writeFileSync(join(f.main, 'CHANGELOG.md'), changelog(['base (#2)']));
+  if (attributes) writeFileSync(join(f.main, '.gitattributes'), 'CHANGELOG.md merge=union\n');
+  git(f.main, 'add', '.');
+  git(f.main, 'commit', '-m', 'changelog');
+  git(f.main, 'push', 'origin', 'main');
+  git(f.lane, 'pull', '--ff-only', 'origin', 'main');
+}
+function commitIn(repo: string, files: Record<string, string>, push: string): void {
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(join(repo, file, '..'), { recursive: true });
+    writeFileSync(join(repo, file), text);
+  }
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-m', 'change');
+  git(repo, 'push', '-u', 'origin', push);
+}
+function localRun(lane: string) {
+  return async (command: string, options?: { cwd?: string }) => ({
+    stdout: execSync(command, { cwd: options?.cwd ?? lane, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }),
+  });
+}
+
 afterEach(() => tempDirs.cleanup());
 
 describe('syncLandBranch', () => {
@@ -152,5 +179,86 @@ describe('syncLandBranch', () => {
       { paths: ['docs/adr/README.md', 'source.txt'] },
     ]);
     expect(events.some((event) => Array.isArray(event) && event[0] === 'conflict_resolved')).toBe(false);
+  });
+
+  for (const attributes of [false, true]) {
+    it(
+      attributes
+        ? "orders main's entry first even when .gitattributes sets CHANGELOG.md merge=union"
+        : "resolves a CHANGELOG.md Unreleased-only conflict with main's entry before the PR's and pushes",
+      async () => {
+        const f = fixture();
+        seedChangelog(f, attributes);
+        commitIn(f.main, { 'CHANGELOG.md': changelog(['base (#2)', 'main line (#3)']) }, 'main');
+        commitIn(f.lane, { 'CHANGELOG.md': changelog(['base (#2)', 'pr line (#4)']) }, 'lane/topic');
+        const before = git(f.lane, 'rev-parse', 'HEAD');
+        const events: unknown[] = [];
+        const result = await syncLandBranch({
+          worktree: f.lane,
+          branch: 'lane/topic',
+          run: localRun(f.lane),
+          log: (...args) => events.push(args),
+        });
+        expect(result).toEqual({ ok: true });
+        const text = readFileSync(join(f.lane, 'CHANGELOG.md'), 'utf8');
+        expect(text).not.toContain('<<<<<<<');
+        expect(text.indexOf('main line')).toBeGreaterThan(-1);
+        expect(text.indexOf('main line')).toBeLessThan(text.indexOf('pr line'));
+        expect(git(f.origin, 'rev-parse', 'lane/topic')).toBe(git(f.lane, 'rev-parse', 'HEAD'));
+        expect(git(f.lane, 'rev-list', '--parents', '-n', '1', 'HEAD').split(' ')).toHaveLength(3);
+        expect(git(f.lane, 'rev-parse', 'HEAD^1')).toBe(before);
+        expect(events).toContainEqual([
+          'conflict_resolved',
+          'resolved CHANGELOG.md Unreleased conflict mechanically',
+          { mode: 'mechanical', paths: ['CHANGELOG.md'] },
+        ]);
+      },
+    );
+  }
+
+  it('parks naming CHANGELOG.md when the conflict is inside a released section', async () => {
+    const f = fixture();
+    seedChangelog(f);
+    commitIn(f.main, { 'CHANGELOG.md': changelog(['base (#2)'], RELEASED.replace('old', 'main edit')) }, 'main');
+    commitIn(f.lane, { 'CHANGELOG.md': changelog(['base (#2)'], RELEASED.replace('old', 'pr edit')) }, 'lane/topic');
+    const before = git(f.lane, 'rev-parse', 'HEAD');
+    const result = await syncLandBranch({
+      worktree: f.lane,
+      branch: 'lane/topic',
+      run: localRun(f.lane),
+      log: () => {},
+    });
+    expect(result).toEqual({ ok: false, message: 'unresolved merge conflicts: CHANGELOG.md', paths: ['CHANGELOG.md'] });
+    expect(git(f.lane, 'rev-parse', 'HEAD')).toBe(before);
+    expect(() => git(f.lane, 'rev-parse', '--verify', 'MERGE_HEAD')).toThrow();
+  });
+
+  it('resolves CHANGELOG.md but parks naming only the source path in a mixed conflict', async () => {
+    const f = fixture();
+    seedChangelog(f);
+    commitIn(
+      f.main,
+      { 'CHANGELOG.md': changelog(['base (#2)', 'main line (#3)']), 'packages/cli/src/cli/run.ts': 'main\n' },
+      'main',
+    );
+    commitIn(
+      f.lane,
+      { 'CHANGELOG.md': changelog(['base (#2)', 'pr line (#4)']), 'packages/cli/src/cli/run.ts': 'lane\n' },
+      'lane/topic',
+    );
+    const before = git(f.lane, 'rev-parse', 'HEAD');
+    const result = await syncLandBranch({
+      worktree: f.lane,
+      branch: 'lane/topic',
+      run: localRun(f.lane),
+      log: () => {},
+    });
+    expect(result).toEqual({
+      ok: false,
+      message: 'unresolved merge conflicts: packages/cli/src/cli/run.ts',
+      paths: ['packages/cli/src/cli/run.ts'],
+    });
+    expect(git(f.lane, 'rev-parse', 'HEAD')).toBe(before);
+    expect(() => git(f.lane, 'rev-parse', '--verify', 'MERGE_HEAD')).toThrow();
   });
 });
