@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- `factory run-issue --merge` and `run-brief --merge` drive the PR through the `factory run --auto-merge` gates to a merge, bounded by `--merge-timeout` or `ci.awaitingCiCapHours`, with distinct exit codes (0 merged, 10 held, 11 CI failed, 12 timed out, 13 land failed, 1 parked before a PR) (#3905)
 - The compile gate and `factory doctor` fall back to `npm run typecheck` when no build command resolves, and doctor names the detected test runner per workspace (#3913).
 - `factory run` starts lanes for work queued after it started, restarts finished lanes when new work arrives, and reaps expired claims mid-run; the interval is `queue.discovery_interval_ms` (default 60s) (#3920)
 - `factory run-issue --in-place` (or `FACTORY_WORKSPACE=in-place`) runs the pipeline in the current clean checkout with no worktree, for disposable containers (#3904).
