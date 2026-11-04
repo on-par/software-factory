@@ -1,7 +1,10 @@
 const UNRELEASED = /^## Unreleased\s*$/i;
 
 interface Subsection {
+  /** The heading plus its occurrence number, so a section with two `### Fixed` headings keeps them apart (#3949). */
   key: string;
+  /** The heading line as written, or '' for the leading subsection. */
+  title: string;
   /** Absolute index of the first body line (the line after the heading, or the section's first body line). */
   start: number;
   /** Absolute index one past the last line of the subsection. */
@@ -21,13 +24,17 @@ function findSection(lines: string[]): Section | undefined {
   if (heading === -1) return undefined;
   let end = lines.findIndex((line, index) => index > heading && line.startsWith('## '));
   if (end === -1) end = lines.length;
-  const subsections: Subsection[] = [{ key: '', start: heading + 1, end, headingIndex: heading }];
+  const subsections: Subsection[] = [{ key: '', title: '', start: heading + 1, end, headingIndex: heading }];
+  const seen = new Map<string, number>();
   for (let index = heading + 1; index < end; index++) {
     const line = lines[index] ?? '';
     if (!line.startsWith('### ')) continue;
     const previous = subsections[subsections.length - 1];
     if (previous) previous.end = index;
-    subsections.push({ key: line.trimEnd(), start: index + 1, end, headingIndex: index });
+    const title = line.trimEnd();
+    const occurrence = (seen.get(title) ?? 0) + 1;
+    seen.set(title, occurrence);
+    subsections.push({ key: `${title}#${occurrence}`, title, start: index + 1, end, headingIndex: index });
   }
   return { heading, end, subsections };
 }
@@ -66,7 +73,7 @@ export function mergeChangelogUnreleased(
   }
 
   const removed = { ok: false as const, reason: 'PR removed or edited an existing Unreleased line' };
-  const additions: { key: string; lines: string[] }[] = [];
+  const additions: { key: string; title: string; lines: string[] }[] = [];
   for (const sub of baseSection.subsections) {
     if (nonBlank(baseLines, sub).length > 0 && !oursSection.subsections.some((s) => s.key === sub.key)) {
       return removed;
@@ -84,10 +91,10 @@ export function mergeChangelogUnreleased(
       else added.push(line);
     }
     if (matched < baseItems.length) return removed;
-    if (added.length > 0) additions.push({ key: sub.key, lines: added });
+    if (added.length > 0) additions.push({ key: sub.key, title: sub.title, lines: added });
   }
 
-  for (const { key, lines } of additions) {
+  for (const { key, title, lines } of additions) {
     const section = findSection(result);
     if (!section) return { ok: false, reason: 'no ## Unreleased section' };
     const sub = section.subsections.find((s) => s.key === key);
@@ -99,7 +106,7 @@ export function mergeChangelogUnreleased(
       result.splice(at + 1, 0, ...(key === '' && at === section.heading ? [''] : []), ...fresh);
     } else {
       const at = lastNonBlank(result, section.heading, section.end);
-      result.splice(at + 1, 0, '', key, '', ...fresh);
+      result.splice(at + 1, 0, '', title, '', ...fresh);
     }
   }
   return { ok: true, text: result.join('\n') };
