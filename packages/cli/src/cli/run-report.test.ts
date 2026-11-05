@@ -76,9 +76,11 @@ describe('withRunReport', () => {
       { json: true },
       s.ctx,
       async (r) => {
+        // Cost lands inside the phase window, as in a real run; logging it after
+        // phase_completed only passed when both writes shared a millisecond.
         s.logAt('phase_started', '5', { phase: 'build' });
-        s.logAt('phase_completed', '5', { phase: 'build' });
         s.costAt('5', 'model-a', 0.25);
+        s.logAt('phase_completed', '5', { phase: 'build' });
         s.costAt('6', 'model-b', 5);
         r.recordOutcome(shipped);
       },
