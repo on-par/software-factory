@@ -99,6 +99,18 @@ export const statusJsonSchema = z.object({
       detail: z.string(),
     }),
   ),
+  /** PRs deferred by a moving base and queued for a land-only retry (#3957). */
+  landDeferred: z.array(
+    z.object({
+      issue: z.number(),
+      prNumber: z.number(),
+      branch: z.string(),
+      deferrals: z.number(),
+      maxDeferrals: z.number(),
+      firstDeferredAt: z.string(),
+      nextRetryAt: z.string(),
+    }),
+  ),
 });
 
 /** `factory kpis --json` (#3553). */
@@ -430,10 +442,10 @@ export type UnparkJson = z.infer<typeof unparkJsonSchema>;
 
 /** `factory run-issue|run-brief|ship --json` final run result (#3907). Additive changes only; bump schemaVersion on a breaking change. */
 export const runResultJsonSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   issue: z.number().int(),
   repo: z.string().nullable(),
-  outcome: z.enum(['merged', 'pr-open', 'held', 'ci-failed', 'parked', 'failed']),
+  outcome: z.enum(['merged', 'pr-open', 'held', 'ci-failed', 'parked', 'failed', 'land-deferred']),
   exitReason: z.string().min(1),
   pr: z
     .object({ number: z.number().int(), url: z.string().nullable(), state: z.enum(['open', 'draft', 'merged']) })
@@ -454,6 +466,8 @@ export const runResultJsonSchema = z.object({
   ),
   cost: z.object({ usd: z.number(), byModel: z.record(z.string(), z.number()) }),
   reworkRounds: z.number().int(),
+  /** How many times the land gave up on a moving base before `--merge` timed out (#3957); set with outcome `land-deferred`. */
+  landDeferrals: z.number().int().optional(),
 });
 export type RunResultJson = z.infer<typeof runResultJsonSchema>;
 export type RunResultOutcome = RunResultJson['outcome'];

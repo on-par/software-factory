@@ -3,6 +3,7 @@
 import type { getFactoryPaths, ParkReason, ProviderBreaker, RunOutcome } from '@on-par/factory-core';
 import type {
   AwaitingCiRecord,
+  LandDeferralDecision,
   logEvent,
   DiskGuardDecision,
   LoadGuardDecision,
@@ -17,7 +18,9 @@ import type { Octokit } from '@octokit/rest';
 
 import type { AwaitingCiLaneOps } from './awaiting-ci-recheck.js';
 import type { BaseHoldDecision } from './base-hold.js';
+import type { LandDeferredLaneOps } from './land-deferred-retry.js';
 import type { waitForMerge } from './land.js';
+import type { LandDeferredError } from './land-pr.js';
 import type { ReplacedPr } from './land-rebuild.js';
 
 export type RunLaneDeps = {
@@ -77,6 +80,16 @@ export type RunLaneDeps = {
   /** #3208: re-checks due awaiting-ci PRs before every claim, parking through the lane's own park path via `ops`.
    *  Fail-closed: a rejection is logged as a warn and never changes lane flow. */
   recheckAwaitingCi?: (ops: AwaitingCiLaneOps) => Promise<void>;
+  /** #3957: records a land that gave up on a moving base and returns the decision: 'defer' keeps the PR open for a
+   *  land-only retry, 'park' (the cap is spent) falls through to the ci-failed park. Absent = park as before. */
+  recordLandDeferred?: (
+    err: LandDeferredError,
+    issue: number,
+    branch: string,
+  ) => Promise<LandDeferralDecision & { maxDeferrals: number }>;
+  /** #3957: retries due land-deferred PRs oldest first before every claim and land, parking through the lane's own
+   *  park path via `ops`. Fail-closed: a rejection is logged as a warn and never changes lane flow. */
+  retryLandDeferred?: (ops: LandDeferredLaneOps) => Promise<void>;
   releaseIssue?: (issue: number, outcome: QueueReleaseOutcome) => Promise<void>;
   /** Refreshes the claim lease every HEARTBEAT_INTERVAL_MS while an issue is in flight
    *  (#1500). Absent for static local-queue lanes, which carry no remote claim to lease. */

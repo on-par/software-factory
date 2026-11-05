@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { CostEntry, FactoryEvent, RunOutcome } from '@on-par/factory-core';
 
 import type { MergeResult } from './run-issue-merge.js';
+import { runResultJsonSchema } from './json-contract.js';
 import { buildRunResult, classifyRunOutcome, type RunResultInput } from './run-result.js';
 
 const route = 'claude' as const;
@@ -65,6 +66,19 @@ describe('classifyRunOutcome', () => {
       exitReason: 'land failed: conflict',
     });
     expect(c({ kind: 'failed-before-pr', detail: 'x' }).outcome).toBe('pr-open');
+  });
+
+  it('a land-deferred merge result maps to outcome land-deferred with landDeferrals', () => {
+    const merge: MergeResult = { kind: 'land-deferred', prNumber: 7, deferrals: 3, detail: 'base kept moving' };
+    expect(classifyRunOutcome(shipped, merge, undefined)).toEqual({
+      outcome: 'land-deferred',
+      exitReason: 'land deferred 3 time(s): base kept moving',
+    });
+    const r = buildRunResult(input({ outcome: shipped, merge }));
+    expect(r.outcome).toBe('land-deferred');
+    expect(r.landDeferrals).toBe(3);
+    expect(runResultJsonSchema.parse(r)).toEqual(r);
+    expect(buildRunResult(input({ outcome: shipped })).landDeferrals).toBeUndefined();
   });
 
   it('maps run outcomes without --merge', () => {

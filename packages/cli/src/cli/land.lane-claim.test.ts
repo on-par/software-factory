@@ -43,6 +43,7 @@ function paths() {
     plans: join(state, 'plans'),
     events: join(state, 'events.ndjson'),
     mergeLock: join(state, 'merge.lock'),
+    landSlotLock: join(state, 'land-slot.lock'),
     gitLock: join(state, 'git.lock'),
     laneFiles: join(state, 'lane-files.json'),
   };

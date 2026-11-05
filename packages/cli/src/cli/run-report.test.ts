@@ -61,7 +61,7 @@ describe('withRunReport', () => {
     const result = JSON.parse(s.out[0]);
     expect(validate(result), JSON.stringify(validate.errors)).toBe(true);
     expect(result).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       outcome: 'pr-open',
       branch: 'factory/5-x',
       headSha: 'head-sha',

@@ -151,6 +151,7 @@ export const FactoryConfigSchema = z.object({
     admin: z.boolean().default(false),
     comment: z.string(),
     maxConflictRounds: z.number().int().min(1).max(10).default(2),
+    maxLandDeferrals: z.number().int().min(1).max(10).default(3),
   }),
   /** `run.merge.*` mirrors the `run.merge` shape of RepoFactoryConfigV2Schema in `config/repo.ts` and, when present,
    *  is authoritative over the legacy top-level `merge.*` fields above (see
@@ -773,6 +774,7 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string, env: NodeJ
     reports: resolve(state, 'reports'),
     runs: resolve(state, 'runs'),
     mergeLock: resolve(state, 'merge.lock'),
+    landSlotLock: resolve(state, 'land-slot.lock'),
     gitLock: resolve(state, 'git.lock'),
     runLock: resolve(state, 'run.lock'),
     runLocks: resolve(state, 'locks', 'run'),

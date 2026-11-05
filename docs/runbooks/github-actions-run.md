@@ -116,6 +116,7 @@ past unmet branch protection but never past red CI. It exits:
 | 11   | CI failed                                                       |
 | 12   | timed out waiting for CI or merge                               |
 | 13   | land failed                                                     |
+| 14   | land deferred: the base kept moving until the timeout           |
 
 ## Providers and secrets
 
@@ -154,7 +155,7 @@ cap is 6 h). Claude usage is billed to the given credential.
 
 A one-shot host (a container that is destroyed after the run) can pass `--json` and `--export <dir>` to
 `factory run-issue`, `run-brief` or `ship`. `--json` prints the final result (outcome, PR, SHAs, phase
-timings, cost in USD) as one `schemaVersion 1` line on stdout and moves progress to stderr; the schema is
+timings, cost in USD; outcome `land-deferred` with a `landDeferrals` count when the base kept moving until the `--merge` timeout, exit 14) as one `schemaVersion 1` line on stdout and moves progress to stderr; the schema is
 `schemas/run-result.schema.json`. `--export` copies the run's state file, events, costs and `run-result.json`
 into `<dir>` on every exit path, so the host can upload them before it exits. Neither flag changes the exit code.
 

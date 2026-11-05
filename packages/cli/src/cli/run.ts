@@ -56,6 +56,7 @@ import { awaitingCiLaneDeps } from './awaiting-ci-wiring.js';
 import type { CiPendingDraftSweepOpts } from './ci-pending-draft-sweep.js';
 import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
 import { waitForMerge } from './land.js';
+import { landDeferredLaneDeps } from './land-deferred-wiring.js';
 import { hostClaimGuards } from './host-claim-guards.js';
 import { DRAIN_MESSAGE, createNotifier, resolveNotifyCommand, withDiskLowNotify, withParkNotify } from './notify.js';
 import { createDeferralTracker, settleDeferredOnly } from './queue-startup.js';
@@ -310,6 +311,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
           octokit: opts.localQueue === true ? undefined : () => rt.getOctokit(),
           pollReviewRework: opts.localQueue === true ? undefined : pollReviewReworkOnce,
           ...(opts.localQueue === true ? {} : awaitingCiLaneDeps(() => rt.getOctokit(), ghRepo, paths, factoryConfig)),
+          ...(opts.localQueue === true ? {} : landDeferredLaneDeps(ghRepo, repoRoot, paths, factoryConfig)),
           runId,
           readParkSha: (branch) =>
             rt.shellOps

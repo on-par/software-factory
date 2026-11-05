@@ -13,10 +13,12 @@ import {
 } from '@on-par/factory-core/internal';
 import { DEFAULT_MAX_CONFLICT_ROUNDS, MAX_LAND_SYNC_ROUNDS, probeHeadBehindBase } from './land-behind.js';
 import { landRuntime } from './land-runtime.js';
+import { CiFailedError, CiInfraError, CiUnverifiedError, LandDeferredError } from './land-errors.js';
 import { BaseCiPendingError } from './merge-base-gate.js';
 
 export { defaultListIssueLabels, squashMergeAndDelete } from './land-merge.js';
 export type { CommandRunner } from './land-merge.js';
+export { CiFailedError, CiInfraError, CiUnverifiedError, LandDeferredError } from './land-errors.js';
 import { squashMergeAndDelete, type CommandRunner } from './land-merge.js';
 
 export class MergeGatedError extends Error {
@@ -88,33 +90,6 @@ export class LandFailureError extends Error {
   ) {
     super(message);
   }
-}
-
-/** Thrown when watchChecks reports a confirmed CI failure — a completed check run with a
- *  non-passing conclusion. A confirmed failing check must never be merged, admin override
- *  or not. See CiUnverifiedError for the no-verdict case. */
-export class CiFailedError extends Error {
-  readonly parkReason: ParkReason = 'ci-failed';
-
-  constructor(
-    message: string,
-    readonly prNumber: number,
-  ) {
-    super(message);
-  }
-}
-
-/** Thrown when the CI watch never reached a green verdict — a deadline timeout, no check runs ever
- *  registering, or repeated API failures. A subclass of CiFailedError so every existing guard
- *  (parkReasonFor → 'ci-failed', worktree cleanup, cmdLand's exit-0 path) treats "we don't know"
- *  exactly like "we know it's red": never merge. */
-export class CiUnverifiedError extends CiFailedError {}
-
-/** Thrown when the one infra rerun (#2365) also failed for infrastructure reasons on the same head SHA (#2366).
- *  A CiFailedError subclass so every guard still leaves the PR open and unmerged, but it parks as
- *  'ci-infra', which the ADR-0155 steward skips. */
-export class CiInfraError extends CiFailedError {
-  override readonly parkReason: ParkReason = 'ci-infra';
 }
 
 /** True for the errors that leave the PR open and unmerged without a land failure: awaiting review, CI red or unverified, or CI not started. */
@@ -394,8 +369,8 @@ export async function landOpenPullRequest(opts: {
     } else {
       if (syncRounds >= MAX_LAND_SYNC_ROUNDS) {
         const msg = `PR #${prNumber} on ${branch}: base kept moving — synced ${MAX_LAND_SYNC_ROUNDS} times and origin/main moved again; refusing to merge an unverified head`;
-        log('ci-failed', msg);
-        throw new CiUnverifiedError(msg, prNumber);
+        log('land-deferred', msg);
+        throw new LandDeferredError(msg, prNumber, branch);
       }
       syncRounds++;
       round = `${syncRounds}/${MAX_LAND_SYNC_ROUNDS}`;

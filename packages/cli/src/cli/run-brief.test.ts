@@ -146,7 +146,7 @@ describe('run-brief --json (#3907)', () => {
       .trim()
       .split('\n');
     const result = JSON.parse(lines.at(-1) as string);
-    expect(result).toMatchObject({ schemaVersion: 1, outcome: 'pr-open', pr: { number: 12 } });
+    expect(result).toMatchObject({ schemaVersion: 2, outcome: 'pr-open', pr: { number: 12 } });
     expect(result.issue).toBeGreaterThanOrEqual(9_000_000);
   });
 

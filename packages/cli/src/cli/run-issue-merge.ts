@@ -12,6 +12,7 @@ import {
   CiFailedError,
   CiUnverifiedError,
   LandConflictError,
+  LandDeferredError,
   MergeGatedError,
 } from './land-pr.js';
 import { landRuntime } from './land-runtime.js';
@@ -24,14 +25,18 @@ export const MERGE_EXIT = {
   ciFailed: 11,
   timedOut: 12,
   landFailed: 13,
+  landDeferred: 14,
 } as const;
 
-export type MergeResultKind = 'merged' | 'held' | 'ci-failed' | 'timed-out' | 'failed-before-pr' | 'land-failed';
+export type MergeResultKind =
+  'merged' | 'held' | 'ci-failed' | 'timed-out' | 'failed-before-pr' | 'land-failed' | 'land-deferred';
 
 export interface MergeResult {
   kind: MergeResultKind;
   prNumber?: number;
   gate?: string;
+  /** #3957: how many times the land gave up on a moving base before the deadline (kind 'land-deferred'). */
+  deferrals?: number;
   detail: string;
 }
 
@@ -153,6 +158,7 @@ export async function driveToMerge(input: DriveToMergeInput, deps: DriveToMergeD
   const { waitMerge = waitForMerge, now = () => Date.now(), sleep, pollMs = 60_000 } = deps;
   const doSleep = sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const deadline = now() + input.timeoutMs;
+  let deferrals = 0;
 
   for (;;) {
     const signal = AbortSignal.timeout(Math.max(1, deadline - now()));
@@ -172,11 +178,13 @@ export async function driveToMerge(input: DriveToMergeInput, deps: DriveToMergeD
       }
       if (err instanceof AwaitingReviewError) return { kind: 'held', gate: err.gate, prNumber: err.prNumber, detail };
       if (err instanceof LandConflictError) return { kind: 'land-failed', ...pr, detail };
+      if (err instanceof LandDeferredError) deferrals++;
       if (err instanceof CiUnverifiedError || err instanceof AwaitingCiError || err instanceof BaseCiPendingError) {
         if (now() < deadline) {
           await doSleep(pollMs);
           continue;
         }
+        if (err instanceof LandDeferredError) return { kind: 'land-deferred', ...pr, deferrals, detail };
         return { kind: 'timed-out', ...pr, detail };
       }
       if (err instanceof CiFailedError) return { kind: 'ci-failed', ...pr, detail };
@@ -192,6 +200,7 @@ const EXIT_BY_KIND: Record<Exclude<MergeResultKind, 'merged'>, number> = {
   'ci-failed': MERGE_EXIT.ciFailed,
   'timed-out': MERGE_EXIT.timedOut,
   'land-failed': MERGE_EXIT.landFailed,
+  'land-deferred': MERGE_EXIT.landDeferred,
 };
 
 /** Print the merge or throw a CliExitError carrying the distinct MERGE_EXIT code. */

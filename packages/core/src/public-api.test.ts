@@ -6,7 +6,13 @@ import { SIZE_GATE_MODES } from './index.js';
 import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
-import { ITERATE_INTERNAL_KEYS, KPIS_API_KEYS, TESTING_API_KEYS, WORK_KEY_API_KEYS } from './public-api-keys.js';
+import {
+  ITERATE_INTERNAL_KEYS,
+  KPIS_API_KEYS,
+  LAND_DEFERRED_INTERNAL_KEYS,
+  TESTING_API_KEYS,
+  WORK_KEY_API_KEYS,
+} from './public-api-keys.js';
 const PUBLIC_API_KEYS = [
   'getConstitutionsDir',
   'getFactoryPaths',
@@ -303,6 +309,7 @@ const EXTRA_INTERNAL_KEYS = [
   ...PO2,
   ...GATE,
   ...ITERATE_INTERNAL_KEYS,
+  ...LAND_DEFERRED_INTERNAL_KEYS,
 ];
 const INTERNAL_API_KEYS = [
   'MAX_REWORK_ROUNDS',
