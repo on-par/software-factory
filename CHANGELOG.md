@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- Land re-syncs a PR that turns DIRTY again during the CI watch up to merge.maxConflictRounds times (default 2), re-watching CI each round, and parks as conflict with "conflict rounds exhausted (N/N)" instead of ci-failed or fail (#1887)
+
 ### Added
 
 - ship: `ship.ciWatchMinutes` sets the CI watch window, and a draft SHIP left for pending CI is landed (or sent to CI rework) by the run-start and between-issue sweep once CI finishes (#3932)

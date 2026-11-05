@@ -11,7 +11,7 @@ import {
   warnNoBranchProtectionOnce,
   watchChecksWithInfraRerun,
 } from '@on-par/factory-core/internal';
-import { MAX_LAND_SYNC_ROUNDS, probeHeadBehindBase } from './land-behind.js';
+import { DEFAULT_MAX_CONFLICT_ROUNDS, MAX_LAND_SYNC_ROUNDS, probeHeadBehindBase } from './land-behind.js';
 import { landRuntime } from './land-runtime.js';
 import { BaseCiPendingError } from './merge-base-gate.js';
 
@@ -256,6 +256,8 @@ export async function landOpenPullRequest(opts: {
   /** #3325: hand a merge-main conflict on real paths back as a LandConflictError carrying `rebuild`. */
   rebuildOnConflict?: boolean;
   baseGate?: { check: (wait?: boolean) => Promise<void>; record: () => Promise<void> };
+  /** #1887: max DIRTY merge-main rounds per land before it parks as conflict. Default 2. */
+  maxConflictRounds?: number;
 }): Promise<void> {
   const {
     octokit,
@@ -277,6 +279,7 @@ export async function landOpenPullRequest(opts: {
     ensureWorktree,
     syncMain = false,
     rebuildOnConflict,
+    maxConflictRounds = DEFAULT_MAX_CONFLICT_ROUNDS,
     behindProbe = (sha: string, base: string) => probeHeadBehindBase(octokit, owner, repoName, base, sha),
   } = opts;
   const { errorDetail } = landRuntime();
@@ -352,6 +355,7 @@ export async function landOpenPullRequest(opts: {
   const needsSync = (s: { mergeStateStatus?: string }) =>
     s.mergeStateStatus === 'DIRTY' || s.mergeStateStatus === 'BEHIND';
   let syncRounds = 0;
+  let conflictRounds = 0;
 
   /** True when `sha` (default: the PR's current head) lacks commits from the base. GitHub reports BEHIND only
    *  under strict protection, which the lander bypasses, so ask the compare API (#3654). An unknown
@@ -378,16 +382,28 @@ export async function landOpenPullRequest(opts: {
 
   /** Merges main into the branch, bounded to MAX_LAND_SYNC_ROUNDS. Call under the land lock. */
   const syncNow = async (reason: string): Promise<void> => {
-    if (syncRounds >= MAX_LAND_SYNC_ROUNDS) {
-      const msg = `PR #${prNumber} on ${branch}: base kept moving — synced ${MAX_LAND_SYNC_ROUNDS} times and origin/main moved again; refusing to merge an unverified head`;
-      log('ci-failed', msg);
-      throw new CiUnverifiedError(msg, prNumber);
+    let round: string;
+    if (reason === 'dirty') {
+      if (conflictRounds >= maxConflictRounds) {
+        const msg = `PR #${prNumber} on ${branch}: conflict rounds exhausted (${conflictRounds}/${maxConflictRounds}) — main moved again; parked`;
+        log('conflict', msg);
+        throw new LandConflictError(`issue #${issue}: ${msg}`);
+      }
+      conflictRounds++;
+      round = `${conflictRounds}/${maxConflictRounds}`;
+    } else {
+      if (syncRounds >= MAX_LAND_SYNC_ROUNDS) {
+        const msg = `PR #${prNumber} on ${branch}: base kept moving — synced ${MAX_LAND_SYNC_ROUNDS} times and origin/main moved again; refusing to merge an unverified head`;
+        log('ci-failed', msg);
+        throw new CiUnverifiedError(msg, prNumber);
+      }
+      syncRounds++;
+      round = `${syncRounds}/${MAX_LAND_SYNC_ROUNDS}`;
     }
-    syncRounds++;
     await ensureWorktree?.();
     log(
       'pr_refresh',
-      `PR #${prNumber} refreshed: mergeStateStatus=${state.mergeStateStatus ?? 'UNKNOWN'} action=merge-main reason=${reason} round=${syncRounds}/${MAX_LAND_SYNC_ROUNDS}`,
+      `PR #${prNumber} refreshed: mergeStateStatus=${state.mergeStateStatus ?? 'UNKNOWN'} action=merge-main reason=${reason} round=${round}`,
     );
     await syncDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists, rebuildOnConflict, state });
   };

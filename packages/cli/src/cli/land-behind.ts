@@ -5,6 +5,9 @@ import type { Octokit } from '@octokit/rest';
 /** Max merge-main syncs per land before it refuses as "base kept moving" (ADR-0170; matches MAX_REWORK_ROUNDS). */
 export const MAX_LAND_SYNC_ROUNDS = 3;
 
+/** Default cap on DIRTY merge-main rounds per land (merge.maxConflictRounds, #1887). */
+export const DEFAULT_MAX_CONFLICT_ROUNDS = 2;
+
 /** True when `headSha` is missing commits from `baseRef` (compare `behind_by > 0`). GitHub reports BEHIND
  *  only under enforced strict protection, so mergeStateStatus alone cannot answer this (#3645).
  *  Undefined when the compare call fails or the response is malformed: the caller decides. */

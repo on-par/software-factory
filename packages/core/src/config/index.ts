@@ -146,7 +146,12 @@ export const FactoryConfigSchema = z.object({
     tests_seconds: z.number().default(300),
     compile_seconds: z.number().default(120),
   }),
-  merge: z.object({ auto: z.boolean(), admin: z.boolean().default(false), comment: z.string() }),
+  merge: z.object({
+    auto: z.boolean(),
+    admin: z.boolean().default(false),
+    comment: z.string(),
+    maxConflictRounds: z.number().int().min(1).max(10).default(2),
+  }),
   /** `run.merge.*` mirrors the `run.merge` shape of RepoFactoryConfigV2Schema in `config/repo.ts` and, when present,
    *  is authoritative over the legacy top-level `merge.*` fields above (see
    *  `resolveMergePolicy`). Left optional with no defaults so "unset" survives parsing
