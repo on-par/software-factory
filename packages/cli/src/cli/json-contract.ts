@@ -458,7 +458,11 @@ export const runResultJsonSchema = z.object({
   ]),
   exitReason: z.string().min(1),
   pr: z
-    .object({ number: z.number().int(), url: z.string().nullable(), state: z.enum(['open', 'draft', 'merged', 'closed']) })
+    .object({
+      number: z.number().int(),
+      url: z.string().nullable(),
+      state: z.enum(['open', 'draft', 'merged', 'closed']),
+    })
     .nullable(),
   branch: z.string().nullable(),
   baseSha: z.string().nullable(),

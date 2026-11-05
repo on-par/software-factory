@@ -563,6 +563,7 @@ const INTERNAL_API_KEYS = [
   'DEFAULT_FACTORYD_PORT',
   // Durable explicit daemon runs (#1393)
   'daemonRunFile',
+  'isTrustedApprover',
   'isValidRunId',
   'readDaemonRun',
   // Daemon runtime state: pid/port/log files (#1177)

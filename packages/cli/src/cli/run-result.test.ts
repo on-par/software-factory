@@ -212,9 +212,9 @@ describe('buildRunResult', () => {
     const r = buildRunResult(input({ lifecycle: { outcome: 'closed', prNumber: 4, detail: 'PR #4 was closed' } }));
     expect(r).toMatchObject({ outcome: 'closed', pr: { number: 4, state: 'closed' } });
     expect(runResultJsonSchema.parse(r)).toEqual(r);
-    expect(
-      buildRunResult(input({ lifecycle: { outcome: 'merged', prNumber: 4, detail: 'merged' } })).pr?.state,
-    ).toBe('merged');
+    expect(buildRunResult(input({ lifecycle: { outcome: 'merged', prNumber: 4, detail: 'merged' } })).pr?.state).toBe(
+      'merged',
+    );
     expect(classifyRunOutcome(undefined, undefined, undefined, { outcome: 'parked', detail: 'cap' })).toEqual({
       outcome: 'parked',
       exitReason: 'cap',

@@ -5,7 +5,13 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CliExitError } from './errors.js';
-import { cmdRespond, respondDepsFrom, runFeedbackRound, type RespondDeps, type RespondRuntime } from './respond-command.js';
+import {
+  cmdRespond,
+  respondDepsFrom,
+  runFeedbackRound,
+  type RespondDeps,
+  type RespondRuntime,
+} from './respond-command.js';
 
 const tmp = createTempDirs();
 afterEach(async () => {

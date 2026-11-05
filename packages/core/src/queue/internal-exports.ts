@@ -1,5 +1,5 @@
 // Review/approval queue exports re-exported from internal.ts (keeps that file under its max-lines ceiling)
-export { createOctokitCollaboratorPermissionClient } from './approval.js';
+export { createOctokitCollaboratorPermissionClient, isTrustedApprover } from './approval.js';
 export {
   claimIterateCommand,
   createFileIterateStore,

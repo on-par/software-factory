@@ -34,7 +34,7 @@ type RunStateRecorder = (update: RunStateUpdate) => Promise<void>;
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /** The run state this checkout holds for the issue (run record plus review-rework store), or null when it holds none. */
-async function localPrRunState(opts: {
+export async function localPrRunState(opts: {
   issueNum: number;
   prNumber: number;
   runsDir: string;

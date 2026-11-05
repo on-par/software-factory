@@ -3,7 +3,12 @@
 import type { Command } from 'commander';
 import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION, BRANCH_PREFIX_OPTION_DESCRIPTION } from './branch-prefix.js';
 import type { ProgramHandlers } from './index.js';
+import type { RunOptions } from './run.js';
+import { validateUntilDoneFlags, type UntilDoneFlagOptions } from './run-until-done.js';
 import type { SteerOptions } from './steer.js';
+
+/** `run`'s flags: the queue drain's own (RunOptions) plus the single-issue lifecycle's (#3908). */
+type RunCommandOptions = RunOptions & UntilDoneFlagOptions;
 
 const BASE_BRANCH_OPTION_DESCRIPTION =
   'Start from the freshly fetched origin/<ref> instead of the default branch, and open the PR against <ref>; runs with the size gate off';
@@ -228,18 +233,29 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .option('--max-lanes <n>', 'Run at most <n> lanes at once, overriding run.maxLanes in .factory/config.yaml')
-    .action(
-      (opts: {
-        localQueue?: boolean;
-        autoMerge?: boolean;
-        usageWatch?: boolean;
-        usageThreshold?: string;
-        usagePoll?: string;
-        branchPrefix?: string;
-        notify?: string;
-        maxLanes?: string;
-      }) => handlers.cmdRun(opts),
-    );
+    .option(
+      '--issue <n>',
+      'Carry one issue to merged, closed, parked or awaiting-review instead of draining the queue; exits 0 merged, 1 parked, 15 closed, 16 awaiting-review',
+    )
+    .option('--wait <mode>', 'stay (default) or exit; with --issue')
+    .option(
+      '--max-wait <duration>',
+      'With --issue --wait stay: longest wait for review (e.g. 30m, 2h); default no limit',
+    )
+    .option('--admin', 'With --issue: admin-merge past unmet branch protection; never bypasses red CI')
+    .option(
+      '--json',
+      'With --issue: print the final run result as one JSON object (schemaVersion 2) on the last stdout line; progress goes to stderr',
+    )
+    .option('--export <dir>', 'With --issue: copy the run state, events and cost records into <dir> when the run ends')
+    .action(async (opts: RunCommandOptions) => {
+      if (opts.issue !== undefined) {
+        await handlers.cmdRunUntilDone(handlers.parseIssueArg(opts.issue), opts);
+        return;
+      }
+      validateUntilDoneFlags(opts);
+      await handlers.cmdRun(opts);
+    });
 
   program
     .command('supervise')
