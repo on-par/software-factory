@@ -120,6 +120,7 @@ export type EventKind =
   | 'kpi-snapshot'
   | 'kpi-sweep-skipped'
   | 'land'
+  | 'land-deferred'
   | 'lane_file_claim_reaped'
   | 'lane_file_release_failed'
   | 'lane_install'
@@ -260,8 +261,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'await-merge': { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'waiting-merge' },
   // STOP ended an await-merge with the PR still open; the issue is re-queued for preflight adopt (#3291). Not a park.
   'await-merge-stopped': { severity: 'warn', isPark: false, isTerminal: true, laneStatus: 'stopped' },
-  // A PR whose CI never registered a run waits for a backoff re-check (#3208). Not a park.
-  'awaiting-ci': { severity: 'info', isPark: false, isTerminal: false },
+  'awaiting-ci': { severity: 'info', isPark: false, isTerminal: false }, // CI never registered a run; backoff re-check, not a park (#3208)
   'awaiting-review': { severity: 'info', isPark: false, isTerminal: false },
   // A persisted base hold (#2348) ended: origin/main moved or its CI went green (#2350). Not a park.
   'base-hold-cleared': { severity: 'info', isPark: false, isTerminal: false },
@@ -364,6 +364,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   lane_install: { severity: 'info', isPark: false, isTerminal: false },
   lane_install_failed: { severity: 'warn', isPark: false, isTerminal: false },
   lease_renew_failed: { severity: 'warn', isPark: false, isTerminal: false }, // #3146
+  'land-deferred': { severity: 'warn', isPark: false, isTerminal: false }, // base kept moving; land-only retry queued (#3957)
   landed: { severity: 'info', isPark: false, isTerminal: true, laneStatus: 'merged' },
   'lane-done': { severity: 'info', isPark: false, isTerminal: false },
   // The lane circuit breaker stopped claiming issues (#1906). Not a park: both
