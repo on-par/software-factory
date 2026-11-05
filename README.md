@@ -136,7 +136,7 @@ factory respond <PR>                Run a feedback round on a factory PR: triage
 factory run-issue <N>               Like ship, but loads the issue first and exits 2 if it cannot be found
 factory run-issue <N> --merge        After SHIP, wait for CI and land the PR through the run merge gates; exits 0 merged, 10 held, 11 CI failed, 12 timed out, 13 land failed, 14 land deferred (base kept moving), 1 parked before a PR
 factory run-issue <N> --in-place   Build in the current clean checkout, no worktree (disposable containers)
-factory run-issue <N> --json       Print the final run result as one JSON line on stdout (schemaVersion 1); progress goes to stderr
+factory run-issue <N> --json       Print the final run result as one JSON line on stdout (schemaVersion 2); progress goes to stderr
 factory run-issue <N> --export D   Copy the run's state, events and cost records into D on any exit path (also run-brief, ship)
 factory run-issue <N> --stack        Build an oversized <N> as a stacked PR set in one run (the size gate default)
 factory run-issue <N> --base-branch <ref>  Start from origin/<ref> and open the PR against <ref> (also ship, run-brief)

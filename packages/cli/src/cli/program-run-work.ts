@@ -32,7 +32,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     .option('--base-branch <ref>', BASE_BRANCH_OPTION_DESCRIPTION)
     .option(
       '--json',
-      'Print the final run result as one JSON object (schemaVersion 1) on the last stdout line; progress goes to stderr',
+      'Print the final run result as one JSON object (schemaVersion 2) on the last stdout line; progress goes to stderr',
     )
     .option(
       '--export <dir>',
@@ -102,7 +102,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     )
     .option(
       '--json',
-      'Print the final run result as one JSON object (schemaVersion 1) on the last stdout line; progress goes to stderr',
+      'Print the final run result as one JSON object (schemaVersion 2) on the last stdout line; progress goes to stderr',
     )
     .option(
       '--export <dir>',
@@ -159,7 +159,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     )
     .option(
       '--json',
-      'Print the final run result as one JSON object (schemaVersion 1) on the last stdout line; progress goes to stderr',
+      'Print the final run result as one JSON object (schemaVersion 2) on the last stdout line; progress goes to stderr',
     )
     .option(
       '--export <dir>',
