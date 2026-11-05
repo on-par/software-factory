@@ -25,6 +25,7 @@ import {
   resolveBaseHealthChecks,
   resolveLaneDiscoveryIntervalMs,
   resolveLocalOnly,
+  resolveRunMaxLanes,
   resolveRunUsageHarness,
   restackOnPrerequisite,
   settleParkedPullRequest,
@@ -34,6 +35,7 @@ import {
 
 import { baseChecksVerdict } from './base-health-ci.js';
 import { createBaseHoldGate, formatBaseHoldCleared } from './base-hold.js';
+import { clearLaneSlots, parseMaxLanesFlag, writeLaneSlots } from './lane-slots.js';
 import { keychainPreflightError, type KeychainProbeStatus } from './doctor.js';
 import type {
   CliDeps,
@@ -57,7 +59,7 @@ import { waitForMerge } from './land.js';
 import { hostClaimGuards } from './host-claim-guards.js';
 import { DRAIN_MESSAGE, createNotifier, resolveNotifyCommand, withDiskLowNotify, withParkNotify } from './notify.js';
 import { createDeferralTracker, settleDeferredOnly } from './queue-startup.js';
-import { discoverQueuedLanes, superviseLanes } from './run-lane-discovery.js';
+import { discoverQueuedLanes, superviseLanes, withLaneHeads } from './run-lane-discovery.js';
 import { runLane } from './run-lane.js';
 import { runReworkPolls } from './run-rework-poll.js';
 import { restackFromSlicePlan } from './run-restack.js';
@@ -74,6 +76,8 @@ export interface RunOptions {
   usagePoll?: string;
   branchPrefix?: string;
   notify?: string;
+  /** `--max-lanes <n>`; beats run.maxLanes (#3958). */
+  maxLanes?: string;
 }
 
 /** index.ts's helpers for `factory run`, built at call time so main() deps injection reaches the handler. */
@@ -152,6 +156,12 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
     writeRunFlagOverrides(paths.runFlags, { autoMerge: opts.autoMerge, prClassifier: opts.prClassifier });
     const ghRepo = await rt.getGitHubRepo();
     const factoryConfig = rt.configLoaders.loadFactoryConfigForRepo(paths.config);
+    const cap = resolveRunMaxLanes(factoryConfig, parseMaxLanesFlag(opts.maxLanes));
+    if (cap.maxLanes !== undefined) {
+      const msg = `at most ${cap.maxLanes} lanes (${cap.source === 'flag' ? '--max-lanes' : 'run.maxLanes'})`;
+      console.log(`[factory] run: ${msg}`);
+      logEvent(paths.events, 'watchdog', 'all', `run: ${msg}`);
+    }
     const keychainErr = keychainPreflightError(rt.probeClaudeKeychain());
     if (keychainErr) {
       logEvent(paths.events, 'environment_warning', 'all', keychainErr);
@@ -384,29 +394,36 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
         });
       };
 
-      ({ started } = await superviseLanes(
-        lanes.map((planned) => ({ planned, keys: planned.issues.map(String) })),
-        {
-          intervalMs: resolveLaneDiscoveryIntervalMs(factoryConfig),
-          startLane,
-          stopRequested: () => readStopFileStatus(paths).present,
-          reapExpiredClaims:
-            opts.localQueue === true
-              ? undefined
-              : resolveTrackerConfig(factoryConfig).kind === 'linear'
-                ? runQueue.startupLinearReap
-                : () => rt.reapExpiredClaims(paths, ghRepo),
-          discover: () =>
-            discoverQueuedLanes({
-              localQueue: opts.localQueue === true,
-              readLocalQueue,
-              queue,
-              onUnshippable: runQueue.onUnshippable,
-              planRunLanes: rt.planRunLanes,
-            }),
-          log: (type, msg, lane) => logEvent(paths.events, type, '-', msg, lane ? { lane } : undefined),
-        },
-      ));
+      ({ started } = await superviseLanes(await withLaneHeads(lanes, { localQueue: opts.localQueue === true, queue }), {
+        maxLanes: cap.maxLanes,
+        onSlots: (s) =>
+          writeLaneSlots(paths.laneSlots, {
+            maxLanes: cap.maxLanes ?? null,
+            source: cap.source,
+            ...s,
+            updatedAt: new Date().toISOString(),
+            pid: process.pid,
+          }),
+        intervalMs: resolveLaneDiscoveryIntervalMs(factoryConfig),
+        startLane,
+        stopRequested: () => readStopFileStatus(paths).present,
+        reapExpiredClaims:
+          opts.localQueue === true
+            ? undefined
+            : resolveTrackerConfig(factoryConfig).kind === 'linear'
+              ? runQueue.startupLinearReap
+              : () => rt.reapExpiredClaims(paths, ghRepo),
+        discover: () =>
+          discoverQueuedLanes({
+            localQueue: opts.localQueue === true,
+            readLocalQueue,
+            queue,
+            onUnshippable: runQueue.onUnshippable,
+            planRunLanes: rt.planRunLanes,
+          }),
+        log: (type, msg, lane) =>
+          logEvent(paths.events, type === 'lane-wait' ? 'watchdog' : type, '-', msg, lane ? { lane } : undefined),
+      }));
       controller.abort();
       await watchdog;
       if (opts.localQueue !== true)
@@ -422,6 +439,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
         await notifier.settle();
       }
     } finally {
+      clearLaneSlots(paths.laneSlots);
       if (proxy) {
         await proxy.stop();
         clearProxyState(paths.proxyState);

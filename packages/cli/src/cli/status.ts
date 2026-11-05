@@ -49,6 +49,7 @@ import { formatBaseHoldStatus, readBaseHold } from './base-hold.js';
 import { notInitializedMessage } from './first-run.js';
 import { selectQueueBackend } from './queue-backend-select.js';
 import type { CliDeps, CliExitError, readActiveProduct } from './index.js';
+import { formatLaneSlotsSection, readLaneSlots } from './lane-slots.js';
 import { readRunFlagOverrides } from './run-flags.js';
 import { readStopFileStatus, stopSentinelStatusLine } from './stop-sentinel.js';
 import { formatHostSlotsSection } from './status-host-slots.js';
@@ -282,6 +283,13 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     for (const line of formatHostSlotsSection(listHostSlots(hostBuildSlotsDir()), maxBuilds)) console.log(line);
   } catch (err) {
     console.log(`  (host slot lookup failed — ${rt.errorDetail(err)})`);
+  }
+
+  console.log(styleText('bold', '\n== Lanes =='));
+  try {
+    for (const line of formatLaneSlotsSection(readLaneSlots(paths.laneSlots))) console.log(line);
+  } catch (err) {
+    console.log(`  (lane slot lookup failed — ${rt.errorDetail(err)})`);
   }
 
   const factoryConfig = rt.configLoaders.loadFactoryConfigForRepo(paths.config);

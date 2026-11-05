@@ -55,6 +55,7 @@ describe('getFactoryPaths', () => {
       flakyLedger: resolve(state, 'flaky-tests.json'),
       laneFiles: resolve(state, 'lane-files.json'),
       runFlags: resolve(state, 'run-flags.json'),
+      laneSlots: resolve(state, 'lane-slots.json'),
       orphanDraftSweep: resolve(state, 'orphan-draft-sweep.json'),
     };
   };
@@ -150,6 +151,7 @@ describe('getFactoryPaths', () => {
       'flakyLedger',
       'laneFiles',
       'runFlags',
+      'laneSlots',
       'orphanDraftSweep',
       'mergeLock',
       'gitLock',

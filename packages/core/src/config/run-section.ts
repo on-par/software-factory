@@ -23,6 +23,12 @@ export const RunConfigSectionSchema = z
       .strict()
       .optional(),
     pr: z.object({ draft: z.boolean().optional() }).strict().optional(),
+    maxLanes: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe('Most lanes one `factory run` has open at once; extra lanes wait for a slot (#3958). Unset = no cap.'),
   })
   .strict()
   .optional();
@@ -61,4 +67,17 @@ export function describeDraftPrPolicy(policy: EffectiveDraftPrPolicy, repoConfig
         ? repoConfigPath
         : 'default';
   return `Draft PR: ${policy.draft ? 'on' : 'off'} (${source})`;
+}
+
+export interface EffectiveRunMaxLanes {
+  maxLanes: number | undefined;
+  source: 'flag' | 'config' | 'unset';
+}
+
+/** `--max-lanes` > run.maxLanes > unset (no cap) (#3958). */
+export function resolveRunMaxLanes(config: { run?: { maxLanes?: number } }, flag?: number): EffectiveRunMaxLanes {
+  if (flag !== undefined) return { maxLanes: flag, source: 'flag' };
+  const configured = config.run?.maxLanes;
+  if (configured !== undefined) return { maxLanes: configured, source: 'config' };
+  return { maxLanes: undefined, source: 'unset' };
 }

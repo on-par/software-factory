@@ -286,7 +286,10 @@ const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError appendSteerEvent'.spli
 const STEERED = 'collectMergedPrSteers summarizeSteerability formatSteerabilityReport fileBug'.split(' '); // #3403
 const MORE = ['readStackSliceGate']; // #3366
 const STACK = 'nextStackSlice restackAfterSquashMerge listStatelessLaneIssues'.split(' ');
-const POLICY = 'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy resolveConfiguredWritablePaths'.split(' '); // #2215, #3449, #3454
+const POLICY =
+  'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy resolveConfiguredWritablePaths resolveRunMaxLanes'.split(
+    ' ',
+  ); // #2215, #3449, #3454, #3958
 const PO2 = 'OPENCODE_GO_DEFAULT_MODEL filterRefusedProviders sweepOrphanDrafts'.split(' '); // #3335, #1623
 const GATE = ['allProvidersDown', 'stageBlocked', 'PROVIDER_LEVEL_REASONS', 'TIMED_BREAKER_REASONS']; // #3226
 const EXTRA_INTERNAL_KEYS = [

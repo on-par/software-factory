@@ -113,6 +113,17 @@ describe('createGithubQueueBackend', () => {
     expect(await backend.list('build')).toEqual(['1055', '993']);
   });
 
+  it('laneHead returns the lowest-order issue and its position, null for an empty lane', async () => {
+    const { client } = createFakeStore([
+      { number: 1055, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(7)] },
+      { number: 993, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(3)] },
+    ]);
+    const backend = createGithubQueueBackend({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    expect(await backend.laneHead?.('build')).toEqual({ key: workKeyFromIssue(993), position: 3 });
+    expect(await backend.laneHead?.('empty')).toBeNull();
+  });
+
   it('list() with no lane returns every lane concatenated, lane-sorted', async () => {
     const { client } = createFakeStore([
       { number: 10, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1)] },

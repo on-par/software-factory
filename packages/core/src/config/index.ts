@@ -798,6 +798,8 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string, env: NodeJ
     /** Per-invocation CLI flag overrides recorded by `factory run` so a separate
      *  `factory status` process can attribute the policy to the flag (#1400). */
     runFlags: resolve(state, 'run-flags.json'),
+    /** Running and waiting lanes of the active `factory run`, read by `factory status` (#3958). */
+    laneSlots: resolve(state, 'lane-slots.json'),
   };
 }
 

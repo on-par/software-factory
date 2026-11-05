@@ -3,10 +3,13 @@
 import { type BlockedParkPollResult, type BlockedParkStore, pollBlockedParks } from '../blockers/poller.js';
 import {
   createGithubQueue,
+  laneLabel,
+  QUEUED_LABEL,
   type GithubQueueOptions,
   type QueueClaim,
   type QueueReleaseOutcome,
 } from './github-queue.js';
+import { orderedCandidates, QUEUE_ORDER_LABEL_PREFIX } from './queue-order.js';
 import { issueNumberOf, workKeyFromIssue, type WorkKey } from '../work/work-key.js';
 import { createLinearQueueBackend, type LinearQueueBackendOptions } from './linear-queue-backend.js';
 import type { LinearStaleClaimRelease } from './linear-queue-lifecycle.js';
@@ -28,6 +31,8 @@ export interface QueueBackend {
   heartbeat(key: WorkKey): Promise<boolean>;
   /** Queued work keys for one lane, in claim order; every lane, lane-sorted, when `lane` is omitted. */
   list(lane?: string): Promise<WorkKey[]>;
+  /** The first queued work item of `lane` and its `factory:order` position, used to rank waiting lanes (#3958); absent on backends without order labels. */
+  laneHead?(lane: string): Promise<{ key: WorkKey; position: number | null } | null>;
   /** Lane names that currently have queued work. */
   lanes(): Promise<string[]>;
   /** Detects and releases claims whose TTL lease has expired across the whole queue. */
@@ -56,6 +61,15 @@ export function createGithubQueueBackend(options: GithubQueueBackendOptions): Qu
     return keys;
   }
 
+  async function laneHead(lane: string): Promise<{ key: WorkKey; position: number | null } | null> {
+    const { onOrderConflict } = options;
+    const candidates = await client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL, laneLabel(lane)] });
+    const first = orderedCandidates(lane, candidates, onOrderConflict, onOrderConflict)[0];
+    if (first === undefined) return null;
+    const label = first.labels.find((l) => l.startsWith(QUEUE_ORDER_LABEL_PREFIX)) ?? '';
+    return { key: workKeyFromIssue(first.number), position: Number(label.slice(QUEUE_ORDER_LABEL_PREFIX.length)) };
+  }
+
   async function reap(): Promise<StaleClaimRelease[]> {
     return releaseStaleClaims({ client, owner, repo, now });
   }
@@ -70,6 +84,7 @@ export function createGithubQueueBackend(options: GithubQueueBackendOptions): Qu
     release: async (key, outcome) => queue.release(issueNumberOf(key), outcome),
     heartbeat: async (key) => queue.heartbeat(issueNumberOf(key)),
     list,
+    laneHead,
     lanes: () => queue.lanes(),
     reap,
     pollBlockedParks: pollParks,
