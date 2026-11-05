@@ -5,7 +5,7 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CliExitError } from './errors.js';
-import { cmdRespond, respondDepsFrom, type RespondDeps, type RespondRuntime } from './respond-command.js';
+import { cmdRespond, respondDepsFrom, runFeedbackRound, type RespondDeps, type RespondRuntime } from './respond-command.js';
 
 const tmp = createTempDirs();
 afterEach(async () => {
@@ -40,6 +40,21 @@ async function setup(pull: Pull = open, config: Partial<FactoryConfig> = {}) {
   };
   return { deps, out, shipIssue, parkAtCap, publishParkComment, repoRoot };
 }
+
+describe('runFeedbackRound', () => {
+  it('returns the round result and prints nothing itself', async () => {
+    const { deps, shipIssue, out } = await setup();
+    await expect(runFeedbackRound(7, deps)).resolves.toEqual({ pr: 7, issue: 42, result: 'shipped' });
+    expect(shipIssue).toHaveBeenCalledTimes(1);
+    expect(out).toEqual([]);
+  });
+
+  it('throws for a closed PR', async () => {
+    const { deps, shipIssue } = await setup({ ...open, state: 'closed' });
+    await expect(runFeedbackRound(7, deps)).rejects.toBeInstanceOf(CliExitError);
+    expect(shipIssue).not.toHaveBeenCalled();
+  });
+});
 
 describe('cmdRespond', () => {
   it("respond starts a feedback round for the PR's issue", async () => {

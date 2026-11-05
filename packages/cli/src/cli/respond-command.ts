@@ -63,14 +63,14 @@ export function respondDepsFrom<Shell>(runtime: RespondRuntime<Shell>): RespondD
   };
 }
 
-/** Run a feedback round on the factory PR `pr`: triage new trusted feedback, re-plan or rework, push, reply, resolve and re-request review. */
-export async function cmdRespond(
-  pr: string,
-  opts: { json?: boolean },
-  deps: RespondDeps = respondDepsFrom(shipRuntime()),
-): Promise<void> {
-  if (!/^#?\d+$/.test(pr.trim())) throw new CliExitError(`factory respond: '${pr}' is not a pull request number`, 2);
-  const prNumber = Number(pr.trim().replace('#', ''));
+export interface FeedbackRoundResult {
+  pr: number;
+  issue: number;
+  result: string;
+}
+
+/** Run one feedback round on the open factory PR `prNumber`: triage new trusted feedback, re-plan or rework, push, reply, resolve fixed threads and re-request review. Throws at a closed or non-factory PR and at the review-rework cap. */
+export async function runFeedbackRound(prNumber: number, deps: RespondDeps): Promise<FeedbackRoundResult> {
   const repoRoot = await deps.getRepoRoot();
   const ghRepo = await deps.getGitHubRepo();
   const [owner = '', repo = ''] = ghRepo.split('/');
@@ -130,6 +130,17 @@ export async function cmdRespond(
       { repoRoot, ghRepo, feedbackRound: { prNumber } },
     ),
   );
+  return { pr: prNumber, issue, result };
+}
+
+/** Run a feedback round on a factory PR (`factory respond <pr>`): see runFeedbackRound. */
+export async function cmdRespond(
+  pr: string,
+  opts: { json?: boolean },
+  deps: RespondDeps = respondDepsFrom(shipRuntime()),
+): Promise<void> {
+  if (!/^#?\d+$/.test(pr.trim())) throw new CliExitError(`factory respond: '${pr}' is not a pull request number`, 2);
+  const { pr: prNumber, issue, result } = await runFeedbackRound(Number(pr.trim().replace('#', '')), deps);
   deps.out(
     opts.json
       ? JSON.stringify({ pr: prNumber, issue, result })
