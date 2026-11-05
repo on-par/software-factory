@@ -3,18 +3,16 @@
 import { existsSync, statSync } from 'node:fs';
 
 import { parkReasonFor, workKeyFromIssue } from '@on-par/factory-core';
-import type { EventKind, getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-core';
+import type { EventKind, getFactoryPaths, ParkPayload, ParkReason, RunOutcome } from '@on-par/factory-core';
 import {
   DEFAULT_CLAIM_LEASE_MS,
   defaultClaimantId,
   logEvent,
-  nextRecheckAt,
   PARKED_LABEL,
   parkPayload,
 } from '@on-par/factory-core/internal';
 import type { AwaitingCiRecord, QueueClaim, QueueReleaseOutcome } from '@on-par/factory-core/internal';
 
-import type { AwaitingCiParkReason } from './awaiting-ci-recheck.js';
 import { formatBaseHoldKept, type BaseHoldDecision } from './base-hold.js';
 import { holdForDisk } from './run-lane-disk-hold.js';
 import { holdForLoad } from './run-lane-load-hold.js';
@@ -28,12 +26,13 @@ import {
   waitForProvidersRestored,
 } from './lane-pause.js';
 import { waitForMerge } from './land.js';
-import { AwaitMergeStoppedError, AwaitingCiError, AwaitingReviewError } from './land-pr.js';
+import { AwaitMergeStoppedError, AwaitingCiError, AwaitingReviewError, LandDeferredError } from './land-pr.js';
 import { closeReplacedPullRequest, landWithOneRebuild } from './land-rebuild.js';
 import { restoredLoggingBreaker } from './provider-restored-log.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
 import { shipIssue } from './ship.js';
 import { ClaimLostError, createClaimLease, laneRenewLogger, onClaimLost, withHeartbeat } from './lane-heartbeat.js';
+import { handleLeftOpen, runPreClaimRechecks } from './run-lane-rechecks.js';
 import { restackPrerequisiteUnderHeartbeat, restackUnderHeartbeat } from './run-lane-restack.js';
 import type { RunLaneDeps } from './run-lane-deps.js';
 import { shipRuntime } from './ship-runtime.js';
@@ -61,6 +60,8 @@ export async function runLane(
     pollReviewRework,
     recordAwaitingCi,
     recheckAwaitingCi,
+    recordLandDeferred,
+    retryLandDeferred,
     releaseIssue = async () => {},
     heartbeat,
     leaseMs = DEFAULT_CLAIM_LEASE_MS,
@@ -150,15 +151,15 @@ export async function runLane(
     await sweepFinished(issue).catch(() => {});
     return true;
   };
-  const emitAwaitingCi = (kind: EventKind, issue: number, message: string): void =>
+  const emitLaneEvent = (kind: EventKind, issue: number, message: string): void =>
     emitEvent(paths.events, kind, issue, message, { lane });
-  // #3208: parks an awaiting-ci PR through the lane's park path: reason event, issue comment, worktree reap, label.
-  const parkAwaitingCi = async (
-    rec: AwaitingCiRecord,
-    reason: AwaitingCiParkReason,
+  // #3208, #3957: parks a left-open PR through the lane's park path: reason event, issue comment, worktree reap, label.
+  const parkLeftOpen = async (
+    rec: Pick<AwaitingCiRecord, 'issue' | 'branch'>,
+    reason: ParkReason,
     message: string,
   ): Promise<void> => {
-    emitAwaitingCi(reason, rec.issue, message);
+    emitLaneEvent(reason, rec.issue, message);
     await postParkComment(rec.issue, reason, message, rec.branch);
     await reapWorktree(rec.issue).catch(() => {});
     const msg = `issue #${rec.issue} parked (${reason}); lane '${lane}' continuing`;
@@ -167,6 +168,12 @@ export async function runLane(
     }
     parked++;
   };
+  const awaitingOps = { park: parkLeftOpen, emit: emitLaneEvent };
+  // #3957: due land-deferred retries also run inside each land's heartbeat, so they land before this lane's own PR.
+  const retryDeferredBeforeLand = (): Promise<void> | undefined =>
+    retryLandDeferred?.(awaitingOps).catch((err) =>
+      emitEvent(paths.events, 'warn', lane, `land-deferred retry failed: ${shipRuntime().errorDetail(err)}`, { lane }),
+    );
   const diskIo = { lane, paths, emitEvent, now, sleep, pathExists };
   for (let i = 0; ; i++) {
     if (await waitForProviderReset(pauseCtx, providerPauseUntil, now, sleep, pathExists)) return;
@@ -189,20 +196,14 @@ export async function runLane(
       }
       if (loadGuard && (await holdForLoad(loadGuard, diskIo)) === 'stopped') break;
       if (diskGuard && (await holdForDisk(diskGuard, diskIo)) === 'stopped') break;
-      if (pollReviewRework) {
-        await pollReviewRework().catch((err) =>
-          emitEvent(paths.events, 'warn', lane, `review-rework poll failed: ${shipRuntime().errorDetail(err)}`, {
-            lane,
-          }),
-        );
-      }
-      if (recheckAwaitingCi) {
-        await recheckAwaitingCi({ park: parkAwaitingCi, emit: emitAwaitingCi }).catch((err) =>
-          emitEvent(paths.events, 'warn', lane, `awaiting-ci recheck failed: ${shipRuntime().errorDetail(err)}`, {
-            lane,
-          }),
-        );
-      }
+      await runPreClaimRechecks({
+        pollReviewRework,
+        recheckAwaitingCi,
+        retryLandDeferred,
+        awaitingOps,
+        deferredOps: awaitingOps,
+        warn: (m) => emitEvent(paths.events, 'warn', lane, m, { lane }),
+      });
       const claimed = await claimNext();
       if (claimed === null) break;
       seen.add(claimed.issue);
@@ -348,7 +349,10 @@ export async function runLane(
         await withHeartbeat(
           issue,
           heartbeat,
-          (signal) => waitMerge(issue, branch, repoRoot, ghRepo, paths, { landBranch: branch, signal }),
+          async (signal) => {
+            await retryDeferredBeforeLand();
+            await waitMerge(issue, branch, repoRoot, ghRepo, paths, { landBranch: branch, signal });
+          },
           lease,
         );
         await recordStackMerge(issue, layer.prNumber).catch((err) =>
@@ -380,7 +384,10 @@ export async function runLane(
           withHeartbeat(
             issue,
             heartbeat,
-            (signal) => waitMerge(issue, b, repoRoot, ghRepo, paths, { ...opts, signal }),
+            async (signal) => {
+              await retryDeferredBeforeLand();
+              await waitMerge(issue, b, repoRoot, ghRepo, paths, { ...opts, signal });
+            },
             lease,
           ),
         ship: (rebuild, onOutcome) => shipUnderLease({ onOutcome, rebuild }),
@@ -407,22 +414,14 @@ export async function runLane(
         await settle(issue, layer && layer.index < layer.count ? 'queued' : 'done');
         continue;
       }
-      if (err instanceof AwaitingCiError) {
-        // #3208: no CI run ever registered. Keep the PR open and record it for the backoff re-check; never a park.
-        const firstSeenAt = now().getTime();
-        const rec = { issue, prNumber: err.prNumber, branch: landBranch ?? '', headSha: err.headSha, firstSeenAt };
-        await recordAwaitingCi?.({ ...rec, attempts: 0, nextRecheckAt: nextRecheckAt(firstSeenAt, 0) }).catch((e) =>
-          emitAwaitingCi(
-            'warn',
-            issue,
-            `could not record awaiting-ci for PR #${err.prNumber}: ${shipRuntime().errorDetail(e)}`,
-          ),
-        );
-        emitAwaitingCi('awaiting-ci', issue, `PR #${err.prNumber} awaiting CI on ${err.headSha}; re-checking soon`);
-        awaitingReview++;
-        streak = null;
-        await settle(issue, 'done');
-        continue;
+      if (err instanceof AwaitingCiError || err instanceof LandDeferredError) {
+        const ctx = { issue, landBranch, now, emit: emitLaneEvent, recordAwaitingCi, recordLandDeferred };
+        if ((await handleLeftOpen(err, ctx)) === 'handled') {
+          awaitingReview++;
+          streak = null;
+          await settle(issue, 'done');
+          continue;
+        }
       }
       if (err instanceof BaseCiPendingError) {
         streak = null;
