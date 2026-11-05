@@ -56,7 +56,7 @@ export function createFileApprovalGate(opts: FileApprovalGateOptions): ApprovalG
     const id = randomUUID();
     const requestedAt = new Date().toISOString();
     const request: ApprovalRequest = { ...req, id, requestedAt };
-    writeFileSync(join(dir, `${id}${REQUEST_SUFFIX}`), JSON.stringify(request, null, 2));
+    writeFileSync(join(dir, `${id}${REQUEST_SUFFIX}`), JSON.stringify(request, null, 2), { mode: 0o600 });
 
     const responsePath = join(dir, `${id}${RESPONSE_SUFFIX}`);
     const deadline = Date.now() + timeoutMs;

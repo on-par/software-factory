@@ -40,7 +40,7 @@ export function createMergeBaseGate(opts: Options) {
       all = {};
     }
     mkdirSync(dirname(opts.file), { recursive: true });
-    writeFileSync(opts.file, `${JSON.stringify({ ...all, [opts.repo]: entry }, null, 2)}\n`);
+    writeFileSync(opts.file, `${JSON.stringify({ ...all, [opts.repo]: entry }, null, 2)}\n`, { mode: 0o600 });
   };
   const warned = new Set<string>();
   const once = async (graceOver: boolean): Promise<boolean> => {
