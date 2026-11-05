@@ -260,7 +260,7 @@ export function createFileReviewReworkStore(file: string): ReviewReworkStore {
   };
   const persist = (map: Map<string, ReviewReworkRecord>): void => {
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(`${file}.tmp`, `${JSON.stringify({ reviews: [...map.values()] }, null, 2)}\n`);
+    writeFileSync(`${file}.tmp`, `${JSON.stringify({ reviews: [...map.values()] }, null, 2)}\n`, { mode: 0o600 });
     renameSync(`${file}.tmp`, file);
   };
   return {

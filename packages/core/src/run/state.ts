@@ -36,7 +36,7 @@ export async function writeIssueRunState(file: string, state: IssueRunState): Pr
 
   await mkdir(dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
-  await writeFile(tmp, `${JSON.stringify({ key, ...persisted }, null, 2)}\n`);
+  await writeFile(tmp, `${JSON.stringify({ key, ...persisted }, null, 2)}\n`, { mode: 0o600 });
   await rename(tmp, file);
   return { ...persisted, key, issue: state.issue };
 }

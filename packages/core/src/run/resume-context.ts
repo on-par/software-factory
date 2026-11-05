@@ -60,7 +60,7 @@ export function createPlanReuseStore(specPath: string): PlanReuseStore & {
   const path = planReusePath(specPath);
   const record = async (entry: PlanReuseRecord): Promise<void> => {
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, `${JSON.stringify(entry, null, 2)}\n`);
+    await writeFile(path, `${JSON.stringify(entry, null, 2)}\n`, { mode: 0o600 });
   };
   return {
     async load(bodyHash) {
@@ -164,7 +164,7 @@ export function createCheckResumeStore(specPath: string): CheckResumeStore {
     },
     async record(entry) {
       await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, `${JSON.stringify(entry, null, 2)}\n`);
+      await writeFile(path, `${JSON.stringify(entry, null, 2)}\n`, { mode: 0o600 });
     },
     async clear() {
       await rm(path, { force: true });

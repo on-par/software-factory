@@ -273,7 +273,7 @@ export class LaneFileGuard {
   private async write(data: LaneFileGuardFile): Promise<void> {
     await mkdir(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp`;
-    await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);
+    await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
     await rename(tmp, this.file);
   }
 }

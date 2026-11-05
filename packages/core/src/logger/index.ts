@@ -111,7 +111,7 @@ function appendLine(
   lock?: { timeoutMs?: number; pollMs?: number },
 ): void {
   const writeOnce = (): number => {
-    const fd = openSync(eventsFile, 'a');
+    const fd = openSync(eventsFile, 'a', 0o600);
     try {
       writeSync(fd, line);
       return fstatSync(fd).size;

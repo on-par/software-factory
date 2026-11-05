@@ -130,7 +130,7 @@ export function drainSteering(dir: string, issue: number, worktree: string): Con
       // then readFileSync(path)) so there's no check-then-use race window on the path.
       let fd: number;
       try {
-        fd = openSync(resolved, 'r');
+        fd = openSync(resolved, 'r', 0o600);
       } catch {
         continue;
       }

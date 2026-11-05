@@ -68,7 +68,7 @@ function serializedPerFile(file: string, op: () => Promise<void>): Promise<void>
 async function writeSnapshotFile(file: string, snapshot: RunPhaseSnapshot): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(snapshot, null, 2)}\n`);
+  await writeFile(tmp, `${JSON.stringify(snapshot, null, 2)}\n`, { mode: 0o600 });
   await rename(tmp, file);
 }
 

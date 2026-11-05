@@ -226,7 +226,7 @@ export async function withFileLock<T>(lockDir: string, fn: () => Promise<T>, opt
 
     if (acquired) {
       try {
-        writeFileSync(pidPath, ourPid);
+        writeFileSync(pidPath, ourPid, { mode: 0o600 });
       } catch (err) {
         rmSync(lockDir, { recursive: true, force: true });
         throw err;

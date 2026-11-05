@@ -223,7 +223,7 @@ export function createFileIterateStore(file: string): IterateCommandStore {
   };
   const persist = (map: Map<number, IterateCommandRecord>): void => {
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(`${file}.tmp`, `${JSON.stringify({ commands: [...map.values()] }, null, 2)}\n`);
+    writeFileSync(`${file}.tmp`, `${JSON.stringify({ commands: [...map.values()] }, null, 2)}\n`, { mode: 0o600 });
     renameSync(`${file}.tmp`, file);
   };
   return {
