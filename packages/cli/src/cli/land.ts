@@ -26,8 +26,6 @@ import {
   resolveEffectiveConfig,
   resolveBaseHealthChecks,
   resolveFilingPolicy,
-  withFileLock,
-  withGitLock,
   worktreeSandboxFor,
 } from '@on-par/factory-core/internal';
 import { resolveEffectiveTrustTier } from './tier-demotion.js';
@@ -42,6 +40,7 @@ import {
   landOpenPullRequest,
 } from './land-pr.js';
 import type { LandLock } from './land-pr.js';
+import { landLockFor } from './land-slot.js';
 import { landBaseGate } from './land-base-gate.js';
 import { enforceRiskAtLand } from './land-risk.js';
 import { isPrMerged, latestPrForBranch } from './land-merged.js';
@@ -75,6 +74,8 @@ export async function landIssue(
     branch?: string;
     enforceRisk?: boolean;
     syncMain?: boolean;
+    /** #3957: the caller already holds the host landing slot (a land-deferred retry); do not take it again. */
+    holdsLandingSlot?: boolean;
     rebuildOnConflict?: boolean;
     signal?: AbortSignal;
     /** #3905: per-invocation merge flag overrides (`--admin`). */
@@ -205,12 +206,7 @@ export async function landIssue(
     allowHosts: landSandboxPolicy?.allowHosts ?? [],
   });
 
-  const withLandLock: LandLock = (fn) =>
-    withGitLock(repoRoot, () =>
-      withFileLock(paths.mergeLock, fn, {
-        onSteal: (pid) => log('lock-stolen', `stole ${paths.mergeLock} from dead holder pid ${pid ?? 'unknown'}`),
-      }),
-    );
+  const withLandLock: LandLock = landLockFor(repoRoot, paths, log, opts.holdsLandingSlot === true);
 
   if (opts.enforceRisk && !opts.allowGated) {
     const gate = await enforceRiskAtLand({
@@ -330,6 +326,8 @@ export type WaitForMergeDeps = {
   landBranch?: string;
   /** #3324: forwarded to land. */
   syncMain?: boolean;
+  /** #3957: forwarded to land. */
+  holdsLandingSlot?: boolean;
   /** #3325: forwarded to land. */
   rebuildOnConflict?: boolean;
   signal?: AbortSignal; // #3146: aborts when the lane loses its claim; checked every poll and before the merge
@@ -377,6 +375,7 @@ export async function waitForMerge(
     mergeOverrides,
     landBranch,
     syncMain,
+    holdsLandingSlot,
     rebuildOnConflict,
     signal,
     holdWhenGated,
@@ -464,6 +463,7 @@ export async function waitForMerge(
         ...(landBranch ? { branch: landBranch } : {}),
         enforceRisk: true,
         ...(syncMain ? { syncMain } : {}),
+        ...(holdsLandingSlot ? { holdsLandingSlot } : {}),
         ...(rebuildOnConflict ? { rebuildOnConflict } : {}),
         ...(signal ? { signal } : {}),
         ...(mergeOverrides ? { mergeOverrides } : {}),
