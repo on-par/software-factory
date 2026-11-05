@@ -615,7 +615,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
     maxLandDeferrals: 3,
     comment:
       'Set FACTORY_MERGE=1 to enable autonomous squash-merge; set FACTORY_MERGE_ADMIN=1 to bypass unmet merge requirements with GitHub admin privileges. ' +
-      'maxConflictRounds (1-10, default 2) caps how many times land merges origin/main into a PR that turned DIRTY, re-watching CI each time; when spent, the run parks as conflict. '+
+      'maxConflictRounds (1-10, default 2) caps how many times land merges origin/main into a PR that turned DIRTY, re-watching CI each time; when spent, the run parks as conflict. ' +
       'maxLandDeferrals (1-10, default 3) caps how many times a land starved by a moving base is deferred and retried land-only before the run parks as ci-failed.',
   },
   worktree: {

@@ -39,6 +39,11 @@ function classifyMerge(merge: MergeResult): { outcome: RunResultOutcome; exitRea
       return { outcome: 'pr-open', exitReason: `merge timed out: ${merge.detail}` };
     case 'land-failed':
       return { outcome: 'failed', exitReason: `land failed: ${merge.detail}` };
+    case 'land-deferred':
+      return {
+        outcome: 'land-deferred',
+        exitReason: `land deferred ${merge.deferrals ?? 0} time(s): ${merge.detail}`,
+      };
     case 'failed-before-pr':
       return undefined;
   }
@@ -133,5 +138,6 @@ export function buildRunResult(input: RunResultInput): RunResultJson {
     phases: buildPhases(events, costs, input.finishedAt),
     cost: { usd: round6(total), byModel },
     reworkRounds: outcome?.reworkRounds ?? 0,
+    ...(merge?.kind === 'land-deferred' ? { landDeferrals: merge.deferrals ?? 0 } : {}),
   };
 }

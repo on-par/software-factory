@@ -1,6 +1,6 @@
 import type { ActiveQueueClaim } from '@on-par/factory-core';
-import { providerPlan, TIMED_BREAKER_REASONS } from '@on-par/factory-core/internal';
-import type { OpenFactoryDrafts } from '@on-par/factory-core/internal';
+import { DEFAULT_MAX_LAND_DEFERRALS, providerPlan, TIMED_BREAKER_REASONS } from '@on-par/factory-core/internal';
+import type { LandDeferredRecord, OpenFactoryDrafts } from '@on-par/factory-core/internal';
 
 import type { StatusJson } from './json-contract.js';
 import type { StatusUpdateJson } from './update-state.js';
@@ -86,6 +86,9 @@ export function buildStatusJson(input: {
   update: StatusUpdateJson | null;
   openFactoryDrafts: OpenFactoryDrafts | null;
   disk: StatusJson['disk'];
+  /** #3957: PRs queued for a land-only retry, and the deferral cap they park at. */
+  landDeferred?: ReadonlyArray<LandDeferredRecord>;
+  maxLandDeferrals?: number;
   now: number;
 }): StatusJson {
   const breakerProviders: StatusBreakerProviderJson[] = input.breakers.map((b) => ({
@@ -152,5 +155,14 @@ export function buildStatusJson(input: {
     disk: input.disk,
     providers,
     activeAlerts,
+    landDeferred: (input.landDeferred ?? []).map((r) => ({
+      issue: r.issue,
+      prNumber: r.prNumber,
+      branch: r.branch,
+      deferrals: r.deferrals,
+      maxDeferrals: input.maxLandDeferrals ?? DEFAULT_MAX_LAND_DEFERRALS,
+      firstDeferredAt: new Date(r.firstDeferredAt).toISOString(),
+      nextRetryAt: new Date(r.nextRetryAt).toISOString(),
+    })),
   };
 }

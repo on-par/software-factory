@@ -68,7 +68,7 @@ describe('retryDueLandDeferred (#3957)', () => {
   it('a due retry lands with syncMain and holdsLandingSlot and clears the record without shipping', async () => {
     const dir = dirs.makeSync('land-deferred-wfm-');
     const paths: any = { config: join(dir, 'config.yaml'), events: join(dir, 'e.ndjson'), stop: join(dir, 'STOP') };
-    const land = vi.fn(async () => {});
+    const land = vi.fn(async () => ({ branch: 'factory/5-x', prNumber: 50 }));
     const real = (r: LandDeferredRecord) =>
       waitForMerge(r.issue, r.branch, '/repo', 'o/r', paths, {
         landBranch: r.branch,

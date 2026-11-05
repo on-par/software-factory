@@ -72,7 +72,6 @@ export const ITERATE_INTERNAL_KEYS = [
 /** ./internal names added by the land-deferred retry queue (#3957). */
 export const LAND_DEFERRED_INTERNAL_KEYS = [
   'DEFAULT_MAX_LAND_DEFERRALS',
-  'LAND_DEFER_BACKOFF_MS',
   'clearLandDeferred',
   'decideLandDeferral',
   'dueLandDeferrals',

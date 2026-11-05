@@ -54,6 +54,7 @@ import { readRunFlagOverrides } from './run-flags.js';
 import { readStopFileStatus, stopSentinelStatusLine } from './stop-sentinel.js';
 import { formatHostSlotsSection } from './status-host-slots.js';
 import { buildStatusJson, statusProviderInputs } from './status-json.js';
+import { formatLandDeferredSection, readLandDeferredStatus } from './status-land-deferred.js';
 import { checkSweepHeartbeat, defaultSweepHeartbeatDeps, formatSweepHeartbeatStatusLine } from './sweep-heartbeat.js';
 import { buildStatusUpdateJson, formatUpdateStatusLine, readUpdateState, updateStatePath } from './update-state.js';
 
@@ -204,6 +205,9 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     } catch {
       // config unreadable: report no providers rather than failing status --json
     }
+    const landDeferred = await readLandDeferredStatus(paths, () =>
+      rt.configLoaders.loadFactoryConfigForRepo(paths.config),
+    );
     console.log(
       JSON.stringify(
         buildStatusJson({
@@ -218,6 +222,8 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
           update: buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir))),
           openFactoryDrafts: await readDrafts(ghRepo, paths.config, rt),
           disk: readStatusDisk(repoRoot, ghRepo, paths, rt),
+          landDeferred: landDeferred.records,
+          maxLandDeferrals: landDeferred.maxDeferrals,
           now: Date.now(),
         }),
       ),
@@ -293,6 +299,10 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
   }
 
   const factoryConfig = rt.configLoaders.loadFactoryConfigForRepo(paths.config);
+  console.log(styleText('bold', '\n== Land deferred =='));
+  const landDeferredStatus = await readLandDeferredStatus(paths, () => factoryConfig);
+  for (const line of formatLandDeferredSection(landDeferredStatus)) console.log(line);
+
   if (resolveTrackerConfig(factoryConfig).kind === 'linear') {
     console.log(styleText('bold', '\n== Queue (Linear) =='));
     try {

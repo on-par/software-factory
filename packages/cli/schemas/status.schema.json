@@ -344,6 +344,37 @@
         "required": ["kind", "since", "detail"],
         "additionalProperties": false
       }
+    },
+    "landDeferred": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "issue": {
+            "type": "number"
+          },
+          "prNumber": {
+            "type": "number"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "deferrals": {
+            "type": "number"
+          },
+          "maxDeferrals": {
+            "type": "number"
+          },
+          "firstDeferredAt": {
+            "type": "string"
+          },
+          "nextRetryAt": {
+            "type": "string"
+          }
+        },
+        "required": ["issue", "prNumber", "branch", "deferrals", "maxDeferrals", "firstDeferredAt", "nextRetryAt"],
+        "additionalProperties": false
+      }
     }
   },
   "required": [
@@ -359,7 +390,8 @@
     "decomposedParents",
     "disk",
     "providers",
-    "activeAlerts"
+    "activeAlerts",
+    "landDeferred"
   ],
   "additionalProperties": false
 }

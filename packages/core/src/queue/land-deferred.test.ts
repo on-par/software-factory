@@ -1,8 +1,9 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { createTempDirs } from '../harness/temp-dir.js';
 
 import {
   clearLandDeferred,
@@ -14,6 +15,9 @@ import {
   upsertLandDeferred,
   type LandDeferredRecord,
 } from './land-deferred.js';
+
+const dirs = createTempDirs();
+afterEach(() => dirs.cleanup());
 
 const next = { issue: 7, prNumber: 70, branch: 'b7', message: 'base kept moving' };
 const rec = (over: Partial<LandDeferredRecord> = {}): LandDeferredRecord => ({
@@ -84,7 +88,7 @@ describe('dueLandDeferrals', () => {
 
 describe('land-deferred file', () => {
   it('upserts, replaces by issue and clears; a missing or malformed file reads as empty', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'land-deferred-'));
+    const dir = dirs.makeSync('land-deferred-');
     const file = landDeferredFile({ state: dir });
     expect(file).toBe(join(dir, 'land-deferred.json'));
     expect(await readLandDeferred(file)).toEqual([]);

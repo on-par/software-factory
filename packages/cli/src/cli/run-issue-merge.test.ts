@@ -12,6 +12,7 @@ import {
   CiInfraError,
   CiUnverifiedError,
   LandConflictError,
+  LandDeferredError,
   LandFailureError,
   MergeGatedError,
 } from './land-pr.js';
@@ -169,6 +170,19 @@ describe('driveToMerge', () => {
     expect(result.kind).toBe('merged');
   });
 
+  it('a land that keeps deferring retries until the deadline, then exits land-deferred with the count', async () => {
+    let t = 0;
+    const sleep = vi.fn(async (ms: number) => {
+      t += ms;
+    });
+    const waitMerge = vi.fn(async () => {
+      throw new LandDeferredError('base kept moving', 55, 'ship-it/9-x');
+    });
+    const result = await driveToMerge(input({ timeoutMs: 150 }), { waitMerge, now: () => t, sleep, pollMs: 100 });
+    expect(result).toMatchObject({ kind: 'land-deferred', prNumber: 55, deferrals: 3, detail: 'base kept moving' });
+    expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
   it('an aborted wait exits timed-out', async () => {
     const named = Object.assign(new Error('t'), { name: 'TimeoutError' });
     expect((await driveToMerge(input(), { waitMerge: vi.fn().mockRejectedValue(named) })).kind).toBe('timed-out');
@@ -239,6 +253,7 @@ describe('exitForMerge', () => {
     expect(code('ci-failed')).toBe(11);
     expect(code('timed-out')).toBe(12);
     expect(code('land-failed')).toBe(13);
+    expect(code('land-deferred')).toBe(14);
   });
 
   it('MERGE_EXIT codes are pairwise distinct and avoid the usage code', () => {

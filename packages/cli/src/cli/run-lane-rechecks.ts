@@ -56,17 +56,21 @@ export async function handleLeftOpen(
     // #3208: no CI run ever registered. Keep the PR open and record it for the backoff re-check; never a park.
     const firstSeenAt = ctx.now().getTime();
     const rec = { issue, prNumber: err.prNumber, branch: ctx.landBranch ?? '', headSha: err.headSha, firstSeenAt };
-    await ctx.recordAwaitingCi?.({ ...rec, attempts: 0, nextRecheckAt: nextRecheckAt(firstSeenAt, 0) }).catch((e) =>
-      emit('warn', issue, `could not record awaiting-ci for PR #${err.prNumber}: ${shipRuntime().errorDetail(e)}`),
-    );
+    try {
+      await ctx.recordAwaitingCi?.({ ...rec, attempts: 0, nextRecheckAt: nextRecheckAt(firstSeenAt, 0) });
+    } catch (e) {
+      emit('warn', issue, `could not record awaiting-ci for PR #${err.prNumber}: ${shipRuntime().errorDetail(e)}`);
+    }
     emit('awaiting-ci', issue, `PR #${err.prNumber} awaiting CI on ${err.headSha}; re-checking soon`);
     return 'handled';
   }
   if (!ctx.recordLandDeferred) return 'unhandled';
-  const decision = await ctx.recordLandDeferred(err, issue, err.branch).catch((e: unknown) => {
+  let decision: Awaited<ReturnType<NonNullable<LeftOpenCtx['recordLandDeferred']>>> | undefined;
+  try {
+    decision = await ctx.recordLandDeferred(err, issue, err.branch);
+  } catch (e) {
     emit('warn', issue, `could not record land-deferred for PR #${err.prNumber}: ${shipRuntime().errorDetail(e)}`);
-    return undefined;
-  });
+  }
   if (decision?.kind !== 'defer') return 'unhandled';
   const { record, maxDeferrals } = decision;
   emit(

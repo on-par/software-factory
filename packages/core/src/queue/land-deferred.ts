@@ -25,8 +25,7 @@ export function resolveMaxLandDeferrals(config: { merge?: { maxLandDeferrals?: n
 }
 
 export type LandDeferralDecision =
-  | { kind: 'defer'; record: LandDeferredRecord }
-  | { kind: 'park'; deferrals: number; message: string };
+  { kind: 'defer'; record: LandDeferredRecord } | { kind: 'park'; deferrals: number; message: string };
 
 /** Defers with backoff until `maxDeferrals` deferrals are spent, then parks. */
 export function decideLandDeferral(

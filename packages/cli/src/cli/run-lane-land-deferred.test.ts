@@ -3,12 +3,13 @@
 import { join } from 'node:path';
 
 import { getFactoryPaths } from '@on-par/factory-core';
+import type { Octokit } from '@octokit/rest';
 import { decideLandDeferral } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LandDeferredError } from './land-pr.js';
-import { runLane } from './run-lane.js';
+import { runLane, type RunLaneDeps } from './run-lane.js';
 
 const dirs = createTempDirs();
 afterEach(() => dirs.cleanup());
@@ -16,13 +17,13 @@ afterEach(() => dirs.cleanup());
 const NOW = Date.parse('2026-11-05T00:00:00Z');
 const MSG = 'PR #7 on factory/5-x: base kept moving — synced 3 times and origin/main moved again';
 
-async function lane(prevDeferrals: number, extra: Record<string, unknown> = {}) {
+async function lane(prevDeferrals: number, extra: Partial<RunLaneDeps> = {}) {
   const dir = dirs.makeSync('lane-land-deferred-');
   const paths = { ...getFactoryPaths(dir), events: join(dir, 'events.ndjson'), stop: join(dir, 'STOP') };
   const events: Array<[string, number | string, string]> = [];
   const released: Array<[number, string]> = [];
   const closeParkedPr = vi.fn(async () => {});
-  const octokit = vi.fn();
+  const octokit = vi.fn(() => ({}) as Octokit);
   const order: string[] = [];
   const recordLandDeferred = vi.fn(async (err: LandDeferredError, issue: number, branch: string) => ({
     ...decideLandDeferral(
@@ -64,7 +65,7 @@ async function lane(prevDeferrals: number, extra: Record<string, unknown> = {}) 
     closeParkedPr,
     reapWorktree: async () => {},
     ...extra,
-  } as any);
+  });
   return { events, released, closeParkedPr, octokit, recordLandDeferred, order };
 }
 
@@ -123,5 +124,15 @@ describe('runLane land-deferred (#3957)', () => {
     const warns = r.events.filter(([type]) => type === 'warn').map(([, , m]) => m);
     expect(warns.some((m) => m.includes('land-deferred retry failed: slot timed out'))).toBe(true);
     expect(r.released).toEqual([[5, 'done']]);
+  });
+
+  it('a deferral that cannot be recorded warns and parks ci-failed as before', async () => {
+    const r = await lane(0, {
+      recordLandDeferred: async () => {
+        throw new Error('disk full');
+      },
+    });
+    expect(r.events.some(([t, , m]) => t === 'warn' && m.includes('could not record land-deferred'))).toBe(true);
+    expect(r.released).toEqual([[5, 'parked']]);
   });
 });

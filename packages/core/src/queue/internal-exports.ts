@@ -18,7 +18,6 @@ export {
 export * from '../run/review-rework-cap.js';
 export {
   DEFAULT_MAX_LAND_DEFERRALS,
-  LAND_DEFER_BACKOFF_MS,
   clearLandDeferred,
   decideLandDeferral,
   dueLandDeferrals,

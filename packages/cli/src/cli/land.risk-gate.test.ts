@@ -28,6 +28,7 @@ function paths(): any {
     tierDemotions: join(state, 'tier-demotions.jsonl'),
     events: join(state, 'events.ndjson'),
     mergeLock: join(state, 'merge.lock'),
+    landSlotLock: join(state, 'land-slot.lock'),
     gitLock: join(state, 'git.lock'),
     config: join(repoRoot, '.factory', 'config.json'),
   };

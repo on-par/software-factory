@@ -82,7 +82,11 @@ export type RunLaneDeps = {
   recheckAwaitingCi?: (ops: AwaitingCiLaneOps) => Promise<void>;
   /** #3957: records a land that gave up on a moving base and returns the decision: 'defer' keeps the PR open for a
    *  land-only retry, 'park' (the cap is spent) falls through to the ci-failed park. Absent = park as before. */
-  recordLandDeferred?: (err: LandDeferredError, issue: number, branch: string) => Promise<LandDeferralDecision & { maxDeferrals: number }>;
+  recordLandDeferred?: (
+    err: LandDeferredError,
+    issue: number,
+    branch: string,
+  ) => Promise<LandDeferralDecision & { maxDeferrals: number }>;
   /** #3957: retries due land-deferred PRs oldest first before every claim and land, parking through the lane's own
    *  park path via `ops`. Fail-closed: a rejection is logged as a warn and never changes lane flow. */
   retryLandDeferred?: (ops: LandDeferredLaneOps) => Promise<void>;

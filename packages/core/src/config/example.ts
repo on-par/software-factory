@@ -409,14 +409,8 @@ function runtimeNamespace(): Node[] {
     {
       kind: 'object',
       key: 'merge',
-      doc:
-        'The legacy `auto`/`admin` spellings live under `run.merge`. ' +
-        'maxConflictRounds (1-10): how many times land merges origin/main into a PR that turned DIRTY, re-watching CI each time; when spent, the run parks as conflict. ' +
-        'maxLandDeferrals (1-10): how many times a land starved by a moving base is deferred and retried land-only before the run parks as ci-failed.',
-      children: [
-        { kind: 'value', key: 'maxConflictRounds', value: defaults.merge.maxConflictRounds },
-        { kind: 'value', key: 'maxLandDeferrals', value: defaults.merge.maxLandDeferrals },
-      ],
+      doc: 'The legacy `auto`/`admin` spellings live under `run.merge`. maxConflictRounds (1-10): how many times land merges origin/main into a PR that turned DIRTY, re-watching CI each time; when spent, the run parks as conflict. maxLandDeferrals (1-10): how many times a land starved by a moving base is deferred and retried land-only before the run parks as ci-failed.',
+      children: (['maxConflictRounds', 'maxLandDeferrals'] as const).map((k) => fromDefaults(k, defaults.merge[k])),
     },
     section('timeouts'),
     section('plan_approval'),

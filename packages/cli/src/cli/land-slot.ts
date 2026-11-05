@@ -36,11 +36,7 @@ export function landLockFor(
     );
   if (holdsLandingSlot) return inner;
   return (fn) =>
-    withLandingSlot(
-      paths,
-      () => inner(fn),
-      {
-        onSteal: (pid) => log('lock-stolen', `stole ${paths.landSlotLock} from dead holder pid ${pid ?? 'unknown'}`),
-      },
-    );
+    withLandingSlot(paths, () => inner(fn), {
+      onSteal: (pid) => log('lock-stolen', `stole ${paths.landSlotLock} from dead holder pid ${pid ?? 'unknown'}`),
+    });
 }

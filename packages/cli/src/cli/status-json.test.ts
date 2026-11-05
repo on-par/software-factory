@@ -46,6 +46,7 @@ describe('buildStatusJson', () => {
       disk: null,
       providers: [],
       activeAlerts: [],
+      landDeferred: [],
     });
     expect(Object.keys(out)).toEqual([
       'schemaVersion',
@@ -61,6 +62,7 @@ describe('buildStatusJson', () => {
       'disk',
       'providers',
       'activeAlerts',
+      'landDeferred',
     ]);
     expect(statusJsonSchema.parse(out)).toEqual(out);
   });
