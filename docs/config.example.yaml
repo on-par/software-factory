@@ -203,9 +203,11 @@ version: 2
     # draft: false
 # The legacy `auto`/`admin` spellings live under `run.merge`. maxConflictRounds (1-10): how many
 # times land merges origin/main into a PR that turned DIRTY, re-watching CI each time; when spent,
-# the run parks as conflict.
+# the run parks as conflict. maxLandDeferrals (1-10): how many times a land starved by a moving base
+# is deferred and retried land-only before the run parks as ci-failed.
 merge:
   maxConflictRounds: 2
+  maxLandDeferrals: 3
 # Phase timeouts in seconds. tests_seconds caps the tests checker command (scripts/verify.sh, npm
 # test or pytest). compile_seconds caps the compile checker command (npm run build, make or cargo
 # build). FACTORY_PLAN_TIMEOUT, FACTORY_BUILD_TIMEOUT, FACTORY_CHECK_TIMEOUT,

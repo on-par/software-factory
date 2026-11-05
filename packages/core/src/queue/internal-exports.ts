@@ -17,6 +17,19 @@ export {
 } from './review-rework-trigger.js';
 export * from '../run/review-rework-cap.js';
 export {
+  DEFAULT_MAX_LAND_DEFERRALS,
+  LAND_DEFER_BACKOFF_MS,
+  clearLandDeferred,
+  decideLandDeferral,
+  dueLandDeferrals,
+  landDeferredFile,
+  readLandDeferred,
+  resolveMaxLandDeferrals,
+  upsertLandDeferred,
+  type LandDeferralDecision,
+  type LandDeferredRecord,
+} from './land-deferred.js'; // land-only retry queue (#3957)
+export {
   allProvidersDown,
   allProvidersDownReleasePayload,
   PROVIDER_LEVEL_REASONS,

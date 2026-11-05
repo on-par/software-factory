@@ -69,5 +69,18 @@ export const ITERATE_INTERNAL_KEYS = [
   'warnNoBranchProtectionOnce',
 ];
 
+/** ./internal names added by the land-deferred retry queue (#3957). */
+export const LAND_DEFERRED_INTERNAL_KEYS = [
+  'DEFAULT_MAX_LAND_DEFERRALS',
+  'LAND_DEFER_BACKOFF_MS',
+  'clearLandDeferred',
+  'decideLandDeferral',
+  'dueLandDeferrals',
+  'landDeferredFile',
+  'readLandDeferred',
+  'resolveMaxLandDeferrals',
+  'upsertLandDeferred',
+];
+
 /** Root names added by the WorkKey identity (ADR-0168, #3639). */
 export const WORK_KEY_API_KEYS = ['isNumericWorkKey', 'issueNumberOf', 'toWorkKey', 'workKeyFromIssue'];
