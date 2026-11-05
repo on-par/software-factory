@@ -1,8 +1,7 @@
 // packages/core/src/run/stack-rebase.ts — shared rebase --onto + atomic leased push for stacked branches (ADR-0161).
 
 import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { execGit } from '../utils/git-exec.js';
 
@@ -49,7 +48,9 @@ async function succeeds(cwd: string, ...args: string[]): Promise<boolean> {
 /** Rebases each layer bottom-up with `--onto` in a temp detached worktree, then pushes all in one leased atomic push. */
 export async function rebaseAndPushStack(opts: StackRebaseOptions): Promise<StackRebaseResult> {
   const { repoRoot, remote, startBase, layers } = opts;
-  const tmp = await mkdtemp(join(tmpdir(), 'factory-restack-'));
+  // Scratch worktree lives inside the repo's git dir, not the shared OS temp dir.
+  const gitDir = resolve(repoRoot, await git(repoRoot, '-C', repoRoot, 'rev-parse', '--git-common-dir'));
+  const tmp = await mkdtemp(join(gitDir, 'factory-restack-'));
   const newHeads: string[] = [];
   try {
     try {
