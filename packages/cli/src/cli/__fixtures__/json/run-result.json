@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "issue": 42,
+  "repo": "acme/widgets",
+  "outcome": "pr-open",
+  "exitReason": "PR #7 opened",
+  "pr": { "number": 7, "url": "https://github.com/acme/widgets/pull/7", "state": "open" },
+  "branch": "factory/42-fix",
+  "baseSha": "1111111111111111111111111111111111111111",
+  "headSha": "2222222222222222222222222222222222222222",
+  "startedAt": "2026-01-01T00:00:00.000Z",
+  "finishedAt": "2026-01-01T00:10:00.000Z",
+  "phases": [
+    {
+      "name": "build",
+      "startedAt": "2026-01-01T00:01:00.000Z",
+      "finishedAt": "2026-01-01T00:05:00.000Z",
+      "model": "model-a",
+      "attempts": 1
+    }
+  ],
+  "cost": { "usd": 0.42, "byModel": { "model-a": 0.42 } },
+  "reworkRounds": 0
+}

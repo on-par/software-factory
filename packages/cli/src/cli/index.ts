@@ -246,6 +246,7 @@ import { withRepoRunLock } from './repo-run-lock.js';
 export { CliExitError, withRepoRunLock };
 import type { StopMarker } from '@on-par/factory-core/internal';
 import { resolveAwaitingCiCapMs } from '@on-par/factory-core/internal';
+import { withRunReport, validateRunReportFlags } from './run-report.js';
 import { driveToMerge, exitForMerge, shouldDriveAfterShipFailure, validateMergeFlags } from './run-issue-merge.js';
 import { formatSteerabilityReport } from '@on-par/factory-core/internal';
 import { buildTierEvidence, formatTierEvidence, resolveTrustTier } from '@on-par/factory-core/internal';
@@ -2278,8 +2279,12 @@ async function cmdShip(
     branchPrefix?: string;
     baseBranch?: string;
     draftPr?: boolean;
+    json?: boolean;
+    export?: string;
   },
 ) {
+  const { json, export: exportDir, ...shipFlags } = opts;
+  validateRunReportFlags({ json, export: exportDir });
   if (availableAgentClis(coreOps.isCommandAvailable).length === 0) {
     throw new CliExitError(`factory: ${missingAgentCliMessage()}`, 2);
   }
@@ -2298,45 +2303,54 @@ async function cmdShip(
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   baseBranchOrExit(opts.baseBranch);
 
-  return withRepoRunLock(
-    paths,
-    'factory ship',
-    async () => {
-      recordDraftPrFlag(paths.runFlags, opts.draftPr);
-      let ghRepo: string | null = null;
-      try {
-        ghRepo = await getGitHubRepo();
-      } catch {
-        /* shipIssue reports repo resolution itself */
-      }
-      if (ghRepo) await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
+  await withRunReport(
+    { json, export: exportDir },
+    { issue: issueNum, repoRoot, paths, getRepo: getGitHubRepo },
+    (report) =>
+      withRepoRunLock(
+        paths,
+        'factory ship',
+        async () => {
+          recordDraftPrFlag(paths.runFlags, opts.draftPr);
+          let ghRepo: string | null = null;
+          try {
+            ghRepo = await getGitHubRepo();
+          } catch {
+            /* shipIssue reports repo resolution itself */
+          }
+          if (ghRepo) await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
 
-      const priorEvents = readEvents(paths.events, { includeSegments: true });
-      if (hasUnresolvedPark(priorEvents, String(issueNum))) {
-        logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
-          actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
-        });
-      }
+          const priorEvents = readEvents(paths.events, { includeSegments: true });
+          if (hasUnresolvedPark(priorEvents, String(issueNum))) {
+            logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
+              actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
+            });
+          }
 
-      try {
-        return await shipIssue(issueNum, { ...opts, branchPrefix });
-      } catch (err: any) {
-        if (err instanceof IssueSkippedError) return;
-        // A --no-pr run keeps its worktree either way: inspecting it is the point.
-        if (
-          ghRepo &&
-          opts.pr !== false &&
-          !(err instanceof InvalidWorkRequestInputError) &&
-          !(err instanceof LaneEnvironmentPauseError)
-        ) {
-          await reapPrlessShipWorktree(issueNum, repoRoot, ghRepo, paths, branchPrefix);
-        }
-        // #2492: a pull request number is a usage error, not a failed ship.
-        if (err instanceof InvalidWorkRequestInputError) throw new CliExitError(`factory: ${err.message}`, 2);
-        throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
-      }
-    },
-    { scope: { kind: 'issue', key: workKeyFromIssue(issueNum) } },
+          try {
+            await shipIssue(
+              issueNum,
+              { ...shipFlags, branchPrefix },
+              ghRepo ? { repoRoot, ghRepo, onOutcome: report.recordOutcome } : undefined,
+            );
+          } catch (err: any) {
+            if (err instanceof IssueSkippedError) return report.recordError(err);
+            // A --no-pr run keeps its worktree either way: inspecting it is the point.
+            if (
+              ghRepo &&
+              opts.pr !== false &&
+              !(err instanceof InvalidWorkRequestInputError) &&
+              !(err instanceof LaneEnvironmentPauseError)
+            ) {
+              await reapPrlessShipWorktree(issueNum, repoRoot, ghRepo, paths, branchPrefix);
+            }
+            // #2492: a pull request number is a usage error, not a failed ship.
+            if (err instanceof InvalidWorkRequestInputError) throw new CliExitError(`factory: ${err.message}`, 2);
+            throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
+          }
+        },
+        { scope: { kind: 'issue', key: workKeyFromIssue(issueNum) } },
+      ),
   );
 }
 
@@ -2363,6 +2377,8 @@ async function cmdRunIssue(
     admin?: boolean;
     /** --in-place (#3904): run in the current checkout, no worktree. */
     inPlace?: boolean;
+    json?: boolean;
+    export?: string;
   },
 ) {
   if (opts.runChildren) throw new CliExitError('--run-children was removed; oversized issues stack with --stack', 2);
@@ -2384,12 +2400,15 @@ async function cmdRunIssue(
     mergeTimeout,
     admin,
     inPlace: _inPlaceFlag,
+    json,
+    export: exportDir,
     ...shipOpts
   } = opts;
   const mergeTimeoutMs = validateMergeFlags(
     { merge, mergeTimeout, admin, pr: opts.pr, stack: stack || rawSizeGate === 'stack' },
     'issue',
   );
+  validateRunReportFlags({ json, export: exportDir, stack: stack || rawSizeGate === 'stack' });
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const parsedSizeGate = sizeGateOrExit(rawSizeGate);
   if (stack && parsedSizeGate !== undefined && parsedSizeGate !== 'stack') {
@@ -2413,89 +2432,99 @@ async function cmdRunIssue(
     if (inPlaceMsg) throw new CliExitError(inPlaceMsg, 2);
   }
 
-  await withRepoRunLock(
+  const reportCtx = {
+    issue: issueNum,
+    repoRoot,
     paths,
-    'factory run-issue',
-    async () => {
-      recordDraftPrFlag(paths.runFlags, opts.draftPr);
-      if (inPlace) {
-        // Refuse before the issue lookup and PLAN, under the run lock (#3904).
-        const problem = await gitOps.checkInPlaceCheckout(repoRoot);
-        if (problem) throw new CliExitError(`factory: ${problem.message}`, 2);
-      }
-      const ghRepo = await getGitHubRepo();
-
-      // Pre-flight: resolve the issue through the canonical work-request seam
-      // BEFORE any worktree or PR exists — a bad issue exits here.
-      const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
-      let work: WorkRequest;
-      try {
-        work = await workSources.resolve(GITHUB_ISSUE_SOURCE, {
-          repo: ghRepo,
-          issue: issueNum,
-        } satisfies GithubIssueParams);
-      } catch (err) {
-        if (err instanceof InvalidWorkRequestInputError) {
-          throw new CliExitError(`factory: ${err.message}`, 2);
+    baseRef: baseBranch ? `origin/${baseBranch}` : undefined,
+    getRepo: getGitHubRepo,
+  };
+  await withRunReport({ json, export: exportDir }, reportCtx, (report) =>
+    withRepoRunLock(
+      paths,
+      'factory run-issue',
+      async () => {
+        recordDraftPrFlag(paths.runFlags, opts.draftPr);
+        if (inPlace) {
+          // Refuse before the issue lookup and PLAN, under the run lock (#3904).
+          const problem = await gitOps.checkInPlaceCheckout(repoRoot);
+          if (problem) throw new CliExitError(`factory: ${problem.message}`, 2);
         }
-        throw new CliExitError(
-          `factory: could not resolve issue #${issueNum} in ${ghRepo} (${errorDetail(err)}) — no worktree or PR was created`,
-          2,
-        );
-      }
-      console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
-      // A one-job in-place container has no other lanes to collect.
-      if (!inPlace) await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
+        const ghRepo = await getGitHubRepo();
 
-      const priorEvents = readEvents(paths.events, { includeSegments: true });
-      if (hasUnresolvedPark(priorEvents, String(issueNum))) {
-        logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
-          actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
-        });
-      }
-
-      try {
-        if (sizeGate === 'stack') {
-          await runIssueStack(issueNum, baseBranch, {
+        // Pre-flight: resolve the issue through the canonical work-request seam
+        // BEFORE any worktree or PR exists — a bad issue exits here.
+        const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
+        let work: WorkRequest;
+        try {
+          work = await workSources.resolve(GITHUB_ISSUE_SOURCE, {
             repo: ghRepo,
-            list: (issue) => listBlockedBy({ octokit: getOctokit(), repo: ghRepo }, issue),
-            shipMember: async (issue, base, onOutcome) => {
-              const memberWork =
-                issue === issueNum
-                  ? work
-                  : await workSources.resolve(GITHUB_ISSUE_SOURCE, { repo: ghRepo, issue } satisfies GithubIssueParams);
-              await shipIssue(
-                issue,
-                {
-                  ...shipOpts,
-                  branchPrefix,
-                  sizeGate,
-                  explicitStack,
-                  maxSlices,
-                  baseBranch: base,
-                  parkOverBudget: true,
-                },
-                { repoRoot, ghRepo, workRequest: memberWork, onOutcome },
-              );
-            },
-            readSlicePlan: async () => {
-              const lookup = await findSlicePlanComment({ octokit: getOctokit(), repo: ghRepo, issue: issueNum });
-              return lookup.status === 'found' ? lookup.plan : undefined;
-            },
-            ship: async (base, onOutcome) => {
-              await shipIssue(
-                issueNum,
-                { ...shipOpts, branchPrefix, sizeGate, explicitStack, maxSlices, baseBranch: base },
-                { repoRoot, ghRepo, workRequest: work, onOutcome },
-              );
-            },
-          });
-          return;
+            issue: issueNum,
+          } satisfies GithubIssueParams);
+        } catch (err) {
+          if (err instanceof InvalidWorkRequestInputError) {
+            throw new CliExitError(`factory: ${err.message}`, 2);
+          }
+          throw new CliExitError(
+            `factory: could not resolve issue #${issueNum} in ${ghRepo} (${errorDetail(err)}) — no worktree or PR was created`,
+            2,
+          );
         }
-        let outcome: RunOutcome | undefined;
-        const drive = async () =>
-          exitForMerge(
-            await driveToMerge({
+        console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
+        // A one-job in-place container has no other lanes to collect.
+        if (!inPlace) await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
+
+        const priorEvents = readEvents(paths.events, { includeSegments: true });
+        if (hasUnresolvedPark(priorEvents, String(issueNum))) {
+          logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
+            actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
+          });
+        }
+
+        try {
+          if (sizeGate === 'stack') {
+            await runIssueStack(issueNum, baseBranch, {
+              repo: ghRepo,
+              list: (issue) => listBlockedBy({ octokit: getOctokit(), repo: ghRepo }, issue),
+              shipMember: async (issue, base, onOutcome) => {
+                const memberWork =
+                  issue === issueNum
+                    ? work
+                    : await workSources.resolve(GITHUB_ISSUE_SOURCE, {
+                        repo: ghRepo,
+                        issue,
+                      } satisfies GithubIssueParams);
+                await shipIssue(
+                  issue,
+                  {
+                    ...shipOpts,
+                    branchPrefix,
+                    sizeGate,
+                    explicitStack,
+                    maxSlices,
+                    baseBranch: base,
+                    parkOverBudget: true,
+                  },
+                  { repoRoot, ghRepo, workRequest: memberWork, onOutcome },
+                );
+              },
+              readSlicePlan: async () => {
+                const lookup = await findSlicePlanComment({ octokit: getOctokit(), repo: ghRepo, issue: issueNum });
+                return lookup.status === 'found' ? lookup.plan : undefined;
+              },
+              ship: async (base, onOutcome) => {
+                await shipIssue(
+                  issueNum,
+                  { ...shipOpts, branchPrefix, sizeGate, explicitStack, maxSlices, baseBranch: base },
+                  { repoRoot, ghRepo, workRequest: work, onOutcome },
+                );
+              },
+            });
+            return;
+          }
+          let outcome: RunOutcome | undefined;
+          const drive = async () => {
+            const result = await driveToMerge({
               issue: issueNum,
               outcome,
               repoRoot,
@@ -2503,33 +2532,43 @@ async function cmdRunIssue(
               paths,
               timeoutMs: mergeTimeoutMs ?? resolveAwaitingCiCapMs(configLoaders.loadFactoryConfigForRepo(paths.config)),
               ...(admin ? { admin } : {}),
-            }),
-            `issue #${issueNum}`,
-          );
-        try {
-          await shipIssue(
-            issueNum,
-            { ...shipOpts, branchPrefix, sizeGate, explicitStack, maxSlices, inPlace },
-            { repoRoot, ghRepo, workRequest: work, onOutcome: (o) => (outcome = o) },
-          );
-        } catch (err) {
-          if (
-            merge &&
-            shouldDriveAfterShipFailure(outcome) &&
-            !(err instanceof CliExitError) &&
-            !(err instanceof IssueSkippedError)
-          )
-            await drive();
-          throw err;
+            });
+            report.recordMerge(result);
+            exitForMerge(result, `issue #${issueNum}`);
+          };
+          try {
+            await shipIssue(
+              issueNum,
+              { ...shipOpts, branchPrefix, sizeGate, explicitStack, maxSlices, inPlace },
+              {
+                repoRoot,
+                ghRepo,
+                workRequest: work,
+                onOutcome: (o) => {
+                  outcome = o;
+                  report.recordOutcome(o);
+                },
+              },
+            );
+          } catch (err) {
+            if (
+              merge &&
+              shouldDriveAfterShipFailure(outcome) &&
+              !(err instanceof CliExitError) &&
+              !(err instanceof IssueSkippedError)
+            )
+              await drive();
+            throw err;
+          }
+          if (merge) await drive();
+        } catch (err: any) {
+          if (err instanceof CliExitError) throw err;
+          if (err instanceof IssueSkippedError) return report.recordError(err);
+          throw new CliExitError(`Run failed for issue #${issueNum}: ${err.message}`, 1);
         }
-        if (merge) await drive();
-      } catch (err: any) {
-        if (err instanceof CliExitError) throw err;
-        if (err instanceof IssueSkippedError) return;
-        throw new CliExitError(`Run failed for issue #${issueNum}: ${err.message}`, 1);
-      }
-    },
-    { scope: { kind: 'issue', key: workKeyFromIssue(issueNum) } },
+      },
+      { scope: { kind: 'issue', key: workKeyFromIssue(issueNum) } },
+    ),
   );
 }
 

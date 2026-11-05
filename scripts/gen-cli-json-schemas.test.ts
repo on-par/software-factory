@@ -25,6 +25,7 @@ const expectedFiles = [
   'runs-diffstat.schema.json',
   'runs.schema.json',
   'resume.schema.json',
+  'run-result.schema.json',
   'status.schema.json',
   'stop.schema.json',
   'unpark.schema.json',

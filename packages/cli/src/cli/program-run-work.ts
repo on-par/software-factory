@@ -30,6 +30,14 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     .option('--no-draft-pr', 'Mark the PR ready for review after CI, overriding run.pr.draft in the repo config')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .option('--base-branch <ref>', BASE_BRANCH_OPTION_DESCRIPTION)
+    .option(
+      '--json',
+      'Print the final run result as one JSON object (schemaVersion 1) on the last stdout line; progress goes to stderr',
+    )
+    .option(
+      '--export <dir>',
+      "When the run ends, on any exit path, copy this run's state file, events and cost records into <dir>",
+    )
     .action(async (issueNum, opts) => {
       await handlers.cmdShip(handlers.parseIssueArg(issueNum), opts);
     });
@@ -92,6 +100,14 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
       '--in-place',
       'Run PLAN → SHIP in the current checkout with no worktree (disposable hosts); the checkout must be clean and at origin/<default>; same as FACTORY_WORKSPACE=in-place',
     )
+    .option(
+      '--json',
+      'Print the final run result as one JSON object (schemaVersion 1) on the last stdout line; progress goes to stderr',
+    )
+    .option(
+      '--export <dir>',
+      "When the run ends, on any exit path, copy this run's state file, events and cost records into <dir>",
+    )
     .action(async (issueNum, opts) => {
       await handlers.cmdRunIssue(handlers.parseIssueArg(issueNum), opts);
     });
@@ -140,6 +156,14 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     .option(
       '--admin',
       'With --merge: admin-merge past unmet branch protection, like FACTORY_MERGE_ADMIN=1; never bypasses red CI',
+    )
+    .option(
+      '--json',
+      'Print the final run result as one JSON object (schemaVersion 1) on the last stdout line; progress goes to stderr',
+    )
+    .option(
+      '--export <dir>',
+      "When the run ends, on any exit path, copy this run's state file, events and cost records into <dir>",
     )
     .action(async (file: string, files: string[], opts) => {
       await handlers.cmdRunBrief([file, ...files], opts);

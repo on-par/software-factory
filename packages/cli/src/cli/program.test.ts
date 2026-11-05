@@ -114,6 +114,26 @@ describe('buildProgram', () => {
     expect(cmdRunBrief).toHaveBeenCalledWith(['a.md'], expect.objectContaining({ merge: true }));
   });
 
+  it('ship, run-issue and run-brief register --json and --export (#3907)', async () => {
+    const cmdShip = vi.fn(async () => {});
+    const cmdRunIssue = vi.fn(async () => {});
+    const cmdRunBrief = vi.fn(async () => {});
+    const handlers = { ...PROGRAM_HANDLERS, cmdShip, cmdRunIssue, cmdRunBrief };
+    for (const name of ['ship', 'run-issue', 'run-brief']) {
+      const cmd = buildProgram(handlers, {}).commands.find((c) => c.name() === name);
+      for (const long of ['--json', '--export']) {
+        expect(cmd?.options.some((o) => o.long === long)).toBe(true);
+      }
+    }
+    const parse = (args: string[]) => buildProgram(handlers, {}).parseAsync(['node', 'factory', ...args]);
+    await parse(['ship', '5', '--json', '--export', '/out']);
+    await parse(['run-issue', '5', '--json']);
+    await parse(['run-brief', 'a.md', '--export', '/out']);
+    expect(cmdShip).toHaveBeenCalledWith(5, expect.objectContaining({ json: true, export: '/out' }));
+    expect(cmdRunIssue).toHaveBeenCalledWith(5, expect.objectContaining({ json: true }));
+    expect(cmdRunBrief).toHaveBeenCalledWith(['a.md'], expect.objectContaining({ export: '/out' }));
+  });
+
   it('unpark registers --keep-order and passes keepOrder to cmdUnpark (#3554)', async () => {
     const cmdUnpark = vi.fn(async () => {});
     const handlers = { ...PROGRAM_HANDLERS, cmdUnpark };
