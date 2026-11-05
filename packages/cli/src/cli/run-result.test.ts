@@ -192,4 +192,32 @@ describe('buildRunResult', () => {
     });
     expect(outcomes).toEqual(['merged', 'pr-open', 'held', 'ci-failed', 'parked', 'failed']);
   });
+
+  it('lifecycle awaiting-review wins and validates against the schema', () => {
+    const shipped: RunOutcome = { state: 'shipped', route, branch: 'b', reworkRounds: 0, prNumber: 7 };
+    const merge: MergeResult = { kind: 'held', gate: 'risk', detail: 'x' };
+    const r = buildRunResult(
+      input({ outcome: shipped, merge, lifecycle: { outcome: 'awaiting-review', prNumber: 9, detail: 'waiting' } }),
+    );
+    expect(r).toMatchObject({ outcome: 'awaiting-review', exitReason: 'waiting' });
+    expect(r.pr).toMatchObject({ number: 9, state: 'open' });
+    expect(runResultJsonSchema.parse(r)).toEqual(r);
+    const schema = JSON.parse(
+      readFileSync(new URL('../../schemas/run-result.schema.json', import.meta.url), 'utf-8'),
+    ) as object;
+    expect(new Ajv2020().compile(schema)(r)).toBe(true);
+  });
+
+  it('lifecycle closed sets pr state closed', () => {
+    const r = buildRunResult(input({ lifecycle: { outcome: 'closed', prNumber: 4, detail: 'PR #4 was closed' } }));
+    expect(r).toMatchObject({ outcome: 'closed', pr: { number: 4, state: 'closed' } });
+    expect(runResultJsonSchema.parse(r)).toEqual(r);
+    expect(
+      buildRunResult(input({ lifecycle: { outcome: 'merged', prNumber: 4, detail: 'merged' } })).pr?.state,
+    ).toBe('merged');
+    expect(classifyRunOutcome(undefined, undefined, undefined, { outcome: 'parked', detail: 'cap' })).toEqual({
+      outcome: 'parked',
+      exitReason: 'cap',
+    });
+  });
 });

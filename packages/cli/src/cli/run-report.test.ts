@@ -70,6 +70,22 @@ describe('withRunReport', () => {
     });
   });
 
+  it('recordLifecycle reaches the printed result', async () => {
+    const s = setup();
+    await withRunReport(
+      { json: true },
+      s.ctx,
+      async (r) => {
+        r.recordOutcome(shipped);
+        r.recordLifecycle({ outcome: 'awaiting-review', prNumber: 12, detail: 'waiting for review' });
+      },
+      s.deps,
+    );
+    const result = JSON.parse(s.out[0]);
+    expect(validate(result), JSON.stringify(validate.errors)).toBe(true);
+    expect(result).toMatchObject({ outcome: 'awaiting-review', pr: { number: 12 } });
+  });
+
   it('json mode puts PR url, phase timings and USD cost in the result', async () => {
     const s = setup();
     await withRunReport(

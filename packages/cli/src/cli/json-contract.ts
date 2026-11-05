@@ -445,10 +445,20 @@ export const runResultJsonSchema = z.object({
   schemaVersion: z.literal(2),
   issue: z.number().int(),
   repo: z.string().nullable(),
-  outcome: z.enum(['merged', 'pr-open', 'held', 'ci-failed', 'parked', 'failed', 'land-deferred']),
+  outcome: z.enum([
+    'merged',
+    'pr-open',
+    'held',
+    'ci-failed',
+    'parked',
+    'failed',
+    'land-deferred',
+    'closed',
+    'awaiting-review',
+  ]),
   exitReason: z.string().min(1),
   pr: z
-    .object({ number: z.number().int(), url: z.string().nullable(), state: z.enum(['open', 'draft', 'merged']) })
+    .object({ number: z.number().int(), url: z.string().nullable(), state: z.enum(['open', 'draft', 'merged', 'closed']) })
     .nullable(),
   branch: z.string().nullable(),
   baseSha: z.string().nullable(),
