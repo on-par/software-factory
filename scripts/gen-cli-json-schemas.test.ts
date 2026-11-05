@@ -18,6 +18,7 @@ const expectedFiles = [
   'draft.schema.json',
   'queue-add.schema.json',
   'cost.schema.json',
+  'job-status.schema.json',
   'kpis.schema.json',
   'daemon-status.schema.json',
   'logs-line.schema.json',

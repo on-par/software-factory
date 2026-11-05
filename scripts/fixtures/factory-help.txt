@@ -23,6 +23,7 @@ Run work:
   respond [options] <pr>                 Run a feedback round on a factory PR: triage new trusted feedback, re-plan or rework, push, reply, resolve fixed threads and re-request review
   run-brief [options] <file> [files...]  Like run-issue, but the work comes from local Markdown briefs; several run in order with the same flags, a failed one does not stop the rest, and any failure exits non-zero
   run [options]                          Claim queued issues (factory:queued labels) and ship them, lanes in parallel; merges only when auto-merge is on
+  job [options]                          Container entrypoint: clone <owner/name>, apply the injected config, run one issue in place (run-issue --in-place --json) and print a final JSON status line; exits with the run's code, 2 on setup errors
   supervise [options]                    Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
   land [options] <issue>                 Squash-merge the issue's open PR once CI is green, then remove its worktree (left open if CI fails or review is pending)
   resume-approved [options]              Land open factory PRs (factory/* or the configured prefix) whose review is now approved; skip the rest

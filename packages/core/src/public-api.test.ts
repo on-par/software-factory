@@ -543,6 +543,7 @@ const INTERNAL_API_KEYS = [
   'rewriteRepoConfigFile',
   'readRepoConfigFile',
   'resolveRepoConfigPath',
+  'resolveRunConfigLadder',
   // Eval internals
   'median',
   // Usage internals

@@ -88,6 +88,8 @@ uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.28
 
 The full caller, inputs, providers and secrets are in [docs/runbooks/github-actions-run.md](docs/runbooks/github-actions-run.md).
 
+To run one issue in a disposable container (Foreman, Cloudflare Containers), use the `ghcr.io/on-par/factory-job` image and `factory job`: see [docs/ops/factory-job-image.md](docs/ops/factory-job-image.md).
+
 ## Safety
 
 To run unattended, the factory starts agent CLIs with their permission prompts turned off:

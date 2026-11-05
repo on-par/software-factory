@@ -34,6 +34,7 @@ export { isAutoMergeBlocked } from './filing/policy.js';
 // Config
 export { resolveStateRoot, STATE_ROOT_ENV } from './config/state-root.js';
 export { resolveFilingPolicy, resolvePrClassifierPolicy } from './config/index.js';
+export { resolveRunConfigLadder } from './config/run-config-ladder.js';
 export { aliasDeprecatedSizeGateMode, isExplicitStackMode } from './config/index.js';
 export { describeDraftPrPolicy, resolveDraftPrPolicy, resolveRunMaxLanes } from './config/run-section.js';
 export type { TrustTier } from './config/repo.js';

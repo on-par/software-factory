@@ -3,8 +3,10 @@
 import type { Command } from 'commander';
 import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION, BRANCH_PREFIX_OPTION_DESCRIPTION } from './branch-prefix.js';
 import type { ProgramHandlers } from './index.js';
+import { cmdJob, type JobCommandOptions } from './job-command.js';
 import type { RunOptions } from './run.js';
 import { validateUntilDoneFlags, type UntilDoneFlagOptions } from './run-until-done.js';
+import { withShutdown } from './shutdown.js';
 import type { SteerOptions } from './steer.js';
 
 /** `run`'s flags: the queue drain's own (RunOptions) plus the single-issue lifecycle's (#3908). */
@@ -256,6 +258,22 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
       validateUntilDoneFlags(opts);
       await handlers.cmdRun(opts);
     });
+
+  program
+    .command('job')
+    .description(
+      "Container entrypoint: clone <owner/name>, apply the injected config, run one issue in place (run-issue --in-place --json) and print a final JSON status line; exits with the run's code, 2 on setup errors",
+    )
+    .requiredOption('--repo <owner/name>', 'GitHub repository to clone and run in')
+    .requiredOption('--issue <n>', 'Issue number to run')
+    .option('--merge', 'Land the PR after CI (run-issue --merge)')
+    .option('--no-pr', 'Stop after a clean CHECK: no push or PR (run-issue --no-pr)')
+    .option('--workdir <dir>', 'Directory to clone into (default ~/work)')
+    .option(
+      '--factory-dir <dir>',
+      'Mounted .factory directory holding config and constitution.md (FACTORY_JOB_FACTORY_DIR)',
+    )
+    .action(withShutdown((opts: JobCommandOptions) => cmdJob(opts)));
 
   program
     .command('supervise')
