@@ -140,7 +140,7 @@ export function buildRunResult(input: RunResultInput): RunResultJson {
   }
   for (const model of Object.keys(byModel)) byModel[model] = round6(byModel[model]);
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     issue: input.issue,
     repo,
     ...classifyRunOutcome(outcome, merge, input.error, lifecycle),

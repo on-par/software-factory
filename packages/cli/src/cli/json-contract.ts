@@ -442,7 +442,7 @@ export type UnparkJson = z.infer<typeof unparkJsonSchema>;
 
 /** `factory run-issue|run-brief|ship --json` final run result (#3907). Additive changes only; bump schemaVersion on a breaking change. */
 export const runResultJsonSchema = z.object({
-  schemaVersion: z.literal(2),
+  schemaVersion: z.literal(3),
   issue: z.number().int(),
   repo: z.string().nullable(),
   outcome: z.enum([

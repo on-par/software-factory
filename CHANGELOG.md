@@ -15,7 +15,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
-- `factory run --issue <n>` carries one issue to merged, closed, parked or awaiting-review, with `--wait stay|exit` for disposable hosts (#3908)
+- `factory run --issue <n>` carries one issue to merged, closed, parked or awaiting-review, with `--wait stay|exit` for disposable hosts; the `--json` run result moves to `schemaVersion` 3 for the new `closed` and `awaiting-review` outcomes and the `closed` PR state (#3908)
 - ship: `ship.ciWatchMinutes` sets the CI watch window, and a draft SHIP left for pending CI is landed (or sent to CI rework) by the run-start and between-issue sweep once CI finishes (#3932)
 - `factory run-issue`, `run-brief` and `ship` take `--json` (a schemaVersion 1 run result on the last stdout line, schema in `schemas/run-result.schema.json`) and `--export <dir>` (copies the run's state, events and costs on every exit path) for disposable hosts (#3907)
 - `factory run` caps open lanes with `run.maxLanes` / `--max-lanes <n>`; extra lanes wait and start in queue order, and `factory status` shows running lanes against the cap (#3958)
