@@ -484,8 +484,8 @@ export { LINEAR_API_KEY_ENV, probeLinearSetup, type LinearPreflightResult } from
 export { resolveTrackerConfig, type TrackerConfig } from './config/tracker-section.js';
 
 // Feedback round (#3910)
+export { countPendingFeedback } from './run/feedback-round-hooks.js';
 export {
-  collectFeedbackItems,
   feedbackHandledMarker,
   feedbackReworkSummary,
   prepareFeedbackRound,
@@ -497,4 +497,3 @@ export {
   type FeedbackRoundPlan,
   type FeedbackRoundTarget,
 } from './run/feedback-round.js';
-export { createOctokitFeedbackRoundGitHub, type FeedbackRoundGitHub } from './run/feedback-github.js';

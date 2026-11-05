@@ -403,7 +403,7 @@ const INTERNAL_API_KEYS = [
   'fileSlicePlanStore',
   'findSlicePlanComment',
   'publishParkComment',
-  ...'collectFeedbackItems createOctokitFeedbackRoundGitHub feedbackHandledMarker feedbackReworkSummary'.split(' '), // #3910
+  ...'countPendingFeedback feedbackHandledMarker feedbackReworkSummary'.split(' '), // #3910
   ...'prepareFeedbackRound publishFeedbackRound renderFeedbackReply triageFeedback'.split(' '),
   'recordSliceMerged',
   'renderSlicePlanComment',
@@ -563,7 +563,6 @@ const INTERNAL_API_KEYS = [
   'DEFAULT_FACTORYD_PORT',
   // Durable explicit daemon runs (#1393)
   'daemonRunFile',
-  'isTrustedApprover',
   'isValidRunId',
   'readDaemonRun',
   // Daemon runtime state: pid/port/log files (#1177)

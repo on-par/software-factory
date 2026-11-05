@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- The stack restack scratch worktree is created inside the repo's git dir instead of the OS temp dir (#3908)
 - Land defers a PR starved by a moving base instead of parking it ci-failed: the PR stays open and a host-local land-only retry queue retries it oldest first with 1, 2, 4 minute backoff under an exclusive landing slot, parking as ci-failed only after merge.maxLandDeferrals deferrals (default 3); `factory status` shows a Land deferred section, and `run-issue --merge` exits 14 with outcome `land-deferred` (#3957)
 - Land re-syncs a PR that turns DIRTY again during the CI watch up to merge.maxConflictRounds times (default 2), re-watching CI each round, and parks as conflict with "conflict rounds exhausted (N/N)" instead of ci-failed or fail (#1887)
 

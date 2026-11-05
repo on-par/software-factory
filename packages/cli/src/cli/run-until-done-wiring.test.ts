@@ -154,6 +154,11 @@ describe('untilDoneDepsFrom', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('lane parked'));
   });
 
+  it('ship rethrows a crash that reported no parked or escalated outcome', async () => {
+    const { deps } = setup({ ship: async () => Promise.reject(new Error('build exploded')) });
+    await expect(deps.ship(12)).rejects.toThrow('build exploded');
+  });
+
   it('ship rethrows CliExitError and IssueSkippedError', async () => {
     const cli = setup({ ship: async () => Promise.reject(new CliExitError('usage', 2)) });
     await expect(cli.deps.ship(12)).rejects.toBeInstanceOf(CliExitError);

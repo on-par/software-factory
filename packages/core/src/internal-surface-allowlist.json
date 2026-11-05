@@ -30,7 +30,6 @@
   "EvidenceRunnerContext",
   "FeedbackDisposition",
   "FeedbackItem",
-  "FeedbackRoundGitHub",
   "FeedbackRoundPlan",
   "FeedbackRoundTarget",
   "GateStage",

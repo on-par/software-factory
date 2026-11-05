@@ -3,11 +3,8 @@
 import type { Octokit } from '@octokit/rest';
 import { workKeyFromIssue, type FactoryConfig, type getFactoryPaths, type RunOutcome } from '@on-par/factory-core';
 import {
-  collectFeedbackItems,
-  createOctokitCollaboratorPermissionClient,
-  createOctokitFeedbackRoundGitHub,
+  countPendingFeedback,
   factoryBranchIssue,
-  isTrustedApprover,
   loadPrRunState,
   logEvent,
   MAX_REWORK_ROUNDS,
@@ -132,7 +129,6 @@ export interface UntilDonePorts {
 /** Builds the production UntilDoneDeps. */
 export function untilDoneDepsFrom(w: UntilDoneWiring, ports: UntilDonePorts = {}): UntilDoneDeps {
   const { octokit, repo, paths, config } = w;
-  const [owner = '', name = ''] = repo.split('/');
   const pulls = ports.pulls ?? pullsPortFrom(octokit, repo);
   const ship = ports.ship ?? shipIssue;
   const drive = ports.driveToMerge ?? driveToMerge;
@@ -161,6 +157,8 @@ export function untilDoneDepsFrom(w: UntilDoneWiring, ports: UntilDonePorts = {}
       } catch (err) {
         if (err instanceof CliExitError || err instanceof shipRuntime().IssueSkippedError) throw err;
         w.log(`ship failed for issue #${issue}: ${err instanceof Error ? err.message : String(err)}`);
+        // A crash with no parked/escalated outcome is a real failure: keep the original error.
+        if (last === undefined || (last.state !== 'parked' && last.state !== 'escalated')) throw err;
       }
       return last;
     },
@@ -189,16 +187,7 @@ export function untilDoneDepsFrom(w: UntilDoneWiring, ports: UntilDonePorts = {}
         log: (kind, msg) => logEvent(paths.events, kind, issue, msg),
       });
     },
-    pendingFeedback: async (prNumber) => {
-      const client = createOctokitCollaboratorPermissionClient(octokit);
-      const items = await collectFeedbackItems({
-        github: createOctokitFeedbackRoundGitHub(octokit, owner, name),
-        prNumber,
-        isTrusted: (login) =>
-          isTrustedApprover(login, { owner, repo: name, trustedApprovers: config.intake?.trustedApprovers, client }),
-      });
-      return items.length;
-    },
+    pendingFeedback: (prNumber) => countPendingFeedback(octokit, repo, prNumber, config.intake?.trustedApprovers),
     feedbackRound: async (prNumber) => {
       try {
         const r = await round(prNumber);

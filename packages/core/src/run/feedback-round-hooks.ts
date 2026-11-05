@@ -4,7 +4,12 @@ import { readFileSync } from 'node:fs';
 import { createOctokitCollaboratorPermissionClient, isTrustedApprover } from '../queue/approval.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { createOctokitFeedbackRoundGitHub } from './feedback-github.js';
-import { prepareFeedbackRound, publishFeedbackRound, type FeedbackRoundPlan } from './feedback-round.js';
+import {
+  collectFeedbackItems,
+  prepareFeedbackRound,
+  publishFeedbackRound,
+  type FeedbackRoundPlan,
+} from './feedback-round.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
 import type { RunLogFn } from './attribution.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
@@ -129,4 +134,21 @@ export async function idleFeedbackRound(
   if (!plan || plan.summary !== undefined) return undefined;
   await publishFeedbackForRun(request, ports, plan, undefined, log);
   return { state: 'ready', route: route ?? 'claude', branch: request.branch, reworkRounds: 0, prNumber: plan.prNumber };
+}
+
+/** How many unhandled trusted feedback items the PR carries, under the config's trusted approvers. */
+export async function countPendingFeedback(
+  octokit: RunPorts['octokit'],
+  repo: string,
+  prNumber: number,
+  trustedApprovers: RunRequest['trustedApprovers'],
+): Promise<number> {
+  const [owner = '', name = ''] = repo.split('/');
+  const client = createOctokitCollaboratorPermissionClient(octokit);
+  const items = await collectFeedbackItems({
+    github: createOctokitFeedbackRoundGitHub(octokit, owner, name),
+    prNumber,
+    isTrusted: (login) => isTrustedApprover(login, { owner, repo: name, trustedApprovers, client }),
+  });
+  return items.length;
 }
