@@ -77,3 +77,16 @@ export function formatQueueOrderConflict(conflict: QueueOrderConflict): string {
   }
   return `lane ${conflict.lane}: issues ${conflict.issues.map((n) => `#${n}`).join(', ')} share ${QUEUE_ORDER_LABEL_PREFIX}${conflict.position} — claimed in issue-number order | repair: give each a unique order label`;
 }
+
+/** First candidate in queue order with its parsed `factory:order:N` position; null for an empty lane (#3958). */
+export function headOfLane(
+  lane: string,
+  issues: { number: number; labels: string[] }[],
+  onConflict?: (conflict: QueueOrderConflict) => void,
+): { issue: number; position: number | null } | null {
+  const first = orderedCandidates(lane, issues, onConflict, onConflict)[0];
+  if (first === undefined) return null;
+  const label = first.labels.find((l) => l.startsWith(QUEUE_ORDER_LABEL_PREFIX));
+  const position = label === undefined ? Number.NaN : Number(label.slice(QUEUE_ORDER_LABEL_PREFIX.length));
+  return { issue: first.number, position: Number.isFinite(position) ? position : null };
+}

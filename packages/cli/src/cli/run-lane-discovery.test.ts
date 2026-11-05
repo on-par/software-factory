@@ -6,7 +6,7 @@ import { workKeyFromIssue } from '@on-par/factory-core';
 import type { QueueBackend } from '@on-par/factory-core/internal';
 
 import type { PlannedLane, planRunLanes } from './index.js';
-import { discoverQueuedLanes, superviseLanes } from './run-lane-discovery.js';
+import { discoverQueuedLanes, rankWaitingLanes, superviseLanes } from './run-lane-discovery.js';
 import type { DiscoveredLane, LaneDiscoveryDeps } from './run-lane-discovery.js';
 
 const lane = (name: string, issues: number[] = [], keys = issues.map(String)): DiscoveredLane => ({
@@ -210,6 +210,122 @@ describe('superviseLanes (#3920)', () => {
   });
 });
 
+const headed = (name: string, position: number | null, issue: number | null = null): DiscoveredLane => ({
+  ...lane(name),
+  head: { position, issue },
+});
+
+describe('superviseLanes maxLanes (#3958)', () => {
+  it('runs at most maxLanes lanes and holds the rest as waiting', async () => {
+    const onSlots = vi.fn();
+    const h = harness({ maxLanes: 4, onSlots });
+    const names = ['a', 'b', 'c', 'd', 'e', 'f'];
+    const done = superviseLanes(
+      names.map((n, i) => headed(n, i + 1)),
+      h.deps,
+    );
+    await settle();
+    expect(h.startLane.mock.calls.map(([p]) => p.lane)).toEqual(['a', 'b', 'c', 'd']);
+    expect(onSlots).toHaveBeenLastCalledWith({ running: ['a', 'b', 'c', 'd'], waiting: ['e', 'f'] });
+    expect(h.log).toHaveBeenCalledWith('lane-wait', "lane 'e' waiting for a slot (4/4 running)", 'e');
+    for (const n of ['a', 'b', 'c', 'd']) h.finish(n);
+    await settle();
+    for (const n of ['e', 'f']) h.finish(n);
+    await done;
+  });
+
+  it('starts the next waiting lane in queue order when a running lane drains', async () => {
+    const withKeys = (d: DiscoveredLane): DiscoveredLane => ({ ...d, keys: ['1'] });
+    const initial = [headed('a', 1), headed('late', 9), headed('early', 2)].map(withKeys);
+    const h = harness({ maxLanes: 1, discover: async () => initial });
+    const done = superviseLanes(initial, h.deps);
+    await settle();
+    expect(h.startLane.mock.calls.map(([p]) => p.lane)).toEqual(['a']);
+    h.finish('a');
+    await settle();
+    expect(h.startLane.mock.calls.map(([p]) => p.lane)).toEqual(['a', 'early']);
+    h.finish('early');
+    await settle();
+    h.finish('late');
+    await expect(done).resolves.toEqual({ started: ['a', 'early', 'late'] });
+  });
+
+  it('rankWaitingLanes orders by head factory:order position then oldest head issue', () => {
+    const ranked = rankWaitingLanes([
+      headed('none', null),
+      lane('unset'),
+      headed('p2-new', 2, 50),
+      headed('p2-old', 2, 10),
+      headed('p1', 1, 99),
+      headed('p2-null', 2, null),
+    ]);
+    expect(ranked.map((l) => l.planned.lane)).toEqual(['p1', 'p2-old', 'p2-new', 'p2-null', 'none', 'unset']);
+  });
+
+  it('starts every lane when maxLanes is unset', async () => {
+    const h = harness();
+    const done = superviseLanes([lane('a'), lane('b'), lane('c'), lane('d'), lane('e')], h.deps);
+    await settle();
+    expect(h.startLane).toHaveBeenCalledTimes(5);
+    expect(h.log.mock.calls.filter(([t]) => t === 'lane-wait')).toHaveLength(0);
+    for (const n of ['a', 'b', 'c', 'd', 'e']) h.finish(n);
+    await done;
+  });
+
+  it('a discovered lane waits while the cap is reached', async () => {
+    const onSlots = vi.fn();
+    const discover = vi.fn(async () => [lane('a'), headed('new', 1)].map((d) => ({ ...d, keys: [...d.keys, '7'] })));
+    const h = harness({ maxLanes: 1, onSlots, discover });
+    const done = superviseLanes([lane('a')], h.deps);
+    await settle();
+    h.clock.tick();
+    await settle();
+    expect(h.startLane).toHaveBeenCalledTimes(1);
+    expect(onSlots).toHaveBeenLastCalledWith({ running: ['a'], waiting: ['new'] });
+    h.finish('a');
+    await settle();
+    expect(h.startLane.mock.calls.map(([p]) => p.lane)).toEqual(['a', 'new']);
+    expect(onSlots).toHaveBeenLastCalledWith({ running: ['new'], waiting: ['a'] });
+    discover.mockResolvedValue([]);
+    h.finish('new');
+    await settle();
+    h.finish('a');
+    await done;
+  });
+
+  it('does not end the run while lanes are waiting', async () => {
+    const h = harness({ maxLanes: 1, discover: async () => [lane('b', [], ['1'])] });
+    let resolved = false;
+    const done = superviseLanes([lane('a', [], ['1']), lane('b', [], ['1'])], h.deps).then((r) => {
+      resolved = true;
+      return r;
+    });
+    await settle();
+    h.finish('a');
+    await settle();
+    expect(resolved).toBe(false);
+    expect(h.startLane.mock.calls.map(([p]) => p.lane)).toEqual(['a', 'b']);
+    h.finish('b');
+    await expect(done).resolves.toEqual({ started: ['a', 'b'] });
+  });
+
+  it('starts no waiting lane after a stop request', async () => {
+    let stop = false;
+    const onSlots = vi.fn();
+    const h = harness({ maxLanes: 1, onSlots, stopRequested: () => stop });
+    const done = superviseLanes(
+      [headed('a', 1), headed('b', 2)].map((d) => ({ ...d, keys: ['1'] })),
+      h.deps,
+    );
+    await settle();
+    stop = true;
+    h.finish('a');
+    await expect(done).resolves.toEqual({ started: ['a'] });
+    expect(h.startLane).toHaveBeenCalledTimes(1);
+    expect(onSlots).toHaveBeenLastCalledWith({ running: [], waiting: [] });
+  });
+});
+
 describe('discoverQueuedLanes (#3920)', () => {
   it('discovers new local-queue entries and seeds a restarted lane with only unseen issues', async () => {
     let content = 'app 5\n';
@@ -254,5 +370,47 @@ describe('discoverQueuedLanes (#3920)', () => {
     });
     expect(list).toHaveBeenCalledWith('x');
     expect(found).toEqual([{ planned: { lane: 'x', issues: [], deps: {} }, keys: ['11', '12'] }]);
+  });
+});
+
+describe('lane heads (#3958)', () => {
+  const planned = { lane: 'x', issues: [], deps: {} };
+  const discover = (queue: Partial<QueueBackend>) =>
+    discoverQueuedLanes({
+      localQueue: false,
+      readLocalQueue: () => null,
+      queue: () => ({ list: async () => [workKeyFromIssue(11)], ...queue }) as QueueBackend,
+      planRunLanes: async () => ({ lanes: [planned], diagnostics: [] }),
+    });
+
+  it('attaches the GitHub laneHead position and issue', async () => {
+    const found = await discover({ laneHead: async () => ({ key: workKeyFromIssue(11), position: 3 }) });
+    expect(found[0].head).toEqual({ position: 3, issue: 11 });
+  });
+
+  it('leaves head unset when laneHead throws or is missing', async () => {
+    expect((await discover({ laneHead: async () => Promise.reject(new Error('x')) }))[0].head).toBeUndefined();
+    expect((await discover({}))[0].head).toBeUndefined();
+  });
+
+  it('ranks local-queue lanes by their plan order', async () => {
+    const found = await discoverQueuedLanes({
+      localQueue: true,
+      readLocalQueue: () => null,
+      queue: () => {
+        throw new Error('no backend');
+      },
+      planRunLanes: async () => ({
+        lanes: [
+          { lane: 'a', issues: [4, 5], deps: {} },
+          { lane: 'b', issues: [], deps: {} },
+        ],
+        diagnostics: [],
+      }),
+    });
+    expect(found.map((f) => f.head)).toEqual([
+      { position: 0, issue: 4 },
+      { position: 1, issue: null },
+    ]);
   });
 });

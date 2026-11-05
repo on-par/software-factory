@@ -227,6 +227,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
       'Shell command spawned once per park and once when the queue drains, with a JSON summary on stdin; overrides FACTORY_NOTIFY_CMD',
     )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
+    .option('--max-lanes <n>', 'Run at most <n> lanes at once, overriding run.maxLanes in .factory/config.yaml')
     .action(
       (opts: {
         localQueue?: boolean;
@@ -236,6 +237,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
         usagePoll?: string;
         branchPrefix?: string;
         notify?: string;
+        maxLanes?: string;
       }) => handlers.cmdRun(opts),
     );
 

@@ -35,7 +35,7 @@ export { isAutoMergeBlocked } from './filing/policy.js';
 export { resolveStateRoot, STATE_ROOT_ENV } from './config/state-root.js';
 export { resolveFilingPolicy, resolvePrClassifierPolicy } from './config/index.js';
 export { aliasDeprecatedSizeGateMode, isExplicitStackMode } from './config/index.js';
-export { describeDraftPrPolicy, resolveDraftPrPolicy } from './config/run-section.js';
+export { describeDraftPrPolicy, resolveDraftPrPolicy, resolveRunMaxLanes } from './config/run-section.js';
 export type { TrustTier } from './config/repo.js';
 export { resolveBaseHealthChecks, resolveBaselineCacheTtlHours, resolveHermeticGit } from './config/base-health.js';
 export {

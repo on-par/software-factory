@@ -28,6 +28,8 @@ export interface QueueBackend {
   heartbeat(key: WorkKey): Promise<boolean>;
   /** Queued work keys for one lane, in claim order; every lane, lane-sorted, when `lane` is omitted. */
   list(lane?: string): Promise<WorkKey[]>;
+  /** The first queued work item of `lane` and its `factory:order` position, used to rank waiting lanes (#3958); absent on backends without order labels. */
+  laneHead?(lane: string): Promise<{ key: WorkKey; position: number | null } | null>;
   /** Lane names that currently have queued work. */
   lanes(): Promise<string[]>;
   /** Detects and releases claims whose TTL lease has expired across the whole queue. */
@@ -56,6 +58,11 @@ export function createGithubQueueBackend(options: GithubQueueBackendOptions): Qu
     return keys;
   }
 
+  async function laneHead(lane: string): Promise<{ key: WorkKey; position: number | null } | null> {
+    const first = await queue.head(lane);
+    return first === null ? null : { key: workKeyFromIssue(first.issue), position: first.position };
+  }
+
   async function reap(): Promise<StaleClaimRelease[]> {
     return releaseStaleClaims({ client, owner, repo, now });
   }
@@ -70,6 +77,7 @@ export function createGithubQueueBackend(options: GithubQueueBackendOptions): Qu
     release: async (key, outcome) => queue.release(issueNumberOf(key), outcome),
     heartbeat: async (key) => queue.heartbeat(issueNumberOf(key)),
     list,
+    laneHead,
     lanes: () => queue.lanes(),
     reap,
     pollBlockedParks: pollParks,

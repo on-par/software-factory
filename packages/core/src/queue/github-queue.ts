@@ -18,6 +18,7 @@ import type { OrderCollisionRepair } from './order-repair.js';
 import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
 import {
   formatQueueOrderConflict,
+  headOfLane,
   orderedCandidates,
   QUEUE_ORDER_LABEL_PREFIX,
   type QueueOrderConflict,
@@ -451,6 +452,7 @@ export interface GithubQueue extends ClaimSettler {
    *  elsewhere, released, or reaped (#1500, #3422). */
   heartbeat(issue: number): Promise<boolean>;
   list(lane: string): Promise<number[]>;
+  head(lane: string): Promise<{ issue: number; position: number | null } | null>;
   lanes(): Promise<string[]>;
   migrateLocalQueue(entries: readonly QueueEntry[]): Promise<void>;
   enqueue(lane: string, issues: readonly number[], options?: EnqueueOptions): Promise<EnqueueResult[]>;
@@ -634,6 +636,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     releaseStale,
     heartbeat,
     list,
+    head: async (lane) => headOfLane(lane, await candidatesFor(lane), onOrderConflict),
     lanes,
     migrateLocalQueue,
     enqueue,

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { describeDraftPrPolicy, resolveDraftPrPolicy, RunConfigSectionSchema } from './run-section.js';
+import {
+  describeDraftPrPolicy,
+  resolveDraftPrPolicy,
+  resolveRunMaxLanes,
+  RunConfigSectionSchema,
+} from './run-section.js';
 
 describe('resolveDraftPrPolicy', () => {
   it('flag beats config, config beats default, default is off', () => {
@@ -38,5 +43,24 @@ describe('RunConfigSectionSchema', () => {
     expect(RunConfigSectionSchema.safeParse({ branchPrefix: '' }).success).toBe(false);
     expect(RunConfigSectionSchema.safeParse({ branchPrefix: '!!!' }).success).toBe(false);
     expect(RunConfigSectionSchema.safeParse({ branchPrefix: 1 }).success).toBe(false);
+  });
+});
+
+describe('resolveRunMaxLanes', () => {
+  it('resolveRunMaxLanes prefers the flag over run.maxLanes', () => {
+    expect(resolveRunMaxLanes({ run: { maxLanes: 4 } }, 2)).toEqual({ maxLanes: 2, source: 'flag' });
+  });
+  it('uses run.maxLanes without a flag', () => {
+    expect(resolveRunMaxLanes({ run: { maxLanes: 4 } })).toEqual({ maxLanes: 4, source: 'config' });
+  });
+  it('is unset without a flag or config', () => {
+    expect(resolveRunMaxLanes({})).toEqual({ maxLanes: undefined, source: 'unset' });
+    expect(resolveRunMaxLanes({ run: {} })).toEqual({ maxLanes: undefined, source: 'unset' });
+  });
+  it('the schema accepts a positive integer and rejects 0, negatives, fractions and strings', () => {
+    expect(RunConfigSectionSchema.parse({ maxLanes: 4 })).toEqual({ maxLanes: 4 });
+    for (const bad of [0, -2, 1.5, '4']) {
+      expect(RunConfigSectionSchema.safeParse({ maxLanes: bad }).success).toBe(false);
+    }
   });
 });
