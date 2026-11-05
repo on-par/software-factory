@@ -49,7 +49,7 @@ async function succeeds(cwd: string, ...args: string[]): Promise<boolean> {
 export async function rebaseAndPushStack(opts: StackRebaseOptions): Promise<StackRebaseResult> {
   const { repoRoot, remote, startBase, layers } = opts;
   // Scratch worktree lives inside the repo's git dir, not the shared OS temp dir.
-  const gitDir = resolve(repoRoot, await git(repoRoot, '-C', repoRoot, 'rev-parse', '--git-common-dir'));
+  const gitDir = resolve(repoRoot, await git(repoRoot, 'rev-parse', '--git-common-dir'));
   const tmp = await mkdtemp(join(gitDir, 'factory-restack-'));
   const newHeads: string[] = [];
   try {
