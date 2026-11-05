@@ -18,6 +18,7 @@ export type ParkReason = Extract<
 >;
 
 import type { BuildRoutePin } from '../config/repo.js';
+import type { ShipDraftReason, ShipResult } from '../phases/ship-types.js';
 
 export type BuildRoute = BuildRoutePin;
 
@@ -60,6 +61,8 @@ export type RunOutcome =
       draft?: boolean;
       /** SHIP's CI watch timed out (#3569); the PR was left as draft. */
       ciPending?: boolean;
+      /** Why SHIP left the PR as a draft (#3932). */
+      draftReason?: ShipDraftReason;
       /** the ADR-0147 slice this run shipped */
       slice?: { index: number; count: number };
       attribution?: RunAttribution;
@@ -188,4 +191,17 @@ export function parkEvents(err: unknown): { type: EventKind; msg: string; design
     events.push({ type: 'stuck', msg: `run exceeded its phase timeout without progressing — ${msg}` });
   }
   return events;
+}
+
+/** The draft fields a ready outcome carries from SHIP's result; each is present only when set. */
+export function readyDraftFields(ship: Pick<ShipResult, 'draft' | 'ciPending' | 'draftReason'>): {
+  draft?: true;
+  ciPending?: true;
+  draftReason?: ShipDraftReason;
+} {
+  return {
+    ...(ship.draft ? { draft: true } : {}),
+    ...(ship.ciPending ? { ciPending: true } : {}),
+    ...(ship.draftReason ? { draftReason: ship.draftReason } : {}),
+  };
 }

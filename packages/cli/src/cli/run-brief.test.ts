@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CliExitError } from './errors.js';
+import type { RunOutcome } from '@on-par/factory-core';
+
 import { cmdRunBrief, type RunBriefRuntime } from './run-brief.js';
 import type { MergeResult } from './run-issue-merge.js';
 import { errored, h, installShipHarness, phases, runMainWith, shipIssue } from './test-support/ship-harness.js';
@@ -116,5 +118,45 @@ describe('run-brief --merge (#3905)', () => {
     const err = await cmdRunBrief([brief(), second()], {}, runtime(drive)).catch((e) => e);
     expect(err).toMatchObject({ code: 1 });
     expect(drive).not.toHaveBeenCalled();
+  });
+});
+
+describe('run-brief --json (#3907)', () => {
+  const runtime = (onOutcome: RunOutcome): RunBriefRuntime => ({
+    isCommandAvailable: () => true,
+    getRepoRoot: async () => h.repoRoot,
+    getGitHubRepo: async () => h.ghRepo,
+    getOctokit: () => h.octokit as any,
+    branchPrefixOrExit: () => 'ship-it',
+    errorDetail: (err) => String(err),
+    shipIssue: async (_n, _o, ctx) => {
+      ctx?.onOutcome?.(onOutcome);
+      return 'done';
+    },
+  });
+
+  it('run-brief --json prints a schemaVersion 1 result as the last stdout line (#3907)', async () => {
+    const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const outcome = { state: 'ready', route: {}, branch: 'ship-it/alpha', reworkRounds: 0, prNumber: 12 } as RunOutcome;
+    await cmdRunBrief([brief()], { json: true }, runtime(outcome));
+    const lines = out.mock.calls
+      .map((c) => String(c[0]))
+      .join('')
+      .trim()
+      .split('\n');
+    const result = JSON.parse(lines.at(-1) as string);
+    expect(result).toMatchObject({ schemaVersion: 1, outcome: 'pr-open', pr: { number: 12 } });
+    expect(result.issue).toBeGreaterThanOrEqual(9_000_000);
+  });
+
+  it('run-brief --json with two briefs exits 2', async () => {
+    const err = await cmdRunBrief(
+      [brief(), brief()],
+      { json: true },
+      runtime({ state: 'escalated', reason: 'x' }),
+    ).catch((e) => e);
+    expect(err).toMatchObject({ code: 2 });
+    expect(err.message).toContain('exactly one brief');
   });
 });

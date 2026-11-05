@@ -20,6 +20,7 @@ import {
 } from '@on-par/factory-core/internal';
 import type { QueueDeferCause } from './queue-preflight.js';
 import { runOrphanDraftSweep } from './orphan-draft-sweep.js';
+import { runCiPendingDraftSweep, type CiPendingDraftSweepOpts } from './ci-pending-draft-sweep.js';
 
 export function warnQueueDiagnostics(diagnostics: QueueDiagnostic[]): void {
   for (const d of diagnostics) {
@@ -147,6 +148,8 @@ export function startupSweeps(getOctokit: () => Octokit | undefined) {
   return {
     sweepStaleLaneClaims: (paths: Paths, ghRepo: string) => sweepLaneClaims(paths, ghRepo, getOctokit),
     sweepOrphanDrafts: (paths: Paths, ghRepo: string) => runOrphanDraftSweep(paths, ghRepo, getOctokit),
+    sweepCiPendingDrafts: (paths: Paths, ghRepo: string, opts?: CiPendingDraftSweepOpts) =>
+      runCiPendingDraftSweep(paths, ghRepo, getOctokit, opts),
     reapExpiredClaims: (paths: Paths, ghRepo: string) => reapExpiredClaims(paths, ghRepo, getOctokit),
   };
 }

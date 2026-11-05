@@ -10,6 +10,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'notifications',
   'cost_tracking',
   'ci',
+  'ship',
   'sweep',
   'plan_approval',
   'design',

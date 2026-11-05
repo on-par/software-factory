@@ -244,6 +244,57 @@ export function createFileIterateStore(file: string): IterateCommandStore {
   };
 }
 
+export interface QueueCiPendingReworkResult {
+  outcome: 'queued' | 'skipped' | 'error';
+  lane?: string;
+  detail?: string;
+}
+
+/**
+ * Queue an issue whose CI-pending draft PR turned red for an iterate run (#3932): the next run skips PLAN/BUILD,
+ * re-runs CHECK, and SHIP re-enters the PR where `shipWithCiRework` reworks within its cap. Skips an issue a lane holds.
+ */
+export async function queueCiPendingRework(opts: {
+  store: IterateCommandStore;
+  queue: QueueGitHubClient;
+  owner: string;
+  repo: string;
+  issue: number;
+  pr: number;
+  now?: () => Date;
+}): Promise<QueueCiPendingReworkResult> {
+  const { store, queue, owner, repo, issue, pr } = opts;
+  const now = opts.now ?? (() => new Date());
+  const labels = await queue.getIssueLabels({ owner, repo, issue_number: issue });
+  if (labels.includes(IN_PROGRESS_LABEL)) return { outcome: 'skipped', detail: 'in-progress' };
+  const lanes = labels.filter((l) => l.startsWith(LANE_LABEL_PREFIX)).map((l) => l.slice(LANE_LABEL_PREFIX.length));
+  if (lanes.length !== 1) {
+    return {
+      outcome: 'skipped',
+      detail: lanes.length === 0 ? 'no lane label' : `several lane labels: ${lanes.join(', ')}`,
+    };
+  }
+  const lane = lanes[0] ?? '';
+  if (labels.includes(PARKED_LABEL)) await queue.removeLabel({ owner, repo, issue_number: issue, name: PARKED_LABEL });
+  const [res] = await createEnqueuers(queue, owner, repo).enqueue(lane, [issue]);
+  if (res === undefined || res.outcome === 'failed') {
+    return { outcome: 'error', lane, detail: res?.detail ?? 'enqueue returned nothing' };
+  }
+  const at = now();
+  // A negative id cannot collide with a real GitHub comment id.
+  store.record({
+    commentId: -Date.parse(at.toISOString()),
+    pr,
+    issue,
+    lane,
+    actor: 'factory-ci-pending-sweep',
+    seenAt: at.toISOString(),
+    outcome: 'queued',
+    detail: 'CI failed on a CI-pending draft (#3932)',
+  });
+  return { outcome: 'queued', lane };
+}
+
 /** Claim the newest pending queued record for the issue (by seenAt, then commentId); older pending ones are coalesced (stamped too). */
 export function claimIterateCommand(
   store: IterateCommandStore,

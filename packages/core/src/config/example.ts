@@ -332,6 +332,15 @@ function runtimeNamespace(): Node[] {
       example: '10',
     });
 
+  const ship = section('ship');
+  if (ship.kind === 'object')
+    ship.children.push({
+      kind: 'unset',
+      key: 'ciWatchMinutes',
+      doc: 'Minutes SHIP waits for CI before leaving the PR as a draft (CI pending); the between-issue sweep lands it once CI passes. Overrides ci.watchMinutes. Unset: 10.',
+      example: '10',
+    });
+
   const sizeGate = section('sizeGate');
   if (sizeGate.kind === 'object')
     sizeGate.children.unshift({ kind: 'unset', key: 'mode', doc: 'off | stack. Unset: stack.', example: 'stack' });
@@ -412,6 +421,7 @@ function runtimeNamespace(): Node[] {
     section('build'),
     sizeGate,
     ci,
+    ship,
     section('worktree'),
     section('workspace'),
     {

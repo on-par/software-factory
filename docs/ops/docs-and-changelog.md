@@ -29,7 +29,12 @@ When a factory PR and `main` both add `CHANGELOG.md` lines under `## Unreleased`
 resolves the conflict itself: main's entries stay first, then the PR's are appended in the
 same subsection. A conflict in a released `## X.Y.Z` section still parks the PR. The
 `.gitattributes` entry `CHANGELOG.md merge=union` only helps local merges, because GitHub
-ignores merge drivers.
+ignores merge drivers. Land and SHIP always rebuild `## Unreleased` with their own resolver,
+which also keeps two subsections with the same heading apart (#3949).
+
+After a release, check any plain local `git merge` of main into an older branch. Git's line
+merge, with or without `merge=union`, can file the branch's new bullets under the just-released
+`## X.Y.Z` heading without any conflict. Move them back under `## Unreleased` by hand.
 
 Do not edit `version` in any `package.json` on a feature PR. See [Versions](#versions).
 

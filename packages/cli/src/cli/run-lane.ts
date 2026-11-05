@@ -332,7 +332,9 @@ export async function runLane(
           paths.events,
           'ship',
           issue,
-          `PR #${shipped.prNumber} left as draft — merge skipped (draft wins over auto-merge); mark it ready for review to land it`,
+          shipped.draftReason === 'ci-pending'
+            ? `PR #${shipped.prNumber} left as draft — CI pending; the between-issue sweep lands it once CI passes`
+            : `PR #${shipped.prNumber} left as draft — merge skipped (draft wins over auto-merge); mark it ready for review to land it`,
           { lane },
         );
         awaitingReview++;

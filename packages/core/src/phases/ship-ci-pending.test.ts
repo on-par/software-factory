@@ -75,6 +75,11 @@ describe('shipPhase CI pending (#3569)', () => {
     expect(result).toMatchObject({ ok: true, ciOutcome: 'timeout', draft: true, ciPending: true });
   });
 
+  it('sets draftReason ci-pending when the CI watch times out', async () => {
+    const { result } = await ship(pending);
+    expect(result.draftReason).toBe('ci-pending');
+  });
+
   it('ship passes the ciDeadlineMs option to the CI watch and defaults to 10 minutes', async () => {
     const short = await ship(pending, { ciDeadlineMs: 120_000 });
     expect(short.logs.some(([, msg]) => msg.includes('within 2 min'))).toBe(true);
@@ -90,6 +95,7 @@ describe('shipPhase CI pending (#3569)', () => {
     expect(graphqlCalls).toHaveLength(1);
     expect(result).not.toHaveProperty('ciPending');
     expect(result).not.toHaveProperty('draft');
+    expect(result).not.toHaveProperty('draftReason');
     expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
   });
 });

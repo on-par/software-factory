@@ -10,6 +10,14 @@ section to `## X.Y.Z - date`. See
 ### Changed
 
 - Land re-syncs a PR that turns DIRTY again during the CI watch up to merge.maxConflictRounds times (default 2), re-watching CI each round, and parks as conflict with "conflict rounds exhausted (N/N)" instead of ci-failed or fail (#1887)
+### Added
+
+- ship: `ship.ciWatchMinutes` sets the CI watch window, and a draft SHIP left for pending CI is landed (or sent to CI rework) by the run-start and between-issue sweep once CI finishes (#3932)
+- `factory run-issue`, `run-brief` and `ship` take `--json` (a schemaVersion 1 run result on the last stdout line, schema in `schemas/run-result.schema.json`) and `--export <dir>` (copies the run's state, events and costs on every exit path) for disposable hosts (#3907)
+
+### Fixed
+
+- Land and SHIP resolve a CHANGELOG.md `## Unreleased` merge when it has two subsections with the same heading (such as two `### Fixed`), instead of aborting the sync with "PR removed or edited an existing Unreleased line" and leaving the PR conflicting (#3949).
 
 ## 0.9.28 - 2026-11-04
 

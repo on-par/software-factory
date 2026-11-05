@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { designSmellFindingFor, parkEvents, parkReasonFor, reworkRouteFor } from './outcome.js';
+import { designSmellFindingFor, parkEvents, parkReasonFor, readyDraftFields, reworkRouteFor } from './outcome.js';
 import type { DesignSmellFinding, RunOutcome } from './outcome.js';
 
 const FINDING: DesignSmellFinding = { approachTried: 'cache', whyItStinks: 'stale reads', recommendation: 'split it' };
@@ -119,5 +119,17 @@ describe('reworkRouteFor', () => {
   it('passes every built route through, command included (#2873)', () => {
     expect(reworkRouteFor('command', 'my-model')).toEqual({ reworkRoute: 'command', reworkModel: 'my-model' });
     expect(reworkRouteFor('codex', undefined)).toEqual({ reworkRoute: 'codex', reworkModel: undefined });
+  });
+});
+
+describe('readyDraftFields', () => {
+  it('carries only the draft fields SHIP set', () => {
+    expect(readyDraftFields({})).toEqual({});
+    expect(readyDraftFields({ draft: false, ciPending: false })).toEqual({});
+    expect(readyDraftFields({ draft: true, ciPending: true, draftReason: 'ci-pending' })).toEqual({
+      draft: true,
+      ciPending: true,
+      draftReason: 'ci-pending',
+    });
   });
 });

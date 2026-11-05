@@ -103,7 +103,7 @@ import {
   type LaneClaimStalenessProbe,
   type LaneFileGuard,
 } from './lane-file-guard.js';
-import { designSmellFindingFor, parkReasonFor, reworkRouteFor } from './outcome.js';
+import { designSmellFindingFor, parkReasonFor, readyDraftFields, reworkRouteFor } from './outcome.js';
 import type { BuildRoute, DesignSmellFinding, ParkReason, RunOutcome } from './outcome.js';
 import type { RunPolicy } from './policy.js';
 import {
@@ -1206,8 +1206,7 @@ async function runIssueOnce(
       branch: request.branch,
       reworkRounds,
       prNumber: ship.prNumber,
-      ...(ship.draft ? { draft: true } : {}),
-      ...(ship.ciPending ? { ciPending: true } : {}),
+      ...readyDraftFields(ship),
       ...(planSlice ? { slice: { index: planSlice.index, count: planSlice.plan.slices.length } } : {}),
     };
   } catch (err) {

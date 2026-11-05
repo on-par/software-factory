@@ -82,6 +82,7 @@ The workflow's caller-repo checkout uses this token too, so `git push` from `run
 made with the Actions token leave follow-up `pull_request` workflows at `action_required` with no jobs,
 so the required `ci` check never reports. A ship that ends "left as draft (CI pending)" fails the
 run (exit 1) and is not a land.
+A local `factory run` lands such a CI-pending draft on its next sweep once CI passes (`ship.ciWatchMinutes` sets the watch window); the one-shot Actions job still exits 1.
 
 ## Merging
 
@@ -148,6 +149,14 @@ Docs: <https://code.claude.com/docs/en/github-actions>,
 
 Every run spends the caller repo's Actions minutes for up to the 120-minute job timeout (GitHub's job
 cap is 6 h). Claude usage is billed to the given credential.
+
+## Hosts whose disk does not survive
+
+A one-shot host (a container that is destroyed after the run) can pass `--json` and `--export <dir>` to
+`factory run-issue`, `run-brief` or `ship`. `--json` prints the final result (outcome, PR, SHAs, phase
+timings, cost in USD) as one `schemaVersion 1` line on stdout and moves progress to stderr; the schema is
+`schemas/run-result.schema.json`. `--export` copies the run's state file, events, costs and `run-result.json`
+into `<dir>` on every exit path, so the host can upload them before it exits. Neither flag changes the exit code.
 
 ## Artifacts
 

@@ -9,6 +9,7 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import {
   countReviewReworkRuns,
   createFileReviewReworkStore,
+  loadPrRunState,
   savePrRunState,
   type PrRunState,
 } from '@on-par/factory-core/internal';
@@ -178,6 +179,37 @@ describe('ship PR run state', () => {
     await record({ status: 'building', prNumber: 9 });
     expect(comments).toHaveLength(1);
     expect(comments[0]?.body).toBe(saved);
+  });
+
+  it('saves draftReason ci-pending and status awaiting-ci on a CI-pending ready update, and drops it later', async () => {
+    const { octokit, comments } = fakeOctokit();
+    const record = prRunStateRecorder(async () => {}, {
+      octokit,
+      repo: REPO,
+      issueNum: 42,
+      specPath: join(dir, 'missing.md'),
+      reviewReworkFile,
+      runsDir,
+      maxReviewReworkRuns: 3,
+      log,
+    });
+    mkdirSync(runsDir, { recursive: true });
+    createFileReviewReworkStore(reviewReworkFile).record({
+      reviewId: 5,
+      pr: 9,
+      issue: 42,
+      lane: '',
+      reviewer: '',
+      queuedAt: '2026-11-04T00:00:00.000Z',
+    });
+    await record({ status: 'ready', prNumber: 9, draftReason: 'ci-pending' });
+    const first = await loadPrRunState({ octokit, repo: REPO, prNumber: 9, key });
+    expect(first).toMatchObject({ status: 'found', state: { draftReason: 'ci-pending', status: 'awaiting-ci' } });
+    expect(comments).toHaveLength(1);
+    await record({ status: 'ready', prNumber: 9 });
+    const second = await loadPrRunState({ octokit, repo: REPO, prNumber: 9, key });
+    expect(second.status === 'found' && 'draftReason' in second.state).toBe(false);
+    expect(second).toMatchObject({ state: { status: 'awaiting-review' } });
   });
 
   it('logs pr_state_ignored for a forged block and restores nothing', async () => {

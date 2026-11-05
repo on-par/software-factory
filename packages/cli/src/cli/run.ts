@@ -51,6 +51,7 @@ import type {
   withRepoRunLock,
 } from './index.js';
 import { awaitingCiLaneDeps } from './awaiting-ci-wiring.js';
+import type { CiPendingDraftSweepOpts } from './ci-pending-draft-sweep.js';
 import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
 import { waitForMerge } from './land.js';
 import { hostClaimGuards } from './host-claim-guards.js';
@@ -96,6 +97,12 @@ export interface RunRuntime {
   ) => Promise<void>;
   sweepStaleLaneClaims: (paths: ReturnType<typeof getFactoryPaths>, ghRepo: string) => Promise<void>;
   sweepOrphanDrafts: (paths: ReturnType<typeof getFactoryPaths>, ghRepo: string) => Promise<void>;
+  /** Optional so existing test fakes stay valid (#3932). */
+  sweepCiPendingDrafts?: (
+    paths: ReturnType<typeof getFactoryPaths>,
+    ghRepo: string,
+    opts?: CiPendingDraftSweepOpts,
+  ) => Promise<void>;
   reapExpiredClaims: (paths: ReturnType<typeof getFactoryPaths>, ghRepo: string) => Promise<void>;
   planRunLanes: typeof planRunLanes;
   preflightQueuedIssue: typeof preflightQueuedIssue;
@@ -155,6 +162,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
     if (opts.localQueue !== true && resolveTrackerConfig(factoryConfig).kind !== 'linear') {
       await rt.reapExpiredClaims(paths, ghRepo);
     }
+    await rt.sweepCiPendingDrafts?.(paths, ghRepo, { repoRoot, autoMerge: opts.autoMerge });
     await rt.sweepOrphanDrafts(paths, ghRepo);
 
     const runQueue = createRunQueue({ rt, paths, ghRepo, factoryConfig, autoMerge: opts.autoMerge, deferrals });
@@ -329,6 +337,14 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
               .sweepBetweenLaneIssues(issue, planned.lane, repoRoot, ghRepo, paths, {
                 protectedIssues: () => inFlightIssues,
               })
+              .then(() =>
+                rt.sweepCiPendingDrafts?.(paths, ghRepo, {
+                  repoRoot,
+                  lane: planned.lane,
+                  protectedIssues: inFlightIssues,
+                  autoMerge: opts.autoMerge,
+                }),
+              )
               .then(() => {}),
           reapWorktree: (issue) =>
             rt.reapParkedLaneWorktree(

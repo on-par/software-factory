@@ -2,6 +2,9 @@ import type { PreviewCheckResult } from '../checkers/preview-check.js';
 import type { CiFailureEvidence } from '../types/index.js';
 import type { InfraRerunOutcome } from '../utils/ci-watch.js';
 
+/** Why SHIP left a PR as a draft (#3932): 'ci-pending' = CI had not finished (the sweep may land it); 'requested' = draft mode. */
+export type ShipDraftReason = 'ci-pending' | 'requested';
+
 export interface ShipResult {
   ok: boolean;
   prNumber?: number;
@@ -20,6 +23,8 @@ export interface ShipResult {
   draft?: boolean;
   /** CI watch timed out before a verdict (#3569): the PR was left as draft. */
   ciPending?: boolean;
+  /** Why an ok result is a draft (#3932); the run-state comment carries it for the CI-pending sweep. */
+  draftReason?: ShipDraftReason;
   previewCheck?: PreviewCheckResult;
 }
 

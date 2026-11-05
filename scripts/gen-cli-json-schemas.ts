@@ -15,6 +15,7 @@ import {
   queueAddJsonSchema,
   resumeJsonSchema,
   runDiffstatJsonSchema,
+  runResultJsonSchema,
   runsJsonSchema,
   statusJsonSchema,
   usageJsonSchema,
@@ -38,6 +39,7 @@ const schemas = [
   ['unpark.schema.json', unparkJsonSchema],
   ['check.schema.json', checkJsonSchema],
   ['draft.schema.json', draftJsonSchema],
+  ['run-result.schema.json', runResultJsonSchema],
 ] as const;
 
 /** Writes every CLI JSON Schema artifact, Prettier-formatted, into outputDirectory (created if absent). */

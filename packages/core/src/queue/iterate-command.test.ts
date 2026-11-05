@@ -14,6 +14,7 @@ import {
   createFileIterateStore,
   parseFactoryCommand,
   pollIterateCommands,
+  queueCiPendingRework,
   type IterateComment,
   type IterateCommandGitHub,
   type IterateCommandRecord,
@@ -291,5 +292,56 @@ describe('file store and claimIterateCommand', () => {
     store.record(rec(1));
     store.record(rec(2));
     expect(claimIterateCommand(store, 42)?.commentId).toBe(2);
+  });
+});
+
+describe('queueCiPendingRework (#3932)', () => {
+  const NOW = new Date('2026-11-04T12:00:00.000Z');
+  const call = (env: ReturnType<typeof setup>) => {
+    const store = createFileIterateStore(join(tempDirs.makeSync('ci-rework-'), 's.json'));
+    return {
+      store,
+      run: () =>
+        queueCiPendingRework({ store, queue: env.queue, owner: 'o', repo: 'r', issue: 42, pr: 900, now: () => NOW }),
+    };
+  };
+  const tempDirs = createTempDirs();
+  afterEach(() => tempDirs.cleanup());
+  const env = (labels: string[]) => setup({ pulls: [], comments: {}, issues: { 42: labels } });
+
+  it('queueCiPendingRework enqueues the issue on its lane and records a queued iterate', async () => {
+    const e = env([lane, PARKED_LABEL]);
+    const { store, run } = call(e);
+    expect(await run()).toEqual({ outcome: 'queued', lane: 'bugfix' });
+    expect(e.state.get(42)?.has('factory:queued')).toBe(true);
+    expect(e.state.get(42)?.has(PARKED_LABEL)).toBe(false);
+    const claimed = claimIterateCommand(store, 42);
+    expect(claimed).toMatchObject({
+      pr: 900,
+      issue: 42,
+      lane: 'bugfix',
+      outcome: 'queued',
+      actor: 'factory-ci-pending-sweep',
+    });
+    expect(claimed?.commentId).toBeLessThan(0);
+  });
+
+  it('skips an issue a lane holds', async () => {
+    const e = env([lane, IN_PROGRESS_LABEL]);
+    const { store, run } = call(e);
+    expect(await run()).toEqual({ outcome: 'skipped', detail: 'in-progress' });
+    expect(store.list()).toEqual([]);
+  });
+
+  it('skips an issue without exactly one lane label', async () => {
+    expect(await call(env([])).run()).toMatchObject({ outcome: 'skipped', detail: 'no lane label' });
+    expect(await call(env([lane, laneLabel('feature')])).run()).toMatchObject({ outcome: 'skipped' });
+  });
+
+  it('reports an enqueue failure as an error and records nothing', async () => {
+    const e = setup({ pulls: [], comments: {}, issues: { 42: [lane] }, failAdd: true });
+    const { store, run } = call(e);
+    expect((await run()).outcome).toBe('error');
+    expect(store.list()).toEqual([]);
   });
 });

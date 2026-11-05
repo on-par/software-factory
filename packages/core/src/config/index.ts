@@ -175,6 +175,9 @@ export const FactoryConfigSchema = z.object({
       comment: z.string().default('Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging'),
     })
     .default({ skip: false, comment: 'Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging' }),
+  ship: z
+    .object({ ciWatchMinutes: z.number().optional().catch(undefined), comment: z.string().optional() })
+    .default({}),
   sweep: z
     .object({
       heartbeatFile: z.string().optional(),
@@ -536,10 +539,15 @@ export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = pr
   return resolveEnabledFlag(env, 'FACTORY_SKIP_CI', config.ci?.skip ?? false);
 }
 
-/** SHIP's CI watch deadline (#3569): ci.watchMinutes as ms; unset, non-finite or <= 0 → DEFAULT_CI_DEADLINE_MS. */
-export function resolveCiWatchDeadlineMs(config: { ci?: { watchMinutes?: number } }): number {
-  const m = config.ci?.watchMinutes;
-  return typeof m === 'number' && Number.isFinite(m) && m > 0 ? Math.round(m * 60_000) : DEFAULT_CI_DEADLINE_MS;
+/** SHIP's CI watch deadline (#3569, #3932): ship.ciWatchMinutes, then ci.watchMinutes, as ms; unset, non-finite or <= 0 → DEFAULT_CI_DEADLINE_MS. */
+export function resolveCiWatchDeadlineMs(config: {
+  ci?: { watchMinutes?: number };
+  ship?: { ciWatchMinutes?: number };
+}): number {
+  for (const m of [config.ship?.ciWatchMinutes, config.ci?.watchMinutes]) {
+    if (typeof m === 'number' && Number.isFinite(m) && m > 0) return Math.round(m * 60_000);
+  }
+  return DEFAULT_CI_DEADLINE_MS;
 }
 
 export {
