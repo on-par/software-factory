@@ -1,8 +1,6 @@
 import { Octokit } from '@octokit/rest';
 import { getFactoryPaths, loadFactoryConfig, type RunOutcome } from '@on-par/factory-core';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { createTempDirs } from '@on-par/factory-core/testing';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -243,15 +241,9 @@ function fakeGitHub(reviewBody: string) {
 }
 
 describe('untilDoneDepsFrom against GitHub', () => {
-  const dirs: string[] = [];
-  afterEach(() => {
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-  });
-  const root = (): string => {
-    const dir = mkdtempSync(join(tmpdir(), 'until-done-'));
-    dirs.push(dir);
-    return dir;
-  };
+  const dirs = createTempDirs();
+  afterEach(() => dirs.cleanup());
+  const root = (): string => dirs.makeSync('until-done-');
 
   it('uses the real clock and a real timer by default', async () => {
     const w = setup().w;

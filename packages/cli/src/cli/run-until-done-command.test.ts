@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { Octokit } from '@octokit/rest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -41,16 +41,18 @@ const closedPull = (mergedAt: string | null) => ({
   head: { ref: 'factory/12-x', repo: { full_name: 'o/r' } },
 });
 
+const dirs = createTempDirs();
+
 describe('cmdRunUntilDone end to end against a finished PR', () => {
   const real = shipRuntime();
   let root = '';
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'until-done-cmd-'));
+    root = dirs.makeSync('until-done-cmd-');
     mkdirSync(join(root, '.factory'), { recursive: true });
   });
-  afterEach(() => {
+  afterEach(async () => {
     setShipRuntime(() => real);
-    rmSync(root, { recursive: true, force: true });
+    await dirs.cleanup();
     vi.restoreAllMocks();
   });
 
