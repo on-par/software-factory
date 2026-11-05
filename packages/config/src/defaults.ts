@@ -59,7 +59,7 @@ export interface FactoryDefaults {
     compile_seconds: number;
   };
   pr: { footer: string };
-  merge: { auto: boolean; comment: string };
+  merge: { auto: boolean; comment: string; maxConflictRounds: number };
   worktree: { parent: string; comment: string; gcTtlDays: number; autoGcOnRun: boolean };
   byok: { enabled: boolean; comment: string };
   notifications: Record<string, boolean>;
@@ -611,8 +611,10 @@ export const defaultFactoryConfig: FactoryDefaults = {
   },
   merge: {
     auto: false,
+    maxConflictRounds: 2,
     comment:
-      'Set FACTORY_MERGE=1 to enable autonomous squash-merge; set FACTORY_MERGE_ADMIN=1 to bypass unmet merge requirements with GitHub admin privileges',
+      'Set FACTORY_MERGE=1 to enable autonomous squash-merge; set FACTORY_MERGE_ADMIN=1 to bypass unmet merge requirements with GitHub admin privileges. ' +
+      'maxConflictRounds (1-10, default 2) caps how many times land merges origin/main into a PR that turned DIRTY, re-watching CI each time; when spent, the run parks as conflict.',
   },
   worktree: {
     parent: '~/.factory/worktrees',
