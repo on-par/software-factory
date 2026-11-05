@@ -1,9 +1,9 @@
 // packages/cli/src/cli/lane-slots.test.ts — lane slot state, status section and --max-lanes parsing (#3958).
 
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CliExitError } from './errors.js';
@@ -26,11 +26,12 @@ const state = (over: Partial<LaneSlotsState> = {}): LaneSlotsState => ({
   ...over,
 });
 
+const tmp = createTempDirs();
 let dir: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'lane-slots-'));
+  dir = tmp.makeSync('lane-slots-');
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(async () => tmp.cleanup());
 
 describe('formatLaneSlotsSection', () => {
   it('formatLaneSlotsSection shows running against the cap and the waiting lanes', () => {

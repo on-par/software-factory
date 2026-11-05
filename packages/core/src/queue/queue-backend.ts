@@ -3,13 +3,10 @@
 import { type BlockedParkPollResult, type BlockedParkStore, pollBlockedParks } from '../blockers/poller.js';
 import {
   createGithubQueue,
-  laneLabel,
-  QUEUED_LABEL,
   type GithubQueueOptions,
   type QueueClaim,
   type QueueReleaseOutcome,
 } from './github-queue.js';
-import { orderedCandidates, QUEUE_ORDER_LABEL_PREFIX } from './queue-order.js';
 import { issueNumberOf, workKeyFromIssue, type WorkKey } from '../work/work-key.js';
 import { createLinearQueueBackend, type LinearQueueBackendOptions } from './linear-queue-backend.js';
 import type { LinearStaleClaimRelease } from './linear-queue-lifecycle.js';
@@ -62,12 +59,8 @@ export function createGithubQueueBackend(options: GithubQueueBackendOptions): Qu
   }
 
   async function laneHead(lane: string): Promise<{ key: WorkKey; position: number | null } | null> {
-    const { onOrderConflict } = options;
-    const candidates = await client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL, laneLabel(lane)] });
-    const first = orderedCandidates(lane, candidates, onOrderConflict, onOrderConflict)[0];
-    if (first === undefined) return null;
-    const label = first.labels.find((l) => l.startsWith(QUEUE_ORDER_LABEL_PREFIX)) ?? '';
-    return { key: workKeyFromIssue(first.number), position: Number(label.slice(QUEUE_ORDER_LABEL_PREFIX.length)) };
+    const first = await queue.head(lane);
+    return first === null ? null : { key: workKeyFromIssue(first.issue), position: first.position };
   }
 
   async function reap(): Promise<StaleClaimRelease[]> {
