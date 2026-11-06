@@ -1297,6 +1297,37 @@ describe('buildPhase cross-harness failover', () => {
     },
   );
 
+  it('rethrows rate_limit to the phase boundary when crossProviderLadder is false', async () => {
+    const worktree = await setup.worktree('build-phase-test-');
+    const specPath = join(worktree, 'issue-3977.md');
+    await writeFile(specPath, '# Frozen spec 3977\nDo the bounded change.\n');
+    const { router, stub } = setup.router(failoverModels, failoverRoutes, {
+      build_claude: [{ fail: 'rate_limit' }, { fail: 'rate_limit' }, { fail: 'rate_limit' }],
+      build_codex: [{ output: 'codex output' }],
+    });
+    const logCalls: string[] = [];
+
+    await expect(
+      buildPhase({
+        issue: workKeyFromIssue(3977),
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        branch: 'ship-it/3977-provider-ladder-rate-limit',
+        route: 'claude',
+        router,
+        constitution: null,
+        crossProviderLadder: false,
+        log: (type) => {
+          logCalls.push(type);
+        },
+      }),
+    ).rejects.toMatchObject({ reason: 'rate_limit' });
+
+    expect(stub.calls.some((c) => c.task === 'build_codex')).toBe(false);
+    expect(logCalls).not.toContain('worker_failover');
+  });
+
   it('codex→claude quota failover with disablePublish: true sends the commit-only prompt, not /ship-it', async () => {
     const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-508.md');

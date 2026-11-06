@@ -163,9 +163,10 @@ export async function pickOrderedProvider(
 }
 
 /**
- * Runs a stage's attempt on the first uncapped provider of `deps.order`. A usage_cap failure reruns the stage from its
- * start on the next uncapped provider (after `beforeRerun` restores the worktree), logging one provider_failover per
- * rerun (#3338). Any other error, no provider left, or a `beforeRerun` that returns false rethrows the original error.
+ * Runs a stage's attempt on the first uncapped provider of `deps.order`. A usage_cap or rate_limit failure reruns the
+ * stage from its start on the next uncapped provider (after `beforeRerun` restores the worktree), logging one
+ * provider_failover per rerun (#3338, #3977). Any other error, no provider left, or a `beforeRerun` that returns false
+ * rethrows the original error.
  */
 export async function runWithProviderFailover<T>(
   deps: {
@@ -186,14 +187,21 @@ export async function runWithProviderFailover<T>(
     try {
       return await attempt(pick);
     } catch (err) {
-      if (!pick || routerFailureOf(err)?.reason !== 'usage_cap') throw err;
+      const reason = pick ? routerFailureOf(err)?.reason : undefined;
+      if (!pick || (reason !== 'usage_cap' && reason !== 'rate_limit')) throw err;
       exclude.add(pick.provider);
       const next = await pickOrderedProvider(deps, deps.order, stage, exclude);
-      if (!next) throw err;
+      if (!next) {
+        deps.log(
+          'provider_failover',
+          `${stage.toUpperCase()} hit a ${reason} on ${pick.provider} — no remaining configured providers`,
+        );
+        throw err;
+      }
       if (hooks?.beforeRerun && !(await hooks.beforeRerun())) throw err;
       deps.log(
         'provider_failover',
-        `${stage.toUpperCase()} hit a usage cap on ${pick.provider} — rerunning ${stage.toUpperCase()} from its start on ${next.provider} (${next.model})`,
+        `${stage.toUpperCase()} hit a ${reason} on ${pick.provider} — rerunning ${stage.toUpperCase()} from its start on ${next.provider} (${next.model})`,
         { providerFailover: { stage, from: pick.provider, to: next.provider, issue: issueNumberOf(deps.issue) } },
       );
       pick = next;

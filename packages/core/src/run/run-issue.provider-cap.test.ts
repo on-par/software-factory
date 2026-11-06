@@ -208,6 +208,27 @@ describe('runIssue — stage-boundary provider gate (#3226)', () => {
     expect(types(events)).not.toContain('fail');
   });
 
+  it('a plan pin with no configured secondary releases provider-cap without calling a secondary', async () => {
+    const { outcome, called } = await run({
+      failClaude: new HarnessError('You have hit your usage limit', 'usage_cap'),
+      request: { modelPins: { sources: {}, plan: 'claude-plan' } },
+    });
+    expect(called).toEqual(['claude-plan']);
+    expect(outcome).toMatchObject({ state: 'released', reason: 'provider-cap' });
+  });
+
+  it('a plan pin with failover disabled releases provider-cap without failing over to an unconfigured provider', async () => {
+    const { outcome, called } = await run({
+      failClaude: new HarnessError('You have hit your usage limit', 'usage_cap'),
+      request: {
+        modelPins: { sources: {}, plan: 'claude-plan' },
+        failover: { ...request.failover, enabled: false },
+      },
+    });
+    expect(called).toEqual(['claude-plan']);
+    expect(outcome).toMatchObject({ state: 'released', reason: 'provider-cap' });
+  });
+
   it('a non-provider PLAN failure (error, schema_invalid) still parks fail', async () => {
     for (const reason of ['error', 'schema_invalid'] as const) {
       const { outcome } = await run({
