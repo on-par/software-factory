@@ -108,8 +108,8 @@ function setup(portOver: UntilDonePorts = {}, over: Partial<UntilDoneWiring> = {
     issue: 12,
     octokit: new Octokit(),
     repo: 'o/r',
-    repoRoot: '/tmp/until-done-repo',
-    paths: getFactoryPaths('/tmp/until-done-repo'),
+    repoRoot: '/repo/until-done',
+    paths: getFactoryPaths('/repo/until-done'),
     config: loadFactoryConfig(),
     branchPrefix: 'factory',
     admin: false,
@@ -200,7 +200,7 @@ describe('untilDoneDepsFrom', () => {
       repo: 'o/r',
       branch: 'factory/12-x',
       issueNum: 12,
-      reviewReworkFile: getFactoryPaths('/tmp/until-done-repo').reviewRework,
+      reviewReworkFile: getFactoryPaths('/repo/until-done').reviewRework,
     });
   });
 
