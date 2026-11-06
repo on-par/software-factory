@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "kind": "factory-job",
+  "repo": "acme/widgets",
+  "issue": 42,
+  "outcome": "merged",
+  "merged": true,
+  "exitReason": "PR #7 merged",
+  "exitCode": 0,
+  "pr": { "number": 7, "url": "https://github.com/acme/widgets/pull/7" },
+  "configSource": "container defaults",
+  "constitutionSource": "repo instruction files / bundled",
+  "timings": {
+    "startedAt": "2026-01-01T00:00:00.000Z",
+    "finishedAt": "2026-01-01T00:10:00.000Z",
+    "cloneMs": 4000,
+    "runMs": 590000,
+    "totalMs": 600000
+  }
+}

@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- `factory job` container entrypoint and the `ghcr.io/on-par/factory-job` image, published for linux/amd64 and linux/arm64 on each release tag (#3902)
+
 ### Changed
 
 - The stack restack scratch worktree is created inside the repo's git dir instead of the OS temp dir (#3908)

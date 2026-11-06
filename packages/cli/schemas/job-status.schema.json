@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "merged",
+        "pr-open",
+        "held",
+        "ci-failed",
+        "parked",
+        "failed",
+        "land-deferred",
+        "closed",
+        "awaiting-review"
+      ]
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "kind": {
+      "type": "string",
+      "const": "factory-job"
+    },
+    "repo": {
+      "type": "string"
+    },
+    "issue": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "merged": {
+      "type": "boolean"
+    },
+    "exitReason": {
+      "type": "string"
+    },
+    "exitCode": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "pr": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "number": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "url": {
+              "type": ["string", "null"]
+            }
+          },
+          "required": ["number", "url"],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "configSource": {
+      "type": "string"
+    },
+    "constitutionSource": {
+      "type": "string"
+    },
+    "timings": {
+      "type": "object",
+      "properties": {
+        "startedAt": {
+          "type": "string"
+        },
+        "finishedAt": {
+          "type": "string"
+        },
+        "cloneMs": {
+          "type": ["number", "null"]
+        },
+        "runMs": {
+          "type": ["number", "null"]
+        },
+        "totalMs": {
+          "type": "number"
+        }
+      },
+      "required": ["startedAt", "finishedAt", "cloneMs", "runMs", "totalMs"],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "outcome",
+    "schemaVersion",
+    "kind",
+    "repo",
+    "issue",
+    "merged",
+    "exitReason",
+    "exitCode",
+    "pr",
+    "configSource",
+    "constitutionSource",
+    "timings"
+  ],
+  "additionalProperties": false
+}
