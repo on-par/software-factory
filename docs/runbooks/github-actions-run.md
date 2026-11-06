@@ -18,7 +18,7 @@ on:
         required: true
 jobs:
   factory:
-    uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.29
+    uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.30
     permissions: { contents: write, pull-requests: write, issues: write }
     with:
       command: run-issue

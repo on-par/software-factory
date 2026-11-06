@@ -33,7 +33,7 @@ describe('docker/factory-job/Dockerfile', () => {
 
   it('installs git, gh and the pinned Claude Code and factory-cli', () => {
     expect(dockerfile).toMatch(/apt-get install[^\n]*\bgit\b/);
-    expect(dockerfile).toContain('"gh=${GH_VERSION}"');
+    expect(dockerfile).toContain('releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${arch}.deb');
     expect(dockerfile).toContain('@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}');
     expect(dockerfile).toContain('@on-par/factory-cli@${FACTORY_VERSION}');
   });
@@ -52,6 +52,15 @@ describe('docker/factory-job/Dockerfile', () => {
     const derive = image.steps.find((s) => s.id === 'meta') as Step;
     expect(derive.env?.REF_NAME).toBe('${{ github.ref_name }}');
     expect(derive.run).toContain('${REF_NAME#v}');
+  });
+
+  it('installs gh from its pinned release .deb with a checked sha256, never an apt version pin', () => {
+    // cli.github.com's apt repo keeps only the newest gh, so `gh=<version>` breaks on every gh release.
+    expect(dockerfile).not.toMatch(/"gh=/);
+    expect(dockerfile).not.toContain('cli.github.com/packages');
+    expect(dockerfile).toMatch(/^ARG GH_SHA256_AMD64=[0-9a-f]{64}$/m);
+    expect(dockerfile).toMatch(/^ARG GH_SHA256_ARM64=[0-9a-f]{64}$/m);
+    expect(dockerfile).toContain('sha256sum -c -');
   });
 
   it('declares no secret ARG or ENV in the Dockerfile', () => {
