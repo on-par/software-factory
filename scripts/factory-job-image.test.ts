@@ -69,9 +69,15 @@ describe('docker/factory-job/Dockerfile', () => {
     for (const l of declared) expect(l).not.toMatch(/TOKEN|KEY|SECRET|PASSWORD/i);
   });
 
-  it('copies nothing from the build context', () => {
-    expect(read('../docker/factory-job/.dockerignore').trim()).toBe('*');
-    expect(dockerfile).not.toMatch(/^(COPY|ADD)\s/m);
+  it('copies only the packed tarballs from the build context and checks the installed version', () => {
+    expect(read('../docker/factory-job/.dockerignore').trim().split('\n')).toEqual(['*', '!pkgs/']);
+    expect(lines.filter((l) => /^(COPY|ADD)\s/.test(l))).toEqual(['COPY pkgs/ /tmp/pkgs/']);
+    expect(dockerfile).toContain('npm install --omit=dev --no-audit --no-fund /tmp/pkgs/*.tgz');
+    expect(dockerfile).toContain('test "$(factory --version)" = "$FACTORY_VERSION"');
+    // Claude Code installs before the tarballs are copied, so its layer stays cached between releases.
+    const claude = lines.findIndex((l) => l.includes('@anthropic-ai/claude-code@'));
+    expect(claude).toBeGreaterThan(-1);
+    expect(claude).toBeLessThan(lines.indexOf('COPY pkgs/ /tmp/pkgs/'));
   });
 });
 
@@ -93,10 +99,33 @@ describe('.github/workflows/publish.yml image job', () => {
     expect(buildStep.id).toBe('build');
   });
 
-  it('waits for the npm package before building', () => {
-    const wait = image.steps.find((s) => s.run?.includes('npm view')) as Step;
-    expect(wait.run).toContain('seq 1 20');
-    expect(image.steps.indexOf(wait)).toBeLessThan(image.steps.indexOf(buildStep));
+  it('builds from the tarballs the publish job packed, never waiting on the npm registry', () => {
+    const download = image.steps.find((s) => s.uses?.startsWith('actions/download-artifact@')) as Step;
+    expect(download.with).toEqual({ name: 'release-tarballs', path: 'docker/factory-job/pkgs' });
+    expect(image.steps.indexOf(download)).toBeLessThan(image.steps.indexOf(buildStep));
+    expect(image.steps.some((s) => s.run?.includes('npm view'))).toBe(false);
+    expect(buildStep.with).toMatchObject({
+      'cache-from': 'type=gha,scope=factory-job',
+      'cache-to': 'type=gha,scope=factory-job,mode=max',
+    });
+    const publish = (parse(read('../.github/workflows/publish.yml')) as { jobs: Record<string, Job> }).jobs
+      .publish as Job;
+    const pack = publish.steps.find((s) => s.name === 'Pack release tarballs') as Step;
+    expect(pack.run).toBe('bash scripts/pack-release-tarballs.sh "$RUNNER_TEMP/pkgs"');
+    const upload = publish.steps.find((s) => s.uses?.startsWith('actions/upload-artifact@')) as Step;
+    expect(upload.with?.name).toBe('release-tarballs');
+    expect(publish.steps.indexOf(pack)).toBeGreaterThan(publish.steps.findIndex((s) => s.id === 'publish'));
+  });
+
+  it('skips the full Verify on a tag only when release-prior-ci.sh reports the tree already verified', () => {
+    const publish = (parse(read('../.github/workflows/publish.yml')) as { jobs: Record<string, Job> }).jobs
+      .publish as Job;
+    const prior = publish.steps.find((s) => s.id === 'prior') as Step;
+    expect(prior.run).toBe('bash scripts/release-prior-ci.sh');
+    const verify = publish.steps.find((s) => s.name === 'Verify') as Step;
+    expect(verify.if).toContain("steps.prior.outputs.verified != 'true'");
+    const build = publish.steps.find((s) => s.name === 'Install and build') as Step;
+    expect(build.if).toContain("steps.prior.outputs.verified == 'true'");
   });
 
   it('passes workflow values through env, never inputs inside run', () => {

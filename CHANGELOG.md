@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- Releases take about 4 minutes instead of 12: a tag whose tree equals a merged PR head with green CI skips the repeat Verify (`scripts/release-prior-ci.sh`), the factory-job image installs the tarballs the publish job packed instead of waiting for npm to show the release, and the image build reuses a layer cache.
+
 ## 0.9.30 - 2026-11-06
 
 Daemon `factory run` lanes land a draft PR that SHIP left for pending CI instead of settling it done, and the `ghcr.io/on-par/factory-job` image builds again, so the npm packages and the image ship at the same version (#3968).
