@@ -222,7 +222,7 @@ await withHostAgentJobLease(
     log: (m) => process.stdout.write(m + '\\n') },
   async () => {
     appendFileSync(eventsFile, 'start ' + issue + ' ' + Date.now() + '\\n');
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 2500));
     appendFileSync(eventsFile, 'end ' + issue + ' ' + Date.now() + '\\n');
   },
 );

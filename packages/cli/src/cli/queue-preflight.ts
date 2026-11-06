@@ -14,6 +14,8 @@ import {
   upsertSlicePlanComment,
   withSliceState,
 } from '@on-par/factory-core/internal';
+import { loadPrRunState } from '@on-par/factory-core/internal';
+import { workKeyFromIssue } from '@on-par/factory-core';
 import { errorDetail } from './index.js';
 import { findOpenPRForIssue } from './land.js';
 import { getPullRequestLandState } from './land-pr.js';
@@ -47,6 +49,8 @@ export interface QueuePreflightOps {
   findOpenPR(issue: number): Promise<OpenPullRequestEvidence | undefined>;
   getLandState(prNumber: number): ReturnType<typeof getPullRequestLandState>;
   watch(ref: string): Promise<CiOutcome>;
+  /** #3968: true when `prNumber`'s trusted factory run-state comment says SHIP left it as a draft for pending CI. */
+  ciPendingDraft?(issue: number, prNumber: number): Promise<boolean>;
   /** The factory-written slice plan comment on the issue (ADR-0147). */
   findSlicePlan(issue: number): Promise<SlicePlanCommentLookup>;
   /** State of a slice PR found by the number recorded in the slice plan. */
@@ -142,6 +146,17 @@ export function makeQueuePreflightOps(
     findOpenPR: (issue) => findOpenPRForIssue(octokit, owner, repo, issue),
     getLandState: (prNumber) => getPullRequestLandState(octokit, owner, repo, prNumber),
     watch: opts.watch,
+    ciPendingDraft: async (issue, prNumber) => {
+      const loaded = await loadPrRunState({
+        octokit,
+        repo: `${owner}/${repo}`,
+        prNumber,
+        key: workKeyFromIssue(issue),
+      });
+      return (
+        loaded.status === 'found' && loaded.state.draftReason === 'ci-pending' && loaded.state.prNumber === prNumber
+      );
+    },
     findSlicePlan: (issue) => findSlicePlanComment({ octokit, repo: `${owner}/${repo}`, issue }),
     getPullState: async (prNumber) => {
       const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
@@ -410,9 +425,15 @@ export async function preflightQueuedIssue(
   } catch (err) {
     return { kind: 'park', reason: `PR #${pr.number} merge-state lookup failed: ${errorDetail(err)}` };
   }
-  if (state.isDraft !== false) {
+  const draftDecision = async (s: typeof state): Promise<QueuePreflightDecision | undefined> => {
+    if (s.isDraft === false) return undefined;
+    if (s.isDraft === true && (await deps.ciPendingDraft?.(issue.number, pr.number).catch(() => false))) {
+      return { kind: 'adopt', branch: pr.branch }; // #3968: land watches CI, flips ready and merges
+    }
     return { kind: 'park', reason: `PR #${pr.number} is draft or its draft state is unavailable` };
-  }
+  };
+  const firstDraft = await draftDecision(state);
+  if (firstDraft) return firstDraft;
   const unknown = (s: typeof state) => !s.mergeStateStatus || s.mergeStateStatus === 'UNKNOWN';
   if (unknown(state)) {
     const sleep = deps.sleep ?? defaultSleep;
@@ -425,9 +446,8 @@ export async function preflightQueuedIssue(
       }
       if (!unknown(state)) break;
     }
-    if (state.isDraft !== false) {
-      return { kind: 'park', reason: `PR #${pr.number} is draft or its draft state is unavailable` };
-    }
+    const rereadDraft = await draftDecision(state);
+    if (rereadDraft) return rereadDraft;
     // #3324: still UNKNOWN after the re-reads, so the head may be stale; land merges main in before its CI watch.
     if (unknown(state)) return { kind: 'adopt', branch: pr.branch, syncMain: true };
   }

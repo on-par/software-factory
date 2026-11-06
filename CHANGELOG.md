@@ -23,6 +23,7 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Changed
 
+- Daemon `factory run` lanes land a draft SHIP left for pending CI through the normal land path (base sync, ready flip, CI verification, merge) instead of settling it done, and a later run adopts such a draft without rebuilding; `no-auto-merge`, auto-merge off and STOP still hold it (#3968)
 - The stack restack scratch worktree is created inside the repo's git dir instead of the OS temp dir (#3908)
 - Land defers a PR starved by a moving base instead of parking it ci-failed: the PR stays open and a host-local land-only retry queue retries it oldest first with 1, 2, 4 minute backoff under an exclusive landing slot, parking as ci-failed only after merge.maxLandDeferrals deferrals (default 3); `factory status` shows a Land deferred section, and `run-issue --merge` exits 14 with outcome `land-deferred` (#3957)
 - Land re-syncs a PR that turns DIRTY again during the CI watch up to merge.maxConflictRounds times (default 2), re-watching CI each round, and parks as conflict with "conflict rounds exhausted (N/N)" instead of ci-failed or fail (#1887)
