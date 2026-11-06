@@ -7,6 +7,20 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.30 - 2026-11-06
+
+Daemon `factory run` lanes land a draft PR that SHIP left for pending CI instead of settling it done, and the `ghcr.io/on-par/factory-job` image builds again, so the npm packages and the image ship at the same version (#3968).
+All seven published `@on-par` packages move to 0.9.30 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Changed
+
+- Daemon `factory run` lanes land a draft SHIP left for pending CI through the normal land path (base sync, ready flip, CI verification, merge) instead of settling it done, and a later run adopts such a draft without rebuilding; `no-auto-merge`, auto-merge off and STOP still hold it (#3968)
+
+### Fixed
+
+- The `ghcr.io/on-par/factory-job` image builds again: `gh` is installed from its pinned GitHub release `.deb` with a checked SHA-256, because the cli.github.com apt repo only keeps the newest `gh` and the `gh=2.76.2` pin failed the 0.9.29 image job.
+
 ## 0.9.29 - 2026-11-06
 
 Daemon `--auto-merge` lanes clean up worktrees of merged PRs and worktree GC stops re-quarantining quarantined trees (ENAMETOOLONG), land defers or re-syncs a PR on a moving base instead of parking it, and `factory run --issue`, `--json` / `--export` run results and the `factory job` image serve disposable hosts (#3966, #3957, #1887, #3908, #3907, #3902).
@@ -23,7 +37,6 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Changed
 
-- Daemon `factory run` lanes land a draft SHIP left for pending CI through the normal land path (base sync, ready flip, CI verification, merge) instead of settling it done, and a later run adopts such a draft without rebuilding; `no-auto-merge`, auto-merge off and STOP still hold it (#3968)
 - The stack restack scratch worktree is created inside the repo's git dir instead of the OS temp dir (#3908)
 - Land defers a PR starved by a moving base instead of parking it ci-failed: the PR stays open and a host-local land-only retry queue retries it oldest first with 1, 2, 4 minute backoff under an exclusive landing slot, parking as ci-failed only after merge.maxLandDeferrals deferrals (default 3); `factory status` shows a Land deferred section, and `run-issue --merge` exits 14 with outcome `land-deferred` (#3957)
 - Land re-syncs a PR that turns DIRTY again during the CI watch up to merge.maxConflictRounds times (default 2), re-watching CI each round, and parks as conflict with "conflict rounds exhausted (N/N)" instead of ci-failed or fail (#1887)
