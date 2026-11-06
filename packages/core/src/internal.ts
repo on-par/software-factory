@@ -166,6 +166,7 @@ export {
   parseWorktreeList,
   sweepWorktrees,
 } from './worktree/worktree-gc.js';
+export * from './worktree/internal-exports.js'; // Retained-worktree budget (#3970)
 export { findWorktreeKeep, removeWorktreeKeep, upsertWorktreeKeep } from './worktree/worktree-keeps.js';
 // Daemon repo registry (~/.factory/registry.json) (#781)
 export { defaultRegistryPath, listRepos, loadRegistry } from './daemon/registry.js';

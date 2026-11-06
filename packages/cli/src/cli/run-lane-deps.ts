@@ -127,6 +127,8 @@ export type RunLaneDeps = {
   /** Host disk guard (#2284): consulted before every remote claim, after the load guard; 'hold' waits
    *  retryMs and re-checks (one `disk_low` event per episode). Absent = always claim. */
   diskGuard?: () => DiskGuardDecision;
+  /** Frees evictable retained worktrees when the disk guard holds, before `disk_low` (#3970). */
+  diskReclaim?: () => Promise<unknown>;
   /** Breaker read while the lane is paused for all_providers_down (#3235). Defaults to the repo's breaker file. */
   providerBreaker?: Pick<ProviderBreaker, 'status'>;
   /** Stamp of the repo config file; a change ends the all_providers_down pause (#3235). Defaults to its mtime and size. */

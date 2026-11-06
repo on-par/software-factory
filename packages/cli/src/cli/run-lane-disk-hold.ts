@@ -21,10 +21,20 @@ const decide = (guard: () => DiskGuardDecision): DiskGuardDecision => {
   }
 };
 
-/** Holds the claim while disk is low: one `disk_low` event per episode, `warn` per retry, until space recovers or STOP appears. */
-export async function holdForDisk(guard: () => DiskGuardDecision, io: DiskHoldIo): Promise<'claim' | 'stopped'> {
+/** Holds the claim while disk is low: reclaims retained worktrees first (#3970), then one `disk_low` event per episode, `warn` per retry, until space recovers or STOP appears. */
+export async function holdForDisk(
+  guard: () => DiskGuardDecision,
+  io: DiskHoldIo,
+  reclaim?: () => Promise<unknown>,
+): Promise<'claim' | 'stopped'> {
   let first = true;
   for (let d = decide(guard); d.kind === 'hold'; d = decide(guard)) {
+    // Free evictable retained trees before holding the claim; a reclaim failure never blocks the hold (#3970).
+    if (reclaim) {
+      await reclaim().catch(() => {});
+      d = decide(guard);
+      if (d.kind !== 'hold') break;
+    }
     const retryAt = new Date(io.now().getTime() + d.retryMs);
     const line = formatDiskHold(`lane '${io.lane}' not claiming:`, d, retryAt);
     io.emitEvent(io.paths.events, first ? 'disk_low' : 'warn', io.lane, line, { lane: io.lane });

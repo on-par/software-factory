@@ -312,6 +312,12 @@ const EXTRA_INTERNAL_KEYS = [
   ...LAND_DEFERRED_INTERNAL_KEYS,
 ];
 const INTERNAL_API_KEYS = [
+  'listFactoryWorktrees',
+  'readHostBuildSlots',
+  'reclaimRetainedWorktrees',
+  'resolveRetentionPolicy',
+  'retentionCandidateOf',
+  'selectRetentionEvictions',
   'MAX_REWORK_ROUNDS',
   'killTrackedProcessGroups',
   'loadPrRunState',
