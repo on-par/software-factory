@@ -27,6 +27,7 @@ section to `## X.Y.Z - date`. See
 ### Fixed
 
 - Land and SHIP resolve a CHANGELOG.md `## Unreleased` merge when it has two subsections with the same heading (such as two `### Fixed`), instead of aborting the sync with "PR removed or edited an existing Unreleased line" and leaving the PR conflicting (#3949).
+- Daemon `--auto-merge` lanes now release the claim and remove the worktree when a PR merges during the merge wait, and worktree GC no longer re-quarantines already-quarantined worktrees (whose names grew until ENAMETOOLONG) (#3966)
 
 ## 0.9.28 - 2026-11-04
 

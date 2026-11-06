@@ -967,6 +967,7 @@ describe('cli', () => {
       pathExists: () => false,
       checkMerged: async () => true,
       loadConfig: () => fakeFactoryConfig(false),
+      cleanupMerged: async () => {},
       land: async () => {
         throw new Error('land should not be called');
       },
