@@ -25,7 +25,12 @@ FACTORY_CONFIG_OVERRIDES=$'sandbox:\n  runtime: none' factory run-issue 42
 # Use a config baked into the image, and pin models on top of it.
 factory --config /etc/factory/config.yaml run-issue 42
 FACTORY_CONFIG_PATH=/etc/factory/config.yaml FACTORY_CONFIG_OVERRIDES=$'models:\n  plan: claude-opus-5-5' factory run-issue 42
+
+# A small disk: keep at most 3 finished lane worktrees per repo.
+FACTORY_CONFIG_OVERRIDES=$'worktree:\n  retainMax: 3' factory run-issue 42
 ```
+
+`worktree.retainMax` (default 8, `0` = no count budget) bounds how many finished or failed lane worktrees a repo keeps, independently of `host.maxBuilds`. Between issues the run evicts the oldest clean, fully pushed trees beyond the budget, and when the disk guard trips it evicts every eligible tree before it holds BUILD, CHECK or a claim. A tree backing an open PR is evicted too, because land recreates it from `origin/<branch>`. Eviction removes only the worktree directory and never the local branch. Trees held by a live claim or a conflict rebuild, and trees with uncommitted, untracked or unpushed work or an unverifiable remote, are never evicted. Each kept tree is logged as a `worktree-gc` event naming its reason (#3970).
 
 ## Validation
 

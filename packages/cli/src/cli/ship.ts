@@ -181,8 +181,8 @@ async function shipIssueFrom(
           logEvent(paths.events, 'github_api_deprecated', issueNum, formatDeprecation(d), { lane: ctx?.lane }),
       }))
   )();
+  const slotWhere = { repoRoot, ghRepo, paths, slots: ctx?.runSlots, octokit: () => octokit };
   const [ghOwner, ghName] = ghRepo.split('/');
-
   const repoConfig = loaders.loadRepoConfig(repoRoot, paths.root);
   const factoryConfig = loaders.loadFactoryConfigForRepo(paths.config);
   const classifierPolicy = resolvePrClassifierPolicy(factoryConfig, process.env, { classifier: opts.prClassifier });
@@ -415,7 +415,7 @@ async function shipIssueFrom(
     planPhase: phases.planPhase,
     buildPhase: phases.buildPhase,
     checkPhase: phases.checkPhase,
-    hostBuildSlot: shipHostBuildSlot(factoryConfig, issueNum, log, { repoRoot, ghRepo, paths, slots: ctx?.runSlots }),
+    hostBuildSlot: shipHostBuildSlot(factoryConfig, issueNum, log, slotWhere),
     shipPhase: shipPhaseForMode,
     requiredChecksVerdict: baseChecksVerdict(octokit, ghOwner, ghName, baseHealthOpts),
     checkBaseHealth: deps.checkBaseHealth ?? baseHealthWithCi(octokit, ghOwner, ghName, baseHealthOpts),

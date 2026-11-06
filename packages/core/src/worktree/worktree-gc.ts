@@ -148,6 +148,32 @@ function buildDryRunDiagnostics(
   return { issueNotFound, issueUnverifiable, noActiveClaim };
 }
 
+/** The factory-owned worktrees among `git worktree list` entries (the sweep's candidate filter),
+ *  plus the lane-branch pattern used to read their issue numbers. */
+export function listFactoryWorktrees(
+  entries: readonly WorktreeListEntry[],
+  repoRoot: string,
+  branchPrefix?: string,
+): { candidates: WorktreeListEntry[]; lanePattern: RegExp } {
+  const repoRootResolved = resolve(repoRoot);
+  const repoBase = basename(repoRootResolved);
+  // Slugs are [a-z0-9-] only (branchPrefixSlug), so interpolating them into a regex is safe.
+  // Matches the resolved prefix.
+  const lanePattern = new RegExp('^(?:' + factoryBranchPrefixes(branchPrefix).join('|') + ')/(\\d+)-');
+
+  const candidates: WorktreeListEntry[] = entries.filter((entry) => {
+    const entryPath = resolve(entry.path);
+    if (entryPath === repoRootResolved) return false;
+    const base = basename(entryPath);
+    if (isFactoryDirName(repoBase, base, entry.branch, branchPrefix)) return true;
+    // Legacy lane paths (<repo>-ship-it-<n>) predate the -factory- infix; there the checked-out
+    // lane-branch shape is what proves factory ownership — manual/* and experiment worktrees
+    // under a <repo>-* name never match it and are never candidates.
+    return base.startsWith(`${repoBase}-`) && entry.branch !== null && lanePattern.test(entry.branch);
+  });
+  return { candidates, lanePattern };
+}
+
 export async function sweepWorktrees(
   opts: {
     repoRoot: string;
@@ -175,22 +201,7 @@ export async function sweepWorktrees(
   const { stdout } = await runCommand('git worktree list --porcelain', { cwd: repoRoot });
   const entries = parseWorktreeList(stdout);
 
-  const repoRootResolved = resolve(repoRoot);
-  const repoBase = basename(repoRootResolved);
-  // Slugs are [a-z0-9-] only (branchPrefixSlug), so interpolating them into a regex is safe.
-  // Matches the resolved prefix.
-  const lanePattern = new RegExp('^(?:' + factoryBranchPrefixes(opts.branchPrefix).join('|') + ')/(\\d+)-');
-
-  const candidates: WorktreeListEntry[] = entries.filter((entry) => {
-    const entryPath = resolve(entry.path);
-    if (entryPath === repoRootResolved) return false;
-    const base = basename(entryPath);
-    if (isFactoryDirName(repoBase, base, entry.branch, opts.branchPrefix)) return true;
-    // Legacy lane paths (<repo>-ship-it-<n>) predate the -factory- infix; there the checked-out
-    // lane-branch shape is what proves factory ownership — manual/* and experiment worktrees
-    // under a <repo>-* name never match it and are never candidates.
-    return base.startsWith(`${repoBase}-`) && entry.branch !== null && lanePattern.test(entry.branch);
-  });
+  const { candidates, lanePattern } = listFactoryWorktrees(entries, repoRoot, opts.branchPrefix);
 
   // Reconcile the issue-warn dedup tracker to this sweep's live candidates before resolving any
   // disposition, so a worktree that's gone (or an issue number no longer in play) drops its

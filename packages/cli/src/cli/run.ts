@@ -59,6 +59,7 @@ import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
 import { waitForMerge } from './land.js';
 import { landDeferredLaneDeps } from './land-deferred-wiring.js';
 import { hostClaimGuards } from './host-claim-guards.js';
+import { retentionReclaimer } from './worktree-retention.js';
 import { DRAIN_MESSAGE, createNotifier, resolveNotifyCommand, withDiskLowNotify, withParkNotify } from './notify.js';
 import { createDeferralTracker, settleDeferredOnly } from './queue-startup.js';
 import { discoverQueuedLanes, superviseLanes, withLaneHeads } from './run-lane-discovery.js';
@@ -319,7 +320,23 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
               .exec(`git rev-parse --verify ${JSON.stringify(`refs/remotes/origin/${branch}`)}`, { cwd: repoRoot })
               .then((r) => r.stdout.trim()),
           activeIssues: inFlightIssues,
-          ...hostClaimGuards(factoryConfig, { repoRoot, ghRepo, stateRoot: paths.root }, opts.localQueue === true),
+          ...hostClaimGuards(
+            factoryConfig,
+            { repoRoot, ghRepo, stateRoot: paths.root },
+            opts.localQueue === true,
+            retentionReclaimer(
+              factoryConfig,
+              {
+                repoRoot,
+                ghRepo,
+                paths,
+                branchPrefix,
+                protectedIssues: () => inFlightIssues,
+                log: (kind, message) => logEvent(paths.events, kind, planned.lane, message, { lane: planned.lane }),
+              },
+              { octokit: () => rt.getOctokit() },
+            ),
+          ),
           baseHoldGate:
             opts.localQueue === true
               ? undefined

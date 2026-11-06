@@ -5,14 +5,19 @@ import { createDiskGuard, evaluateLoadGuard, readHostLoad, resolveHostLoadGuard 
 
 import type { RunLaneDeps } from './run-lane-deps.js';
 
-/** The `loadGuard` and `diskGuard` lane deps; local-queue lanes get neither. */
+/** The `loadGuard`, `diskGuard` and `diskReclaim` lane deps; local-queue lanes get neither. */
 export function hostClaimGuards(
   config: FactoryConfig,
   where: { repoRoot: string; ghRepo: string; stateRoot: string },
   localQueue: boolean,
-): Pick<RunLaneDeps, 'loadGuard' | 'diskGuard'> {
+  reclaim?: (pressure: boolean) => Promise<unknown>,
+): Pick<RunLaneDeps, 'loadGuard' | 'diskGuard' | 'diskReclaim'> {
   if (localQueue) return {};
   const loadPolicy = resolveHostLoadGuard(config);
   const disk = createDiskGuard(config, where);
-  return { loadGuard: () => evaluateLoadGuard(loadPolicy, readHostLoad()), diskGuard: () => disk.check() };
+  return {
+    loadGuard: () => evaluateLoadGuard(loadPolicy, readHostLoad()),
+    diskGuard: () => disk.check(),
+    ...(reclaim ? { diskReclaim: () => reclaim(true) } : {}),
+  };
 }

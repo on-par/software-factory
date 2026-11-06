@@ -1,13 +1,16 @@
 // packages/cli/src/cli/run-lane-disk-guard.test.ts — runLane host disk guard (#2284)
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { runLane } from './run-lane.js';
 
 const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
 const hold = { kind: 'hold' as const, freeGb: 3.2, thresholdGb: 10, path: '/wt', retryMs: 300_000 };
 
-function harness(decisions: any[] | null, opts: { stopAfterSleep?: boolean; throwing?: boolean } = {}) {
+function harness(
+  decisions: any[] | null,
+  opts: { stopAfterSleep?: boolean; throwing?: boolean; diskReclaim?: () => Promise<unknown> } = {},
+) {
   const calls: string[] = [];
   const events: { type: string; message: string }[] = [];
   const sleeps: number[] = [];
@@ -37,6 +40,7 @@ function harness(decisions: any[] | null, opts: { stopAfterSleep?: boolean; thro
           },
         }
       : {}),
+    ...(opts.diskReclaim ? { diskReclaim: opts.diskReclaim } : {}),
     sleep: async (ms) => {
       sleeps.push(ms);
     },
@@ -58,6 +62,26 @@ describe('runLane disk guard', () => {
       expect(e.message).toContain('path=/wt');
     }
     expect(h.sleeps).toEqual([300_000, 300_000]);
+  });
+
+  it('reclaims before holding the claim and claims once space recovers', async () => {
+    const diskReclaim = vi.fn(async () => {});
+    const h = harness([hold, { kind: 'claim' }], { diskReclaim });
+    await h.run;
+    expect(diskReclaim).toHaveBeenCalledTimes(1);
+    expect(h.events.filter((e) => e.type === 'disk_low')).toEqual([]);
+    expect(h.sleeps).toEqual([]);
+    expect(h.calls).toContain('ship 1');
+  });
+
+  it('holds as before when reclaim frees nothing', async () => {
+    const diskReclaim = vi.fn(async () => {
+      throw new Error('no');
+    });
+    const h = harness([hold, hold, { kind: 'claim' }], { diskReclaim });
+    await h.run;
+    expect(h.events.filter((e) => e.type === 'disk_low')).toHaveLength(1);
+    expect(h.sleeps).toEqual([300_000]);
   });
 
   it('resumes claiming in the same loop once disk recovers', async () => {

@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadFactoryConfig } from '@on-par/factory-core';
-import { createDiskGuard, createRunSlotGate } from '@on-par/factory-core/internal';
+import { createDiskGuard, createRunSlotGate, resolveHostMaxBuilds } from '@on-par/factory-core/internal';
 
-import { hostBuildSlotPort } from './host-slot.js';
+import { hostBuildSlotPort, shipHostBuildSlot } from './host-slot.js';
 
 let dir: string;
 
@@ -116,6 +116,40 @@ describe('hostBuildSlotPort with a disk guard (#2284)', () => {
     expect(log).toHaveBeenCalledWith('disk_low', expect.stringContaining('#7 check waiting:'));
   });
 
+  it('reclaims retained trees on a disk hold and proceeds without changing maxBuilds', async () => {
+    const config = loadFactoryConfig();
+    const maxBefore = resolveHostMaxBuilds(config);
+    let reclaimed = false;
+    const guard: any = { check: () => (reclaimed ? { kind: 'claim' } : hold) };
+    const reclaim = vi.fn(async () => {
+      reclaimed = true;
+    });
+    const sleep = vi.fn(async () => {});
+    const log = vi.fn();
+    const fn = vi.fn(async () => 'built');
+    const port = hostBuildSlotPort(config, 'o/r', 7, log, undefined, { guard, reclaim, sleep });
+    await expect(port('build', fn)).resolves.toBe('built');
+    expect(reclaim).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalledWith('disk_low', expect.anything());
+    expect(resolveHostMaxBuilds(config)).toBe(maxBefore);
+  });
+
+  it('falls back to waiting when reclaim does not free space', async () => {
+    const decisions = [hold, hold, hold, { kind: 'claim' as const }, { kind: 'claim' as const }];
+    const guard: any = { check: () => decisions.shift() };
+    const reclaim = vi.fn(async () => {
+      throw new Error('busy');
+    });
+    const sleep = vi.fn(async () => {});
+    const log = vi.fn();
+    const port = hostBuildSlotPort(loadFactoryConfig(), 'o/r', 7, log, undefined, { guard, reclaim, sleep });
+    await port('check', async () => 'ok');
+    expect(reclaim).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith('disk_low', expect.stringContaining('#7 check waiting:'));
+  });
+
   it('treats a throwing guard as claim and takes no slot while held', async () => {
     const guard: any = {
       check: () => {
@@ -124,5 +158,27 @@ describe('hostBuildSlotPort with a disk guard (#2284)', () => {
     };
     const port = hostBuildSlotPort(loadFactoryConfig(), 'o/r', 7, vi.fn(), undefined, { guard });
     await expect(port('build', async () => 'ok')).resolves.toBe('ok');
+  });
+});
+
+describe('shipHostBuildSlot reclaim wiring (#3970)', () => {
+  it('reclaims retained worktrees before waiting on a low disk, and only with lock paths', async () => {
+    vi.stubEnv('FACTORY_MIN_FREE_GB', '1000000000');
+    const config = loadFactoryConfig();
+    const log = vi.fn();
+    const where = {
+      repoRoot: dir,
+      ghRepo: 'o/r',
+      paths: { root: dir, mergeLock: join(dir, 'm.lock'), gitLock: join(dir, 'g.lock') },
+    };
+    void shipHostBuildSlot(config, 7, log, where)('build', async () => 'built');
+    // The tmp dir is not a git repo, so the reclaim logs a warn and skips; the wait still starts.
+    await vi.waitFor(() => expect(log).toHaveBeenCalledWith('disk_low', expect.stringContaining('#7 build waiting:')));
+    expect(log).toHaveBeenCalledWith('warn', expect.stringContaining('retention reclaim failed'));
+
+    const bare = vi.fn();
+    void shipHostBuildSlot(config, 8, bare, { ...where, paths: { root: dir } })('build', async () => 'built');
+    await vi.waitFor(() => expect(bare).toHaveBeenCalledWith('disk_low', expect.stringContaining('#8 build waiting:')));
+    expect(bare).not.toHaveBeenCalledWith('warn', expect.anything());
   });
 });

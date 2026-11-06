@@ -164,6 +164,7 @@ export const FactoryConfigSchema = z.object({
     comment: z.string(),
     gcTtlDays: z.number().default(7),
     autoGcOnRun: z.boolean().default(true),
+    retainMax: z.number().int().nonnegative().default(8),
   }),
   byok: z.object({ enabled: z.boolean(), comment: z.string() }),
   notifications: z.record(z.string(), z.boolean()),
