@@ -11,7 +11,7 @@ import type {
   MergePolicyOverrides,
 } from '@on-par/factory-core';
 import type { getFactoryPaths } from '@on-par/factory-core';
-import { LaneFileGuard, resolveMergePolicy, resolveSandboxPolicy, workKeyFromIssue } from '@on-par/factory-core';
+import { resolveMergePolicy, resolveSandboxPolicy, workKeyFromIssue } from '@on-par/factory-core';
 import type { OpenPrLookup, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   branchFor,
@@ -22,7 +22,6 @@ import {
   lookupOpenPrByBranch,
   lookupOpenPrByIssue,
   publishRiskReceipt,
-  releaseLaneClaim,
   resolveEffectiveConfig,
   resolveBaseHealthChecks,
   resolveFilingPolicy,
@@ -44,22 +43,13 @@ import { landLockFor } from './land-slot.js';
 import { landBaseGate } from './land-base-gate.js';
 import { enforceRiskAtLand } from './land-risk.js';
 import { isPrMerged, latestPrForBranch } from './land-merged.js';
+import { cleanupMergedLane, releaseLandedClaim } from './land-merged-cleanup.js';
 import { landRuntime } from './land-runtime.js';
 
 export { isPrMerged, latestPrForBranch };
 export { findOpenPRForIssue } from './land-find-pr.js';
 import { riskPolicyLines } from './risk-policy.js';
 import { touchIssueActivity } from './ship-run-state.js';
-
-async function releaseLandedClaim(
-  paths: ReturnType<typeof getFactoryPaths>,
-  ghRepo: string,
-  issue: number,
-  log: (type: EventKind, msg: string) => void,
-): Promise<void> {
-  if (!paths.laneFiles) return;
-  await releaseLaneClaim(new LaneFileGuard(paths.laneFiles), ghRepo, workKeyFromIssue(issue), log);
-}
 
 export async function landIssue(
   issueNum: number,
@@ -348,6 +338,8 @@ export type WaitForMergeDeps = {
   holdWhenGated?: boolean;
   /** #3905: a brief PR with no issue; gate labels are read from the PR, and the issue claim is left alone. */
   issueless?: boolean;
+  /** #3966: merged-wait cleanup (claim release + worktree removal); defaults to cleanupMergedLane. */
+  cleanupMerged?: () => Promise<void>;
 };
 
 export async function waitForMerge(
@@ -383,6 +375,15 @@ export async function waitForMerge(
   } = deps;
   const { configLoaders, errorDetail, LaneParkError } = landRuntime();
   const factoryConfig = loadConfig(paths.config);
+  const cleanupMerged =
+    deps.cleanupMerged ??
+    (() =>
+      cleanupMergedLane(issue, repoRoot, ghRepo, paths, {
+        factoryConfig,
+        issueless,
+        holdsLandingSlot,
+        log: (type, msg) => emitEvent(paths.events, type, issue, msg),
+      }));
   const isMergeEnabled = mergeEnabled ?? (() => resolveMergePolicy(factoryConfig, process.env, mergeOverrides).auto);
   const skipCI = configLoaders.resolveSkipCI(factoryConfig);
   const filingPolicy = resolveFilingPolicy(factoryConfig);
@@ -423,6 +424,7 @@ export async function waitForMerge(
     }
     if (merged) {
       emitEvent(paths.events, 'landed', issue, 'PR merged');
+      await cleanupMerged();
       return;
     }
 
@@ -483,4 +485,5 @@ export async function waitForMerge(
   if (!pr?.merged)
     throw new AwaitMergeStoppedError(`STOP during await-merge: PR on ${branch} left open`, branch, pr?.number ?? null);
   emitEvent(paths.events, 'landed', issue, 'PR merged');
+  await cleanupMerged();
 }

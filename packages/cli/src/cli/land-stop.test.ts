@@ -22,12 +22,14 @@ const fakeConfig: any = {
 };
 
 describe('waitForMerge STOP exit (#3291)', () => {
+  const cleanupMerged = vi.fn(async () => {});
   const run = (lookupPr: any, events: any[]) =>
     waitForMerge(7, 'ship-it/7-x', '/repo', 'on-par/software-factory', { events: '/e', stop: '/STOP' } as any, {
       createOctokit: () => ({}) as any,
       pathExists: () => true,
       loadConfig: () => fakeConfig,
       mergeEnabled: () => true,
+      cleanupMerged,
       lookupPr,
       land: async () => {
         throw new Error('land should not be called');
@@ -42,12 +44,14 @@ describe('waitForMerge STOP exit (#3291)', () => {
     expect(err.prNumber).toBe(12);
     expect(err.branch).toBe('ship-it/7-x');
     expect(events.some((e) => e[0] === 'landed')).toBe(false);
+    expect(cleanupMerged).not.toHaveBeenCalled();
   });
 
   it('waitForMerge with STOP present emits landed when the PR is already merged (#3291)', async () => {
     const events: any[] = [];
     await run(async () => ({ number: 12, merged: true }), events);
     expect(events).toContainEqual(['landed', 'PR merged']);
+    expect(cleanupMerged).toHaveBeenCalledTimes(1);
   });
 
   it('rejects with prNumber null when the lookup throws', async () => {
