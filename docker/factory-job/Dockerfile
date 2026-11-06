@@ -23,7 +23,23 @@ RUN test -n "$FACTORY_VERSION" \
  && test "$(gh --version | head -1 | cut -d' ' -f3)" = "$GH_VERSION" \
  && rm -f /tmp/gh.deb \
  && rm -rf /var/lib/apt/lists/*
-RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "@on-par/factory-cli@${FACTORY_VERSION}" \
+# The release workflow drops the seven packed @on-par tarballs into pkgs/ so the image never waits for
+# the npm registry to show a fresh publish. They install together into one prefix, so factory-cli's
+# exact @on-par pins resolve to the sibling tarballs. With an empty pkgs/ (a local build) the CLI
+# comes from npm at FACTORY_VERSION.
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && npm cache clean --force
+COPY pkgs/ /tmp/pkgs/
+RUN if ls /tmp/pkgs/*.tgz >/dev/null 2>&1; then \
+      mkdir -p /opt/factory \
+      && cd /opt/factory \
+      && npm init -y >/dev/null \
+      && npm install --omit=dev --no-audit --no-fund /tmp/pkgs/*.tgz \
+      && ln -s /opt/factory/node_modules/.bin/factory /usr/local/bin/factory; \
+    else \
+      npm install -g "@on-par/factory-cli@${FACTORY_VERSION}"; \
+    fi \
+ && test "$(factory --version)" = "$FACTORY_VERSION" \
+ && rm -rf /tmp/pkgs \
  && npm cache clean --force
 USER node
 WORKDIR /home/node

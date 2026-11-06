@@ -11,6 +11,10 @@ section to `## X.Y.Z - date`. See
 
 - Repository-wide `worktree.retainMax` retention budget evicts clean, fully pushed finished worktrees oldest first, and the disk guard reclaims them before holding BUILD/CHECK or claims (#3970).
 
+### Changed
+
+- Releases take about 4 minutes instead of 12: a tag whose tree equals a merged PR head with green CI skips the repeat Verify (`scripts/release-prior-ci.sh`), the factory-job image installs the tarballs the publish job packed instead of waiting for npm to show the release, and the image build reuses a layer cache.
+
 ### Fixed
 
 - A timed provider cap (`usage_cap` or `rate_limit`) on a stage-pinned model advances the stage to the next configured `models.providerOrder` provider instead of releasing without a secondary attempt (#3977).

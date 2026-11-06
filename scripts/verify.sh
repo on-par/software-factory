@@ -84,6 +84,7 @@ bash scripts/triage-factory-report.test.sh
 bash scripts/nightly-failure-issue.test.sh
 bash scripts/real-cli-smoke.test.sh
 bash scripts/factory-run.test.sh
+bash scripts/release-prior-ci.test.sh
 bash scripts/cli-help-baseline.test.sh
 bash scripts/adapter-smoke.test.sh
 bash scripts/publish-workspaces.test.sh
