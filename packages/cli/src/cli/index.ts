@@ -354,6 +354,7 @@ import { cmdRespond } from './respond-command.js';
 import { withShutdown } from './shutdown.js';
 import { runWorktreeKeep, runWorktreeRelease } from './worktree-keep.js';
 import { gcWorktreeSandbox, reapParkedLane, reapPrlessShip } from './worktree-reap.js';
+import { retentionBudgetPass, underSweepLocks } from './worktree-retention.js';
 
 export type ConfigLoaderKey =
   | 'loadModelsConfig'
@@ -2209,6 +2210,8 @@ export interface LaneGcDeps {
   sweep?: typeof sweepWorktrees;
   emitEvent?: typeof logEvent;
   octokit?: () => NonNullable<Parameters<typeof sweepWorktrees>[1]>['octokit'];
+  /** Retention-budget pass that runs after the sweep (#3970). */
+  reclaim?: Parameters<typeof retentionBudgetPass>[0];
   /** Issues other lanes of this run have in flight (#2964). */
   protectedIssues?: () => ReadonlySet<number>;
 }
@@ -2238,16 +2241,13 @@ export async function sweepBetweenLaneIssues(
     const gcLog = (type: EventKind, msg: string) => emitEvent(paths.events, type, issue, msg, { lane });
     const sandbox = gcWorktreeSandbox(cfg.sandbox, repoRoot);
     const gcOpts = { repoRoot, ttlDays: cfg.worktree.gcTtlDays, repo: ghRepo, branchPrefix: resolveBranchPrefix(cfg) };
-    const report = await withGitLock(repoRoot, () =>
-      withFileLock(
-        paths.mergeLock,
-        () =>
-          withFileLock(paths.gitLock, () =>
-            sweep({ ...gcOpts, protectedIssues: protectedIssues() }, { log: gcLog, octokit: octokit(), sandbox }),
-          ),
-        { timeoutMs: 0 },
-      ),
-    );
+    const { report, retention } = await underSweepLocks(repoRoot, paths, async () => {
+      const gc = { log: gcLog, octokit: octokit(), sandbox };
+      const swept = await sweep({ ...gcOpts, protectedIssues: protectedIssues() }, gc);
+      const budget = { ...gcOpts, protectedIssues: protectedIssues() };
+      return { report: swept, retention: await retentionBudgetPass(deps.reclaim, cfg, budget, gc) };
+    });
+    if (retention !== null) emitEvent(paths.events, 'worktree-gc', issue, retention, { lane });
     if (report.removed.length > 0) {
       emitEvent(
         paths.events,

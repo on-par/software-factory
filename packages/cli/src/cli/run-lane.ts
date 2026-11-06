@@ -77,6 +77,7 @@ export async function runLane(
     baseHoldGate,
     loadGuard,
     diskGuard,
+    diskReclaim,
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now = () => new Date(),
     laneBreakerThreshold = 0,
@@ -197,7 +198,7 @@ export async function runLane(
         return;
       }
       if (loadGuard && (await holdForLoad(loadGuard, diskIo)) === 'stopped') break;
-      if (diskGuard && (await holdForDisk(diskGuard, diskIo)) === 'stopped') break;
+      if (diskGuard && (await holdForDisk(diskGuard, diskIo, diskReclaim)) === 'stopped') break;
       await runPreClaimRechecks({
         pollReviewRework,
         recheckAwaitingCi,

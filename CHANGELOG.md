@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- Repository-wide `worktree.retainMax` retention budget evicts clean, fully pushed finished worktrees oldest first, and the disk guard reclaims them before holding BUILD/CHECK or claims (#3970).
+
 ## 0.9.29 - 2026-11-06
 
 Daemon `--auto-merge` lanes clean up worktrees of merged PRs and worktree GC stops re-quarantining quarantined trees (ENAMETOOLONG), land defers or re-syncs a PR on a moving base instead of parking it, and `factory run --issue`, `--json` / `--export` run results and the `factory job` image serve disposable hosts (#3966, #3957, #1887, #3908, #3907, #3902).
