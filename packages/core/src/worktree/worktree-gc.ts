@@ -1,7 +1,7 @@
 // src/worktree/worktree-gc.ts — Stale factory worktree cleanup: gather evidence, decide, execute
 
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { basename, join, resolve, sep } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
 import { getFactoryPaths } from '../config/index.js';
@@ -50,13 +50,27 @@ export function quarantineRoot(repoRoot: string): string {
   return join(getFactoryPaths(repoRoot).state, 'quarantine');
 }
 
+/** True when worktreePath sits inside quarantineDir (path-boundary aware, #3966). */
+export function isQuarantinedPath(quarantineDir: string, worktreePath: string): boolean {
+  const dir = resolve(quarantineDir);
+  const p = resolve(worktreePath);
+  return p.startsWith(dir + sep);
+}
+
+const EPOCH_SUFFIXES = /(?:-\d{13})+$/;
+
 /** The destination for a quarantined worktree: its own basename under `quarantineDir`, unless
  *  that name is already occupied (e.g. a prior quarantine nobody cleared), in which case a
- *  timestamp suffix disambiguates rather than overwriting or failing. */
+ *  single timestamp suffix disambiguates rather than overwriting or failing. Prior epoch
+ *  suffixes are collapsed so the name stays bounded, and a path already under the dir is
+ *  returned unchanged (#3966). */
 export function quarantineDestination(quarantineDir: string, worktreePath: string): string {
+  if (isQuarantinedPath(quarantineDir, worktreePath)) return resolve(worktreePath);
   const base = basename(worktreePath);
   const dest = join(quarantineDir, base);
-  return existsSync(dest) ? join(quarantineDir, `${base}-${Date.now()}`) : dest;
+  if (!existsSync(dest)) return dest;
+  const stem = base.replace(EPOCH_SUFFIXES, '') || base;
+  return join(quarantineDir, `${stem}-${Date.now()}`);
 }
 
 export function parseWorktreeList(porcelain: string): WorktreeListEntry[] {
@@ -203,11 +217,17 @@ export async function sweepWorktrees(
     { runCommand, now, log, octokit, issueWarnDedup },
   );
 
+  const quarantineDir = quarantineRoot(repoRoot);
   const evidences: WorktreeEvidence[] = [];
   for (const entry of candidates) {
     const evidence = await gatherWorktreeEvidence(ctx, entry);
     evidences.push(evidence);
     const decision = decideWorktree(evidence, { ttlDays, dryRun });
+    if (decision.action === 'quarantine' && isQuarantinedPath(quarantineDir, entry.path)) {
+      kept++;
+      log('worktree-gc', `kept ${entry.path} — already quarantined (${decision.reason}); not moving it again`);
+      continue;
+    }
     if (decision.action === 'keep') {
       kept++;
       if (decision.why === 'keep-record' && evidence.keep) {
@@ -262,7 +282,6 @@ export async function sweepWorktrees(
     }
 
     if (candidate.action === 'quarantine') {
-      const quarantineDir = quarantineRoot(repoRoot);
       const dest = quarantineDestination(quarantineDir, candidate.path);
       try {
         mkdirSync(quarantineDir, { recursive: true });
