@@ -23,6 +23,7 @@ export const HELP_GROUPS: readonly HelpGroup[] = [
       'respond',
       'run-brief',
       'run',
+      'job',
       'supervise',
       'land',
       'resume-approved',

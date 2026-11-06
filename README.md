@@ -123,6 +123,8 @@ factory self-update --to <version>          # install that exact stable version 
 
 `factory self-update --to` installs the version next to the running Node, runs `factory doctor`, restarts factoryd, and rolls back if the install or doctor fails. factoryd installed from npm runs the same update on its own when a new stable release appears. Update modes, opting out, and manual rollback are in [docs/ops/updating.md](docs/ops/updating.md). Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
+To run one issue in a disposable container (Foreman on Cloudflare Containers, CI jobs), use the published `ghcr.io/on-par/factory-job` image and `factory job`; see [docs/ops/factory-job-image.md](docs/ops/factory-job-image.md).
+
 The `version` fields in this repo's `package.json` files stay at the last committed version (0.9.28). The publish job writes the release or prerelease version at build time and never commits it, so use `factory --version` or `npm view @on-par/factory-cli dist-tags` to see real versions.
 
 ## CLI commands
