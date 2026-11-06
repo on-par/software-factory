@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { setupWorktree } from '../utils/index.js';
 import { reclaimRetainedWorktrees } from './worktree-retention.js';
 
@@ -26,20 +26,22 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, ...HERMETIC_ENV } }).trim();
 }
 
+const tempDirs = createTempDirs();
+
 beforeEach(() => {
   for (const [k, v] of Object.entries(HERMETIC_ENV)) {
     saved[k] = process.env[k];
     process.env[k] = v;
   }
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'retention-real-')));
+  root = realpathSync(tempDirs.makeSync('retention-real-'));
 });
 
-afterEach(() => {
+afterEach(async () => {
   for (const [k, v] of Object.entries(saved)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
-  rmSync(root, { recursive: true, force: true });
+  await tempDirs.cleanup();
 });
 
 describe('reclaimRetainedWorktrees on a real git repo', () => {
