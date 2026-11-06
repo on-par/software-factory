@@ -137,6 +137,8 @@ const ORDERED_MODELS = {
 const order = (worker: string[]): ProviderOrder => ({ boss: [], worker, checker: [], triage: [] });
 const ALL = order(['claude-w', 'codex-w', 'og-w']);
 const capErr = () => new ModelRouterError('cap', 'usage_cap', [{ model: 'claude-w', reason: 'usage_cap', ok: false }]);
+const rateLimitErr = () =>
+  new ModelRouterError('cap', 'rate_limit', [{ model: 'claude-w', reason: 'rate_limit', ok: false }]);
 
 async function orderedDeps() {
   counter += 1;
@@ -240,6 +242,31 @@ describe('runWithProviderFailover', () => {
     });
   });
 
+  it('reruns once on the next provider after a rate_limit and logs one provider_failover', async () => {
+    const { deps, log } = await setup();
+    const seen: Array<ProviderPick | undefined> = [];
+    const beforeRerun = vi.fn(async () => true);
+    const result = await runWithProviderFailover(
+      deps,
+      'build',
+      async (pick) => {
+        seen.push(pick);
+        if (seen.length === 1) throw rateLimitErr();
+        return 'done';
+      },
+      { beforeRerun },
+    );
+    expect(result).toBe('done');
+    expect(seen.map((p) => p?.provider)).toEqual(['claude', 'codex']);
+    expect(beforeRerun).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0]?.[0]).toBe('provider_failover');
+    expect(log.mock.calls[0]?.[1]).toContain('hit a rate_limit on claude');
+    expect(log.mock.calls[0]?.[2]).toEqual({
+      providerFailover: { stage: 'build', from: 'claude', to: 'codex', issue: 7 },
+    });
+  });
+
   it('rethrows a non-cap error without a rerun', async () => {
     const { deps, log } = await setup();
     const attempt = vi.fn(async () => {
@@ -250,7 +277,7 @@ describe('runWithProviderFailover', () => {
     expect(log).not.toHaveBeenCalled();
   });
 
-  it('rethrows the original cap error when the last provider is capped', async () => {
+  it('logs no remaining configured providers and rethrows the cap when the ladder is exhausted', async () => {
     const { deps, log } = await setup(order(['claude-w']));
     const err = capErr();
     const attempt = vi.fn(async () => {
@@ -258,7 +285,10 @@ describe('runWithProviderFailover', () => {
     });
     await expect(runWithProviderFailover(deps, 'build', attempt)).rejects.toBe(err);
     expect(attempt).toHaveBeenCalledTimes(1);
-    expect(log).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0]?.[0]).toBe('provider_failover');
+    expect(log.mock.calls[0]?.[1]).toContain('no remaining configured providers');
+    expect(log.mock.calls[0]?.[2]).toBeUndefined();
   });
 
   it('rethrows the cap when beforeRerun refuses, and propagates when it throws', async () => {

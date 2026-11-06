@@ -11,6 +11,10 @@ section to `## X.Y.Z - date`. See
 
 - Repository-wide `worktree.retainMax` retention budget evicts clean, fully pushed finished worktrees oldest first, and the disk guard reclaims them before holding BUILD/CHECK or claims (#3970).
 
+### Fixed
+
+- A timed provider cap (`usage_cap` or `rate_limit`) on a stage-pinned model advances the stage to the next configured `models.providerOrder` provider instead of releasing without a secondary attempt (#3977).
+
 ## 0.9.30 - 2026-11-06
 
 Daemon `factory run` lanes land a draft PR that SHIP left for pending CI instead of settling it done, and the `ghcr.io/on-par/factory-job` image builds again, so the npm packages and the image ship at the same version (#3968).
