@@ -320,7 +320,7 @@ async function buildPhaseImpl(opts: {
   } catch (err) {
     const routerFailure = routerFailureOf(err);
     const reason = routerFailure?.reason;
-    if (opts.crossProviderLadder === false && reason === 'usage_cap') throw err;
+    if (opts.crossProviderLadder === false && (reason === 'usage_cap' || reason === 'rate_limit')) throw err;
     const attempts = routerFailure?.attempts;
     // These all indicate a provider problem rather than a bad task. Preserve
     // the frozen spec and continue on the other provider when one is available.

@@ -71,6 +71,8 @@ const ORDER: ProviderOrder = {
 
 const capError = (model: string) =>
   new ModelRouterError('cap', 'usage_cap', [{ model, reason: 'usage_cap', ok: false }]);
+const rateLimitError = (model: string) =>
+  new ModelRouterError('cap', 'rate_limit', [{ model, reason: 'rate_limit', ok: false }]);
 
 const tempDirs = createTempDirs();
 const dir = tempDirs.makeSync('run-issue-provider-failover-');
@@ -135,6 +137,7 @@ interface Setup {
   openProviders?: string[];
   workspace?: string;
   request?: Partial<RunRequest>;
+  plan?: (call: number, opts: Parameters<typeof realPlanPhase>[0]) => Promise<PlanResult>;
   build?: (call: number, opts: Parameters<typeof realBuildPhase>[0]) => Promise<BuildResult>;
   check?: (call: number, skipDuringCall: () => ReadonlySet<string> | undefined) => Promise<CheckPhaseResult>;
 }
@@ -154,16 +157,18 @@ async function run(setup: Setup = {}) {
     skipCalls.push(providers);
     original(providers);
   };
-  const planPhase = vi.fn<typeof realPlanPhase>(
-    async (opts) =>
-      ({
-        ok: true,
-        route: 'claude',
-        specPath: '/tmp/wt/spec.md',
-        model: opts.modelOverride ?? 'm',
-        designArtifact: null,
-      }) satisfies PlanResult,
-  );
+  let planCalls = 0;
+  const planPhase = vi.fn<typeof realPlanPhase>(async (opts) => {
+    planCalls += 1;
+    if (setup.plan) return setup.plan(planCalls, opts);
+    return {
+      ok: true,
+      route: 'claude',
+      specPath: '/tmp/wt/spec.md',
+      model: opts.modelOverride ?? 'm',
+      designArtifact: null,
+    } satisfies PlanResult;
+  });
   let buildCalls = 0;
   const buildPhase = vi.fn<typeof realBuildPhase>(async (opts) => {
     buildCalls += 1;
@@ -226,6 +231,38 @@ describe('runIssue — provider failover at the phase boundary (#3338)', () => {
     expect(buildPhase.mock.calls.every(([o]) => o.crossProviderLadder === false)).toBe(true);
     expect(failovers).toEqual([{ stage: 'build', from: 'claude', to: 'codex', issue: 1 }]);
     expect(types(events).filter((t) => t === 'provider_failover')).toHaveLength(1);
+  });
+
+  it('a rate_limit mid-BUILD under a build pin on the primary reruns BUILD on the next configured provider', async () => {
+    const { outcome, buildPhase } = await run({
+      request: { modelPins: { sources: {}, build: 'claude-worker' } },
+      build: async (call, opts) => {
+        if (call === 1) throw rateLimitError('claude-worker');
+        return { ok: true, model: opts.modelOverride ?? 'm', route: opts.route };
+      },
+    });
+    expect(outcome.state).toBe('ready');
+    expect(buildPhase).toHaveBeenCalledTimes(2);
+    expect(buildPhase.mock.calls[0]?.[0]).toMatchObject({ modelOverride: 'claude-worker', route: 'claude' });
+    expect(buildPhase.mock.calls[1]?.[0]).toMatchObject({ modelOverride: 'codex-worker', route: 'codex' });
+  });
+
+  it('a usage_cap mid-PLAN under a plan pin on the primary reruns PLAN on the next configured provider', async () => {
+    const { outcome, planPhase } = await run({
+      request: { modelPins: { sources: {}, plan: 'claude-boss' } },
+      plan: async (call, opts) => {
+        if (call === 1) throw capError('claude-boss');
+        return {
+          ok: true,
+          route: 'claude',
+          specPath: '/tmp/wt/spec.md',
+          model: opts.modelOverride ?? 'm',
+          designArtifact: null,
+        } satisfies PlanResult;
+      },
+    });
+    expect(outcome.state).toBe('ready');
+    expect(planPhase.mock.calls.map(([o]) => o.modelOverride)).toEqual(['claude-boss', 'codex-boss']);
   });
 
   it("a provider capped before PLAN runs PLAN on the next provider's boss model (#3338)", async () => {
