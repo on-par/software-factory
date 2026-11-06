@@ -32,6 +32,7 @@ import { restoredLoggingBreaker } from './provider-restored-log.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
 import { shipIssue } from './ship.js';
 import { ClaimLostError, createClaimLease, laneRenewLogger, onClaimLost, withHeartbeat } from './lane-heartbeat.js';
+import { draftLeftMessage } from './run-lane-draft.js';
 import { handleLeftOpen, runPreClaimRechecks } from './run-lane-rechecks.js';
 import { restackPrerequisiteUnderHeartbeat, restackUnderHeartbeat } from './run-lane-restack.js';
 import type { RunLaneDeps } from './run-lane-deps.js';
@@ -51,6 +52,7 @@ export async function runLane(
   const {
     ship = shipIssue,
     waitMerge = waitForMerge,
+    mergeEnabled = () => false,
     recordStackMerge = async () => {},
     restack = async () => ({ status: 'nothing', reason: 'restack not wired' }),
     restackPrerequisite = async () => ({ status: 'park', reason: 'prerequisite restack not wired', files: [] }),
@@ -329,19 +331,15 @@ export async function runLane(
         continue;
       }
       if (shipped?.state === 'ready' && shipped.draft) {
-        emitEvent(
-          paths.events,
-          'ship',
-          issue,
-          shipped.draftReason === 'ci-pending'
-            ? `PR #${shipped.prNumber} left as draft — CI pending; the between-issue sweep lands it once CI passes`
-            : `PR #${shipped.prNumber} left as draft — merge skipped (draft wins over auto-merge); mark it ready for review to land it`,
-          { lane },
-        );
-        awaitingReview++;
-        streak = null;
-        await settle(issue, 'done');
-        continue;
+        const ciPending = shipped.draftReason === 'ci-pending';
+        const landing = ciPending && mergeEnabled(); // #3968: a CI-pending draft falls through to the land path
+        emitEvent(paths.events, 'ship', issue, draftLeftMessage(shipped.prNumber, ciPending, landing), { lane });
+        if (!landing) {
+          awaitingReview++;
+          streak = null;
+          await settle(issue, 'done');
+          continue;
+        }
       }
       if (layer) {
         // ADR-0161: land exactly this layer's branch, record it, and re-queue for the next layer.

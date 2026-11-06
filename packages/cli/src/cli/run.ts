@@ -14,6 +14,7 @@ import {
   resolveEffectiveBuildRoute,
   resolveEnvironmentProxy,
   resolveLaneBreakerThreshold,
+  resolveMergePolicy,
   workKeyFromIssue,
 } from '@on-par/factory-core';
 import { createRunQueue } from './run-queue.js';
@@ -391,6 +392,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
               stackedOn: d.stackedOn,
               onto: d.onto,
             }),
+          mergeEnabled: () => resolveMergePolicy(factoryConfig, process.env, { auto: opts.autoMerge }).auto,
           waitMerge: (issue, branch, root, gh, p, d = {}) =>
             waitForMerge(issue, branch, root, gh, p, { ...d, mergeOverrides: { auto: opts.autoMerge } }),
         });

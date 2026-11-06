@@ -63,6 +63,9 @@ export type RunLaneDeps = {
     },
   ) => Promise<string>;
   waitMerge?: typeof waitForMerge;
+  /** #3968: the effective auto-merge policy. When true, a CI-pending draft from SHIP enters the land path instead
+   *  of settling done. Absent = false (the CI-pending draft sweep keeps it, as before). */
+  mergeEnabled?: () => boolean;
   /** ADR-0161: records a landed stack layer as merged in the slice-plan comment. Defaults to a no-op. */
   recordStackMerge?: (issue: number, prNumber: number) => Promise<void>;
   /** ADR-0161 (#3368): rebases the open layers above a squash-merged layer onto main, model-free. Defaults to a no-op. */
