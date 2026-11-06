@@ -1,11 +1,10 @@
 // packages/cli/src/cli/land.merged-cleanup.test.ts — a PR merged during the merge wait releases the claim and removes the worktree (#3966)
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LaneFileGuard, workKeyFromIssue } from '@on-par/factory-core';
+import { createTempDirs } from '@on-par/factory-core/testing';
 
 import './index.js';
 import { waitForMerge } from './land.js';
@@ -23,11 +22,12 @@ const config: any = {
 let root = '';
 let guard: LaneFileGuard;
 let paths: any;
+const tmp = createTempDirs();
 let previous: (() => LandRuntime) | undefined;
 const cleanupWorktree = vi.fn(async (..._args: unknown[]) => {});
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'merged-cleanup-'));
+  root = await tmp.make('merged-cleanup-');
   const laneFiles = join(root, 'lane-files.json');
   guard = new LaneFileGuard(laneFiles);
   await guard.register(REPO, workKeyFromIssue(1), ['src/a.ts']);
@@ -56,7 +56,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   if (previous) setLandRuntime(previous);
-  await rm(root, { recursive: true, force: true });
+  await tmp.cleanup();
 });
 
 function expectedWorktree(): string {

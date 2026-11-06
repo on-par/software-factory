@@ -1,10 +1,10 @@
 // Already-quarantined worktrees are never moved again, and still drain on hard evidence (#3966).
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { SweepDeps } from './worktree-gc.js';
 import { quarantineDestination, sweepWorktrees } from './worktree-gc.js';
 
@@ -16,15 +16,17 @@ interface SweepOctokitDouble {
   };
 }
 
+const dirs = createTempDirs();
+
 describe('already-quarantined worktrees (#3966)', () => {
   let parentDir = '';
 
-  afterEach(() => {
-    if (parentDir) rmSync(parentDir, { recursive: true, force: true });
+  afterEach(async () => {
+    await dirs.cleanup();
   });
 
   function setup() {
-    parentDir = mkdtempSync(join(tmpdir(), 'gc-parent-'));
+    parentDir = dirs.makeSync('gc-parent-');
     const repoRoot = join(parentDir, 'repo');
     mkdirSync(repoRoot, { recursive: true });
     return { repoRoot };
