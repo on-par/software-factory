@@ -159,6 +159,34 @@ timings, cost in USD; outcome `land-deferred` with a `landDeferrals` count when 
 `schemas/run-result.schema.json`. `--export` copies the run's state file, events, costs and `run-result.json`
 into `<dir>` on every exit path, so the host can upload them before it exits. Neither flag changes the exit code.
 
+### One issue to a terminal outcome
+
+`factory run --issue <N> [--wait stay|exit] [--max-wait <30m|2h>] [--admin] [--json] [--export <dir>]`
+carries one issue to the end of its life on GitHub. With no PR for the issue it ships one; with an
+open PR (a re-run) it ships nothing and restores the PR's run state. It honours the repo's merge
+policy (`run.merge.auto`, `--auto-merge`/`--no-auto-merge`, risk tier, `no-auto-merge`/`needs-human`
+labels, the PR classifier): when auto-merge is on it waits for CI and merges, and a PR held by a gate
+waits for a human. When auto-merge is off it never merges. Trusted feedback on the PR runs a feedback
+round (like `factory respond`) that pushes to the same PR.
+
+`--wait stay` (default) polls in-process until the PR is merged, closed or `--max-wait` elapses.
+`--wait exit` handles any pending feedback once, saves status `awaiting-review` to the PR's run-state
+comment and exits, so the host can stop the container and run the same command on the next PR event.
+Exit codes:
+
+| Exit | Meaning                                                                                             |
+| ---- | --------------------------------------------------------------------------------------------------- |
+| 0    | merged                                                                                              |
+| 1    | parked (ship parked, a merge failed, or the review-rework cap was reached)                          |
+| 2    | usage error (`--wait` not stay or exit, lifecycle flags without `--issue`)                          |
+| 15   | closed without merging                                                                              |
+| 16   | awaiting review: the PR is open with no unhandled feedback (`--wait exit`, or `--max-wait` elapsed) |
+
+Re-run contract: a re-run on a fresh clone finds the issue's factory PR on GitHub, reuses it, does not
+build or open a second PR, and handles only feedback no earlier round marked handled. A merged or
+closed PR is never shipped again. `--json` reports outcomes `merged`, `closed`, `parked` and
+`awaiting-review` (PR state `closed` is new; `schemaVersion` stays 2).
+
 ## Artifacts
 
 `factory-run-log` holds the run log and `.factory/state/events.ndjson`, kept 14 days. No state (runs,

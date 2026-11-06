@@ -273,6 +273,7 @@ import {
 import { setLandRuntime } from './land-runtime.js';
 import { recordKpiTierDemotions, runAckTierDemotion } from './tier-demotion.js';
 import { cmdRun, type RunOptions } from './run.js';
+import { cmdRunUntilDoneWith } from './run-until-done-command.js';
 import type { RunLaneDeps } from './run-lane.js';
 import { shipIssue } from './ship.js';
 import type { KpisJson } from './json-contract.js';
@@ -4370,6 +4371,7 @@ export const PROGRAM_HANDLERS = {
   cmdLand,
   cmdResumeApproved,
   cmdRun: withShutdown(runRun),
+  cmdRunUntilDone: withShutdown(cmdRunUntilDoneWith(branchPrefixOrExit)),
   cmdProxy,
   cmdFactoryd,
   cmdDaemonStart,

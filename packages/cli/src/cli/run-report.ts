@@ -16,7 +16,7 @@ import { readCosts, runStateFile } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
 import type { RunResultJson } from './json-contract.js';
 import type { MergeResult } from './run-issue-merge.js';
-import { buildRunResult } from './run-result.js';
+import { buildRunResult, type LifecycleResult } from './run-result.js';
 
 export interface RunReportOptions {
   json?: boolean;
@@ -36,6 +36,7 @@ export interface RunReportContext {
 export interface RunReportSink {
   recordOutcome(o: RunOutcome): void;
   recordMerge(r: MergeResult): void;
+  recordLifecycle(r: LifecycleResult): void;
   recordError(e: unknown): void;
 }
 
@@ -45,7 +46,12 @@ export interface RunReportDeps {
   stdout?: { write(s: string): unknown };
 }
 
-const noopSink: RunReportSink = { recordOutcome: () => {}, recordMerge: () => {}, recordError: () => {} };
+const noopSink: RunReportSink = {
+  recordOutcome: () => {},
+  recordMerge: () => {},
+  recordLifecycle: () => {},
+  recordError: () => {},
+};
 
 function gitRevParse(repoRoot: string, ref: string): string | null {
   try {
@@ -112,13 +118,16 @@ export async function withRunReport(
   if (!opts.json && opts.export === undefined) return run(noopSink);
   const now = deps.now ?? (() => new Date());
   const startedAt = now().toISOString();
-  const seen: { outcome?: RunOutcome; merge?: MergeResult; error?: unknown } = {};
+  const seen: { outcome?: RunOutcome; merge?: MergeResult; lifecycle?: LifecycleResult; error?: unknown } = {};
   const sink: RunReportSink = {
     recordOutcome: (o) => {
       seen.outcome = o;
     },
     recordMerge: (r) => {
       seen.merge = r;
+    },
+    recordLifecycle: (r) => {
+      seen.lifecycle = r;
     },
     recordError: (e) => {
       seen.error = e;
@@ -152,6 +161,7 @@ export async function withRunReport(
       repo,
       outcome: seen.outcome,
       merge: seen.merge,
+      lifecycle: seen.lifecycle,
       error: seen.error,
       startedAt,
       finishedAt: now().toISOString(),

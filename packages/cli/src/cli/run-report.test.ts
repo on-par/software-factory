@@ -61,13 +61,29 @@ describe('withRunReport', () => {
     const result = JSON.parse(s.out[0]);
     expect(validate(result), JSON.stringify(validate.errors)).toBe(true);
     expect(result).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       outcome: 'pr-open',
       branch: 'factory/5-x',
       headSha: 'head-sha',
       baseSha: 'base-sha',
       reworkRounds: 1,
     });
+  });
+
+  it('recordLifecycle reaches the printed result', async () => {
+    const s = setup();
+    await withRunReport(
+      { json: true },
+      s.ctx,
+      async (r) => {
+        r.recordOutcome(shipped);
+        r.recordLifecycle({ outcome: 'awaiting-review', prNumber: 12, detail: 'waiting for review' });
+      },
+      s.deps,
+    );
+    const result = JSON.parse(s.out[0]);
+    expect(validate(result), JSON.stringify(validate.errors)).toBe(true);
+    expect(result).toMatchObject({ outcome: 'awaiting-review', pr: { number: 12 } });
   });
 
   it('json mode puts PR url, phase timings and USD cost in the result', async () => {

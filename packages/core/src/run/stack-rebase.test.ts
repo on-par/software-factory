@@ -1,7 +1,7 @@
 // packages/core/src/run/stack-rebase.test.ts — shared rebase --onto + atomic leased push, on a real git fixture.
 
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
@@ -124,5 +124,16 @@ describe('rebaseAndPushStack', () => {
     expect(out).toMatchObject({ ok: false, phase: 'push' });
     expect(!out.ok && out.reason).toContain('lease');
     expect(remoteHead('factory/1-a')).toBe(moved);
+  });
+
+  it('leaves no scratch worktree behind in the git dir', async () => {
+    await rebaseAndPushStack({
+      repoRoot: root,
+      remote: 'origin',
+      startBase: 'origin/main',
+      layers: [{ branch: 'factory/1-a', recordedHead: head1, upstream: oldMain }],
+    });
+    expect(readdirSync(join(root, '.git')).filter((n) => n.startsWith('factory-restack-'))).toEqual([]);
+    expect(git(root, 'worktree', 'list', '--porcelain')).not.toContain('factory-restack-');
   });
 });

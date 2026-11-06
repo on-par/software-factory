@@ -7,11 +7,19 @@ import type { MergeResult } from './run-issue-merge.js';
 
 const CI_PARKS: ReadonlySet<string> = new Set(['ci-failed', 'ci-infra', 'ci-never-started']);
 
+/** The end state `factory run --issue` reached (#3908); it wins over the merge result and the ship outcome. */
+export interface LifecycleResult {
+  outcome: 'merged' | 'closed' | 'parked' | 'awaiting-review';
+  prNumber?: number;
+  detail: string;
+}
+
 export interface RunResultInput {
   issue: number;
   repo: string | null;
   outcome: RunOutcome | undefined;
   merge: MergeResult | undefined;
+  lifecycle?: LifecycleResult | undefined;
   error: unknown;
   startedAt: string;
   finishedAt: string;
@@ -54,7 +62,9 @@ export function classifyRunOutcome(
   outcome: RunOutcome | undefined,
   merge: MergeResult | undefined,
   error: unknown,
+  lifecycle?: LifecycleResult,
 ): { outcome: RunResultOutcome; exitReason: string } {
+  if (lifecycle) return { outcome: lifecycle.outcome, exitReason: lifecycle.detail || lifecycle.outcome };
   const merged = merge ? classifyMerge(merge) : undefined;
   if (merged) return merged;
   const message = errorMessage(error);
@@ -108,12 +118,20 @@ const round6 = (n: number): number => Math.round(n * 1e6) / 1e6;
 
 /** Builds the schema-valid run result from what the run recorded; pure, no I/O. */
 export function buildRunResult(input: RunResultInput): RunResultJson {
-  const { outcome, merge, repo, startedAt } = input;
+  const { outcome, merge, lifecycle, repo, startedAt } = input;
   const issueKey = String(input.issue);
   const events = input.events.filter((e) => e.issue === issueKey && e.ts >= startedAt);
   const costs = input.costs.filter((c) => c.issue === issueKey && c.ts >= startedAt);
-  const prNumber = merge?.prNumber ?? (outcome && 'prNumber' in outcome ? outcome.prNumber : undefined);
-  const prState = merge?.kind === 'merged' ? 'merged' : outcome?.state === 'ready' && outcome.draft ? 'draft' : 'open';
+  const prNumber =
+    merge?.prNumber ?? lifecycle?.prNumber ?? (outcome && 'prNumber' in outcome ? outcome.prNumber : undefined);
+  const prState =
+    lifecycle?.outcome === 'closed'
+      ? 'closed'
+      : merge?.kind === 'merged' || lifecycle?.outcome === 'merged'
+        ? 'merged'
+        : outcome?.state === 'ready' && outcome.draft
+          ? 'draft'
+          : 'open';
   const byModel: Record<string, number> = {};
   let total = 0;
   for (const c of costs) {
@@ -122,10 +140,10 @@ export function buildRunResult(input: RunResultInput): RunResultJson {
   }
   for (const model of Object.keys(byModel)) byModel[model] = round6(byModel[model]);
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     issue: input.issue,
     repo,
-    ...classifyRunOutcome(outcome, merge, input.error),
+    ...classifyRunOutcome(outcome, merge, input.error, lifecycle),
     pr:
       prNumber === undefined
         ? null

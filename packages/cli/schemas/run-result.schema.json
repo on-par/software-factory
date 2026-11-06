@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "number",
-      "const": 2
+      "const": 3
     },
     "issue": {
       "type": "integer",
@@ -16,7 +16,17 @@
     },
     "outcome": {
       "type": "string",
-      "enum": ["merged", "pr-open", "held", "ci-failed", "parked", "failed", "land-deferred"]
+      "enum": [
+        "merged",
+        "pr-open",
+        "held",
+        "ci-failed",
+        "parked",
+        "failed",
+        "land-deferred",
+        "closed",
+        "awaiting-review"
+      ]
     },
     "exitReason": {
       "type": "string",
@@ -37,7 +47,7 @@
             },
             "state": {
               "type": "string",
-              "enum": ["open", "draft", "merged"]
+              "enum": ["open", "draft", "merged", "closed"]
             }
           },
           "required": ["number", "url", "state"],
