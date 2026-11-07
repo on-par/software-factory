@@ -19,7 +19,6 @@
 // these ports and re-raises a parked/escalated outcome as LaneParkError.
 
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
 import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
@@ -45,7 +44,7 @@ import { classifyCheckFailure } from './check-verdict.js';
 import { withSingleTerminalEvent } from './terminal-events.js';
 import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
 import { parkPayload, postEnvironmentReleaseComment, publishParkComment } from './park-comment.js';
-import { createRunPhaseLogger } from './run-phase-log.js';
+import { createRunPhaseLogger, outputLogDirOption } from './run-phase-log.js';
 import { providerFailureRecorder } from './provider-failure-recorder.js';
 import { gateBuildTarget, pickOrderedProvider, type ProviderPick } from './provider-breaker-gate.js';
 import {
@@ -590,9 +589,7 @@ async function runIssueOnce(
           timeoutSeconds: request.timeouts.check,
           testsTimeoutSeconds: request.timeouts.tests,
           compileTimeoutSeconds: request.timeouts.compile,
-          ...(request.logsDir !== undefined
-            ? { outputLogDir: join(request.logsDir, `issue-${workKey}`, 'check-base-health') }
-            : {}),
+          ...outputLogDirOption(request.logsDir, workKey, 'check-base-health'),
           log: (type, msg) => log(type, msg),
         })
         .catch((err): undefined => {
