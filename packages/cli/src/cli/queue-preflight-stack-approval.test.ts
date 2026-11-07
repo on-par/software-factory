@@ -212,4 +212,33 @@ describe('stack approval gate (#3366)', () => {
     expect(getAuthenticated).toHaveBeenCalledTimes(1);
     expect(createQueuePreflightOps(octokit, 'o', 'r').stackMode).toBe(false);
   });
+
+  it('drops only the App bot reviews under a GitHub App installation token', async () => {
+    const listReviews = vi.fn(async () => ({
+      data: [
+        { user: { id: 9001, login: 'factory-app[bot]', type: 'Bot' }, state: 'APPROVED', commit_id: 'abc' },
+        { user: { id: 9002, login: 'other-app[bot]', type: 'Bot' }, state: 'COMMENTED', commit_id: 'abc' },
+        { user: { id: 5, login: 'someone', type: 'User' }, state: 'APPROVED', commit_id: 'abc' },
+      ],
+    }));
+    const getAuthenticated = vi.fn(async () => {
+      throw Object.assign(new Error('Resource not accessible by integration'), { status: 403 });
+    });
+    const graphql = vi.fn(async () => ({ viewer: { __typename: 'Bot', login: 'factory-app', databaseId: 9001 } }));
+    const octokit: any = {
+      graphql,
+      rest: {
+        pulls: { get: async () => ({ data: { head: { sha: 'abc' } } }), listReviews },
+        users: { getAuthenticated },
+      },
+    };
+    const ops = createQueuePreflightOps(octokit, 'o', 'r', { stackMode: true });
+    const pull = await ops.getPullReviews(5);
+    expect(pull.selfId).toBe(9001);
+    expect(pull.reviews).toEqual([
+      { reviewerId: 9002, state: 'COMMENTED', commitId: 'abc' },
+      { reviewerId: 5, state: 'APPROVED', commitId: 'abc' },
+    ]);
+    expect(graphql).toHaveBeenCalledTimes(1);
+  });
 });

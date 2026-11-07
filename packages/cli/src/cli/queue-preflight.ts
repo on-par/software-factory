@@ -14,7 +14,7 @@ import {
   upsertSlicePlanComment,
   withSliceState,
 } from '@on-par/factory-core/internal';
-import { loadPrRunState } from '@on-par/factory-core/internal';
+import { isOwnComment, loadPrRunState, resolveSelfIdentity, type SelfIdentity } from '@on-par/factory-core/internal';
 import { workKeyFromIssue } from '@on-par/factory-core';
 import { errorDetail } from './index.js';
 import { findOpenPRForIssue } from './land.js';
@@ -97,15 +97,15 @@ export function makeQueuePreflightOps(
     sleep?: (ms: number) => Promise<void>;
   },
 ): QueuePreflightOps {
-  let selfId: Promise<number> | undefined;
+  let self: Promise<SelfIdentity> | undefined;
   return {
     autoMergeStack: opts.autoMergeStack ?? false,
     stackMode: opts.stackMode ?? false,
     stackOnOpenPrerequisite: opts.stackOnOpenPrerequisite ?? false,
     getPullReviews: async (prNumber) => {
       const { data: pull } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
-      selfId ??= octokit.rest.users.getAuthenticated().then(({ data }) => data.id);
-      const id = await selfId;
+      self ??= resolveSelfIdentity(octokit);
+      const me = await self;
       const reviews: StackPullReviews['reviews'] = [];
       for (let page = 1; ; page++) {
         const { data } = await octokit.rest.pulls.listReviews({
@@ -116,11 +116,12 @@ export function makeQueuePreflightOps(
           page,
         });
         for (const r of data) {
+          if (isOwnComment(r.user, me)) continue;
           reviews.push({ reviewerId: r.user?.id ?? null, state: r.state, commitId: r.commit_id ?? null });
         }
         if (data.length < 100) break;
       }
-      return { headSha: pull.head.sha, selfId: id, reviews };
+      return { headSha: pull.head.sha, selfId: me.id, reviews };
     },
     onDeferred: opts.onDeferred,
     laneFileHold: opts.laneFileHold,

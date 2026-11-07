@@ -31,7 +31,8 @@ describe('isDecomposeProposal', () => {
 });
 
 describe('findPendingProposal', () => {
-  const find = (comments: GuardComment[]) => findPendingProposal(comments, 1, NOW, DECOMPOSE_PROPOSAL_WINDOW_MS);
+  const find = (comments: GuardComment[]) =>
+    findPendingProposal(comments, { id: 1, login: 'factory', kind: 'user' }, NOW, DECOMPOSE_PROPOSAL_WINDOW_MS);
 
   it('returns the own proposal inside the window', () => {
     expect(find([proposal(10)])?.id).toBe(10);
@@ -52,6 +53,15 @@ describe('findPendingProposal', () => {
   it('ignores a proposal heading by another user and lets the latest own proposal decide', () => {
     expect(find([comment({ id: 5, body: '## Proposed epic: y', userId: 9 })])).toBeUndefined();
     expect(find([proposal(10), comment({ id: 11 }), proposal(12)])?.id).toBe(12);
+  });
+
+  it('with an id-less App bot identity, trusts only its exact login on a Bot author', () => {
+    const bot = { id: undefined, login: 'factory-app[bot]', kind: 'bot' } as const;
+    const findAs = (comments: GuardComment[]) => findPendingProposal(comments, bot, NOW, DECOMPOSE_PROPOSAL_WINDOW_MS);
+    const own = { ...proposal(10), userId: 9001, userLogin: 'factory-app[bot]' };
+    expect(findAs([own])?.id).toBe(10);
+    expect(findAs([{ ...own, userLogin: 'other-app[bot]' }])).toBeUndefined();
+    expect(findAs([{ ...own, userType: 'User' }])).toBeUndefined();
   });
 
   it('handles a null user and an empty body', () => {
@@ -101,7 +111,7 @@ describe('checkDecomposeGuard', () => {
   it('fails open when a GitHub read throws or a page is not an array', async () => {
     for (const mock of [
       makeOctokit({ get: () => Promise.reject(new Error('boom')) }),
-      makeOctokit({ me: () => Promise.reject(new Error('app token')) }),
+      makeOctokit({ me: () => Promise.reject(new Error('bad credentials')) }),
       makeOctokit({ list: () => Promise.reject(new Error('403')) }),
       makeOctokit({ list: () => ({ data: 'nope' }) }),
     ]) {
@@ -109,5 +119,15 @@ describe('checkDecomposeGuard', () => {
       expect(verdict.kind).toBe('proceed');
       expect(verdict.kind === 'proceed' && verdict.warning).toBeTruthy();
     }
+  });
+
+  it("sees the App bot's pending proposal under a GitHub App installation token", async () => {
+    const forbidden = Object.assign(new Error('Resource not accessible by integration'), { status: 403 });
+    const own = { ...wire(proposal(10)), user: { id: 9001, login: 'factory-app[bot]', type: 'Bot' } };
+    const mock = makeOctokit({ me: () => Promise.reject(forbidden), list: () => ({ data: [own] }) });
+    mock.octokit.graphql = vi.fn(async () => ({
+      viewer: { __typename: 'Bot', login: 'factory-app', databaseId: 9001 },
+    }));
+    expect(await run(mock.octokit)).toMatchObject({ kind: 'proposal-pending', commentId: 10 });
   });
 });

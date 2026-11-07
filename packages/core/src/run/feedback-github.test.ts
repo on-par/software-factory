@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { asPhaseOctokit, createSimOctokit, type SimOctokitEndpoint, type SimOctokitStep } from '../fakes/octokit.js';
 import { createOctokitFeedbackRoundGitHub } from './feedback-github.js';
+import { collectFeedbackItems } from './feedback-round.js';
 
 function setup(endpoints: Partial<Record<SimOctokitEndpoint, SimOctokitStep[]>> = {}) {
   const { octokit, calls } = createSimOctokit({ endpoints });
@@ -96,6 +97,37 @@ describe('createOctokitFeedbackRoundGitHub', () => {
     ]);
     expect(calls).toContainEqual(['issues.createComment', { owner: 'o', repo: 'r', issue_number: 7, body: 'c' }]);
     expect(calls).toContainEqual(['pulls.update', { owner: 'o', repo: 'r', pull_number: 7, body: 'new' }]);
+  });
+
+  it('reads the App bot login under a GitHub App installation token, so its own comments are skipped', async () => {
+    const forbidden = Object.assign(new Error('Resource not accessible by integration'), { status: 403 });
+    const own = {
+      id: 5,
+      user: { login: 'factory-app[bot]' },
+      body: 'reply\n<!-- factory:feedback-handled comment:4 -->',
+    };
+    const { github } = setup({
+      'users.getAuthenticated': [{ fail: forbidden }, { fail: forbidden }],
+      graphql: [
+        { response: { viewer: { __typename: 'Bot', login: 'factory-app', databaseId: 9001 } } },
+        { response: { viewer: { __typename: 'Bot', login: 'factory-app', databaseId: 9001 } } },
+        { response: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } },
+      ],
+      'issues.listComments': [
+        {
+          response: {
+            data: [
+              { id: 4, user: { login: 'amy' }, body: 'handled already', html_url: 'u4' },
+              { ...own, html_url: 'u5' },
+              { id: 6, user: { login: 'amy' }, body: 'please fix', html_url: 'u6' },
+            ],
+          },
+        },
+      ],
+    });
+    expect(await github.viewerLogin()).toBe('factory-app[bot]');
+    const items = await collectFeedbackItems({ github, prNumber: 7, isTrusted: async () => true });
+    expect(items.map((i) => i.id)).toEqual([6]);
   });
 
   it('requestReviewers filters out the PR author and skips the call when none remain', async () => {

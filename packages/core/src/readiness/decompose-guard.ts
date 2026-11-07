@@ -1,10 +1,13 @@
 // packages/core/src/readiness/decompose-guard.ts — pre-flight guard for decomposeOversizedIssue: skip a closed issue,
 // and skip when the factory's own proposal is still waiting for a human reply, so PLAN retries stop spamming (#728)
 //
-// GitHub read failures fail open (verdict `proceed` with a warning): users.getAuthenticated is rejected for
-// App installation tokens, and failing closed would permanently disable decomposition there.
+// GitHub read failures fail open (verdict `proceed` with a warning): the guard only stops duplicate proposals, and
+// failing closed on a transient read error would disable decomposition. The factory's own identity comes from
+// resolveSelfIdentity, which also covers GitHub App installation tokens.
 
 import type { Octokit } from '@octokit/rest';
+
+import { isOwnComment, resolveSelfIdentity, type SelfIdentity } from '../utils/github-identity.js';
 
 export const DECOMPOSE_PROPOSAL_MARKER = '<!-- factory:decompose-proposal v1 -->';
 export const DECOMPOSE_PROPOSAL_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -19,6 +22,7 @@ export interface GuardComment {
   /** ISO timestamp. */
   createdAt: string;
   userId: number | undefined;
+  userLogin?: string;
   /** 'User' | 'Bot' | 'Organization' */
   userType: string | undefined;
 }
@@ -39,15 +43,16 @@ export function isDecomposeProposal(body: string): boolean {
  */
 export function findPendingProposal(
   comments: readonly GuardComment[],
-  selfId: number,
+  self: SelfIdentity,
   now: Date,
   windowMs: number,
 ): GuardComment | undefined {
   let latest: GuardComment | undefined;
   for (const comment of [...comments].sort((a, b) => a.id - b.id)) {
-    if (comment.userId === selfId && isDecomposeProposal(comment.body)) {
+    const own = isOwnComment({ id: comment.userId, login: comment.userLogin, type: comment.userType }, self);
+    if (own && isDecomposeProposal(comment.body)) {
       latest = comment;
-    } else if (comment.userId !== undefined && comment.userId !== selfId && comment.userType !== 'Bot') {
+    } else if (comment.userId !== undefined && !own && comment.userType !== 'Bot') {
       latest = undefined;
     }
   }
@@ -76,11 +81,10 @@ export async function checkDecomposeGuard(deps: {
     return { kind: 'proceed', warning: `could not read #${issue}'s state (${errorDetail(error)}); decomposing anyway` };
   }
 
-  let selfId: number;
+  let self: SelfIdentity;
   const comments: GuardComment[] = [];
   try {
-    const { data: me } = await octokit.rest.users.getAuthenticated();
-    selfId = me.id;
+    self = await resolveSelfIdentity(octokit);
     for (let page = 1; ; page++) {
       const { data } = await octokit.rest.issues.listComments({
         owner,
@@ -96,6 +100,7 @@ export async function checkDecomposeGuard(deps: {
           body: comment.body ?? '',
           createdAt: comment.created_at,
           userId: comment.user?.id,
+          userLogin: comment.user?.login,
           userType: comment.user?.type,
         });
       }
@@ -110,7 +115,7 @@ export async function checkDecomposeGuard(deps: {
 
   const pending = findPendingProposal(
     comments,
-    selfId,
+    self,
     deps.now ?? new Date(),
     deps.windowMs ?? DECOMPOSE_PROPOSAL_WINDOW_MS,
   );

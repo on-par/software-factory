@@ -15,8 +15,8 @@ export interface StackSliceReview {
 export interface StackPullReviews {
   /** Current head SHA of the PR. */
   headSha: string;
-  /** GitHub user id of the factory's own identity; its reviews never count. */
-  selfId: number;
+  /** GitHub user id of the factory's own identity, when known; its reviews never count. */
+  selfId: number | undefined;
   /** Reviews in the chronological order GitHub returns them. */
   reviews: StackSliceReview[];
 }

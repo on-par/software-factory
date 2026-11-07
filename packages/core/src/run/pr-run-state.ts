@@ -11,6 +11,12 @@ import { z } from 'zod';
 
 import { redactSecrets } from '../filing/redact.js';
 import type { RunStatus } from '../types/index.js';
+import {
+  isOwnComment,
+  resolveSelfIdentity,
+  type SelfIdentity,
+  type SelfIdentityOctokit,
+} from '../utils/github-identity.js';
 import { workKeyFromIssue, type WorkKey } from '../work/work-key.js';
 import { upsertMarkerComment } from './park-comment.js';
 
@@ -62,6 +68,8 @@ export type PrRunStateRejectReason =
 export interface PrStateComment {
   id: number;
   authorId: number | undefined;
+  authorLogin?: string;
+  authorType?: string;
   body: string;
 }
 
@@ -166,23 +174,23 @@ export function decodePrRunState(
 }
 
 /**
- * Picks the state to trust: only a comment by `selfId` (the authenticated identity) is decoded. Lowest comment id
+ * Picks the state to trust: only a comment by `self` (the authenticated identity) is decoded. Lowest comment id
  * wins, as in `readParkState`. An unknown identity fails closed: every marker comment is ignored.
  */
 export function selectTrustedPrRunState(
   comments: readonly PrStateComment[],
-  selfId: number | undefined,
+  self: SelfIdentity | undefined,
   key: WorkKey,
 ): PrRunStateLoad {
   const ignored: Ignored = [];
   let winner: { commentId: number; state: PrRunState } | undefined;
   for (const c of [...comments].sort((a, b) => a.id - b.id)) {
     if (!MARKER_RE.test(c.body)) continue;
-    if (selfId === undefined) {
+    if (self === undefined) {
       ignored.push({ commentId: c.id, reason: 'identity-unavailable' });
       continue;
     }
-    if (c.authorId !== selfId) {
+    if (!isOwnComment({ id: c.authorId, login: c.authorLogin, type: c.authorType }, self)) {
       ignored.push({ commentId: c.id, reason: 'untrusted-author' });
       continue;
     }
@@ -253,18 +261,18 @@ export function prRunStatusFor(status: RunStatus, ciPending?: boolean): PrRunSta
 }
 
 export async function loadPrRunState(deps: {
-  octokit: Pick<Octokit, 'rest'>;
+  octokit: SelfIdentityOctokit;
   repo: string;
   prNumber: number;
   key: WorkKey;
 }): Promise<PrRunStateLoad> {
   const { octokit, repo, prNumber, key } = deps;
   const [owner, name] = repo.split('/');
-  let selfId: number | undefined;
+  let self: SelfIdentity | undefined;
   try {
-    selfId = (await octokit.rest.users.getAuthenticated()).data.id;
+    self = await resolveSelfIdentity(octokit);
   } catch {
-    selfId = undefined;
+    self = undefined;
   }
   const comments: PrStateComment[] = [];
   for (let page = 1; ; page++) {
@@ -275,10 +283,18 @@ export async function loadPrRunState(deps: {
       per_page: PAGE_SIZE,
       page,
     });
-    for (const c of data) comments.push({ id: c.id, authorId: c.user?.id, body: c.body ?? '' });
+    for (const c of data) {
+      comments.push({
+        id: c.id,
+        authorId: c.user?.id,
+        authorLogin: c.user?.login,
+        authorType: c.user?.type,
+        body: c.body ?? '',
+      });
+    }
     if (data.length < PAGE_SIZE) break;
   }
-  return selectTrustedPrRunState(comments, selfId, key);
+  return selectTrustedPrRunState(comments, self, key);
 }
 
 export function savePrRunState(deps: {

@@ -1,6 +1,8 @@
 // packages/core/src/run/feedback-github.ts — the GitHub port a feedback round reads feedback from and answers through (#3910)
 import type { Octokit } from '@octokit/rest';
 
+import { resolveSelfIdentity } from '../utils/github-identity.js';
+
 export interface FeedbackPull {
   state: string;
   headRef: string;
@@ -127,8 +129,7 @@ export function createOctokitFeedbackRoundGitHub(octokit: Octokit, owner: string
       }));
     },
     async viewerLogin() {
-      const { data } = await octokit.rest.users.getAuthenticated();
-      return data.login;
+      return (await resolveSelfIdentity(octokit)).login;
     },
     async replyToReviewComment(pr, commentId, body) {
       await octokit.rest.pulls.createReplyForReviewComment({ ...base(pr), comment_id: commentId, body });

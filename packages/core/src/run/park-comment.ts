@@ -14,6 +14,7 @@ import { readWorktreeHead } from './ci-suppression-guard.js';
 import { QUEUE_ORDER_LABEL_PREFIX } from '../queue/queue-order.js';
 import type { DesignSmellFinding, ParkReason } from './outcome.js';
 import { issueNumberOf, type WorkKey } from '../work/work-key.js';
+import { isOwnComment, resolveSelfIdentity } from '../utils/github-identity.js';
 
 export const ISSUE_STATE_MARKER_VERSION = 'v1';
 
@@ -262,7 +263,7 @@ export async function findOwnMarkerComment(deps: {
 }): Promise<ParkStateComment | undefined> {
   const { octokit, repo, issue, marker } = deps;
   const [owner, name] = repo.split('/');
-  const { data: me } = await octokit.rest.users.getAuthenticated();
+  const me = await resolveSelfIdentity(octokit);
   let existing: ParkStateComment | undefined;
   for (let page = 1; ; page++) {
     const { data } = await octokit.rest.issues.listComments({
@@ -274,7 +275,7 @@ export async function findOwnMarkerComment(deps: {
     });
     for (const comment of data) {
       const body = comment.body ?? '';
-      if (comment.user?.id !== me.id || !body.includes(marker)) continue;
+      if (!isOwnComment(comment.user, me) || !body.includes(marker)) continue;
       if (existing === undefined || comment.id < existing.id) existing = { id: comment.id, body };
     }
     if (data.length < PAGE_SIZE) break;
