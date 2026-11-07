@@ -27,6 +27,10 @@ export interface BaseHold {
   confirmedLocally?: true;
   /** Issue released by the CHECK environment pause that wrote the hold (#3851). */
   issue?: number;
+  /** The base checks could not run (timeout, environment, setup): not a test failure; failingChecks is empty. */
+  inconclusive?: true;
+  /** Pre-PLAN base health evidence on one line (bounded, redacted). */
+  evidence?: string;
 }
 
 /** Backoff between strict CI re-checks of a ci-awaiting hold (#3186). */
@@ -42,6 +46,8 @@ export function writeBaseHold(file: string, hold: BaseHold): void {
     ...(hold.ciRecheckAfter !== undefined ? { ciRecheckAfter: hold.ciRecheckAfter } : {}),
     ...(hold.confirmedLocally === true ? { confirmedLocally: true as const } : {}),
     ...(hold.issue !== undefined && Number.isInteger(hold.issue) && hold.issue > 0 ? { issue: hold.issue } : {}),
+    ...(hold.inconclusive === true ? { inconclusive: true as const } : {}),
+    ...(typeof hold.evidence === 'string' ? { evidence: hold.evidence } : {}),
   };
   writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
 }
@@ -56,10 +62,8 @@ export function readBaseHold(file: string): BaseHold | null {
     return null;
   }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
-  const { repo, baseSha, failingChecks, since, ciRecheckAfter, confirmedLocally, issue } = raw as Record<
-    string,
-    unknown
-  >;
+  const { repo, baseSha, failingChecks, since, ciRecheckAfter, confirmedLocally, issue, inconclusive, evidence } =
+    raw as Record<string, unknown>;
   if (typeof repo !== 'string' || typeof baseSha !== 'string' || typeof since !== 'string') return null;
   if (!Array.isArray(failingChecks) || !failingChecks.every((c) => typeof c === 'string')) return null;
   const recheck =
@@ -72,6 +76,8 @@ export function readBaseHold(file: string): BaseHold | null {
     ...recheck,
     ...(confirmedLocally === true ? { confirmedLocally: true as const } : {}),
     ...(typeof issue === 'number' && Number.isInteger(issue) && issue > 0 ? { issue } : {}),
+    ...(inconclusive === true ? { inconclusive: true as const } : {}),
+    ...(typeof evidence === 'string' ? { evidence } : {}),
   };
 }
 
@@ -115,9 +121,12 @@ export function formatBaseHoldCleared(c: BaseHoldCleared): string {
 /** Lane warn text for a kept hold; names the current SHA when origin/main moved (#3620). */
 export function formatBaseHoldKept(lane: string, d: Extract<BaseHoldDecision, { kind: 'hold' }>): string {
   const held = d.hold.baseSha.slice(0, 8);
-  const checks = d.hold.failingChecks.join(', ');
+  const evidence = d.hold.evidence;
+  const what = d.hold.inconclusive
+    ? `base checks could not run, not a test failure${evidence !== undefined ? `: ${evidence}` : ''}`
+    : `${d.hold.failingChecks.join(', ')}${evidence !== undefined ? ` — ${evidence}` : ''}`;
   const reason = d.ciReason ? ` (${d.ciReason})` : '';
-  const prefix = `lane '${lane}' not claiming: base hold on ${held} (${checks}) — `;
+  const prefix = `lane '${lane}' not claiming: base hold on ${held} (${what}) — `;
   if (d.currentSha !== undefined && d.currentSha !== d.hold.baseSha) {
     return `${prefix}origin/main moved to ${d.currentSha.slice(0, 8)} but its code-health CI is not green${reason}`;
   }
@@ -126,7 +135,12 @@ export function formatBaseHoldKept(lane: string, d: Extract<BaseHoldDecision, { 
 
 /** `factory status` lines for an active hold (#2351). */
 export function formatBaseHoldStatus(hold: BaseHold): string[] {
-  const checks = hold.failingChecks.length > 0 ? hold.failingChecks.join(', ') : '(none recorded)';
+  const checks =
+    hold.failingChecks.length > 0
+      ? hold.failingChecks.join(', ')
+      : hold.inconclusive
+        ? '(none — base checks could not run, not a test failure)'
+        : '(none recorded)';
   const lines = [
     `  repo: ${hold.repo}`,
     `  baseSha: ${hold.baseSha}`,
@@ -134,8 +148,14 @@ export function formatBaseHoldStatus(hold: BaseHold): string[] {
     `  since: ${hold.since}`,
   ];
   if (hold.confirmedLocally === true) lines.push('  confirmedLocally: true');
+  if (hold.evidence !== undefined) lines.push(`  evidence: ${hold.evidence}`);
   if (hold.issue !== undefined) {
-    lines.push(`  waiting: #${hold.issue} is waiting on red base ${hold.baseSha.slice(0, 8)} (${checks})`);
+    const sha8 = hold.baseSha.slice(0, 8);
+    lines.push(
+      hold.inconclusive
+        ? `  waiting: #${hold.issue} is waiting: base checks could not run on ${sha8} (not a test failure)`
+        : `  waiting: #${hold.issue} is waiting on red base ${sha8} (${checks})`,
+    );
   }
   return lines;
 }

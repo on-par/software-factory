@@ -50,6 +50,8 @@ export function pauseLaneForBrokenBase(
       issue,
       ...(err.awaitingCi ? { ciRecheckAfter: new Date(now().getTime() + BASE_HOLD_CI_RECHECK_MS).toISOString() } : {}),
       ...(err.confirmedLocally ? { confirmedLocally: true as const } : {}),
+      ...(err.inconclusive ? { inconclusive: true as const } : {}),
+      ...(err.baseEvidence !== undefined ? { evidence: err.baseEvidence } : {}),
     });
   } catch {}
   const payload: LanePausedPayload = {
@@ -61,13 +63,17 @@ export function pauseLaneForBrokenBase(
     cause: 'environment',
     baseSha: err.baseSha,
   };
-  emitEvent(
-    paths.events,
-    'lane-paused',
+  const sha8 = err.baseSha.slice(0, 8);
+  const evidence = err.baseEvidence !== undefined ? `: ${err.baseEvidence}` : '';
+  const why = err.inconclusive
+    ? `base checks could not run on base ${sha8} (not a test failure)${evidence}`
+    : `#${issue} failed only on checkers that also fail on base ${sha8} (${err.failingChecks.join(', ')})${
+        err.baseEvidence !== undefined ? ` — ${err.baseEvidence}` : ''
+      }`;
+  emitEvent(paths.events, 'lane-paused', lane, `lane '${lane}' paused: ${why}; #${issue} released to queued`, {
     lane,
-    `lane '${lane}' paused: #${issue} failed only on checkers that also fail on base ${err.baseSha.slice(0, 8)} (${err.failingChecks.join(', ')}); #${issue} released to queued`,
-    { lane, lanePaused: payload },
-  );
+    lanePaused: payload,
+  });
 }
 
 /** Latch for the all_providers_down alert (#3340): false only when the same reset is already announced and still ahead.

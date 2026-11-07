@@ -399,3 +399,45 @@ describe('BaselineCache TTL (#3540)', () => {
     expect(existsSync(file)).toBe(false);
   });
 });
+
+describe('BaselineCache inconclusive FAILs (a base check that could not run)', () => {
+  const NOW = Date.parse('2026-01-01T00:00:00.000Z');
+  async function stored(output: CheckerOutput): Promise<BaselineCache> {
+    const file = await cacheFile();
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        entries: { 'sha:env:tests': { output, configHash: 'cfg', recordedAt: new Date(NOW).toISOString() } },
+      }),
+    );
+    return new BaselineCache(file, () => NOW);
+  }
+  const cmd = (exitCode: number) => ({ command: 'bash scripts/verify.sh --no-e2e', exitCode, timeoutSeconds: 300 });
+
+  it.each([
+    ['exit 78', { failedCommand: cmd(78) }],
+    ['exit 127', { failedCommand: cmd(127) }],
+    ['no exit code', { failedCommand: cmd(-1) }],
+    ['a checker crash', { checkerError: true as const }],
+    ['a legacy exit 78 with only the sandbox marker', { sandboxEnv: 'verify: ENVIRONMENT ERROR: x' }],
+    ['a legacy checker crash', { details: 'unexpected checker error: boom' }],
+  ])('get rejects a stored %s FAIL', async (_label, extra) => {
+    const cache = await stored({ checker: 'tests', result: 'FAIL', details: 'x', ...extra });
+    expect(await cache.get('sha', 'env', 'cfg', 'tests')).toBeUndefined();
+  });
+
+  it('get still serves a stored genuine FAIL (control)', async () => {
+    const cache = await stored({ checker: 'tests', result: 'FAIL', details: 'x', failedCommand: cmd(1) });
+    expect((await cache.get('sha', 'env', 'cfg', 'tests'))?.result).toBe('FAIL');
+  });
+
+  it('set never stores a checker-crash FAIL', async () => {
+    const file = await cacheFile();
+    await new BaselineCache(file).set('sha', 'env', 'cfg', [
+      { checker: 'tests', result: 'FAIL', details: 'unexpected checker error: boom', checkerError: true },
+    ]);
+    expect(existsSync(file)).toBe(false);
+  });
+});

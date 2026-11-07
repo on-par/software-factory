@@ -14,6 +14,7 @@ import { dirname } from 'node:path';
 import type { CheckerOutput, Constitution } from '../types/index.js';
 import { DEFAULT_BASELINE_CACHE_TTL_HOURS } from '../config/base-health.js';
 import { isConfigCheckerOutput } from './index.js';
+import { inconclusiveOutputCause } from './inconclusive.js';
 
 /** laneEnv keys that differ per lane lease or per run and do not describe the environment contract. */
 export const BASELINE_ENV_VOLATILE_KEYS: readonly string[] = [
@@ -76,6 +77,7 @@ export class BaselineCache {
     if (output.result !== 'PASS' && output.result !== 'FAIL') return undefined;
     if (isConfigCheckerOutput(output)) return undefined;
     if (output.timedOut === true) return undefined;
+    if (inconclusiveOutputCause(output) !== undefined) return undefined;
     if (
       output.timedOut === undefined &&
       typeof output.details === 'string' &&
@@ -86,10 +88,14 @@ export class BaselineCache {
     return output;
   }
 
-  /** Stores PASS/FAIL outputs of checkers that really ran; SKIPs, config-validation FAILs and timeouts (inconclusive, #3186) are never cached. */
+  /** Stores PASS/FAIL outputs of checkers that really ran; SKIPs, config-validation FAILs, timeouts (#3186) and
+   *  other inconclusive FAILs (environment exit 78, missing command, no exit code, checker crash) are never cached. */
   async set(baseSha: string, envHash: string, configHash: string, outputs: readonly CheckerOutput[]): Promise<void> {
     const storable = outputs.filter(
-      (o) => (o.result === 'PASS' || o.result === 'FAIL') && !isConfigCheckerOutput(o) && o.timedOut !== true,
+      (o) =>
+        (o.result === 'PASS' || (o.result === 'FAIL' && inconclusiveOutputCause(o) === undefined)) &&
+        !isConfigCheckerOutput(o) &&
+        o.timedOut !== true,
     );
     if (storable.length === 0) return;
     const data = await this.read();

@@ -22,7 +22,7 @@ import { randomUUID } from 'node:crypto';
 import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
-import type { checkBaseHealth } from '../checkers/base-health.js';
+import { baseHealthReleasedMessage, type checkBaseHealth } from '../checkers/base-health.js';
 import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import { installLaneDependencies as installLaneDependenciesDefault } from './lane-install.js';
@@ -595,11 +595,9 @@ async function runIssueOnce(
           log('environment_warning', `base health check failed: ${errorMessage(err)} — continuing to PLAN`);
           return undefined;
         });
-      if (health?.kind === 'red' && health.baseSha !== undefined) {
-        log(
-          'environment-released',
-          `${request.parentBaseRef ?? 'origin/main'} ${health.baseSha.slice(0, 8)} fails ${health.failingChecks.join(', ')} before PLAN — no model calls, releasing #${workKey} to queued`,
-        );
+      // Inconclusive (a base check could not run) never reads as failing checks and never enters PLAN either.
+      if ((health?.kind === 'red' || health?.kind === 'inconclusive') && health.baseSha !== undefined) {
+        log('environment-released', baseHealthReleasedMessage(health, request.parentBaseRef ?? 'origin/main', workKey));
         return {
           state: 'released',
           reason: 'environment',
@@ -609,6 +607,8 @@ async function runIssueOnce(
           failingChecks: health.failingChecks,
           ...(health.awaitingCi ? { awaitingCi: true } : {}),
           ...(health.confirmedLocally ? { confirmedLocally: true } : {}),
+          ...(health.evidence?.length ? { baseEvidence: health.evidence } : {}),
+          ...(health.kind === 'inconclusive' ? { baseInconclusive: true as const } : {}),
         };
       }
     }

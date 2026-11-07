@@ -116,6 +116,41 @@ describe('cli commands (via main dispatch)', () => {
       expect(phases.planPhase).not.toHaveBeenCalled();
     });
 
+    it('an inconclusive pre-PLAN base check throws LaneEnvironmentPauseError marked inconclusive, with redacted evidence', async () => {
+      const baseSha = 'a'.repeat(40);
+      const inconclusive = vi.fn<NonNullable<CliDeps['checkBaseHealth']>>(async () => ({
+        kind: 'inconclusive' as const,
+        baseSha,
+        failingChecks: [],
+        cached: false,
+        evidence: [
+          {
+            checker: 'tests',
+            cause: 'timeout' as const,
+            command: 'bash scripts/verify.sh --no-e2e',
+            timeoutSeconds: 300,
+            tail: 'timed out after 300s',
+          },
+        ],
+      }));
+
+      const err = await shipIssue(
+        5,
+        {},
+        { repoRoot: h.repoRoot, ghRepo: h.ghRepo },
+        { checkBaseHealth: inconclusive },
+      ).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(LaneEnvironmentPauseError);
+      const pause = err as LaneEnvironmentPauseError;
+      expect(pause.failingChecks).toEqual([]);
+      expect(pause.inconclusive).toBe(true);
+      expect(pause.baseEvidence).toBe(
+        'tests: timeout after 300s — `bash scripts/verify.sh --no-e2e`: timed out after 300s',
+      );
+      expect(phases.planPhase).not.toHaveBeenCalled();
+    });
+
     it('a .factory/config template token parks the run before planPhase with file:line', async () => {
       mkdirSync(dirname(paths().config), { recursive: true });
       writeFileSync(paths().config, '{\n  "version": 2,\n  "models": { "pins": { "build": "<owner-name>" } }\n}\n');

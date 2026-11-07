@@ -135,6 +135,10 @@ export interface CheckerOutput {
   timedOut?: boolean;
   /** The verify.sh sandbox marker line when the tests command exited 78 with it (#3332); CHECK parks sandbox-env. */
   sandboxEnv?: string;
+  /** The compile/tests command that FAILed: argv, exit code (-1 = none: killed or spawn failure) and timeout. */
+  failedCommand?: { command: string; exitCode: number; timeoutSeconds: number };
+  /** The compile/tests checker crashed in its own catch branch: no command verdict (base health: inconclusive). */
+  checkerError?: true;
   evidencePlanResults?: EvidencePlanResult[];
 }
 
