@@ -123,11 +123,14 @@ describe('checkBaseHealth: environment and setup failures are inconclusive, not 
   });
 
   it('scripts/verify.ps1 with pwsh missing from PATH is an inconclusive missing command, not a test failure', async () => {
-    // PATH holds git (the base worktree needs it) and the system dirs, never pwsh.
+    // PATH is one temp dir of symlinks to exactly the tools this path may spawn, so pwsh stays off it
+    // even on hosts that ship /usr/bin/pwsh (GitHub's ubuntu-latest does). No system dirs on PATH.
     const bin = await tempDirs.make('base-health-nopwsh-bin-');
-    const git = execFileSync('/usr/bin/which', ['git'], { encoding: 'utf8' }).trim();
-    await symlink(git, join(bin, 'git'));
-    const PATH = [bin, '/usr/bin', '/bin'].join(delimiter);
+    for (const tool of ['git', 'sh', 'bash', 'env']) {
+      const resolved = execFileSync('/bin/sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).trim();
+      await symlink(resolved, join(bin, tool));
+    }
+    const PATH = bin;
     expect(PATH.split(delimiter).some((d) => existsSync(join(d, 'pwsh')))).toBe(false);
     const { res, messages } = await health(
       'Write-Output "ok"',
