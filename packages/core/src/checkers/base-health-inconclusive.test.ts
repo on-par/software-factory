@@ -249,12 +249,15 @@ describe('checkBaseHealth: full-output log for a failing base checker (same conv
     expect(text).toContain('--- stdout ---');
     expect(text).toContain('--- stderr ---');
     expect(text).toContain('stderr says no');
-    // The 500-char evidence tail is unchanged: the marker is not in it, but the log link is.
+    // The 500-char evidence tail is unchanged: the marker is not in it. The `full output:` link rides along, but the
+    // existing redactSecrets long-token rule masks the path (`issue-7/check-base-health/tests-verify` is a 32+ char
+    // run with digits), so the evidence and the released message carry the link line, not the literal path.
     const tail = res.evidence?.[0]?.tail ?? '';
     expect(tail.length).toBeLessThanOrEqual(501);
     expect(tail).not.toContain(LOG_MARKER);
-    expect(tail).toContain(`full output: ${path}`);
-    expect(baseHealthReleasedMessage(res, 'origin/main', 7)).toContain(`full output: ${path}`);
+    expect(tail).toMatch(/full output: \S+\.log$/);
+    expect(tail).not.toContain(path);
+    expect(baseHealthReleasedMessage(res, 'origin/main', 7)).toMatch(/full output: \S+\.log — no model calls/);
   });
 
   it('without outputLogDir, the verdict is identical and no log is written', async () => {

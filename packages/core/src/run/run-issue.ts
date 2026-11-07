@@ -19,6 +19,7 @@
 // these ports and re-raises a parked/escalated outcome as LaneParkError.
 
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
@@ -589,6 +590,9 @@ async function runIssueOnce(
           timeoutSeconds: request.timeouts.check,
           testsTimeoutSeconds: request.timeouts.tests,
           compileTimeoutSeconds: request.timeouts.compile,
+          ...(request.logsDir !== undefined
+            ? { outputLogDir: join(request.logsDir, `issue-${workKey}`, 'check-base-health') }
+            : {}),
           log: (type, msg) => log(type, msg),
         })
         .catch((err): undefined => {
