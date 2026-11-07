@@ -52,7 +52,7 @@ on:
         required: false
 
 env:
-  FACTORY_CLI_VERSION: 0.9.30
+  FACTORY_CLI_VERSION: 0.9.31
 
 jobs:
   run:

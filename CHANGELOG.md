@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.31 - 2026-11-06
+
+The factory works under a GitHub App installation token wherever it checks its own comments, finished worktrees are evicted under a retention budget, a timed provider cap on a stage-pinned model falls through to the next provider, and releases take about 4 minutes (#3985, #3970, #3977).
+All seven published `@on-par` packages move to 0.9.31 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - Repository-wide `worktree.retainMax` retention budget evicts clean, fully pushed finished worktrees oldest first, and the disk guard reclaims them before holding BUILD/CHECK or claims (#3970).
@@ -17,7 +23,7 @@ section to `## X.Y.Z - date`. See
 
 ### Fixed
 
-- GitHub App installation tokens work wherever the factory checks its own comments: REST `GET /user` is refused for them (403), so the factory now resolves its App bot account through GraphQL `viewer`. Stack-mode runs no longer park on "slice plan lookup failed". Park comments, PR run state, decompose proposals, feedback rounds and stack approval recognize the factory's own comments and reviews, and still trust only that exact account (ADR-0176).
+- GitHub App installation tokens work wherever the factory checks its own comments: REST `GET /user` is refused for them (403), so the factory now resolves its App bot account through GraphQL `viewer`. Stack-mode runs no longer park on "slice plan lookup failed". Park comments, PR run state, decompose proposals, feedback rounds and stack approval recognize the factory's own comments and reviews, and still trust only that exact account (ADR-0176, #3985).
 - A timed provider cap (`usage_cap` or `rate_limit`) on a stage-pinned model advances the stage to the next configured `models.providerOrder` provider instead of releasing without a secondary attempt (#3977).
 
 ## 0.9.30 - 2026-11-06
