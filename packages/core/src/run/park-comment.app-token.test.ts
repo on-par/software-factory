@@ -20,7 +20,7 @@ function octokitFor(comments: { id: number; body: string; user: Author }[], toke
       : vi.fn(async () => {
           throw Object.assign(new Error('Resource not accessible by integration'), { status: 403 });
         });
-  const graphql = vi.fn(async () => ({ viewer: { __typename: 'Bot', login: 'factory-app', databaseId: APP_BOT } }));
+  const graphql = vi.fn(async () => ({ viewer: { login: 'factory-app[bot]', databaseId: APP_BOT } }));
   const listComments = vi.fn(async () => ({ data: comments }));
   const createComment = vi.fn(async () => ({ data: { id: 1000 } }));
   const updateComment = vi.fn(async () => ({ data: {} }));

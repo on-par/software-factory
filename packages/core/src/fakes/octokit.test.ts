@@ -45,6 +45,14 @@ describe('createSimOctokit', () => {
     ]);
   });
 
+  it('answers users.getByUsername with a plain User by default and records the call', async () => {
+    const { octokit, calls } = createSimOctokit();
+    await expect(octokit.rest.users.getByUsername({ username: 'octo' })).resolves.toEqual({
+      data: { login: 'octo', type: 'User' },
+    });
+    expect(calls).toEqual([['users.getByUsername', { username: 'octo' }]]);
+  });
+
   it('defaults an unconfigured issue body to "stub issue body"', async () => {
     const { octokit } = createSimOctokit({ titles: { 1: 'Title only' } });
     await expect(octokit.rest.issues.get({ issue_number: 1 })).resolves.toEqual({

@@ -273,7 +273,7 @@ describe('savePrRunState / loadPrRunState', () => {
     const getAuthenticated = async () => {
       throw Object.assign(new Error('Resource not accessible by integration'), { status: 403 });
     };
-    const graphql = async () => ({ viewer: { __typename: 'Bot', login: 'factory-app', databaseId: 9001 } });
+    const graphql = async () => ({ viewer: { login: 'factory-app[bot]', databaseId: 9001 } });
     const octokit = Object.assign({} as Octokit, {
       graphql,
       rest: { users: { getAuthenticated }, issues: { listComments } },

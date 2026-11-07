@@ -70,6 +70,13 @@ jobs:
       - name: Knip
         run: npm run knip
 
+      # The job token is a GitHub App installation token: REST GET /user refuses it, so this exercises the real
+      # GraphQL self-identity fallback against GitHub. Read-only; the suite skips wherever the variable is unset.
+      - name: App installation-token identity (live)
+        env:
+          FACTORY_LIVE_GITHUB_TOKEN: ${{ github.token }}
+        run: npx vitest run packages/core/src/utils/github-identity.live.test.ts
+
   test:
     name: test (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest

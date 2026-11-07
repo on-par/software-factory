@@ -134,7 +134,7 @@ describe('findSlicePlanComment with a GitHub App installation token', () => {
       Object.assign(new Error('Resource not accessible by integration'), { status: 403 }),
     );
     const graphql = vi.fn().mockResolvedValue({
-      viewer: { __typename: 'Bot', login: 'factory-app', databaseId: APP_BOT },
+      viewer: { login: 'factory-app[bot]', databaseId: APP_BOT },
     });
     return { ...f, octokit: Object.assign(f.octokit, { graphql }), graphql };
   }
