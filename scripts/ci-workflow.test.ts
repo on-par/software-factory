@@ -64,6 +64,20 @@ describe('.github/workflows/ci.yml', () => {
     expect(step?.env).toHaveProperty('MAX_LINES_BOT_LOGINS');
   });
 
+  it('runs the live App installation-token identity suite with the job token, outside coverage', () => {
+    const suite = 'packages/core/src/utils/github-identity.live.test.ts';
+    const step = jobs['static']?.steps.find((s) => s.run?.includes(suite));
+    expect(step?.run).toBe(`npx vitest run ${suite}`);
+    expect(step?.env).toEqual({ FACTORY_LIVE_GITHUB_TOKEN: '${{ github.token }}' });
+    expect(step?.if).toBeUndefined();
+    // The suite skips unless it sees this exact variable, so a rename on either side would silently disable it.
+    expect(readFileSync(new URL(`../${suite}`, import.meta.url), 'utf8')).toContain(
+      'process.env.FACTORY_LIVE_GITHUB_TOKEN',
+    );
+    // Only the static job carries the token; the shards would otherwise run the live suite too.
+    expect(JSON.stringify(jobs['test'])).not.toContain('FACTORY_LIVE_GITHUB_TOKEN');
+  });
+
   it('caps every job with timeout-minutes (#755)', () => {
     for (const [id, job] of Object.entries(jobs)) expect(job['timeout-minutes'], id).toBeGreaterThan(0);
   });

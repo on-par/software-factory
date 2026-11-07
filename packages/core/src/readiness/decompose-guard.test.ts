@@ -126,8 +126,9 @@ describe('checkDecomposeGuard', () => {
     const own = { ...wire(proposal(10)), user: { id: 9001, login: 'factory-app[bot]', type: 'Bot' } };
     const mock = makeOctokit({ me: () => Promise.reject(forbidden), list: () => ({ data: [own] }) });
     mock.octokit.graphql = vi.fn(async () => ({
-      viewer: { __typename: 'Bot', login: 'factory-app', databaseId: 9001 },
+      viewer: { login: 'factory-app[bot]', databaseId: 9001 },
     }));
+    mock.octokit.rest.users.getByUsername = vi.fn(async () => ({ data: own.user }));
     expect(await run(mock.octokit)).toMatchObject({ kind: 'proposal-pending', commentId: 10 });
   });
 });

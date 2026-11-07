@@ -109,9 +109,13 @@ describe('createOctokitFeedbackRoundGitHub', () => {
     const { github } = setup({
       'users.getAuthenticated': [{ fail: forbidden }, { fail: forbidden }],
       graphql: [
-        { response: { viewer: { __typename: 'Bot', login: 'factory-app', databaseId: 9001 } } },
-        { response: { viewer: { __typename: 'Bot', login: 'factory-app', databaseId: 9001 } } },
+        { response: { viewer: { login: 'factory-app[bot]', databaseId: 9001 } } },
+        { response: { viewer: { login: 'factory-app[bot]', databaseId: 9001 } } },
         { response: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } },
+      ],
+      'users.getByUsername': [
+        { response: { data: { id: 9001, login: 'factory-app[bot]', type: 'Bot' } } },
+        { response: { data: { id: 9001, login: 'factory-app[bot]', type: 'Bot' } } },
       ],
       'issues.listComments': [
         {

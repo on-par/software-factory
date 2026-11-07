@@ -21,6 +21,7 @@ export type SimOctokitEndpoint =
   | 'pulls.createReplyForReviewComment'
   | 'pulls.requestReviewers'
   | 'users.getAuthenticated'
+  | 'users.getByUsername'
   | 'checks.listForRef'
   | 'graphql';
 
@@ -65,7 +66,7 @@ export interface SimOctokit {
       createReplyForReviewComment: (args: any) => Promise<any>;
       requestReviewers: (args: any) => Promise<any>;
     };
-    users: { getAuthenticated: () => Promise<any> };
+    users: { getAuthenticated: () => Promise<any>; getByUsername: (args: any) => Promise<any> };
     checks: { listForRef: (args: any) => Promise<any> };
   };
 }
@@ -133,6 +134,10 @@ export function createSimOctokit(options: SimOctokitOptions = {}): {
       users: {
         getAuthenticated: () =>
           invoke('users.getAuthenticated', ['users.getAuthenticated'], () => ({ data: { login: 'factory-bot' } })),
+        getByUsername: (args: any) =>
+          invoke('users.getByUsername', ['users.getByUsername', args], () => ({
+            data: { login: args.username, type: 'User' },
+          })),
       },
       checks: {
         listForRef: (args: any) =>
