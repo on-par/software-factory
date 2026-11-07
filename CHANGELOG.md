@@ -7,9 +7,15 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.32 - 2026-11-07
+
+GitHub App installation tokens resolve the factory's own identity again: the GraphQL `viewer` fallback asks only valid `User` fields and is confirmed through REST (#3987).
+All seven published `@on-par` packages move to 0.9.32 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Fixed
 
-- GitHub App installation tokens resolve the factory's own identity again. The GraphQL `viewer` fallback added in 0.9.31 spread `... on Bot` inside `User`, so GitHub rejected the query for every token and stack-mode runs still parked on "slice plan lookup failed". The fallback now asks only `User` fields and accepts the viewer only when REST confirms its `[bot]` account is a Bot with the same numeric id. A new test checks every GraphQL document the factory sends against GitHub's published schema, and CI checks identity resolution with a real installation token (ADR-0176).
+- GitHub App installation tokens resolve the factory's own identity again. The GraphQL `viewer` fallback added in 0.9.31 spread `... on Bot` inside `User`, so GitHub rejected the query for every token and stack-mode runs still parked on "slice plan lookup failed". The fallback now asks only `User` fields and accepts the viewer only when REST confirms its `[bot]` account is a Bot with the same numeric id. A new test checks every GraphQL document the factory sends against GitHub's published schema, and CI checks identity resolution with a real installation token (ADR-0176, #3987).
 
 ## 0.9.31 - 2026-11-06
 
