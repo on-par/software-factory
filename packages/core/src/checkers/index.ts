@@ -161,6 +161,7 @@ export const compileChecker: CheckerFn = async (ctx) => {
       result: 'FAIL',
       details: await commandFailureDetails(ctx, 'compile', label, r, evidence(r)),
       ...(r.timedOut ? { timedOut: true } : {}),
+      failedCommand: { command: label, exitCode: r.exitCode, timeoutSeconds },
     };
   } catch (e: any) {
     return {
@@ -240,6 +241,7 @@ const runFullTests: CheckerFn = async (ctx) => {
         details: await commandFailureDetails(ctx, 'tests', cmd.label, r, describeFailure(r)),
         ...(r.timedOut ? { timedOut: true } : {}),
         ...(marker ? { sandboxEnv: marker } : {}),
+        failedCommand: { command: cmd.argv.join(' '), exitCode: r.exitCode, timeoutSeconds },
       };
     }
 

@@ -155,7 +155,7 @@ describe('compareBaseline', () => {
 
   it('reports fails-on-base, comparing test names when both name tests', () => {
     expect(compareBaseline([out('lint', 'FAIL', 'x')], [out('lint', 'FAIL', 'y')])).toEqual([
-      { checker: 'lint', verdict: 'fails-on-base', baseResult: 'FAIL' },
+      { checker: 'lint', verdict: 'fails-on-base', baseResult: 'FAIL', baseDetails: 'y' },
     ]);
     const [c] = compareBaseline([out('tests', 'FAIL', 'FAIL a\nFAIL b')], [out('tests', 'FAIL', 'FAIL a\nFAIL c')]);
     expect(c.sharedFailingTests).toEqual(['a']);

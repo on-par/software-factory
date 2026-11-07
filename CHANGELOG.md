@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Fixed
+
+- The pre-PLAN base health check no longer reports a base check that could not run as failing tests. A timeout, an environment exit (78), a missing command (126/127) or a command with no exit code is now `inconclusive`: the issue is still released and the base held before any model call, but the message says the check could not run and names the command, exit code or timeout and a bounded output tail. These results are never cached. A real test failure still releases as before, and its message now carries the same bounded evidence.
+
 ## 0.9.32 - 2026-11-07
 
 GitHub App installation tokens resolve the factory's own identity again: the GraphQL `viewer` fallback asks only valid `User` fields and is confirmed through REST (#3987).

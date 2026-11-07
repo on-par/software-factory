@@ -19,6 +19,7 @@ export type ParkReason = Extract<
 
 import type { BuildRoutePin } from '../config/repo.js';
 import type { ShipDraftReason, ShipResult } from '../phases/ship-types.js';
+import type { BaseHealthEvidence } from '../checkers/base-health.js';
 
 export type BuildRoute = BuildRoutePin;
 
@@ -101,6 +102,8 @@ export type RunOutcome =
       awaitingCi?: boolean;
       /** Red because a fresh local re-run confirmed a cached FAIL that CI calls green (#3287). */
       confirmedLocally?: boolean;
+      /** Pre-PLAN base health evidence; failingChecks is empty when every entry is inconclusive (could not run). */
+      baseEvidence?: BaseHealthEvidence[];
       failureSignature?: string;
       /** BUILD output was kept and a check-resume record written (#2564). */
       buildPreserved?: boolean;
