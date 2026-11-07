@@ -54,6 +54,15 @@ describe('resolveSelfIdentity', () => {
     await expect(resolveSelfIdentity(octokit as never)).rejects.toBe(original);
   });
 
+  it('rethrows the original 403 when a non-Bot viewer has a [bot]-suffixed login', async () => {
+    const original = INTEGRATION_403();
+    const { octokit } = octokitWith(
+      { fail: original },
+      { response: { viewer: { __typename: 'User', login: 'x[bot]' } } },
+    );
+    await expect(resolveSelfIdentity(octokit as never)).rejects.toBe(original);
+  });
+
   it('rethrows the original 403 when the GraphQL viewer has no login', async () => {
     const original = INTEGRATION_403();
     const { octokit } = octokitWith({ fail: original }, { response: { viewer: { __typename: 'Bot', login: '' } } });

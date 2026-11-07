@@ -241,4 +241,23 @@ describe('stack approval gate (#3366)', () => {
     ]);
     expect(graphql).toHaveBeenCalledTimes(1);
   });
+
+  it('retries the identity lookup after a failure instead of caching the rejection', async () => {
+    const listReviews = vi.fn(async () => ({ data: [] }));
+    const getAuthenticated = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error('Server Error'), { status: 500 }))
+      .mockResolvedValue({ data: { id: 42, login: 'octo', type: 'User' } });
+    const octokit: any = {
+      rest: {
+        pulls: { get: async () => ({ data: { head: { sha: 'abc' } } }), listReviews },
+        users: { getAuthenticated },
+      },
+    };
+    const ops = createQueuePreflightOps(octokit, 'o', 'r', { stackMode: true });
+    await expect(ops.getPullReviews(5)).rejects.toThrow('Server Error');
+    const second = await ops.getPullReviews(5);
+    expect(second.selfId).toBe(42);
+    expect(getAuthenticated).toHaveBeenCalledTimes(2);
+  });
 });

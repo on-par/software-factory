@@ -42,8 +42,7 @@ export async function resolveSelfIdentity(octokit: SelfIdentityOctokit): Promise
     if (!isForbidden(err) || octokit.graphql === undefined) throw err;
     const { viewer } = await octokit.graphql<ViewerResponse>(VIEWER_QUERY);
     const login = viewer?.login ?? '';
-    const isBot = viewer?.__typename === 'Bot' || login.endsWith(BOT_SUFFIX);
-    if (!isBot || login === '') throw err;
+    if (viewer?.__typename !== 'Bot' || login === '') throw err;
     const id = typeof viewer?.databaseId === 'number' ? viewer.databaseId : undefined;
     return { id, login: login.endsWith(BOT_SUFFIX) ? login : `${login}${BOT_SUFFIX}`, kind: 'bot' };
   }

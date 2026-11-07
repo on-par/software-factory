@@ -104,7 +104,14 @@ export function makeQueuePreflightOps(
     stackOnOpenPrerequisite: opts.stackOnOpenPrerequisite ?? false,
     getPullReviews: async (prNumber) => {
       const { data: pull } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
-      self ??= resolveSelfIdentity(octokit);
+      if (self === undefined) {
+        const pending = resolveSelfIdentity(octokit);
+        self = pending;
+        // A failed lookup is not memoized: the next call retries.
+        pending.catch(() => {
+          if (self === pending) self = undefined;
+        });
+      }
       const me = await self;
       const reviews: StackPullReviews['reviews'] = [];
       for (let page = 1; ; page++) {
