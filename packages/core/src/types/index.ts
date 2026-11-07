@@ -137,6 +137,8 @@ export interface CheckerOutput {
   sandboxEnv?: string;
   /** The compile/tests command that FAILed: argv, exit code (-1 = none: killed or spawn failure) and timeout. */
   failedCommand?: { command: string; exitCode: number; timeoutSeconds: number };
+  /** The compile/tests checker crashed in its own catch branch: no command verdict (base health: inconclusive). */
+  checkerError?: true;
   evidencePlanResults?: EvidencePlanResult[];
 }
 

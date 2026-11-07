@@ -9,7 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Fixed
 
-- The pre-PLAN base health check no longer reports a base check that could not run as failing tests. A timeout, an environment exit (78), a missing command (126/127) or a command with no exit code is now `inconclusive`: the issue is still released and the base held before any model call, but the message says the check could not run and names the command, exit code or timeout and a bounded output tail. These results are never cached. A real test failure still releases as before, and its message now carries the same bounded evidence.
+- The pre-PLAN base health check no longer reports a base check that could not run as failing tests. A timeout, an environment exit (78), a missing command (126/127, including `scripts/verify.ps1` without `pwsh` on PATH), a command with no exit code or a checker crash is now `inconclusive`: the issue is still released and the base held before any model call, but the released message, the lane-paused event, the base hold, `factory status` and the kept-hold lane warning say the base checks could not run (not a test failure) and name the command, exit code or timeout and a bounded, redacted output tail. These results are never cached, and older cached entries of this kind are ignored. A real test failure still releases as before, and those surfaces now carry the same bounded evidence.
 
 ## 0.9.32 - 2026-11-07
 

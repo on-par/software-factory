@@ -2,8 +2,9 @@
 // environment exit (78) or a missing command is inconclusive, never a red base; a real test
 // failure stays red and carries bounded evidence.
 import { execFileSync } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { delimiter, join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,16 +13,20 @@ import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
 import type { BaselineReport } from './baseline.js';
 import { type BaseHealthOptions, checkBaseHealth } from './base-health.js';
+import { testsChecker } from './index.js';
 
 const tempDirs = createTempDirs();
 afterEach(() => tempDirs.cleanup());
 
 const MARKER = 'verify: ENVIRONMENT ERROR: loopback bind denied (EPERM)';
 
-async function repoWithVerify(body: string): Promise<string> {
+async function repoWithVerify(body: string, script = 'verify.sh'): Promise<string> {
   const dir = await tempDirs.make('base-health-inconclusive-');
   await mkdir(join(dir, 'scripts'));
-  await writeFile(join(dir, 'scripts/verify.sh'), `#!/usr/bin/env bash\n${body}\n`);
+  await writeFile(
+    join(dir, 'scripts', script),
+    script === 'verify.sh' ? `#!/usr/bin/env bash\n${body}\n` : `${body}\n`,
+  );
   const git = (...args: string[]) =>
     execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], {
       cwd: dir,
@@ -34,8 +39,12 @@ async function repoWithVerify(body: string): Promise<string> {
   return dir;
 }
 
-async function health(body: string, extra: Partial<BaseHealthOptions> = {}) {
-  const worktree = await repoWithVerify(body);
+async function health(
+  body: string,
+  extra: Partial<BaseHealthOptions> = {},
+  setup: { script?: string; baselineDeps?: NonNullable<BaseHealthOptions['deps']>['baselineDeps'] } = {},
+) {
+  const worktree = await repoWithVerify(body, setup.script);
   const log = vi.fn<(type: EventKind, msg: string) => void>();
   const res = await checkBaseHealth({
     worktree,
@@ -45,7 +54,11 @@ async function health(body: string, extra: Partial<BaseHealthOptions> = {}) {
     testsTimeoutSeconds: 1,
     log,
     ...extra,
-    deps: { memo: new Map<string, Promise<BaselineReport>>(), confirmed: new Set<string>() },
+    deps: {
+      memo: new Map<string, Promise<BaselineReport>>(),
+      confirmed: new Set<string>(),
+      ...(setup.baselineDeps ? { baselineDeps: setup.baselineDeps } : {}),
+    },
   });
   return { res, log, worktree, messages: log.mock.calls.map((c) => `${c[0]}: ${c[1]}`) };
 }
@@ -98,6 +111,77 @@ describe('checkBaseHealth: environment and setup failures are inconclusive, not 
       }),
     ]);
     expect(messages.join('\n')).toMatch(/command not found/);
+  });
+
+  it('a verify shell killed by a signal (kill -9 $$) is inconclusive with no exit code', async () => {
+    const { res, messages } = await health('echo going down\nkill -9 $$');
+    expect(res.kind).toBe('inconclusive');
+    expect(res.failingChecks).toEqual([]);
+    expect(res.evidence).toEqual([expect.objectContaining({ checker: 'tests', cause: 'killed' })]);
+    expect(res.evidence?.[0]).not.toHaveProperty('exitCode');
+    expect(messages.join('\n')).toMatch(/tests: no exit code \(killed by a signal or failed to start\)/);
+  });
+
+  it('scripts/verify.ps1 with pwsh missing from PATH is an inconclusive missing command, not a test failure', async () => {
+    // PATH holds git (the base worktree needs it) and the system dirs, never pwsh.
+    const bin = await tempDirs.make('base-health-nopwsh-bin-');
+    const git = execFileSync('/usr/bin/which', ['git'], { encoding: 'utf8' }).trim();
+    await symlink(git, join(bin, 'git'));
+    const PATH = [bin, '/usr/bin', '/bin'].join(delimiter);
+    expect(PATH.split(delimiter).some((d) => existsSync(join(d, 'pwsh')))).toBe(false);
+    const { res, messages } = await health(
+      'Write-Output "ok"',
+      { env: { PATH, HOME: process.env.HOME ?? '' } },
+      { script: 'verify.ps1' },
+    );
+    expect(res.kind).toBe('inconclusive');
+    expect(res.failingChecks).toEqual([]);
+    expect(res.evidence).toEqual([
+      expect.objectContaining({
+        checker: 'tests',
+        cause: 'missing-command',
+        exitCode: 127,
+        command: expect.stringContaining('pwsh'),
+        tail: expect.stringContaining('pwsh (PowerShell 7) is not on PATH'),
+      }),
+    ]);
+    expect(messages.join('\n')).not.toMatch(/is red/);
+  });
+
+  it('a tests checker that crashes on base is inconclusive (checker-error), not red', async () => {
+    // The real tests checker runs, but its command runner throws: the checker's own catch branch answers.
+    const runCheckers = (async (ctx: Parameters<typeof testsChecker>[0]) => {
+      const tests = await testsChecker({
+        ...ctx,
+        runCommand: async () => {
+          throw new Error('runner exploded');
+        },
+      });
+      const pass = (checker: string) => ({ checker, result: 'PASS' as const, details: '' });
+      return { failures: 1, passes: 2, skips: 0, total: 3, results: [pass('compile'), pass('lint'), tests] };
+    }) as never;
+    const { res, messages } = await health('echo never runs', {}, { baselineDeps: { runCheckers } });
+    expect(res.kind).toBe('inconclusive');
+    expect(res.failingChecks).toEqual([]);
+    expect(res.evidence).toEqual([
+      expect.objectContaining({
+        checker: 'tests',
+        cause: 'checker-error',
+        tail: expect.stringContaining('runner exploded'),
+      }),
+    ]);
+    expect(messages.join('\n')).toMatch(/tests: the checker crashed before a verdict/);
+  });
+
+  it('redacts a token from the verify output in the evidence, the reason and the log', async () => {
+    // The command runner already scrubs GitHub tokens; a provider key is what reaches the evidence unredacted.
+    // Built at runtime so no secret-shaped literal sits in source; the value still matches redactSecrets' `sk-…` rule.
+    const secret = ['sk', ['ABCDEFGHIJKLMNOPQRSTUVWX', '0123456789'].join('')].join('-');
+    const { res, messages } = await health(`echo "export PROVIDER_KEY=${secret}" >&2\ndefinitely-not-a-real-tool-xyz`);
+    expect(res.kind).toBe('inconclusive');
+    expect(JSON.stringify(res)).not.toContain(secret);
+    expect(messages.join('\n')).not.toContain(secret);
+    expect(res.evidence?.[0]?.tail).toContain('command not found');
   });
 
   it('never caches an inconclusive base result', async () => {

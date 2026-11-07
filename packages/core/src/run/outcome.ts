@@ -104,6 +104,8 @@ export type RunOutcome =
       confirmedLocally?: boolean;
       /** Pre-PLAN base health evidence; failingChecks is empty when every entry is inconclusive (could not run). */
       baseEvidence?: BaseHealthEvidence[];
+      /** Pre-PLAN base checks could not run (timeout, environment, setup): not a test failure; failingChecks is empty. */
+      baseInconclusive?: true;
       failureSignature?: string;
       /** BUILD output was kept and a check-resume record written (#2564). */
       buildPreserved?: boolean;

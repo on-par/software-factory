@@ -29,6 +29,8 @@ export interface BaselineCheckerComparison {
   baseDetails?: string;
   /** The base FAIL's command, exit code and timeout, when the checker recorded them. */
   baseCommand?: CheckerOutput['failedCommand'];
+  /** The base checker crashed before a verdict (CheckerOutput.checkerError). */
+  baseCheckerError?: true;
   /** Failing tests named by both the head and base output; present only when both name tests. */
   sharedFailingTests?: string[];
   /** Failing tests named by the head output but not the base output; present only when both name tests. */
@@ -131,6 +133,7 @@ export function compareBaseline(
     if (b.timedOut === true) comparison.baseTimedOut = true;
     comparison.baseDetails = b.details;
     if (b.failedCommand) comparison.baseCommand = b.failedCommand;
+    if (b.checkerError === true) comparison.baseCheckerError = true;
     const headTests = extractFailingTestNames(h.details);
     const baseTests = extractFailingTestNames(b.details);
     if (headTests.length > 0 && baseTests.length > 0) {

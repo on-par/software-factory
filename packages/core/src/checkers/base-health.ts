@@ -21,6 +21,7 @@ import {
   runBaselineCheckers,
 } from './baseline.js';
 import { BaselineCache, hashBaselineCheckerConfig, hashBaselineEnv } from './baseline-cache.js';
+import { redactSecrets } from '../filing/redact.js';
 import { outputTail } from './command-output.js';
 import { describeInconclusive, type InconclusiveCause, inconclusiveCause } from './inconclusive.js';
 import { runAllCheckers } from './index.js';
@@ -35,13 +36,15 @@ export const BASE_DIVERGENCE_TAIL_CHARS = 500;
 /** One base checker FAIL, as quoted in the result and the released message. */
 export interface BaseHealthEvidence {
   checker: string;
-  /** Set when the FAIL never reached a verdict; absent for a genuine failure. */
+  /** Set when the FAIL never reached a verdict. A timed-out compile also carries 'timeout' while it stays red on
+   *  its CI-gated path (#3186); every other entry with a cause is inconclusive. */
   cause?: InconclusiveCause;
+  /** The command, passed through redactSecrets. */
   command?: string;
   /** The command's exit code; absent when it had none (timeout kill, signal, spawn failure). */
   exitCode?: number;
   timeoutSeconds?: number;
-  /** Tail of the checker's FAIL details, at most BASE_DIVERGENCE_TAIL_CHARS (+1 for the ellipsis). */
+  /** Tail of the checker's FAIL details, at most BASE_DIVERGENCE_TAIL_CHARS (+1 for the ellipsis), passed through redactSecrets. */
   tail: string;
 }
 
@@ -102,19 +105,32 @@ const defaultConfirmed = new Set<string>();
 /** Why a base FAIL is inconclusive; a timed-out compile keeps its CI-gated path (#3186). */
 function inconclusiveOf(c: BaselineCheckerComparison): InconclusiveCause | undefined {
   if (c.verdict !== 'fails-on-base' || (c.checker === 'compile' && c.baseTimedOut === true)) return undefined;
-  return inconclusiveCause({ timedOut: c.baseTimedOut === true, exitCode: c.baseCommand?.exitCode });
+  return comparisonCause(c);
+}
+
+function comparisonCause(c: BaselineCheckerComparison): InconclusiveCause | undefined {
+  return inconclusiveCause({
+    timedOut: c.baseTimedOut === true,
+    exitCode: c.baseCommand?.exitCode,
+    checkerError: c.baseCheckerError === true,
+  });
+}
+
+/** Bounded, redacted output tail: verify output can echo tokens (set -x, env dumps) into events and logs. */
+function redactedTail(details: string): string {
+  return outputTail(redactSecrets(details), BASE_DIVERGENCE_TAIL_CHARS);
 }
 
 function toEvidence(c: BaselineCheckerComparison): BaseHealthEvidence {
   const cmd = c.baseCommand;
-  const cause = inconclusiveCause({ timedOut: c.baseTimedOut === true, exitCode: cmd?.exitCode });
+  const cause = comparisonCause(c);
   return {
     checker: c.checker,
     ...(cause ? { cause } : {}),
-    ...(cmd ? { command: cmd.command } : {}),
+    ...(cmd ? { command: redactSecrets(cmd.command) } : {}),
     ...(cmd && cmd.exitCode >= 0 ? { exitCode: cmd.exitCode } : {}),
     ...(cmd ? { timeoutSeconds: cmd.timeoutSeconds } : {}),
-    tail: outputTail(c.baseDetails ?? '', BASE_DIVERGENCE_TAIL_CHARS),
+    tail: redactedTail(c.baseDetails ?? ''),
   };
 }
 
@@ -129,13 +145,18 @@ function renderBaseHealthEvidence(e: BaseHealthEvidence): string {
   return `${e.checker}: ${what}${e.command ? ` — \`${e.command}\`` : ''}${tail ? `: ${tail}` : ''}`;
 }
 
+/** Every evidence entry on one line, `; `-separated — the text the lane-paused event, base hold and status quote. */
+export function describeBaseHealthEvidence(evidence: readonly BaseHealthEvidence[]): string {
+  return evidence.map(renderBaseHealthEvidence).join('; ');
+}
+
 /** run-issue's environment-released line for a red or inconclusive base, with the evidence. */
 export function baseHealthReleasedMessage(health: BaseHealthResult, ref: string, workKey: string | number): string {
   const verdict =
     health.kind === 'red'
       ? `fails ${health.failingChecks.join(', ')} before PLAN`
       : 'base checks could not run before PLAN (not a test failure)';
-  const evidence = (health.evidence ?? []).map(renderBaseHealthEvidence).join('; ');
+  const evidence = describeBaseHealthEvidence(health.evidence ?? []);
   const base = `${ref} ${(health.baseSha ?? '').slice(0, 8)}`;
   return `${base} ${verdict}${evidence ? ` — ${evidence}` : ''} — no model calls, releasing #${workKey} to queued`;
 }
@@ -319,7 +340,7 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
             confirmedSet.add(key);
             confirmedLocally = true;
             for (const checker of confirmed) {
-              const tail = (captured.find((o) => o.checker === checker)?.details ?? '').slice(
+              const tail = redactSecrets(captured.find((o) => o.checker === checker)?.details ?? '').slice(
                 -BASE_DIVERGENCE_TAIL_CHARS,
               );
               log(
@@ -362,7 +383,7 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
       };
     }
     if (inconclusive.length > 0) {
-      const reason = inconclusive.map(renderBaseHealthEvidence).join('; ');
+      const reason = describeBaseHealthEvidence(inconclusive);
       log(
         'environment_warning',
         `base health: ${ref} ${sha8} is inconclusive — a base check could not run, not a test failure: ${reason}`,

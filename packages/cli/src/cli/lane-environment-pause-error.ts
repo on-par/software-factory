@@ -12,6 +12,10 @@ export class LaneEnvironmentPauseError extends Error {
   readonly awaitingCi?: boolean;
   /** A fresh local re-run failed while CI was green (#3287). */
   readonly confirmedLocally?: boolean;
+  /** Pre-PLAN base checks could not run (timeout, environment, setup): not a test failure; failingChecks is empty. */
+  readonly inconclusive?: true;
+  /** Pre-PLAN base health evidence on one line (bounded, redacted): cause, command, exit code, timeout, output tail. */
+  readonly baseEvidence?: string;
 
   constructor(
     message: string,
@@ -22,9 +26,13 @@ export class LaneEnvironmentPauseError extends Error {
       buildPreserved?: boolean;
       awaitingCi?: boolean;
       confirmedLocally?: boolean;
+      inconclusive?: true;
+      baseEvidence?: string;
     },
   ) {
     super(message);
+    if (failure.inconclusive === true) this.inconclusive = true;
+    if (failure.baseEvidence !== undefined) this.baseEvidence = failure.baseEvidence;
     if (failure.awaitingCi !== undefined) this.awaitingCi = failure.awaitingCi;
     if (failure.confirmedLocally !== undefined) this.confirmedLocally = failure.confirmedLocally;
     if (failure.buildPreserved !== undefined) this.buildPreserved = failure.buildPreserved;

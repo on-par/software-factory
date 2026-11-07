@@ -39,6 +39,7 @@ import type {
   WorktreeSandbox,
 } from '@on-par/factory-core/internal';
 import {
+  describeBaseHealthEvidence,
   findOpenPR,
   inPlaceWorkspace,
   isEgressEnforced,
@@ -278,6 +279,8 @@ export function finishOutcome({
       buildPreserved: outcome.buildPreserved,
       awaitingCi: outcome.awaitingCi,
       confirmedLocally: outcome.confirmedLocally,
+      inconclusive: outcome.baseInconclusive,
+      baseEvidence: outcome.baseEvidence?.length ? describeBaseHealthEvidence(outcome.baseEvidence) : undefined,
     });
   }
 

@@ -587,6 +587,7 @@ const INTERNAL_API_KEYS = [
   'cleanupWorktree',
   'colorEnabled',
   'defaultRemoteBase',
+  'describeBaseHealthEvidence',
   'ensureDir',
   'factoryBranchIssue',
   'factoryBranchPrefixes',

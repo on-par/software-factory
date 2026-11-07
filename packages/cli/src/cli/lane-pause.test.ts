@@ -6,7 +6,9 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
 
-import { pauseLaneForProviderCap, waitForProvidersRestored } from './lane-pause.js';
+import { readBaseHold } from './base-hold.js';
+import { LaneEnvironmentPauseError } from './lane-environment-pause-error.js';
+import { pauseLaneForBrokenBase, pauseLaneForProviderCap, waitForProvidersRestored } from './lane-pause.js';
 
 const paths = { stop: '/stop', events: '/events' } as never;
 
@@ -128,5 +130,59 @@ describe('pauseLaneForProviderCap all_providers_down latch (#3340)', () => {
       { providers: [], resetAt: RESET },
     );
     expect(events).toEqual(['lane-paused']);
+  });
+});
+
+describe('pauseLaneForBrokenBase: inconclusive vs red base', () => {
+  const SHA = 'abc1234567890def'.padEnd(40, '0');
+  const EVIDENCE =
+    'tests: timeout after 300s — `bash scripts/verify.sh --no-e2e`: timed out after 300s (raise timeouts.tests_seconds or FACTORY_TESTS_TIMEOUT)';
+  async function pause(err: LaneEnvironmentPauseError) {
+    const dir = await tempDirs.make('lane-pause-base-');
+    const events: { msg: string; extra: unknown }[] = [];
+    const ctx = {
+      lane: 'app',
+      paths: { events: join(dir, 'events.jsonl'), baseHold: join(dir, 'state', 'base-hold.json') } as never,
+      emitEvent: ((_f: string, _t: string, _k: unknown, msg: string, extra: unknown) =>
+        events.push({ msg, extra })) as never,
+    };
+    pauseLaneForBrokenBase(ctx, 7, err, 'on-par/app', () => new Date());
+    return { events, hold: readBaseHold(join(dir, 'state', 'base-hold.json')) };
+  }
+
+  it('an inconclusive base says the base checks could not run (not a test failure), with the evidence', async () => {
+    const { events, hold } = await pause(
+      new LaneEnvironmentPauseError('x', {
+        baseSha: SHA,
+        failingChecks: [],
+        inconclusive: true,
+        baseEvidence: EVIDENCE,
+      }),
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0].msg).toBe(
+      `lane 'app' paused: base checks could not run on base abc12345 (not a test failure): ${EVIDENCE}; #7 released to queued`,
+    );
+    expect(events[0].msg).not.toMatch(/failed only on checkers/);
+    expect(hold).toMatchObject({ baseSha: SHA, failingChecks: [], inconclusive: true, evidence: EVIDENCE, issue: 7 });
+  });
+
+  it('a red base keeps its wording and adds the evidence', async () => {
+    const red = 'tests: exit 1 — `bash scripts/verify.sh --no-e2e`: FAIL  src/math.test.ts > add > adds';
+    const { events, hold } = await pause(
+      new LaneEnvironmentPauseError('x', { baseSha: SHA, failingChecks: ['tests'], baseEvidence: red }),
+    );
+    expect(events[0].msg).toBe(
+      `lane 'app' paused: #7 failed only on checkers that also fail on base abc12345 (tests) — ${red}; #7 released to queued`,
+    );
+    expect(hold).toMatchObject({ failingChecks: ['tests'], evidence: red });
+    expect(hold?.inconclusive).toBeUndefined();
+  });
+
+  it('a CHECK-phase environment pause without evidence keeps the old text (control)', async () => {
+    const { events } = await pause(new LaneEnvironmentPauseError('x', { baseSha: SHA, failingChecks: ['lint'] }));
+    expect(events[0].msg).toBe(
+      "lane 'app' paused: #7 failed only on checkers that also fail on base abc12345 (lint); #7 released to queued",
+    );
   });
 });

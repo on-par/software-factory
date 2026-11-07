@@ -168,6 +168,7 @@ export const compileChecker: CheckerFn = async (ctx) => {
       checker: 'compile',
       result: 'FAIL',
       details: `unexpected checker error: ${(e?.stderr || e?.message || String(e)).slice(0, 500)}`,
+      checkerError: true,
     };
   }
 };
@@ -223,6 +224,8 @@ const runFullTests: CheckerFn = async (ctx) => {
         result: 'FAIL',
         details:
           'verify.ps1 failed: pwsh (PowerShell 7) is not on PATH — scripts/verify.ps1 needs it. Install PowerShell: https://aka.ms/powershell (macOS: brew install --cask powershell; Linux: see the same page).',
+        // The command never ran: the shell's command-not-found exit, so base health reads it as inconclusive.
+        failedCommand: { command: cmd.argv.join(' '), exitCode: 127, timeoutSeconds },
       };
     }
     if (cmd.runner !== 'none') {
@@ -262,6 +265,7 @@ const runFullTests: CheckerFn = async (ctx) => {
       checker: 'tests',
       result: 'FAIL',
       details: `unexpected checker error: ${(e?.stderr || e?.message || String(e)).slice(0, 500)}`,
+      checkerError: true,
     };
   }
 };
@@ -314,6 +318,7 @@ export const lintChecker: CheckerFn = async (ctx) => {
       checker: 'lint',
       result: 'FAIL',
       details: `unexpected checker error: ${String(e?.message ?? e).slice(0, 500)}`,
+      checkerError: true,
     };
   }
   if (commands.length === 0) {

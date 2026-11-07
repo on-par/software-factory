@@ -463,11 +463,11 @@ export type { CheckResumeRecord, CheckResumeStore, PlanReuseRecord, PlanReuseSto
 // Pre-PLAN base health (#2339)
 export { BaselineCache } from './checkers/baseline-cache.js';
 export { runBaselineCheckers } from './checkers/baseline.js';
-export { BASE_HEALTH_CHECKERS, checkBaseHealth, fetchRequiredChecksVerdict } from './checkers/base-health.js';
+export { BASE_HEALTH_CHECKERS, checkBaseHealth, describeBaseHealthEvidence } from './checkers/base-health.js';
+export { fetchRequiredChecksVerdict } from './checkers/base-health.js';
 export type { BaseHealthOptions, BaseHealthResult, RequiredChecksVerdict } from './checkers/base-health.js';
 // Codex ChatGPT session freshness for doctor (#2509)
 export { codexChatgptSessionState } from './utils/codex-config.js';
-
 // Last run-time local_auth failure per agent, read by doctor (#2733)
 export { localAuthFailureSinceLogin, recordLocalAuthFailure } from './utils/local-auth-record.js';
 export { syncLandBranch } from './land/sync.js';

@@ -128,6 +128,42 @@ describe('checkBaseHealth cached FAIL with green CI (#3287)', () => {
     expect(runCheckers).not.toHaveBeenCalled();
   });
 
+  it('a cache-bypass re-run that cannot run (exit 127) is inconclusive: not red, not green, no base_divergence', async () => {
+    const { cachePath, baselineDeps, runCheckers } = await setup('PASS');
+    runCheckers.mockImplementation(async () => ({
+      failures: 1,
+      passes: 0,
+      skips: 0,
+      total: 1,
+      results: [
+        {
+          checker: 'tests',
+          result: 'FAIL' as never,
+          details: 'bash scripts/verify.sh --no-e2e failed: tool: command not found',
+          failedCommand: { command: 'bash scripts/verify.sh --no-e2e', exitCode: 127, timeoutSeconds: 300 },
+        } as never,
+      ],
+    }));
+    const res = await checkBaseHealth(
+      opts({ baselineDeps, confirmed: new Set() }, { cachePath, requiredChecksVerdict: green }),
+    );
+    expect(res).toMatchObject({ kind: 'inconclusive', failingChecks: [] });
+    expect(res.confirmedLocally).toBeUndefined();
+    expect(res.evidence).toEqual([expect.objectContaining({ checker: 'tests', cause: 'missing-command' })]);
+    expect(runCheckers).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls.filter((c) => c[0] === 'base_divergence')).toHaveLength(0);
+  });
+
+  it('redacts a token in the base_divergence output tail', async () => {
+    const secret = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const { cachePath, baselineDeps } = await setup('FAIL', `GH_TOKEN=${secret}\nFAIL src/a.test.ts`);
+    await checkBaseHealth(opts({ baselineDeps, confirmed: new Set() }, { cachePath, requiredChecksVerdict: green }));
+    const events = log.mock.calls.filter((c) => c[0] === 'base_divergence');
+    expect(events).toHaveLength(1);
+    expect(String(events[0][1])).not.toContain(secret);
+    expect(String(events[0][1])).toContain('FAIL src/a.test.ts');
+  });
+
   it('a fresh re-run error keeps the cached red without confirmedLocally', async () => {
     const { cachePath, baselineDeps, runCheckers } = await setup('PASS', '', 1);
     const res = await checkBaseHealth(

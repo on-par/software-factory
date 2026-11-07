@@ -608,6 +608,7 @@ async function runIssueOnce(
           ...(health.awaitingCi ? { awaitingCi: true } : {}),
           ...(health.confirmedLocally ? { confirmedLocally: true } : {}),
           ...(health.evidence?.length ? { baseEvidence: health.evidence } : {}),
+          ...(health.kind === 'inconclusive' ? { baseInconclusive: true as const } : {}),
         };
       }
     }

@@ -171,6 +171,7 @@ describe('runIssue — pre-PLAN base health evidence', () => {
     const outcome = await runIssue(request, policy, ports);
     expect(outcome).toMatchObject({ state: 'released', reason: 'environment', baseSha: BASE, failingChecks: [] });
     expect(outcome).toMatchObject({ baseEvidence: evidence });
+    expect(outcome).toMatchObject({ baseInconclusive: true });
     expect(routerRun).not.toHaveBeenCalled();
     const [msg] = released(log);
     expect(msg).toBeDefined();
@@ -198,6 +199,7 @@ describe('runIssue — pre-PLAN base health evidence', () => {
     });
     const outcome = await runIssue(request, policy, ports);
     expect(outcome).toMatchObject({ state: 'released', reason: 'environment', failingChecks: ['tests'] });
+    expect(outcome).not.toHaveProperty('baseInconclusive');
     const [msg] = released(log);
     expect(msg).toContain(`origin/main ${BASE.slice(0, 8)} fails tests before PLAN`);
     expect(msg).toContain('exit 1');
