@@ -136,6 +136,7 @@ describe('findSlicePlanComment with a GitHub App installation token', () => {
     const graphql = vi.fn().mockResolvedValue({
       viewer: { login: 'factory-app[bot]', databaseId: APP_BOT },
     });
+    Object.assign(f.octokit.rest.users, { getByUsername: vi.fn().mockResolvedValue({ data: appBot }) });
     return { ...f, octokit: Object.assign(f.octokit, { graphql }), graphql };
   }
 

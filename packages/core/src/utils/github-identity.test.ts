@@ -36,6 +36,7 @@ describe('resolveSelfIdentity', () => {
     const { octokit, graphqlCalls } = octokitWith(
       { fail: INTEGRATION_403() },
       viewer({ login: 'my-app[bot]', databaseId: 555 }),
+      { response: { data: { id: 555, login: 'my-app[bot]', type: 'Bot' } } },
     );
     await resolveSelfIdentity(octokit as never);
     expect(graphqlCalls()).toHaveLength(1);
@@ -44,51 +45,49 @@ describe('resolveSelfIdentity', () => {
     expect(query).not.toMatch(/\bon Bot\b|__typename/);
   });
 
-  it('accepts a [bot] viewer with a database id on an installation-token 403, without a REST lookup', async () => {
-    const { octokit, lookups } = octokitWith(
-      { fail: INTEGRATION_403() },
-      viewer({ login: 'my-app[bot]', databaseId: 555 }),
-    );
-    expect(await resolveSelfIdentity(octokit as never)).toEqual({ id: 555, login: 'my-app[bot]', kind: 'bot' });
-    expect(lookups()).toHaveLength(0);
-  });
+  // Both viewer login shapes are confirmed through REST GET /users/{login}[bot]; neither is taken on GraphQL's word.
+  const VIEWER_LOGINS = [
+    ['a [bot] viewer login', 'octo[bot]'],
+    ['a suffix-less viewer login', 'octo'],
+  ] as const;
 
-  it('accepts a suffix-less viewer only when REST names the [bot] account a Bot with the same id', async () => {
-    const { octokit, lookups } = octokitWith(
-      { fail: INTEGRATION_403() },
-      viewer({ login: 'my-app', databaseId: 555 }),
-      { response: { data: { id: 555, login: 'my-app[bot]', type: 'Bot' } } },
-    );
-    expect(await resolveSelfIdentity(octokit as never)).toEqual({ id: 555, login: 'my-app[bot]', kind: 'bot' });
-    expect(lookups()).toEqual([['users.getByUsername', { username: 'my-app[bot]' }]]);
-  });
+  it.each(VIEWER_LOGINS)(
+    'accepts %s only when REST names the [bot] account a Bot with the same id',
+    async (_label, login) => {
+      const { octokit, lookups } = octokitWith({ fail: INTEGRATION_403() }, viewer({ login, databaseId: 7 }), {
+        response: { data: { id: 7, login: 'octo[bot]', type: 'Bot' } },
+      });
+      expect(await resolveSelfIdentity(octokit as never)).toEqual({ id: 7, login: 'octo[bot]', kind: 'bot' });
+      expect(lookups()).toEqual([['users.getByUsername', { username: 'octo[bot]' }]]);
+    },
+  );
 
-  it.each([
-    ['a plain user', { id: 7, login: 'octo[bot]', type: 'User' }],
-    ['a Bot with another id', { id: 556, login: 'octo[bot]', type: 'Bot' }],
-    ['a Bot without a login', { id: 7, type: 'Bot' }],
-  ])('rethrows the original 403 when REST names the suffix-less [bot] account %s', async (_label, data) => {
-    const original = INTEGRATION_403();
-    const { octokit } = octokitWith({ fail: original }, viewer({ login: 'octo', databaseId: 7 }), {
-      response: { data },
+  describe.each(VIEWER_LOGINS)('with %s', (_label, login) => {
+    it.each([
+      ['a plain user', { id: 7, login: 'octo[bot]', type: 'User' }],
+      ['a Bot with another id', { id: 556, login: 'octo[bot]', type: 'Bot' }],
+      ['a Bot without a login', { id: 7, type: 'Bot' }],
+    ])('rethrows the original 403 when REST names the [bot] account %s', async (_kind, data) => {
+      const original = INTEGRATION_403();
+      const { octokit } = octokitWith({ fail: original }, viewer({ login, databaseId: 7 }), { response: { data } });
+      await expect(resolveSelfIdentity(octokit as never)).rejects.toBe(original);
     });
-    await expect(resolveSelfIdentity(octokit as never)).rejects.toBe(original);
-  });
 
-  it('rethrows the original 403 when a suffix-less viewer has no [bot] account (404)', async () => {
-    const original = INTEGRATION_403();
-    const { octokit } = octokitWith({ fail: original }, viewer({ login: 'octo', databaseId: 7 }), {
-      fail: httpError(404, 'Not Found'),
+    it('rethrows the original 403 when the [bot] account does not exist (404)', async () => {
+      const original = INTEGRATION_403();
+      const { octokit } = octokitWith({ fail: original }, viewer({ login, databaseId: 7 }), {
+        fail: httpError(404, 'Not Found'),
+      });
+      await expect(resolveSelfIdentity(octokit as never)).rejects.toBe(original);
     });
-    await expect(resolveSelfIdentity(octokit as never)).rejects.toBe(original);
-  });
 
-  it('throws when the REST lookup of a suffix-less viewer fails for another reason', async () => {
-    const outage = httpError(502, 'Bad Gateway');
-    const { octokit } = octokitWith({ fail: INTEGRATION_403() }, viewer({ login: 'octo', databaseId: 7 }), {
-      fail: outage,
+    it('throws when the REST lookup fails for another reason', async () => {
+      const outage = httpError(502, 'Bad Gateway');
+      const { octokit } = octokitWith({ fail: INTEGRATION_403() }, viewer({ login, databaseId: 7 }), {
+        fail: outage,
+      });
+      await expect(resolveSelfIdentity(octokit as never)).rejects.toBe(outage);
     });
-    await expect(resolveSelfIdentity(octokit as never)).rejects.toBe(outage);
   });
 
   it.each([

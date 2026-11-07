@@ -276,7 +276,7 @@ describe('savePrRunState / loadPrRunState', () => {
     const graphql = async () => ({ viewer: { login: 'factory-app[bot]', databaseId: 9001 } });
     const octokit = Object.assign({} as Octokit, {
       graphql,
-      rest: { users: { getAuthenticated }, issues: { listComments } },
+      rest: { users: { getAuthenticated, getByUsername: async () => ({ data: appBot }) }, issues: { listComments } },
     });
     const loaded = await loadPrRunState({ octokit, repo: 'o/r', prNumber: 9, key });
     expect(loaded).toMatchObject({

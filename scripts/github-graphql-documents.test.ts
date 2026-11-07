@@ -2,14 +2,15 @@
 //
 // Unit tests stub GraphQL responses, so they never notice a document GitHub would reject. This suite finds every
 // `.graphql(` / `.graphql<T>(` call in the shipped package sources, resolves its document (an inline literal, a
-// same-file `const`, or a named builder below) and runs graphql-js `validate` against the schema shipped in
-// `@octokit/graphql-schema`. A call whose document cannot be resolved fails, so a new query cannot skip the check.
+// same-file `const`, or a named builder below) and runs graphql-js `validate` against the text schema shipped in
+// `@octokit/graphql-schema`. Any other `.graphql` shape (`.graphql?.(`, `.graphql<T>` with no call) and any document
+// it cannot resolve fail the suite, so a new query cannot skip the check.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { schema as githubSchema } from '@octokit/graphql-schema';
-import { buildClientSchema, extendSchema, parse, validate, type GraphQLSchema, type IntrospectionQuery } from 'graphql';
+import { buildSchema, parse, specifiedRules, validate, type GraphQLSchema } from 'graphql';
 import { describe, expect, it } from 'vitest';
 
 import { buildPrDetailsQuery } from '../packages/core/src/kpis/sweep.js';
@@ -27,6 +28,8 @@ const TEST_ONLY = /(\.test\.tsx?$|\/(test-support|__fixtures__|fakes)\/)/;
 interface CallSite {
   site: string;
   documents: string[];
+  /** Set when the call's shape is not one this reader understands; the site then fails the suite. */
+  problem?: string;
 }
 
 function sourceFiles(dir: string): string[] {
@@ -83,53 +86,61 @@ function graphqlCallSites(): CallSite[] {
       return [];
     }
   });
-  const sites: CallSite[] = [];
-  for (const file of files) {
+  return files.flatMap((file) => {
     const rel = relative(ROOT, file);
-    if (TEST_ONLY.test(rel)) continue;
-    const src = readFileSync(file, 'utf8');
-    for (const match of src.matchAll(/\.graphql\s*(?=[<(])/g)) {
-      let i = match.index + match[0].length;
-      if (src[i] === '<') i = skipTypeArguments(src, i);
-      if (src[i] !== '(') continue;
-      i++;
-      while (/\s/.test(src[i] ?? '')) i++;
-      const line = src.slice(0, match.index).split('\n').length;
-      sites.push({ site: `${rel}:${line}`, documents: documentsAt(src, i) ?? [] });
+    return TEST_ONLY.test(rel) ? [] : callSitesIn(rel, readFileSync(file, 'utf8'));
+  });
+}
+
+const skipSpace = (src: string, start: number): number => {
+  let i = start;
+  while (/\s/.test(src[i] ?? '')) i++;
+  return i;
+};
+
+/**
+ * The `.graphql` call sites in one source file. `.graphql` followed by `<`, `(` or `?.` is a call, or a shape this
+ * reader refuses: it records a `problem` for the site instead of skipping it, so the site fails the suite.
+ */
+function callSitesIn(rel: string, src: string): CallSite[] {
+  const sites: CallSite[] = [];
+  for (const match of src.matchAll(/\.graphql\s*(?=[<(]|\?\.)/g)) {
+    const site = `${rel}:${src.slice(0, match.index).split('\n').length}`;
+    let i = match.index + match[0].length;
+    if (src.startsWith('?.', i)) {
+      sites.push({ site, documents: [], problem: 'optional call `.graphql?.(`' });
+      continue;
     }
+    if (src[i] === '<') i = skipSpace(src, skipTypeArguments(src, i));
+    if (src[i] !== '(') {
+      sites.push({ site, documents: [], problem: '`.graphql<T>` not followed by a call `(`' });
+      continue;
+    }
+    sites.push({ site, documents: documentsAt(src, skipSpace(src, i + 1)) ?? [] });
   }
   return sites;
 }
 
 /**
- * Fields GitHub serves that the pinned `@octokit/graphql-schema` snapshot predates, copied verbatim from GitHub's
- * public schema (https://docs.github.com/public/fpt/schema.docs.graphql). `extendSchema` throws once the snapshot
- * defines one of them itself, so a dependency update that catches up fails here until the entry is deleted.
+ * GitHub's public schema, built from the package's text SDL (`schema.graphql`, exposed as `schema.idl`). Upstream
+ * keeps the text schema current. The package's `schema.json` introspection copy lags it: it lacks newer fields and
+ * still carries removed ones, so it is not used.
+ *
+ * `assumeValidSDL: true` skips only graphql-js's SDL validation of the schema definition itself
+ * (`specifiedSDLRules`). That validation rejects the upstream file because it defines two `EnterpriseOwnerInfo`
+ * fields twice. It does not relax validation of the documents under test: `errorsIn` runs each one through
+ * graphql-js `validate()` with every rule in `specifiedRules` (fields exist, fragment spreads are possible,
+ * arguments are typed correctly, and so on). `validate()` also still checks the built schema's type system first,
+ * because `assumeValid` stays false.
  */
-const NEWER_THAN_SNAPSHOT = `
-  extend type Issue {
-    subIssues(after: String, before: String, first: Int, last: Int): IssueConnection!
-  }
-`;
-
-/** The package types its introspection JSON loosely; fail loudly if its shape ever changes. */
-function introspection(json: Record<string, unknown>): IntrospectionQuery {
-  const { __schema } = json;
-  if (typeof __schema !== 'object' || __schema === null || !('types' in __schema)) {
-    throw new Error('@octokit/graphql-schema: schema.json has no __schema.types');
-  }
-  return { __schema } as IntrospectionQuery;
-}
-
-// The introspection result, not `schema.idl`: the published SDL repeats two `EnterpriseOwnerInfo` fields, which
-// graphql-js's SDL validation rejects. Introspection is what GitHub's own endpoint returns.
 let cachedSchema: GraphQLSchema | undefined;
 function github(): GraphQLSchema {
-  cachedSchema ??= extendSchema(buildClientSchema(introspection(githubSchema.json)), parse(NEWER_THAN_SNAPSHOT));
+  cachedSchema ??= buildSchema(githubSchema.idl, { assumeValidSDL: true });
   return cachedSchema;
 }
 
-const errorsIn = (document: string): string[] => validate(github(), parse(document)).map((e) => e.message);
+const errorsIn = (document: string): string[] =>
+  validate(github(), parse(document), specifiedRules).map((e) => e.message);
 
 const sites = graphqlCallSites();
 
@@ -141,11 +152,34 @@ describe('GitHub GraphQL documents', () => {
     );
   });
 
-  it.each(sites.map((s) => [s.site, s] as const))('%s sends a document GitHub accepts', (_site, { documents }) => {
-    expect(documents, 'document not resolvable: inline it, use a same-file const, or add a BUILDERS entry').not.toEqual(
-      [],
-    );
-    for (const document of documents) expect(errorsIn(document), document).toEqual([]);
+  it.each(sites.map((s) => [s.site, s] as const))(
+    '%s sends a document GitHub accepts',
+    (_site, { documents, problem }) => {
+      expect(problem, 'call shape not understood: call `.graphql(` or `.graphql<T>(` directly').toBeUndefined();
+      expect(
+        documents,
+        'document not resolvable: inline it, use a same-file const, or add a BUILDERS entry',
+      ).not.toEqual([]);
+      for (const document of documents) expect(errorsIn(document), document).toEqual([]);
+    },
+  );
+
+  it('reads direct calls, with or without type arguments', () => {
+    const src = "a.graphql('query { viewer { login } }');\nb.graphql<{ x: number }>(\n  `query { viewer { id } }`,\n);";
+    expect(callSitesIn('f.ts', src)).toEqual([
+      { site: 'f.ts:1', documents: ['query { viewer { login } }'] },
+      { site: 'f.ts:2', documents: ['query { viewer { id } }'] },
+    ]);
+  });
+
+  it.each([
+    ['an optional call', "octokit.graphql?.('query { viewer { login } }');", /optional call/],
+    ['an optional call after a space', "octokit.graphql ?.('query { viewer { login } }');", /optional call/],
+    ['type arguments without a call', 'const run = octokit.graphql<Viewer>;', /not followed by a call/],
+  ])('refuses %s instead of skipping it', (_label, src, problem) => {
+    expect(callSitesIn('f.ts', src)).toEqual([
+      { site: 'f.ts:1', documents: [], problem: expect.stringMatching(problem) },
+    ]);
   });
 
   it('rejects the viewer query that spread `... on Bot` inside `User` (0.9.31)', () => {

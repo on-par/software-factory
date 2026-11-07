@@ -214,6 +214,7 @@ describe('stack approval gate (#3366)', () => {
   });
 
   it('drops only the App bot reviews under a GitHub App installation token', async () => {
+    const reviewsBot = { id: 9001, login: 'factory-app[bot]', type: 'Bot' };
     const listReviews = vi.fn(async () => ({
       data: [
         { user: { id: 9001, login: 'factory-app[bot]', type: 'Bot' }, state: 'APPROVED', commit_id: 'abc' },
@@ -229,7 +230,7 @@ describe('stack approval gate (#3366)', () => {
       graphql,
       rest: {
         pulls: { get: async () => ({ data: { head: { sha: 'abc' } } }), listReviews },
-        users: { getAuthenticated },
+        users: { getAuthenticated, getByUsername: async () => ({ data: reviewsBot }) },
       },
     };
     const ops = createQueuePreflightOps(octokit, 'o', 'r', { stackMode: true });

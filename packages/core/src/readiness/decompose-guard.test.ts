@@ -128,6 +128,7 @@ describe('checkDecomposeGuard', () => {
     mock.octokit.graphql = vi.fn(async () => ({
       viewer: { login: 'factory-app[bot]', databaseId: 9001 },
     }));
+    mock.octokit.rest.users.getByUsername = vi.fn(async () => ({ data: own.user }));
     expect(await run(mock.octokit)).toMatchObject({ kind: 'proposal-pending', commentId: 10 });
   });
 });

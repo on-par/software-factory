@@ -113,6 +113,10 @@ describe('createOctokitFeedbackRoundGitHub', () => {
         { response: { viewer: { login: 'factory-app[bot]', databaseId: 9001 } } },
         { response: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } },
       ],
+      'users.getByUsername': [
+        { response: { data: { id: 9001, login: 'factory-app[bot]', type: 'Bot' } } },
+        { response: { data: { id: 9001, login: 'factory-app[bot]', type: 'Bot' } } },
+      ],
       'issues.listComments': [
         {
           response: {

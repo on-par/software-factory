@@ -26,7 +26,10 @@ function octokitFor(comments: { id: number; body: string; user: Author }[], toke
   const updateComment = vi.fn(async () => ({ data: {} }));
   const octokit = Object.assign({} as Octokit, {
     graphql,
-    rest: { users: { getAuthenticated }, issues: { listComments, createComment, updateComment } },
+    rest: {
+      users: { getAuthenticated, getByUsername: async () => ({ data: appBot }) },
+      issues: { listComments, createComment, updateComment },
+    },
   });
   return { octokit, graphql, createComment, updateComment };
 }
