@@ -517,6 +517,7 @@ const INTERNAL_API_KEYS = [
   ...'claimDiskAlert createDiskGuard'.split(' '), // #2284
   ...'FACTORY_RUNTIME_CONFIG_KEYS hostDiskAlertFile'.split(' '),
   'createOctokitCollaboratorPermissionClient',
+  ...'isOwnComment resolveSelfIdentity'.split(' '), // own GitHub identity, incl. App installation tokens (ADR-0176)
   ...'renderConfigExample resolveT1SampleRate'.split(' '),
   'resolveEvidenceAllowlist',
   'runEvidencePlan',

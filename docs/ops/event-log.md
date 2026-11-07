@@ -32,7 +32,7 @@ A run for an issue with an open factory PR keeps its resumable state in one hidd
   remaining under the cap, the CHECK rework rounds and the status.
 - `pr_state_ignored` (warn): a state comment on the PR was not trusted. The reason is `untrusted-author`,
   `digest-mismatch`, `key-mismatch`, `malformed` or `identity-unavailable` (the token's identity could not be read,
-  for example a GitHub App installation token).
+  for example a revoked token or a GitHub outage).
 - `pr_state_failed` (info): the PR lookup, restore or save failed. The run continues on local state.
 
 A feedback round on a factory PR (`factory respond <pr>` or a queued review rework, #3910) logs two more:

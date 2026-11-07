@@ -31,7 +31,7 @@ function plan(issue: number): SlicePlan {
 
 interface FakeComment {
   id: number;
-  user: { id: number } | null;
+  user: { id: number; login?: string; type?: string } | null;
   body?: string;
 }
 
@@ -117,6 +117,60 @@ describe('findSlicePlanComment', () => {
     const f = fake([]);
     f.getAuthenticated.mockRejectedValue(new Error('bad credentials'));
     await expect(findSlicePlanComment({ octokit: f.octokit, ...base })).rejects.toThrow('bad credentials');
+  });
+});
+
+describe('findSlicePlanComment with a GitHub App installation token', () => {
+  const APP_BOT = 9001;
+  const body = renderSlicePlanComment(plan(5));
+  const appBot = { id: APP_BOT, login: 'factory-app[bot]', type: 'Bot' };
+  const otherBot = { id: 9002, login: 'other-app[bot]', type: 'Bot' };
+  const human = { id: OTHER, login: 'someone', type: 'User' };
+
+  /** GET /user answers 403 for an installation token; GraphQL `viewer` names the App's bot account. */
+  function appTokenFake(comments: FakeComment[]) {
+    const f = fake(comments);
+    f.getAuthenticated.mockRejectedValue(
+      Object.assign(new Error('Resource not accessible by integration'), { status: 403 }),
+    );
+    const graphql = vi.fn().mockResolvedValue({
+      viewer: { __typename: 'Bot', login: 'factory-app', databaseId: APP_BOT },
+    });
+    return { ...f, octokit: Object.assign(f.octokit, { graphql }), graphql };
+  }
+
+  it("finds the plan posted by the App's bot account", async () => {
+    const f = appTokenFake([...noise(3), { id: 77, user: appBot, body }]);
+    expect(await findSlicePlanComment({ octokit: f.octokit, ...base })).toEqual({
+      status: 'found',
+      commentId: 77,
+      plan: plan(5),
+    });
+    expect(f.graphql).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores an identical marker comment from a different bot and from a human', async () => {
+    const f = appTokenFake([
+      { id: 10, user: otherBot, body },
+      { id: 11, user: human, body },
+    ]);
+    expect(await findSlicePlanComment({ octokit: f.octokit, ...base })).toEqual({ status: 'not-found' });
+    const g = appTokenFake([
+      { id: 10, user: otherBot, body: renderSlicePlanComment(plan(6)) },
+      { id: 11, user: human, body: `${SLICE_PLAN_MARKER}\nno data` },
+      { id: 12, user: appBot, body },
+    ]);
+    expect(await findSlicePlanComment({ octokit: g.octokit, ...base })).toMatchObject({
+      status: 'found',
+      commentId: 12,
+    });
+  });
+
+  it('still throws on a genuine 401 so the caller parks', async () => {
+    const f = appTokenFake([{ id: 77, user: appBot, body }]);
+    f.getAuthenticated.mockRejectedValue(Object.assign(new Error('Bad credentials'), { status: 401 }));
+    await expect(findSlicePlanComment({ octokit: f.octokit, ...base })).rejects.toThrow('Bad credentials');
+    expect(f.graphql).not.toHaveBeenCalled();
   });
 });
 

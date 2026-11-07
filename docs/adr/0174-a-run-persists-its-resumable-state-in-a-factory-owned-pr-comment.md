@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-04
+- Amended by: [ADR-0176](0176-the-factory-s-own-github-identity-covers-app-installation-tokens-and-own-comment-checks-match-that-exact-account.md) (GitHub App installation tokens resolve their identity; decision 3 now applies only to genuine identity failures)
 - See also: [ADR-0130](0130-auto-filed-bug-evidence-is-stripped-of-hidden-content-and-fenced-longer-than-any-backtick-run-inside-it.md) (park-comment marker trust), [ADR-0168](0168-a-repo-reads-tickets-from-one-configured-tracker-and-a-workkey-string-replaces-the-numeric-issue.md) (WorkKey), issue #3909
 
 ## Context

@@ -17,6 +17,7 @@ section to `## X.Y.Z - date`. See
 
 ### Fixed
 
+- GitHub App installation tokens work wherever the factory checks its own comments: REST `GET /user` is refused for them (403), so the factory now resolves its App bot account through GraphQL `viewer`. Stack-mode runs no longer park on "slice plan lookup failed". Park comments, PR run state, decompose proposals, feedback rounds and stack approval recognize the factory's own comments and reviews, and still trust only that exact account (ADR-0176).
 - A timed provider cap (`usage_cap` or `rate_limit`) on a stage-pinned model advances the stage to the next configured `models.providerOrder` provider instead of releasing without a secondary attempt (#3977).
 
 ## 0.9.30 - 2026-11-06

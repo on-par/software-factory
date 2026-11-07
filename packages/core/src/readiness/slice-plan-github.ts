@@ -5,6 +5,7 @@
 
 import type { Octokit } from '@octokit/rest';
 
+import { isOwnComment, resolveSelfIdentity } from '../utils/github-identity.js';
 import { markSliceMerged, parseSlicePlanComment, renderSlicePlanComment } from './slice-plan.js';
 import type { SlicePlan } from './slice-plan.js';
 
@@ -33,7 +34,7 @@ export async function findSlicePlanComment(deps: {
 }): Promise<SlicePlanCommentLookup> {
   const { octokit, repo, issue } = deps;
   const [owner, name] = splitRepo(repo);
-  const { data: me } = await octokit.rest.users.getAuthenticated();
+  const me = await resolveSelfIdentity(octokit);
   for (let page = 1; ; page++) {
     const { data } = await octokit.rest.issues.listComments({
       owner,
@@ -43,7 +44,7 @@ export async function findSlicePlanComment(deps: {
       page,
     });
     for (const comment of data) {
-      if (comment.user?.id !== me.id) continue;
+      if (!isOwnComment(comment.user, me)) continue;
       const parsed = parseSlicePlanComment(comment.body ?? '');
       if (parsed === null) continue;
       if (!parsed.ok) return { status: 'invalid', commentId: comment.id, error: parsed.error };

@@ -1,5 +1,7 @@
 // Review/approval queue exports re-exported from internal.ts (keeps that file under its max-lines ceiling)
 export { createOctokitCollaboratorPermissionClient } from './approval.js';
+// The factory's own GitHub account (user or App installation token), for skipping its own reviews.
+export { isOwnComment, resolveSelfIdentity, type SelfIdentity } from '../utils/github-identity.js';
 export {
   claimIterateCommand,
   createFileIterateStore,

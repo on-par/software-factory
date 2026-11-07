@@ -3,6 +3,7 @@ import type { Octokit } from '@octokit/rest';
 import { describe, expect, it } from 'vitest';
 
 import type { RunStatus } from '../types/index.js';
+import type { SelfIdentity } from '../utils/github-identity.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 import {
   MAX_ENCODED_CHARS,
@@ -18,6 +19,7 @@ import {
 
 const key = workKeyFromIssue(42);
 const SELF = 7;
+const ME: SelfIdentity = { id: SELF, login: 'factory', kind: 'user' };
 
 function state(over: Partial<PrRunState> = {}): PrRunState {
   return {
@@ -50,7 +52,7 @@ describe('pr run state', () => {
 
   it('ignores a state block posted by another user and reports untrusted-author', () => {
     const body = encodePrRunState(state());
-    const out = selectTrustedPrRunState([{ id: 1, authorId: 99, body }], SELF, key);
+    const out = selectTrustedPrRunState([{ id: 1, authorId: 99, body }], ME, key);
     expect(out).toEqual({ status: 'none', ignored: [{ commentId: 1, reason: 'untrusted-author' }] });
   });
 
@@ -59,7 +61,7 @@ describe('pr run state', () => {
     const { b64, json } = dataOf(body);
     const edited = JSON.stringify({ ...JSON.parse(json), reviewRework: { used: 0, cap: 3 } });
     const forged = body.replace(b64, Buffer.from(edited).toString('base64'));
-    expect(selectTrustedPrRunState([{ id: 1, authorId: SELF, body: forged }], SELF, key)).toEqual({
+    expect(selectTrustedPrRunState([{ id: 1, authorId: SELF, body: forged }], ME, key)).toEqual({
       status: 'none',
       ignored: [{ commentId: 1, reason: 'digest-mismatch' }],
     });
@@ -68,9 +70,7 @@ describe('pr run state', () => {
   it('ignores a block for another key and reports key-mismatch', () => {
     const body = encodePrRunState(state({ key: workKeyFromIssue(43) }));
     expect(decodePrRunState(body, key)).toEqual({ ok: false, reason: 'key-mismatch' });
-    expect(selectTrustedPrRunState([{ id: 1, authorId: SELF, body }], SELF, key).ignored[0]?.reason).toBe(
-      'key-mismatch',
-    );
+    expect(selectTrustedPrRunState([{ id: 1, authorId: SELF, body }], ME, key).ignored[0]?.reason).toBe('key-mismatch');
   });
 
   it('reports malformed for bad base64, bad JSON and unknown keys', () => {
@@ -89,7 +89,7 @@ describe('pr run state', () => {
 
   it('round-trips draftReason, still parses a comment without it and rejects an unknown value', () => {
     const body = encodePrRunState(state({ draftReason: 'ci-pending' }));
-    const out = selectTrustedPrRunState([{ id: 1, authorId: SELF, body }], SELF, key);
+    const out = selectTrustedPrRunState([{ id: 1, authorId: SELF, body }], ME, key);
     expect(out).toMatchObject({ status: 'found', state: { draftReason: 'ci-pending' } });
     const plain = decodePrRunState(encodePrRunState(state()), key);
     expect(plain).toMatchObject({ ok: true });
@@ -126,7 +126,7 @@ describe('pr run state', () => {
         { id: 10, authorId: SELF, body: first },
         { id: 5, authorId: SELF, body: 'unrelated' },
       ],
-      SELF,
+      ME,
       key,
     );
     expect(out).toMatchObject({ status: 'found', commentId: 10, state: { prNumber: 1 } });
@@ -257,6 +257,55 @@ describe('savePrRunState / loadPrRunState', () => {
 
     const loaded = await loadPrRunState({ octokit, repo: 'o/r', prNumber: 9, key });
     expect(loaded).toMatchObject({ status: 'found', state: { reviewRework: { used: 3, cap: 3 } } });
+  });
+
+  it('loadPrRunState trusts only the App bot under a GitHub App installation token', async () => {
+    const body = encodePrRunState(state({ prNumber: 77 }));
+    const forged = encodePrRunState(state({ prNumber: 66 }));
+    const appBot = { id: 9001, login: 'factory-app[bot]', type: 'Bot' };
+    const listComments = async () => ({
+      data: [
+        { id: 1, user: { id: 9002, login: 'other-app[bot]', type: 'Bot' }, body: forged },
+        { id: 2, user: { id: 5, login: 'someone', type: 'User' }, body: forged },
+        { id: 3, user: appBot, body },
+      ],
+    });
+    const getAuthenticated = async () => {
+      throw Object.assign(new Error('Resource not accessible by integration'), { status: 403 });
+    };
+    const graphql = async () => ({ viewer: { __typename: 'Bot', login: 'factory-app', databaseId: 9001 } });
+    const octokit = Object.assign({} as Octokit, {
+      graphql,
+      rest: { users: { getAuthenticated }, issues: { listComments } },
+    });
+    const loaded = await loadPrRunState({ octokit, repo: 'o/r', prNumber: 9, key });
+    expect(loaded).toMatchObject({
+      status: 'found',
+      commentId: 3,
+      state: { prNumber: 77 },
+      ignored: [
+        { commentId: 1, reason: 'untrusted-author' },
+        { commentId: 2, reason: 'untrusted-author' },
+      ],
+    });
+  });
+
+  it('selectTrustedPrRunState trusts an id-less bot identity only on its exact login and Bot type', () => {
+    const body = encodePrRunState(state());
+    const bot: SelfIdentity = { id: undefined, login: 'factory-app[bot]', kind: 'bot' };
+    const out = selectTrustedPrRunState(
+      [
+        { id: 1, authorId: 2, authorLogin: 'factory-app[bot]', authorType: 'User', body },
+        { id: 2, authorId: 3, authorLogin: 'factory-app[bot]', authorType: 'Bot', body },
+      ],
+      bot,
+      key,
+    );
+    expect(out).toMatchObject({
+      status: 'found',
+      commentId: 2,
+      ignored: [{ commentId: 1, reason: 'untrusted-author' }],
+    });
   });
 
   it('loadPrRunState fails closed when the identity lookup throws', async () => {
