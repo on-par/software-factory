@@ -130,6 +130,31 @@ describe('runIssue — pre-PLAN base health tests timeout (#3095)', () => {
     await runIssue({ ...request, baselineCacheTtlHours: 6 }, policy, ports);
     expect(checkBaseHealth.mock.calls[0][0]).toMatchObject({ cacheTtlHours: 6 });
   });
+
+  it.each([
+    ['with request.logsDir: <logsDir>/issue-<n>/check-base-health', '/tmp/factory-logs'],
+    ['without request.logsDir: no outputLogDir', undefined],
+  ])('passes the base health full-output log dir %s', async (_label, logsDir) => {
+    const checkBaseHealth = vi.fn<NonNullable<RunPorts['checkBaseHealth']>>().mockResolvedValue({
+      kind: 'red',
+      baseSha: 'a'.repeat(40),
+      failingChecks: ['tests'],
+      cached: false,
+    });
+    const ports: RunPorts = {
+      router: new ModelRouter(MODELS, ROUTES),
+      octokit: {} as Octokit,
+      workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
+      events: () => () => {},
+      breaker: new ProviderBreaker(join(breakerDir, 'breaker.json')),
+      resolveConstitution: () => null,
+      checkBaseHealth,
+    };
+    await runIssue({ ...request, ...(logsDir ? { logsDir } : {}) }, policy, ports);
+    const passed = checkBaseHealth.mock.calls[0][0];
+    if (logsDir) expect(passed.outputLogDir).toBe(join(logsDir, 'issue-1', 'check-base-health'));
+    else expect(passed).not.toHaveProperty('outputLogDir');
+  });
 });
 
 describe('runIssue — pre-PLAN base health evidence', () => {
