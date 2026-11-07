@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.33 - 2026-11-07
+
+A base check that could not run (timeout, environment exit, missing command or checker crash) is now reported as inconclusive and the base held instead of reported as failing tests, with bounded, redacted evidence (#3989).
+All seven published `@on-par` packages move to 0.9.33 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Fixed
 
 - The pre-PLAN base health check no longer reports a base check that could not run as failing tests. A timeout, an environment exit (78), a missing command (126/127, including `scripts/verify.ps1` without `pwsh` on PATH), a command with no exit code or a checker crash is now `inconclusive`: the issue is still released and the base held before any model call, but the released message, the lane-paused event, the base hold, `factory status` and the kept-hold lane warning say the base checks could not run (not a test failure) and name the command, exit code or timeout and a bounded, redacted output tail. These results are never cached, and older cached entries of this kind are ignored. A real test failure still releases as before, and those surfaces now carry the same bounded evidence.
