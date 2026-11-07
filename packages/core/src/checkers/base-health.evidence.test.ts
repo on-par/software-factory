@@ -6,7 +6,12 @@ import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import type { BaselineCheckerComparison, BaselineReport, runBaselineCheckers } from './baseline.js';
-import { BASE_HEALTH_CHECKERS, checkBaseHealth, type BaseHealthOptions } from './base-health.js';
+import {
+  BASE_HEALTH_CHECKERS,
+  checkBaseHealth,
+  describeBaseHealthEvidence,
+  type BaseHealthOptions,
+} from './base-health.js';
 
 const SHA = 'b'.repeat(40);
 
@@ -116,5 +121,21 @@ describe('checkBaseHealth inconclusive vs red', () => {
     expect(JSON.stringify(res)).not.toContain(secret);
     expect(messages().join('\n')).not.toContain(secret);
     expect(res.evidence?.[0]?.tail).toContain('command not found');
+  });
+});
+
+describe('describeBaseHealthEvidence tail rendering', () => {
+  const line = (tail: string) => describeBaseHealthEvidence([{ checker: 'tests', exitCode: 1, tail }]);
+
+  it('joins lines with a single separator, dropping blank lines and indentation', () => {
+    expect(line('first\n\n   \n  second  \r\n\t third\n')).toBe('tests: exit 1: first | second | third');
+  });
+
+  it('renders no tail suffix when the tail is only whitespace and newlines', () => {
+    expect(line(' \n \n')).toBe('tests: exit 1');
+  });
+
+  it('renders a 100k-space tail without a newline in linear time', () => {
+    expect(line(`a${' '.repeat(100_000)}b`)).toBe(`tests: exit 1: a${' '.repeat(100_000)}b`);
   });
 });

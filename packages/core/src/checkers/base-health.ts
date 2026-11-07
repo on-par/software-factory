@@ -141,7 +141,12 @@ function renderBaseHealthEvidence(e: BaseHealthEvidence): string {
     : e.exitCode !== undefined
       ? `exit ${e.exitCode}`
       : 'failed';
-  const tail = e.tail.replace(/\s*\n\s*/g, ' | ');
+  // Split/trim/join, not a regex: `\s*\n\s*` backtracks polynomially on long runs of whitespace in uncontrolled output.
+  const tail = e.tail
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+    .join(' | ');
   return `${e.checker}: ${what}${e.command ? ` — \`${e.command}\`` : ''}${tail ? `: ${tail}` : ''}`;
 }
 
