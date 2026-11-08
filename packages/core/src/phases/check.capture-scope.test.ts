@@ -76,4 +76,34 @@ describe('checkPhase capture scope (#3994)', () => {
   it('checkPhase without runId opens no scope', async () => {
     expect(await run({})).toEqual([]);
   });
+
+  it('checkPhase with export unset registers no extra sink and logs no export event', async () => {
+    const events: string[] = [];
+    const records: CommandOutputRecord[] = [];
+    unregs.push(registerCommandOutputSink((r) => records.push(r)));
+    const worktree = await tmp.make('check-capture-off-');
+    await writeFile(join(worktree, 'issue-3995.md'), '# Spec\n');
+    await checkPhase({
+      issue: workKeyFromIssue(3995),
+      worktree,
+      specPath: join(worktree, 'issue-3995.md'),
+      router: new ModelRouter(models, routes, false, new StubModelExecutor({ defaultOutput: 'ok' })),
+      constitution: null,
+      log: (type: string) => events.push(type),
+      autoRework: false,
+      runId: 'run-off',
+      runCheckers: async () => {
+        await runVerificationCommand([process.execPath, '-e', `console.log('hello')`], {});
+        return {
+          failures: 0,
+          passes: 1,
+          skips: 0,
+          total: 1,
+          results: [{ checker: 'x', result: 'PASS', details: 'ok' }],
+        };
+      },
+    });
+    expect(records).toHaveLength(1);
+    expect(events.filter((e) => e.startsWith('command_output_export'))).toEqual([]);
+  });
 });

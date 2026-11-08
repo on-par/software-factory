@@ -1,9 +1,7 @@
-// src/events/kinds.ts — Closed vocabulary for FactoryEvent.type (#663)
-//
-// FactoryEvent.type was free-form, classified by six hand-maintained sets with no seam forcing a
-// newly-emitted kind to be registered. EventKind is the closed set of kinds the factory emits, and
-// EVENT_TRAITS is the single table every consumer reads instead of keeping its own classification.
+// src/events/kinds.ts — Closed vocabulary for FactoryEvent.type (#663): EventKind is the closed set of kinds the factory
+// emits and EVENT_TRAITS is the single table every consumer reads instead of keeping its own classification.
 
+import { COMMAND_OUTPUT_EVENT_TRAITS, type CommandOutputEventKind } from './command-output-traits.js';
 import { CONFIG_EVENT_TRAITS, type ConfigEventKind } from './config-traits.js';
 import { DECOMPOSE_EVENT_TRAITS } from './decompose-traits.js';
 import type { EventTraits, LaneStatus } from './event-traits.js';
@@ -59,6 +57,7 @@ export type EventKind =
   | 'conflict_detected'
   | 'conflict_resolved'
   | 'config'
+  | CommandOutputEventKind
   | ConfigEventKind
   | 'constitution'
   | 'context_ceiling'
@@ -299,6 +298,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   context_ceiling: { severity: 'info', isPark: false, isTerminal: false },
   // A config-caused CHECK failure parked with file, line and fix (#2583/#2584): fails the same way on every requeue.
   config: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
+  ...COMMAND_OUTPUT_EVENT_TRAITS,
   ...CONFIG_EVENT_TRAITS,
   constitution: { severity: 'info', isPark: false, isTerminal: false },
   ...DECOMPOSE_EVENT_TRAITS,
