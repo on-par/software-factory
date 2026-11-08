@@ -15,6 +15,19 @@ describe('shipParkReason', () => {
     expect(shipParkReason({ ok: false, previewCheck: preview('preview-unavailable') })).toBe('fail');
   });
 
+  it('parks fail when visual proof did not pass', () => {
+    const proof = (status: 'fail' | 'unavailable' | 'pass' | 'not-required'): ShipResult['visualProof'] => ({
+      status,
+      headSha: 'a',
+      runId: 'r',
+      captures: [],
+    });
+    expect(shipParkReason({ ok: false, visualProof: proof('fail'), ciOutcome: 'failure' })).toBe('fail');
+    expect(shipParkReason({ ok: false, visualProof: proof('unavailable') })).toBe('fail');
+    expect(shipParkReason({ ok: false, visualProof: proof('pass'), ciOutcome: 'failure' })).toBe('ci-failed');
+    expect(shipParkReason({ ok: false, visualProof: proof('not-required'), ciOutcome: 'failure' })).toBe('ci-failed');
+  });
+
   it('keeps the denial and CI mappings', () => {
     expect(shipParkReason({ ok: false, denied: true, previewCheck: preview('fail') })).toBe('escalate');
     expect(shipParkReason({ ok: false, ciOutcome: 'failure' })).toBe('ci-failed');

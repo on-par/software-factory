@@ -253,6 +253,7 @@ function modelNamespace(): Node[] {
       doc('preview'),
       '{ source: { kind: "deployment", environment: "preview/pr-*" }, command: ["npm", "run", "smoke:preview"] }',
     ),
+    unset('visualProof', doc('visualProof'), '{ uiPaths: ["src/ui/**"], routes: [<route>], command: ["<capture>"] }'),
     unset('tests', doc('tests'), '{ affected: { command: "npx vitest related --run {files}" } }'),
     {
       kind: 'object',

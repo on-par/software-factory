@@ -268,6 +268,73 @@ The result is `pass`, `fail` (the command exited non-zero) or `preview-unavailab
 
 Evidence is written to `preview-check.json` in the run's logs directory, also when the gate itself throws. It holds the URL with its query string masked, head SHA, command, exit code, readiness wait, command run time, output tail (stdout and stderr), artifacts and reason. Artifacts are copied to `preview-artifacts/` in the same directory. SHIP also writes the result as a "Preview check" block in the PR body and updates that block on each SHIP. A preview pass does not change land: land still refuses to merge into a red main. Repos without a `preview` section behave as before.
 
+### UI visual proof gate
+
+A repo whose PRs change user-visible UI can opt in to a SHIP gate that proves the change visually. When the changed files match `visualProof.uiPaths`, or the frozen plan's evidence plan names a screenshot, SHIP boots the app from `qa.start` on the lane's leased port (`127.0.0.1` only), runs your capture command against the exact pushed head, validates the PNGs it wrote, uploads them to a dedicated evidence branch, embeds them in the PR body and stamps a `factory/visual-proof` commit status on that head. The trusted config decides whether proof is required: leaving the screenshot entry out of a plan cannot skip it. The gate adds no browser, deployment or storage service of its own. The capture command is yours (for example a Playwright script).
+
+```yaml
+qa:
+  start: [npm, run, start] # must listen on $PORT; the gate sets HOST=127.0.0.1
+  readyPath: /
+visualProof:
+  uiPaths: ['src/ui/**', 'web/**/*.css'] # changed files matching these make proof required
+  routes: # 1-10 routes
+    - route: /settings
+      state: default # default: default
+      assert: 'Settings' # text or selector the capture command must positively assert
+      paths: ['src/ui/settings/**'] # files this route covers
+      viewport: { width: 1280, height: 800 } # default; width 320-3840, height 240-2160
+  command: [node, scripts/capture.mjs] # argv, never shell-interpolated
+  maxCaptures: 3 # 1-5; the first matching routes, in config order
+  timeoutSeconds: 300
+  evidenceBranch: factory-evidence # never the PR branch, never `factory/*`
+```
+
+The command runs once the app answers `qa.readyPath` with a status below 500. It gets the checker environment (no `GITHUB_TOKEN` or other host secrets) plus:
+
+| Variable                | Value                                                           |
+| ----------------------- | --------------------------------------------------------------- |
+| `VISUAL_PROOF_BASE_URL` | `http://127.0.0.1:<leased port>`                                |
+| `VISUAL_PROOF_OUT_DIR`  | directory to write the PNGs and `manifest.json` into            |
+| `VISUAL_PROOF_ROUTES`   | JSON array of the selected `{ route, state, assert, viewport }` |
+| `FACTORY_HEAD_SHA`      | the head commit being proved                                    |
+| `FACTORY_RUN_ID`        | the current run id                                              |
+
+It must write `manifest.json` into `VISUAL_PROOF_OUT_DIR`, one entry per selected route and state:
+
+```json
+{
+  "headSha": "<FACTORY_HEAD_SHA>",
+  "runId": "<FACTORY_RUN_ID>",
+  "captures": [
+    {
+      "route": "/settings",
+      "state": "default",
+      "viewport": { "width": 1280, "height": 800 },
+      "finalPath": "/settings",
+      "assertion": { "target": "Settings", "passed": true },
+      "file": "settings.png"
+    }
+  ]
+}
+```
+
+`finalPath` is the path the page ended on after any redirects, and `assertion.target` must equal the route's `assert`. `file` is relative to the out dir. The gate rejects the capture, with a named diagnostic, for any of:
+
+- a manifest for another head or run (`capture is for another head/run`)
+- a capture for a route that was not selected, or a selected route with no capture
+- a `finalPath` other than the route (`landed on /login, expected /settings — login redirect or wrong page`)
+- an assertion that did not pass or names another target
+- a viewport other than the configured one
+- a `file` that is absolute, contains `..` or leaves the out dir
+- a file that is not a PNG, is under 2048 bytes (`blank or empty image`) or is over 5 MiB
+
+Other diagnostics: `visual proof required by the plan's screenshot entries (...) but .factory config has no visualProof section`, `plan screenshot route <r> is not in visualProof.routes`, `UI files not covered by any visualProof route: <files>`, `qa.start missing`, `no leased lane port — enable environment.ports`, start exited or never ready, `capture command timed out after Ns`, a non-zero capture exit (a 200 from the app does not make it pass), `upload failed: ...`, `embedded asset unavailable: ...` and `CI pending, visual proof not captured`.
+
+A valid capture is committed through the Git Data API to `evidenceBranch` under `visual-proof/<pr>/<run>/<head12>/`, read back, and embedded in the PR body's "Visual proof" block as `github.com/.../blob/<commit>/...?raw=true` images with run, head, route, state and viewport next to each. The result is `pass`, `fail` or `unavailable`. Screenshots are never committed to the PR branch. Any non-pass leaves the PR unmarked as ready and parks the run `fail`; the park policy then decides what happens to the PR. CI-rework does not retry a visual proof failure. The block and the status are rewritten on each SHIP.
+
+Land enforces the result. A PR whose body carries the visual proof block is only merged when its exact head commit has a `factory/visual-proof` success status created by the factory's own identity. After a push, the older head has no such status, so land leaves the PR open with the remedy `re-run SHIP (factory resume --from ship) to capture proof for <head12>`. Land never re-captures. A PR without the block merges as before. Runs that change no UI start no app and no browser, and repos without a `visualProof` section and without plan screenshots behave as before.
+
 ## Open-core boundary
 
 **What's OSS (this repo):** `packages/cli`, `packages/core`, and `packages/config` are the open-source core. The full local pipeline (router, constitutions, checkers, phases) runs from this repo alone, MIT-licensed.

@@ -256,7 +256,7 @@ describe('evidence plan runner', () => {
     });
     expect(result.map(({ status, reason }) => [status, reason])).toEqual([
       ['SKIP', 'not allowlisted'],
-      ['SKIP', '/settings'],
+      ['SKIP', 'enforced by the SHIP visual proof gate: /settings'],
       ['SKIP', 'manual proof'],
     ]);
     expect(await runEvidencePlan(null, new Map(), { worktree: '/tmp/lane' })).toEqual([]);

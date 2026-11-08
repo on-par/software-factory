@@ -2,8 +2,15 @@
 
 import { PREVIEW_REWORK_INSTRUCTIONS, previewReworkSummary, runPreviewCheck } from '../checkers/preview-check.js';
 import { createOctokitPreviewGitHub } from '../checkers/preview-source-octokit.js';
+import { attachVisualProof, publishVisualProof } from '../checkers/visual-proof-attach.js';
+import { classifyVisualProof, runVisualProofCapture } from '../checkers/visual-proof.js';
 import type { PreviewConfig } from '../config/preview-section.js';
 import { loadRepoConfig } from '../config/repo.js';
+import type { VisualProofConfig } from '../config/visual-proof-section.js';
+import { parseDesignArtifact } from '../design/index.js';
+import { readSpec } from '../spec/index.js';
+import type { VisualProofResult } from '../checkers/visual-proof.js';
+import type { VisualProofGate } from '../phases/ship-visual-proof.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 import {
   type checkPhase as checkPhaseDefault,
@@ -74,6 +81,8 @@ export interface CiReworkPorts {
   /** Aborts when the lane loses this issue's claim lease (#3146): phase boundaries, push, PR creation and merge refuse to run. */
   claimSignal?: AbortSignal;
   loadPreviewConfig?: (worktree: string) => PreviewConfig | undefined;
+  /** Reads the trusted `visualProof` section for the SHIP visual proof gate (#2232); defaults to the repo config. */
+  loadVisualProofConfig?: (worktree: string) => VisualProofConfig | undefined;
 }
 
 export interface CiReworkLoopContext {
@@ -133,6 +142,22 @@ const isPreviewRework = (ship: ShipResult): boolean =>
 
 const loadPreviewConfigDefault = (worktree: string): PreviewConfig | undefined => loadRepoConfig(worktree)?.preview;
 
+const loadVisualProofConfigDefault = (worktree: string): VisualProofConfig | undefined =>
+  loadRepoConfig(worktree)?.visualProof;
+
+/** Screenshot routes the frozen plan's evidence plan names; a missing spec yields no routes; `error` is set when it or its design block cannot be read. */
+async function readPlanScreenshotRoutes(specPath: string | undefined): Promise<{ routes: string[]; error?: string }> {
+  if (!specPath) return { routes: [] };
+  try {
+    const { artifact } = parseDesignArtifact((await readSpec(specPath)).data);
+    return { routes: (artifact?.evidencePlan ?? []).flatMap((e) => (e.kind === 'screenshot' ? [e.route] : [])) };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { routes: [] };
+    const detail = err instanceof Error ? err.message : String(err);
+    return { routes: [], error: `could not read the frozen plan's evidencePlan: ${detail}` };
+  }
+}
+
 /**
  * Runs SHIP. When the CI watch fails on CodeQL alerts the PR introduced (on changed files, or not open on base), feeds them to the
  * BUILD rework worker, re-runs CHECK and re-enters SHIP on the same PR, up to
@@ -177,6 +202,41 @@ export async function shipWithCiRework(
           onPgid: ctx.onPgid,
         })
     : undefined;
+  const visualProofConfig = (ports.loadVisualProofConfig ?? loadVisualProofConfigDefault)(ports.workspace.path);
+  const { routes: planRoutes, error: planRoutesError } = await readPlanScreenshotRoutes(request.specPath);
+  const visualProofGate: VisualProofGate | undefined =
+    visualProofConfig || planRoutes.length > 0 || planRoutesError
+      ? async (pr) => {
+          if (planRoutesError) throw new Error(planRoutesError);
+          const changedFiles = await listChanged(ports.octokit, owner, repoName, pr.prNumber);
+          const requirement = classifyVisualProof({ changedFiles, config: visualProofConfig, planRoutes });
+          const base = { headSha: pr.headSha, runId: ctx.runId, captures: [] };
+          if (!requirement.required) return { status: 'not-required', ...base };
+          let result: VisualProofResult = visualProofConfig
+            ? await runVisualProofCapture({
+                requirement,
+                qa: loadRepoConfig(ports.workspace.path)?.qa ?? null,
+                config: visualProofConfig,
+                port: ctx.appPort,
+                headSha: pr.headSha,
+                runId: ctx.runId,
+                worktree: ports.workspace.path,
+                logsDir: request.logsDir,
+                onPgid: ctx.onPgid,
+              })
+            : { status: 'fail', ...base, diagnostic: requirement.diagnostic };
+          if (result.status === 'pass' && visualProofConfig) {
+            const target = { owner, repo: repoName, prNumber: pr.prNumber, branch: request.branch };
+            result = await attachVisualProof(
+              ports.octokit,
+              { ...target, evidenceBranch: visualProofConfig.evidenceBranch },
+              result,
+            );
+          }
+          await publishVisualProof(ports.octokit, { owner, repo: repoName, prNumber: pr.prNumber }, result);
+          return result;
+        }
+      : undefined;
   const shipOpts = {
     issue: workKeyFromIssue(request.issue),
     repo: request.repo,
@@ -200,6 +260,7 @@ export async function shipWithCiRework(
     work: request.work,
     ...(ports.claimSignal ? { run: claimGuardedRunner(ports.claimSignal) } : {}),
     ...(previewGate ? { previewGate } : {}),
+    ...(visualProofGate ? { visualProofGate } : {}),
     laneId: request.lane,
     reviewRouting: inputs.reviewRouting,
     ...(inputs.pinNote ? { pinNotes: [inputs.pinNote] } : {}),

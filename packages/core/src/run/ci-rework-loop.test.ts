@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ReworkHistory } from '../checkers/rework-history.js';
+import { VisualProofConfigSchema } from '../config/visual-proof-section.js';
 import type { CheckPhaseResult } from '../phases/check.js';
 import type { ShipResult } from '../phases/ship.js';
 import type { CiFailureEvidence } from '../types/index.js';
@@ -418,5 +419,29 @@ describe('shipWithCiRework — log-attributed and diagnosed CI failures (#3998)'
     expect(message).toContain('budget exhausted');
     expect(message).toContain('gitleaks');
     expect(message).toContain(URL);
+  });
+});
+
+describe('shipWithCiRework — visual proof gate (#2232)', () => {
+  const VISUAL_PROOF = VisualProofConfigSchema.parse({
+    uiPaths: ['web/**'],
+    routes: [{ route: '/settings', assert: 'Settings', paths: ['web/settings/**'] }],
+    command: ['node', 'capture.mjs'],
+  });
+
+  it('builds no gate when neither config nor plan screenshot routes exist', async () => {
+    shipPhase.mockResolvedValueOnce({ ok: true, prNumber: 9 });
+    await runIssue(request, policy, { ...ports(vi.fn<Log>()), loadVisualProofConfig: () => undefined });
+    expect(shipPhase.mock.calls[0][0]).not.toHaveProperty('visualProofGate');
+  });
+
+  it('builds a gate from the trusted config that reports not-required for non-UI changes', async () => {
+    shipPhase.mockResolvedValueOnce({ ok: true, prNumber: 9 });
+    await runIssue(request, policy, { ...ports(vi.fn<Log>()), loadVisualProofConfig: () => VISUAL_PROOF });
+    const gate = shipPhase.mock.calls[0][0].visualProofGate;
+    if (!gate) throw new Error('expected a visualProofGate');
+    const result = await gate({ prNumber: 9, headSha: 'a'.repeat(40) });
+    expect(result).toMatchObject({ status: 'not-required', headSha: 'a'.repeat(40) });
+    expect(listPrChangedFiles).toHaveBeenCalled();
   });
 });

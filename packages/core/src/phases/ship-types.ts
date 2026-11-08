@@ -1,4 +1,5 @@
 import type { PreviewCheckResult } from '../checkers/preview-check.js';
+import type { VisualProofResult } from '../checkers/visual-proof.js';
 import type { CiFailureEvidence } from '../types/index.js';
 import type { InfraRerunOutcome } from '../utils/ci-watch.js';
 
@@ -26,6 +27,8 @@ export interface ShipResult {
   /** Why an ok result is a draft (#3932); the run-state comment carries it for the CI-pending sweep. */
   draftReason?: ShipDraftReason;
   previewCheck?: PreviewCheckResult;
+  /** UI visual proof outcome (#2232); a status other than pass/not-required means the PR was not marked ready. */
+  visualProof?: VisualProofResult;
 }
 
 /** The result of asking GitHub whether a PR exists for a branch. `error` is never collapsed

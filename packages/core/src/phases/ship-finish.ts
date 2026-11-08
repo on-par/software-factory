@@ -1,12 +1,14 @@
 // packages/core/src/phases/ship-finish.ts — SHIP preview gate, ready flip and final result
 
 import type { PreviewCheckResult } from '../checkers/preview-check.js';
+import type { VisualProofResult } from '../checkers/visual-proof.js';
 import { publishPreviewReceipt } from '../checkers/preview-receipt.js';
 import type { InfraRerunOutcome } from '../utils/ci-watch.js';
 import type { CommandRunner } from './ship-git.js';
 import type { ShipPhaseOptions } from './ship-options.js';
 import { previewFailureReason, runPreviewGate } from './ship-preview.js';
 import { markPrReadyWithRetry } from './ship-ready.js';
+import { runVisualProofGate, visualProofFailureReason } from './ship-visual-proof.js';
 import type { ShipResult } from './ship-types.js';
 
 export async function finishShip(ctx: {
@@ -23,9 +25,15 @@ export async function finishShip(ctx: {
   const { octokit, worktree, log } = opts;
   const ciPending = ciOutcome === 'timeout' || ciWatchError !== undefined;
 
+  let resolvedSha = headSha;
+  const currentSha = async (): Promise<string> => {
+    resolvedSha ??= (await run('git rev-parse HEAD', { cwd: worktree })).stdout.trim();
+    return resolvedSha;
+  };
+
   let previewCheck: PreviewCheckResult | undefined;
   if (opts.previewGate) {
-    const sha = headSha ?? (await run('git rev-parse HEAD', { cwd: worktree })).stdout.trim();
+    const sha = await currentSha();
     const publish = (n: number, r: PreviewCheckResult) => publishPreviewReceipt(octokit, owner, repoName, n, r);
     const gateCtx = { log, ciPending, publish, ...(opts.logsDir ? { logsDir: opts.logsDir } : {}) };
     previewCheck = await runPreviewGate(opts.previewGate, { prNumber, headSha: sha }, gateCtx);
@@ -35,6 +43,23 @@ export async function finishShip(ctx: {
         prNumber,
         reason: previewFailureReason(prNumber, previewCheck),
         previewCheck,
+        headSha: sha,
+        ...(ciOutcome ? { ciOutcome } : {}),
+        ...(ciPending ? { ciPending: true, draft: true } : {}),
+      };
+    }
+  }
+
+  let visualProof: VisualProofResult | undefined;
+  if (opts.visualProofGate) {
+    const sha = await currentSha();
+    visualProof = await runVisualProofGate(opts.visualProofGate, { prNumber, headSha: sha }, { log, ciPending });
+    if (visualProof.status !== 'pass' && visualProof.status !== 'not-required') {
+      return {
+        ok: false,
+        prNumber,
+        reason: visualProofFailureReason(prNumber, visualProof),
+        visualProof,
         headSha: sha,
         ...(ciOutcome ? { ciOutcome } : {}),
         ...(ciPending ? { ciPending: true, draft: true } : {}),
@@ -82,5 +107,6 @@ export async function finishShip(ctx: {
     ...(ciPending ? { ciPending: true } : {}),
     ...(opts.draft ? { draftReason: 'requested' as const } : ciPending ? { draftReason: 'ci-pending' as const } : {}),
     ...(previewCheck ? { previewCheck } : {}),
+    ...(visualProof ? { visualProof } : {}),
   };
 }
