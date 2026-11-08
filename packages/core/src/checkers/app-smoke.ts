@@ -2,6 +2,7 @@
 
 import { spawn } from 'node:child_process';
 
+import { openCommandCapture } from '../command-output/capture.js';
 import { loadRepoConfig } from '../config/repo.js';
 import type { QaConfig } from '../config/qa-section.js';
 import { killProcessGroup, registerProcessGroup } from '../environment/process-groups.js';
@@ -48,6 +49,7 @@ export const defaultStartApp: AppSmokeDeps['startApp'] = (argv, { cwd, env, onPg
     shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  const capture = openCommandCapture();
   let buffer = '';
   const collect = (chunk: Buffer): void => {
     buffer = (buffer + chunk.toString()).slice(-OUTPUT_CAP_BYTES);
@@ -55,12 +57,20 @@ export const defaultStartApp: AppSmokeDeps['startApp'] = (argv, { cwd, env, onPg
   const deregister = child.pid !== undefined ? registerProcessGroup(child.pid) : () => {};
   child.once('exit', deregister);
   child.once('error', deregister);
-  child.stdout?.on('data', collect);
-  child.stderr?.on('data', collect);
+  child.stdout?.on('data', (chunk: Buffer) => {
+    collect(chunk);
+    capture?.onChunk('stdout', chunk);
+  });
+  child.stderr?.on('data', (chunk: Buffer) => {
+    collect(chunk);
+    capture?.onChunk('stderr', chunk);
+  });
+  child.once('close', () => capture?.close());
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     child.on('exit', (code, signal) => resolve({ code, signal }));
     child.on('error', (err) => {
       collect(Buffer.from(`${err.message}\n`));
+      capture?.close();
       resolve({ code: -1, signal: null });
     });
   });

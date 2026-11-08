@@ -34,6 +34,8 @@ export interface RunCommandOptions {
    *  own GitHub calls); every other command — checkers running agent-written
    *  code, repo scripts — gets an environment without them. */
   githubAuth?: boolean;
+  /** Called with each raw output chunk as it arrives, tagged with its stream. Must not throw; errors are swallowed. Does not change CommandResult (#3994). */
+  onOutput?: (stream: 'stdout' | 'stderr', chunk: Buffer) => void;
 }
 
 export interface CommandResult {
@@ -52,6 +54,14 @@ export interface CommandResult {
 }
 
 const DEFAULT_MAX_BUFFER = 1000 * 1000 * 100;
+
+function safeOutput(options: RunCommandOptions, stream: 'stdout' | 'stderr', chunk: Buffer): void {
+  try {
+    options.onOutput?.(stream, chunk);
+  } catch {
+    // an output observer must never change the command's result
+  }
+}
 
 /** argv-based (no shell) detached run for the `onPgid` path. Resolves on the
  *  child's own `exit`, not on its piped stdio closing: a backgrounded
@@ -129,6 +139,7 @@ async function runCommandDetached(
           return;
         }
         stdoutChunks.push(chunk);
+        safeOutput(options, 'stdout', chunk);
       });
       child.stderr?.on('data', (chunk: Buffer) => {
         if (settled) return;
@@ -139,6 +150,7 @@ async function runCommandDetached(
           return;
         }
         stderrChunks.push(chunk);
+        safeOutput(options, 'stderr', chunk);
       });
       const finish = (code: number | null, signal: NodeJS.Signals | null) => {
         if (settled) return;
@@ -205,7 +217,7 @@ async function runCommandAttached(
   options: RunCommandOptions,
   env: NodeJS.ProcessEnv,
 ): Promise<CommandResult> {
-  const r = await execa(argv[0], argv.slice(1), {
+  const subprocess = execa(argv[0], argv.slice(1), {
     cwd: options.cwd,
     timeout: options.timeoutMs,
     maxBuffer: options.maxBuffer,
@@ -214,6 +226,11 @@ async function runCommandAttached(
     reject: false,
     all: false,
   });
+  if (options.onOutput) {
+    subprocess.stdout?.on('data', (c: Buffer | string) => safeOutput(options, 'stdout', Buffer.from(c)));
+    subprocess.stderr?.on('data', (c: Buffer | string) => safeOutput(options, 'stderr', Buffer.from(c)));
+  }
+  const r = await subprocess;
 
   const exitCode = typeof r.exitCode === 'number' ? r.exitCode : -1;
   const killed = r.isTerminated;
