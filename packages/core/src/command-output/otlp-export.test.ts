@@ -2,7 +2,7 @@ import type { LogRecordExporter, ReadableLogRecord } from '@opentelemetry/sdk-lo
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { openCommandCapture, withCommandOutputScope } from './capture.js';
-import { resolveCommandOutputExport, withCommandOutputExport } from './otlp-export.js';
+import { flushCommandOutputExports, resolveCommandOutputExport, withCommandOutputExport } from './otlp-export.js';
 
 const corr = { runId: 'run-1', issue: '3995', lane: 'issue-3995', phase: 'check' };
 const ON = { FACTORY_COMMAND_OUTPUT_EXPORT: 'otlp', OTEL_EXPORTER_OTLP_ENDPOINT: 'http://127.0.0.1:4318' };
@@ -28,6 +28,9 @@ function fakeExporter(mode: 'ok' | 'fail' | 'hang' | 'throw' = 'ok'): Fake {
   };
   return { exporter, records, shutdown };
 }
+
+const outputBodies = (records: ReadableLogRecord[]): string[] =>
+  records.filter((r) => r.attributes['factory.event'] === undefined).map((r) => String(r.body).trimEnd());
 
 function emitLines(lines: string[], stream: 'stdout' | 'stderr' = 'stdout'): void {
   const cap = openCommandCapture();
@@ -188,20 +191,22 @@ describe('withCommandOutputExport', () => {
     const fake = fakeExporter();
     await run(ON, async () => emitLines(['alpha', 'beta']), fake);
     await run(ON, async () => emitLines(['oops'], 'stderr'), fake);
-    expect(fake.records.map((r) => String(r.body).trimEnd())).toEqual(['alpha', 'beta', 'oops']);
-    expect(fake.records[0].attributes).toEqual({
+    expect(outputBodies(fake.records)).toEqual(['alpha', 'beta', 'oops']);
+    const out = fake.records.filter((r) => r.attributes['factory.event'] === undefined);
+    expect(out[0].attributes).toEqual({
       'factory.run_id': 'run-1',
       'factory.issue': '3995',
       'factory.lane': 'issue-3995',
       'factory.phase': 'check',
+      'factory.session_id': expect.stringMatching(/^[0-9a-f]{8}$/),
       'factory.command_id': 'cmd-0',
       'factory.seq': 0,
       'log.iostream': 'stdout',
     });
-    expect(fake.records[1].attributes['factory.seq']).toBe(1);
-    expect(fake.records[2].attributes['log.iostream']).toBe('stderr');
-    expect(fake.records[2].severityNumber).toBe(13);
-    expect(fake.records[0].severityNumber).toBe(9);
+    expect(out[1].attributes['factory.seq']).toBe(1);
+    expect(out[2].attributes['log.iostream']).toBe('stderr');
+    expect(out[2].severityNumber).toBe(13);
+    expect(out[0].severityNumber).toBe(9);
     expect(fake.records[0].resource.attributes['service.name']).toBe('software-factory');
   });
 
@@ -221,7 +226,7 @@ describe('withCommandOutputExport', () => {
       },
       fake,
     );
-    expect(fake.records.map((r) => String(r.body).trimEnd())).toEqual(['mine']);
+    expect(outputBodies(fake.records)).toEqual(['mine']);
   });
 
   it('never passes a planted token, private key or OTLP header value to the exporter', async () => {
@@ -246,12 +251,22 @@ describe('withCommandOutputExport', () => {
     expect(JSON.stringify(logs)).not.toContain('s3cr3tHeaderValue');
   });
 
+  it('masks the bare credential of a scheme-prefixed OTLP header value', async () => {
+    const fake = fakeExporter();
+    await run(
+      { ...ON, OTEL_EXPORTER_OTLP_HEADERS: 'authorization=Bearer tok3n-value-xyz' },
+      async () => emitLines(['bare tok3n-value-xyz', 'full Bearer tok3n-value-xyz']),
+      fake,
+    );
+    expect(JSON.stringify(fake.records)).not.toContain('tok3n-value-xyz');
+  });
+
   it('logs command_output_export with sent, dropped and failed counts when nothing is lost', async () => {
     const fake = fakeExporter();
     const { logs, result } = await run(ON, async () => (emitLines(['a', 'b', 'c']), 'done'), fake);
     expect(result).toBe('done');
     expect(logs).toEqual([
-      { type: 'command_output_export', msg: 'command output export: 3 sent, 0 dropped, 0 failed (0 retries)' },
+      { type: 'command_output_export', msg: 'command output export: 5 sent, 0 dropped, 0 failed (0 retries)' },
     ]);
     expect(fake.shutdown).toHaveBeenCalledOnce();
   });
@@ -261,7 +276,7 @@ describe('withCommandOutputExport', () => {
     const { logs } = await run(ON, async () => emitLines(['1', '2', '3', '4', '5']), fake, { maxQueued: 2 });
     expect(logs).toHaveLength(1);
     expect(logs[0].type).toBe('command_output_export_degraded');
-    expect(logs[0].msg).toBe('command output export: 2 sent, 3 dropped, 0 failed (0 retries)');
+    expect(logs[0].msg).toBe('command output export: 2 sent, 5 dropped, 0 failed (0 retries)');
   });
 
   it('logs command_output_export_degraded with the failed count when every export fails', async () => {
@@ -270,7 +285,7 @@ describe('withCommandOutputExport', () => {
       retry: { initialMs: 1, maxAttempts: 2 },
     });
     expect(logs[0].type).toBe('command_output_export_degraded');
-    expect(logs[0].msg).toBe('command output export: 0 sent, 0 dropped, 2 failed (1 retries)');
+    expect(logs[0].msg).toBe('command output export: 0 sent, 0 dropped, 4 failed (1 retries)');
   });
 
   it("returns fn's result within the flush budget when the exporter hangs", async () => {
@@ -280,7 +295,7 @@ describe('withCommandOutputExport', () => {
     expect(Date.now() - start).toBeLessThan(2000);
     expect(result).toBe('ok');
     expect(logs[0].type).toBe('command_output_export_degraded');
-    expect(logs[0].msg).toContain('1 failed');
+    expect(logs[0].msg).toContain('3 failed');
   });
 
   it("swallows a throwing exporter and still returns fn's result", async () => {
@@ -289,7 +304,7 @@ describe('withCommandOutputExport', () => {
       retry: { initialMs: 1, maxAttempts: 2 },
     });
     expect(result).toBe('ok');
-    expect(logs[0].msg).toContain('1 failed');
+    expect(logs[0].msg).toContain('3 failed');
   });
 
   it('swallows a throwing exporter shutdown and a throwing log', async () => {
@@ -344,5 +359,106 @@ describe('withCommandOutputExport', () => {
       },
     );
     expect(logs[0]).toContain('setup failed: plain');
+  });
+});
+
+describe('export sessions', () => {
+  const evt = (r: ReadableLogRecord) => r.attributes['factory.event'];
+
+  it('emits session.start before output and session.end last with the run correlation', async () => {
+    const fake = fakeExporter();
+    await run(ON, async () => emitLines(['x']), fake);
+    expect(fake.records.map((r) => evt(r) ?? 'output')).toEqual(['session.start', 'output', 'session.end']);
+    const [start, out, end] = fake.records;
+    expect(start.body).toBe('session start');
+    expect(end.body).toBe('session end');
+    expect(end.attributes['factory.session.status']).toBe('ok');
+    expect(end.attributes['factory.signal']).toBeUndefined();
+    for (const r of [start, end]) {
+      expect(r.attributes).toMatchObject({
+        'factory.run_id': 'run-1',
+        'factory.issue': '3995',
+        'factory.lane': 'issue-3995',
+        'factory.phase': 'check',
+        'factory.session_id': out.attributes['factory.session_id'],
+      });
+    }
+  });
+
+  it('marks a throwing fn as status error', async () => {
+    const fake = fakeExporter();
+    await expect(run(ON, () => Promise.reject(new Error('x')), fake)).rejects.toThrow('x');
+    expect(fake.records.at(-1)?.attributes['factory.session.status']).toBe('error');
+  });
+
+  it('session end is idempotent when a signal flush races the normal finally', async () => {
+    const fake = fakeExporter();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const logs: Array<{ type: string; msg: string }> = [];
+    const done = withCommandOutputExport(
+      corr,
+      (type, msg) => logs.push({ type, msg }),
+      async () => gate,
+      { env: ON, createExporter: async () => fake.exporter },
+    );
+    await vi.waitFor(() => expect(fake.records.length).toBeGreaterThan(0));
+    const reports = await flushCommandOutputExports('SIGINT');
+    release();
+    await done;
+    expect(reports).toHaveLength(1);
+    expect(fake.records.filter((r) => evt(r) === 'session.end')).toHaveLength(1);
+    expect(fake.shutdown).toHaveBeenCalledOnce();
+    expect(logs).toHaveLength(1);
+  });
+
+  it('a flush that exceeds its budget counts the unsent records and the session end as failed and logs degraded', async () => {
+    const fake = fakeExporter('hang');
+    const { logs } = await run(ON, async () => emitLines(['1', '2']), fake, { flushBudgetMs: 50 });
+    expect(logs).toHaveLength(1);
+    expect(logs[0].type).toBe('command_output_export_degraded');
+    expect(logs[0].msg).toMatch(/0 sent, 0 dropped, \d+ failed/);
+    const failed = Number(/(\d+) failed/.exec(logs[0].msg)?.[1]);
+    expect(failed).toBeGreaterThanOrEqual(3);
+  });
+
+  it('flushCommandOutputExports ends active sessions as interrupted with the signal and returns their reports', async () => {
+    const fake = fakeExporter();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const logs: Array<{ type: string; msg: string }> = [];
+    const done = withCommandOutputExport(
+      corr,
+      (type, msg) => logs.push({ type, msg }),
+      async () => gate,
+      { env: ON, createExporter: async () => fake.exporter },
+    );
+    await vi.waitFor(() => expect(fake.records.length).toBeGreaterThan(0));
+    const reports = await flushCommandOutputExports('SIGTERM', 1000);
+    expect(reports).toEqual([
+      expect.objectContaining({ runId: 'run-1', sessionId: expect.any(String), complete: true, sent: 2 }),
+    ]);
+    const end = fake.records.find((r) => evt(r) === 'session.end');
+    expect(end?.attributes).toMatchObject({ 'factory.session.status': 'interrupted', 'factory.signal': 'SIGTERM' });
+    expect(logs[0]).toEqual({
+      type: 'command_output_export_degraded',
+      msg: 'command output export: 2 sent, 0 dropped, 0 failed (0 retries); session interrupted by SIGTERM',
+    });
+    release();
+    await done;
+    expect(await flushCommandOutputExports('SIGINT')).toEqual([]);
+  });
+
+  it('disabled export opens no session and flushCommandOutputExports resolves empty without an exporter', async () => {
+    const createExporter = vi.fn();
+    await withCommandOutputExport(
+      corr,
+      () => {},
+      async () => {
+        expect(await flushCommandOutputExports('SIGINT')).toEqual([]);
+      },
+      { env: {}, createExporter },
+    );
+    expect(createExporter).not.toHaveBeenCalled();
   });
 });

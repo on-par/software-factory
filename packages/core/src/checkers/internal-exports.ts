@@ -36,3 +36,10 @@ export {
   type SummarizeCommandRunOptions,
 } from './command-output.js';
 export { resolveWorkspaceTestRunners } from './evidence-workspace.js';
+// CHECK command output export: verification runner and OTLP session flush on exit and signals (#3996).
+export { runVerificationCommand } from './run-command.js';
+export {
+  flushCommandOutputExports,
+  withCommandOutputExport,
+  type CommandOutputFlushReport,
+} from '../command-output/otlp-export.js';

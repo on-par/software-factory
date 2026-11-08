@@ -60,9 +60,11 @@ describe('OTLP/HTTP export through the official exporter', () => {
     expect(posts[0].body).toContain('done');
     expect(posts[0].body).toContain('factory.run_id');
     expect(posts[0].body).toContain('run-recv');
+    expect(posts[0].body).toContain('session.start');
+    expect(posts[0].body).toContain('session.end');
     expect(posts[0].body).not.toContain(token);
     expect(logs).toEqual([
-      { type: 'command_output_export', msg: 'command output export: 1 sent, 0 dropped, 0 failed (0 retries)' },
+      { type: 'command_output_export', msg: 'command output export: 3 sent, 0 dropped, 0 failed (0 retries)' },
     ]);
   });
 
@@ -81,7 +83,7 @@ describe('OTLP/HTTP export through the official exporter', () => {
       },
     );
     expect(posts).toEqual(['/v1/logs']);
-    expect(logs[0]).toContain('1 sent');
+    expect(logs[0]).toContain('3 sent');
   });
 
   it('an unreachable endpoint counts failures and does not throw', async () => {
@@ -103,6 +105,6 @@ describe('OTLP/HTTP export through the official exporter', () => {
     expect(result).toBe('still-fine');
     expect(logs).toHaveLength(1);
     expect(logs[0].type).toBe('command_output_export_degraded');
-    expect(logs[0].msg).toMatch(/1 failed/);
+    expect(logs[0].msg).toMatch(/3 failed/);
   });
 });

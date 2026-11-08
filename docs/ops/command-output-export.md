@@ -8,7 +8,7 @@ an OTLP/HTTP endpoint you operate. With export off, which is the default, nothin
 
 The redacted stdout and stderr lines of the CHECK phase's checkers, verify command and app smoke. The redaction from
 #3994 runs first. Any value in `OTEL_EXPORTER_OTLP_HEADERS` or `OTEL_EXPORTER_OTLP_LOGS_HEADERS` (at least 4
-characters) is also masked as `<secret>` in the text. Output outside CHECK, and model or agent output, is not exported.
+characters, and the credential after a scheme such as `Bearer`) is also masked as `<secret>` in the text. Output outside CHECK, and model or agent output, is not exported.
 
 ## Opt-in contract
 
@@ -32,7 +32,28 @@ A warning is a `command_output_export_degraded` event naming env vars, never val
 
 Each record is an OTLP log record with the line as its body, severity INFO for stdout and WARN for stderr, and the
 attributes `factory.run_id`, `factory.issue`, `factory.lane`, `factory.phase`, `factory.command_id`, `factory.seq` and
-`log.iostream` (`stdout` or `stderr`).
+`log.iostream` (`stdout` or `stderr`), plus `factory.session_id` (see Sessions).
+
+## Sessions
+
+Each CHECK export is a session with an 8-character `factory.session_id`. The session opens with a `session start`
+record and closes with a `session end` record, so a collector can tell a complete export from a cut-off one. Both
+carry `factory.run_id`, `factory.issue`, `factory.lane`, `factory.phase`, `factory.session_id` and `factory.event`
+(`session.start` or `session.end`). The end record adds `factory.session.status`:
+
+- `ok`: the phase finished.
+- `error`: the phase threw.
+- `interrupted`: SIGINT or SIGTERM ended the session; `factory.signal` names the signal.
+
+A session with no `session.end` record was lost. With export off no session exists.
+
+## Shutdown
+
+On normal exit the session end is flushed within the 5 s budget below. On the first Ctrl-C or SIGTERM, after the agent
+process-group sweep, the factory flushes pending records for up to 2 s (a 3 s outer guard also covers the 500 ms
+exporter shutdown) and still exits 130. Loss is printed to stderr
+(`factory: command output export incomplete for run <id>: <D> dropped, <F> failed`, or a flush timeout line) and logged
+as `command_output_export_degraded`. A second signal exits immediately without a flush.
 
 ## Bounds
 
@@ -40,15 +61,16 @@ attributes `factory.run_id`, `factory.issue`, `factory.lane`, `factory.phase`, `
 - Batches of 256 records, flushed after 200 ms of linger, one batch in flight at a time so order is kept.
 - 3 attempts per batch with 250 ms → 500 ms → up to 4 s backoff; a batch that still fails is counted failed.
 - 2 s exporter request timeout.
-- 5 s flush budget at the end of CHECK; records still unsent then count as failed, then the exporter shuts down
+- 5 s flush budget at the end of CHECK (2 s when a signal ends the session); records still unsent then count as failed, then the exporter shuts down
   (500 ms at most). A broken collector can never fail a run or stall it beyond this.
 
 ## Events
 
-One event per CHECK phase reports the totals: `command output export: N sent, D dropped, F failed (R retries)`.
+One event per session reports the totals: `command output export: N sent, D dropped, F failed (R retries)`.
 
 - `command_output_export` (info): nothing was dropped or failed.
-- `command_output_export_degraded` (warn): `D + F > 0`, or the opt-in was refused or setup failed.
+- `command_output_export_degraded` (warn): `D + F > 0`, the session was interrupted by a signal (the message ends
+  `; session interrupted by <signal>`), or the opt-in was refused or setup failed.
 
 Every record is counted exactly once as sent, dropped (queue full) or failed (retries or the flush budget exhausted).
 

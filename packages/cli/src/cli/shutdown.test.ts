@@ -8,13 +8,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defaultIsProcessGroupAlive } from '@on-par/factory-core';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import {
+  type CommandOutputFlushReport,
   killTrackedProcessGroups,
   readStopMarker,
   registerProcessGroup,
   trackedProcessGroups,
 } from '@on-par/factory-core/internal';
 
-import { installShutdown, withShutdown, type ShutdownSignals } from './shutdown.js';
+import { installShutdown, withShutdown, SHUTDOWN_FLUSH_GUARD_MS, type ShutdownSignals } from './shutdown.js';
 
 const originalExitCode = process.exitCode;
 const cleanups: Array<() => void> = [];
@@ -30,6 +31,109 @@ function fakeSignals(): ShutdownSignals & EventEmitter {
 }
 
 const tick = () => new Promise((r) => setImmediate(r));
+
+describe('installShutdown export flush', () => {
+  function setup(flushExports: () => Promise<CommandOutputFlushReport[]>) {
+    const signals = fakeSignals();
+    const order: string[] = [];
+    const lines: string[] = [];
+    const exit = vi.fn((code: number) => {
+      order.push(`exit ${code}`);
+    });
+    installShutdown(new AbortController(), {
+      stopFile: () => '/unused',
+      writeStop: () => {},
+      signals,
+      exit,
+      log: (l) => lines.push(l),
+      killTracked: async () => {
+        order.push('kill');
+      },
+      flushExports: async (sig: NodeJS.Signals) => {
+        order.push(`flush ${sig}`);
+        return flushExports();
+      },
+    });
+    return { signals, order, lines, exit };
+  }
+
+  it.each(['SIGINT', 'SIGTERM'] as const)('%s awaits flushExports before exit 130', async (sig) => {
+    const { signals, order, exit } = setup(async () => {
+      await tick();
+      order.push('flushed');
+      return [];
+    });
+    signals.emit(sig, sig);
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+    expect(order).toEqual(['kill', `flush ${sig}`, 'flushed', 'exit 130']);
+  });
+
+  it('a hung flush is abandoned after the guard and still exits 130', async () => {
+    vi.useFakeTimers();
+    try {
+      const { signals, lines, exit } = setup(() => new Promise(() => {}));
+      signals.emit('SIGINT', 'SIGINT');
+      await vi.advanceTimersByTimeAsync(SHUTDOWN_FLUSH_GUARD_MS + 1);
+      expect(exit).toHaveBeenCalledWith(130);
+      expect(lines.join('\n')).toContain(`flush timed out after ${SHUTDOWN_FLUSH_GUARD_MS} ms — records may be lost`);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('incomplete flush reports are logged', async () => {
+    const { signals, lines, exit } = setup(async () => [
+      { runId: 'run-9', sessionId: 'abcd', complete: false, sent: 1, dropped: 2, failed: 3, retries: 0 },
+      { runId: 'run-ok', sessionId: 'efgh', complete: true, sent: 4, dropped: 0, failed: 0, retries: 0 },
+    ]);
+    signals.emit('SIGTERM', 'SIGTERM');
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+    expect(lines).toContain('factory: command output export incomplete for run run-9: 2 dropped, 3 failed');
+    expect(lines.join('\n')).not.toContain('run-ok');
+  });
+
+  it('a report carrying an error prints the reason instead of counts', async () => {
+    const { signals, lines, exit } = setup(async () => [
+      {
+        runId: 'run-err',
+        sessionId: 'ijkl',
+        complete: false,
+        sent: 0,
+        dropped: 0,
+        failed: 0,
+        retries: 0,
+        error: 'boom',
+      },
+    ]);
+    signals.emit('SIGTERM', 'SIGTERM');
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+    expect(lines).toContain('factory: command output export failed for run run-err: boom');
+  });
+
+  it('a rejecting flush never blocks exit', async () => {
+    const { signals, exit } = setup(() => Promise.reject(new Error('boom')));
+    signals.emit('SIGINT', 'SIGINT');
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+  });
+
+  it('with no active export session the default flush is a no-op', async () => {
+    const signals = fakeSignals();
+    const lines: string[] = [];
+    const exit = vi.fn();
+    installShutdown(new AbortController(), {
+      stopFile: () => '/unused',
+      writeStop: () => {},
+      signals,
+      exit,
+      log: (l) => lines.push(l),
+      killTracked: async () => {},
+    });
+    signals.emit('SIGINT', 'SIGINT');
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+    expect(signals.listenerCount('SIGINT')).toBe(1);
+    expect(lines.filter((l) => l.includes('command output export'))).toEqual([]);
+  });
+});
 
 describe('installShutdown', () => {
   it('first SIGINT SIGTERMs every tracked process group, SIGKILLs survivors after the grace and exits 130', async () => {

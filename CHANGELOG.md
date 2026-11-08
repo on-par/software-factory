@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- OTLP command output export now emits run-correlated session start/end records and flushes pending records within a bounded budget on normal exit, Ctrl-C (exit 130) and SIGTERM, reporting any loss (#3996).
 - Opt-in export of redacted CHECK command output to any OTLP/HTTP endpoint (FACTORY_COMMAND_OUTPUT_EXPORT=otlp plus standard OTEL_EXPORTER_OTLP_* env), with a bounded queue, retry with backoff, and a per-CHECK sent/dropped/failed event (#3995).
 - CHECK command output (checkers, verify, app smoke) is now captured live per line, redacted, and tagged with run, issue, lane, phase, command id and sequence number for an in-process sink; no exporter ships yet (#3994).
 
