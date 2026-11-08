@@ -227,6 +227,14 @@ Product e2e suites should boot their app on `PORT` (strict-port) and point their
 
 Checker commands (compile, tests, lint, evidence, `app_smoke`) inherit only an allow-list of host variables: `PATH`, `HOME`, locale, `TERM`, `CI`, `NODE_OPTIONS`, `npm_config_*`, proxies, common toolchain roots and the lane contract above. Other host variables, such as `ANTHROPIC_API_KEY`, are not passed. The list lives in `packages/core/src/environment/checker-env.ts`; set `FACTORY_CHECKER_ENV_ALLOW=NAME,...` on the factory process to add names.
 
+**Live command output stream.** Set `FACTORY_COMMAND_STREAM_DIR=<dir>` on the factory process to watch command output while it runs. Every command the factory runs (checker, base health and lane install commands, the `app_smoke` app, and the factory's other subprocesses) then appends each stdout/stderr chunk to its own NDJSON file in that directory the moment it is received, before any in-memory buffer, `maxBuffer` limit, tail or excerpt. Files are named `cmd-<process start ms>-<pid>-<6-digit sequence>-<command label>.ndjson` and are never overwritten. Each line is one record with `seq` and `ts` (epoch ms):
+
+- `start`: `argv` (GitHub tokens masked), `shell`, `cwd` (directory name only) and the factory `pid`.
+- `chunk`: `stream` (`stdout` or `stderr`), `offset` (bytes already received on that stream) and `data` (the raw bytes, base64). `decoded: true` marks the one path (shell `exec` without a process group) whose pipes arrive as UTF-8 text.
+- `end`: `exitCode`, `signal`, `timedOut`, `maxBufferExceeded`, `bytes` per stream, `writeErrors` and `complete`.
+
+Output is raw, not redacted; whoever reads the files must redact it. Records are written synchronously, so a crash keeps everything received so far. The stream is a side channel: a failed write never changes a command's result, verdict or logs. After a failed write the factory stops writing chunks and the `end` record says `complete: false`. A missing `end` record means the factory stopped before the command finished. If the file cannot be created at all, no file is written. For a process-group run, the `end` record can land up to 250 ms after the command returns, while the pipes drain. Leave the variable unset to turn streaming off.
+
 ### Preview environment gate
 
 A repo with its own PR preview deployments can opt in to a SHIP gate. Once the PR's hosted CI is green, SHIP finds the preview URL, waits for it to answer, and runs your smoke or e2e command against it. The gate only reads GitHub. It never deploys anything, never merges, and does not replace the CI watch or land's merge gates.

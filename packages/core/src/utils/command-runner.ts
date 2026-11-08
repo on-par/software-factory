@@ -6,6 +6,7 @@ import { execa } from 'execa';
 import { basename } from 'node:path';
 
 import { killProcessGroup, registerProcessGroup } from '../environment/process-groups.js';
+import { endCommandStreamWhenDrained, openCommandStream } from './command-stream.js';
 import { childProcessEnv, redactGitHubCredentials } from './github-credentials.js';
 import { spawnSupervisedCommand } from './supervised-exec.js';
 
@@ -85,6 +86,7 @@ async function runCommandDetached(
   const pid = child.pid;
   const deregister = pid !== undefined ? registerProcessGroup(pid) : () => {};
   if (pid !== undefined) options.onPgid?.(pid);
+  const stream = openCommandStream(argv, { cwd: options.cwd });
   child.once('exit', deregister);
   child.once('error', deregister);
 
@@ -121,6 +123,7 @@ async function runCommandDetached(
   const { exitCode, signal } = await new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>(
     (resolve) => {
       child.stdout?.on('data', (chunk: Buffer) => {
+        stream?.write('stdout', chunk);
         if (settled) return;
         stdoutLen += chunk.length;
         if (stdoutLen > maxBuffer) {
@@ -131,6 +134,7 @@ async function runCommandDetached(
         stdoutChunks.push(chunk);
       });
       child.stderr?.on('data', (chunk: Buffer) => {
+        stream?.write('stderr', chunk);
         if (settled) return;
         stderrLen += chunk.length;
         if (stderrLen > maxBuffer) {
@@ -157,6 +161,8 @@ async function runCommandDetached(
   );
 
   if (timer) clearTimeout(timer);
+  if (stream)
+    endCommandStreamWhenDrained(stream, [child.stdout, child.stderr], { exitCode, signal, timedOut, maxBufferExceeded });
 
   const isTerminated = timedOut || maxBufferExceeded || signal !== null;
   if (isTerminated && pid !== undefined) {
@@ -205,7 +211,7 @@ async function runCommandAttached(
   options: RunCommandOptions,
   env: NodeJS.ProcessEnv,
 ): Promise<CommandResult> {
-  const r = await execa(argv[0], argv.slice(1), {
+  const subprocess = execa(argv[0], argv.slice(1), {
     cwd: options.cwd,
     timeout: options.timeoutMs,
     maxBuffer: options.maxBuffer,
@@ -213,6 +219,19 @@ async function runCommandAttached(
     extendEnv: false,
     reject: false,
     all: false,
+  });
+  // Tap the raw pipes before execa's own buffering and maxBuffer truncation.
+  const stream = openCommandStream(argv, { cwd: options.cwd });
+  if (stream) {
+    subprocess.stdout?.on('data', (chunk: Buffer | string) => stream.write('stdout', chunk));
+    subprocess.stderr?.on('data', (chunk: Buffer | string) => stream.write('stderr', chunk));
+  }
+  const r = await subprocess;
+  stream?.end({
+    exitCode: typeof r.exitCode === 'number' ? r.exitCode : null,
+    signal: r.signal ?? null,
+    timedOut: r.timedOut,
+    maxBufferExceeded: r.isMaxBuffer,
   });
 
   const exitCode = typeof r.exitCode === 'number' ? r.exitCode : -1;

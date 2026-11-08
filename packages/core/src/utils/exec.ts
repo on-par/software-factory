@@ -4,6 +4,12 @@ import { exec as execCb, spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { promisify } from 'node:util';
 
+import {
+  type CommandStreamEnd,
+  type CommandStreamSink,
+  endCommandStreamWhenDrained,
+  openCommandStream,
+} from './command-stream.js';
 import { childProcessEnv, redactExecError } from './github-credentials.js';
 import { spawnSupervisedCommand } from './supervised-exec.js';
 import { killProcessGroup, registerProcessGroup } from '../environment/process-groups.js';
@@ -64,6 +70,7 @@ function execDetached(
     maxBuffer?: number;
     env: NodeJS.ProcessEnv;
     onStdout?: (chunk: string) => void;
+    stream?: CommandStreamSink;
   },
   spawnFn: typeof spawn,
 ): Promise<ChildResult> & { child: ReturnType<typeof spawn> } {
@@ -95,7 +102,9 @@ function execDetached(
       : undefined;
 
   const promise = new Promise<ChildResult>((resolve, reject) => {
+    const stream = opts.stream;
     child.stdout?.on('data', (chunk: Buffer) => {
+      stream?.write('stdout', chunk);
       if (settled) return;
       stdoutLen += chunk.length;
       if (stdoutLen > maxBuffer) {
@@ -116,6 +125,7 @@ function execDetached(
       }
     });
     child.stderr?.on('data', (chunk: Buffer) => {
+      stream?.write('stderr', chunk);
       if (settled) return;
       stderrLen += chunk.length;
       if (stderrLen > maxBuffer) {
@@ -128,6 +138,7 @@ function execDetached(
 
     child.on('error', (err) => {
       if (timer) clearTimeout(timer);
+      stream?.end({ exitCode: null, signal: null, timedOut, maxBufferExceeded });
       reject(err);
     });
 
@@ -135,6 +146,13 @@ function execDetached(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (stream)
+        endCommandStreamWhenDrained(stream, [child.stdout, child.stderr], {
+          exitCode: code,
+          signal,
+          timedOut,
+          maxBufferExceeded,
+        });
       const stdout = Buffer.concat(stdoutChunks).toString('utf-8');
       const stderr = Buffer.concat(stderrChunks).toString('utf-8');
 
@@ -166,6 +184,18 @@ function execDetached(
   return Object.assign(promise, { child });
 }
 
+/** End-record fields from a `promisify(exec)` rejection. */
+function execErrorEnd(err: unknown): CommandStreamEnd {
+  const e = err as { code?: unknown; signal?: NodeJS.Signals | null; killed?: boolean };
+  const maxBufferExceeded = e.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
+  return {
+    exitCode: typeof e.code === 'number' ? e.code : null,
+    signal: e.signal ?? null,
+    timedOut: e.killed === true && !maxBufferExceeded,
+    maxBufferExceeded,
+  };
+}
+
 /** Injectable process seams for defaultExecFn; defaults are the real spawn and killProcessGroup. */
 export interface ExecDeps {
   spawn?: typeof spawn;
@@ -178,15 +208,25 @@ export function createDefaultExecFn(deps: ExecDeps = {}): ExecFn {
   const killGroup = deps.killProcessGroup ?? killProcessGroup;
   return async (cmd, opts) => {
     const env = childProcessEnv(process.env, opts.env, { githubAuth: opts.githubAuth });
+    const stream = openCommandStream([cmd], { cwd: opts.cwd, shell: true });
     if (!opts.onPgid) {
+      const pending = exec(cmd, {
+        cwd: opts.cwd,
+        timeout: opts.timeoutMs,
+        maxBuffer: opts.maxBuffer,
+        env,
+      });
+      if (stream) {
+        // exec decodes its pipes as UTF-8, so these chunks arrive as text (marked `decoded` in the stream).
+        pending.child.stdout?.on('data', (chunk: string) => stream.write('stdout', chunk));
+        pending.child.stderr?.on('data', (chunk: string) => stream.write('stderr', chunk));
+      }
       try {
-        return await exec(cmd, {
-          cwd: opts.cwd,
-          timeout: opts.timeoutMs,
-          maxBuffer: opts.maxBuffer,
-          env,
-        });
+        const result = await pending;
+        stream?.end({ exitCode: 0, signal: null, timedOut: false, maxBufferExceeded: false });
+        return result;
       } catch (err) {
+        stream?.end(execErrorEnd(err));
         throw redactExecError(err);
       }
     }
@@ -199,6 +239,7 @@ export function createDefaultExecFn(deps: ExecDeps = {}): ExecFn {
         maxBuffer: opts.maxBuffer,
         env,
         onStdout: opts.onStdout,
+        stream,
       },
       spawnFn,
     );

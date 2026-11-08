@@ -7,6 +7,8 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+- Setting `FACTORY_COMMAND_STREAM_DIR` makes every command the factory runs append its raw stdout/stderr chunks to a per-command NDJSON file as they arrive, before any buffer or `maxBuffer` limit. Off by default; see the README.
+
 ## 0.9.34 - 2026-11-07
 
 A failing pre-PLAN base health checker's full output is now written to `<logsDir>/issue-<n>/check-base-health/`, the same way CHECK does (#3991).

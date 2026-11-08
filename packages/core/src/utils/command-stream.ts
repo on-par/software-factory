@@ -1,0 +1,172 @@
+// src/utils/command-stream.ts — opt-in live NDJSON stream of a command's raw stdout/stderr, written as it arrives.
+
+import { closeSync, mkdirSync, openSync, writeSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import type { Readable } from 'node:stream';
+
+import { redactGitHubCredentials } from './github-credentials.js';
+
+/** When set on the factory process, every command run through the command runners streams its output into this dir. */
+export const COMMAND_STREAM_DIR_ENV = 'FACTORY_COMMAND_STREAM_DIR';
+
+/** How long a detached run waits for its stdio to drain after exit before writing the end record. */
+const DRAIN_GRACE_MS = 250;
+
+export type OutputStream = 'stdout' | 'stderr';
+
+export interface CommandStreamEnd {
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  timedOut: boolean;
+  maxBufferExceeded: boolean;
+}
+
+export interface CommandStreamSink {
+  /** Appends one received chunk. A string chunk was decoded by a runner that never exposes raw bytes. */
+  write(stream: OutputStream, chunk: Buffer | string): void;
+  /** Writes the end record and closes the file. Later writes and ends are ignored. */
+  end(result: CommandStreamEnd): void;
+}
+
+/** File seam so tests can fail a write mid-stream. */
+export interface CommandStreamIo {
+  mkdir(dir: string): void;
+  open(path: string): number;
+  write(fd: number, data: Buffer): number;
+  close(fd: number): void;
+}
+
+const nodeIo: CommandStreamIo = {
+  mkdir: (dir) => mkdirSync(dir, { recursive: true }),
+  open: (path) => openSync(path, 'ax'),
+  write: (fd, data) => writeSync(fd, data),
+  close: (fd) => closeSync(fd),
+};
+
+const PROCESS_TAG = `${Date.now()}-${process.pid}`;
+let sequence = 0;
+
+/** File-name-safe label from the program name and its first two arguments; never a caller-supplied path. */
+function commandLabel(argv: readonly string[]): string {
+  const words = [basename(argv[0] ?? 'command'), ...argv.slice(1, 3)];
+  return (
+    words
+      .join('-')
+      .replace(/[^A-Za-z0-9._-]+/g, '-')
+      .replace(/-{2,}/g, '-')
+      .replace(/^[-.]+|-+$/g, '')
+      .slice(0, 60) || 'command'
+  );
+}
+
+/** Opens a stream file for one command invocation, or returns undefined when streaming is off or the file
+ *  cannot be created. The stream is a diagnostic side channel: no method ever throws, and a failed write
+ *  only marks the stream incomplete (`complete: false` and `writeErrors` on the end record). */
+export function openCommandStream(
+  argv: readonly string[],
+  opts: { cwd?: string; shell?: boolean } = {},
+  env: NodeJS.ProcessEnv = process.env,
+  io: CommandStreamIo = nodeIo,
+): CommandStreamSink | undefined {
+  const dir = env[COMMAND_STREAM_DIR_ENV]?.trim();
+  if (!dir) return undefined;
+
+  let fd: number;
+  try {
+    io.mkdir(dir);
+    fd = openUnique(dir, commandLabel(opts.shell ? (argv[0] ?? '').trim().split(/\s+/) : argv), io);
+  } catch {
+    return undefined;
+  }
+
+  let seq = 0;
+  let writeErrors = 0;
+  let failed = false;
+  let closed = false;
+  const bytes: Record<OutputStream, number> = { stdout: 0, stderr: 0 };
+
+  const append = (record: Record<string, unknown>): void => {
+    // After a failed write the file may end in a torn line; a leading newline keeps the next record parseable.
+    const lead = failed ? '\n' : '';
+    const line = Buffer.from(`${lead}${JSON.stringify({ seq: seq++, ts: Date.now(), ...record })}\n`, 'utf-8');
+    try {
+      let off = 0;
+      while (off < line.length) off += io.write(fd, line.subarray(off));
+    } catch {
+      writeErrors++;
+      failed = true;
+    }
+  };
+
+  append({
+    type: 'start',
+    argv: argv.map((arg) => redactGitHubCredentials(arg)),
+    shell: opts.shell === true,
+    cwd: basename(opts.cwd ?? process.cwd()),
+    pid: process.pid,
+  });
+
+  return {
+    write(stream, chunk) {
+      if (closed) return;
+      const data = typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : chunk;
+      const offset = bytes[stream];
+      bytes[stream] += data.length;
+      // Once a write has failed the byte sequence has a gap: stop appending chunks and let the end record say so.
+      if (failed) return;
+      append({
+        type: 'chunk',
+        stream,
+        offset,
+        ...(typeof chunk === 'string' ? { decoded: true } : {}),
+        data: data.toString('base64'),
+      });
+    },
+    end(result) {
+      if (closed) return;
+      closed = true;
+      append({ type: 'end', ...result, bytes: { ...bytes }, complete: !failed, writeErrors });
+      try {
+        io.close(fd);
+      } catch {
+        // nothing left to report to
+      }
+    },
+  };
+}
+
+function openUnique(dir: string, label: string, io: CommandStreamIo): number {
+  for (;;) {
+    const name = `cmd-${PROCESS_TAG}-${String(++sequence).padStart(6, '0')}-${label}.ndjson`;
+    try {
+      return io.open(join(dir, name));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
+  }
+}
+
+/** Ends the stream once both pipes have closed, or after a short grace period when a backgrounded grandchild
+ *  keeps them open. Never delays the caller: the end record may land just after the runner returns. */
+export function endCommandStreamWhenDrained(
+  sink: CommandStreamSink,
+  pipes: readonly (Readable | null | undefined)[],
+  result: CommandStreamEnd,
+): void {
+  const open = pipes.filter((p): p is Readable => !!p && !p.readableEnded && !p.destroyed);
+  if (open.length === 0) {
+    sink.end(result);
+    return;
+  }
+  let pending = open.length;
+  const done = () => {
+    clearTimeout(timer);
+    sink.end(result);
+  };
+  const timer = setTimeout(done, DRAIN_GRACE_MS);
+  timer.unref();
+  for (const pipe of open)
+    pipe.once('close', () => {
+      if (--pending === 0) done();
+    });
+}

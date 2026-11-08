@@ -1,4 +1,4 @@
-import { mkdir, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -261,5 +261,40 @@ describe('app_smoke registry opt-in', () => {
     expect(trackedProcessGroups()).toContain(app.pid);
     await app.exited;
     expect(trackedProcessGroups()).not.toContain(app.pid);
+  });
+
+  it('defaultStartApp streams the app output live when a command stream dir is set', async () => {
+    const streamDir = await tempDirs.make('sf-app-stream-');
+    vi.stubEnv('FACTORY_COMMAND_STREAM_DIR', streamDir);
+    try {
+      const app = defaultStartApp(
+        [process.execPath, '-e', 'process.stdout.write("ready é\\n"); process.stderr.write("warn\\n"); process.exitCode = 4'],
+        { cwd: process.cwd(), env: process.env },
+      );
+      expect(await app.exited).toEqual({ code: 4, signal: null });
+      expect(app.output()).toContain('ready é');
+      const read = async () => {
+        const [file] = await readdir(streamDir);
+        return (await readFile(join(streamDir, file), 'utf-8'))
+          .split('\n')
+          .filter(Boolean)
+          .map((l) => JSON.parse(l) as Record<string, unknown>);
+      };
+      await vi.waitFor(async () => expect((await read()).at(-1)).toMatchObject({ type: 'end', exitCode: 4 }), {
+        timeout: 5_000,
+        interval: 20,
+      });
+      const lines = await read();
+      const text = (stream: string) =>
+        Buffer.concat(
+          lines
+            .filter((l) => l.type === 'chunk' && l.stream === stream)
+            .map((l) => Buffer.from(String(l.data), 'base64')),
+        ).toString('utf-8');
+      expect(text('stdout')).toBe('ready é\n');
+      expect(text('stderr')).toBe('warn\n');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

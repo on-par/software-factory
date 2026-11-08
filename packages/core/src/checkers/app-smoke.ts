@@ -9,6 +9,7 @@ import type { CheckerOutput } from '../types/index.js';
 import { checkerParentEnv } from '../environment/checker-env.js';
 import { childProcessEnv } from '../utils/github-credentials.js';
 import type { CommandResult } from '../utils/command-runner.js';
+import { endCommandStreamWhenDrained, openCommandStream } from '../utils/command-stream.js';
 import { stripAnsi, writeCommandLog } from './command-log.js';
 import type { CheckerContext } from './index.js';
 import { runVerificationCommand, VERIFICATION_SCRUBBED_ENV_VARS } from './run-command.js';
@@ -55,11 +56,28 @@ export const defaultStartApp: AppSmokeDeps['startApp'] = (argv, { cwd, env, onPg
   const deregister = child.pid !== undefined ? registerProcessGroup(child.pid) : () => {};
   child.once('exit', deregister);
   child.once('error', deregister);
-  child.stdout?.on('data', collect);
-  child.stderr?.on('data', collect);
+  const stream = openCommandStream(argv, { cwd });
+  child.stdout?.on('data', (chunk: Buffer) => {
+    stream?.write('stdout', chunk);
+    collect(chunk);
+  });
+  child.stderr?.on('data', (chunk: Buffer) => {
+    stream?.write('stderr', chunk);
+    collect(chunk);
+  });
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-    child.on('exit', (code, signal) => resolve({ code, signal }));
+    child.on('exit', (code, signal) => {
+      if (stream)
+        endCommandStreamWhenDrained(stream, [child.stdout, child.stderr], {
+          exitCode: code,
+          signal,
+          timedOut: false,
+          maxBufferExceeded: false,
+        });
+      resolve({ code, signal });
+    });
     child.on('error', (err) => {
+      stream?.end({ exitCode: null, signal: null, timedOut: false, maxBufferExceeded: false });
       collect(Buffer.from(`${err.message}\n`));
       resolve({ code: -1, signal: null });
     });
