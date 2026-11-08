@@ -145,14 +145,16 @@ const loadPreviewConfigDefault = (worktree: string): PreviewConfig | undefined =
 const loadVisualProofConfigDefault = (worktree: string): VisualProofConfig | undefined =>
   loadRepoConfig(worktree)?.visualProof;
 
-/** Screenshot routes the frozen plan's evidence plan names; empty when the spec or its design block cannot be read. */
-async function readPlanScreenshotRoutes(specPath: string | undefined): Promise<string[]> {
-  if (!specPath) return [];
+/** Screenshot routes the frozen plan's evidence plan names; a missing spec yields no routes; `error` is set when it or its design block cannot be read. */
+async function readPlanScreenshotRoutes(specPath: string | undefined): Promise<{ routes: string[]; error?: string }> {
+  if (!specPath) return { routes: [] };
   try {
     const { artifact } = parseDesignArtifact((await readSpec(specPath)).data);
-    return (artifact?.evidencePlan ?? []).flatMap((e) => (e.kind === 'screenshot' ? [e.route] : []));
-  } catch {
-    return [];
+    return { routes: (artifact?.evidencePlan ?? []).flatMap((e) => (e.kind === 'screenshot' ? [e.route] : [])) };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { routes: [] };
+    const detail = err instanceof Error ? err.message : String(err);
+    return { routes: [], error: `could not read the frozen plan's evidencePlan: ${detail}` };
   }
 }
 
@@ -201,10 +203,11 @@ export async function shipWithCiRework(
         })
     : undefined;
   const visualProofConfig = (ports.loadVisualProofConfig ?? loadVisualProofConfigDefault)(ports.workspace.path);
-  const planRoutes = await readPlanScreenshotRoutes(request.specPath);
+  const { routes: planRoutes, error: planRoutesError } = await readPlanScreenshotRoutes(request.specPath);
   const visualProofGate: VisualProofGate | undefined =
-    visualProofConfig || planRoutes.length > 0
+    visualProofConfig || planRoutes.length > 0 || planRoutesError
       ? async (pr) => {
+          if (planRoutesError) throw new Error(planRoutesError);
           const changedFiles = await listChanged(ports.octokit, owner, repoName, pr.prNumber);
           const requirement = classifyVisualProof({ changedFiles, config: visualProofConfig, planRoutes });
           const base = { headSha: pr.headSha, runId: ctx.runId, captures: [] };

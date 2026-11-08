@@ -1,8 +1,7 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { VisualProofConfigSchema } from '../config/visual-proof-section.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import {
@@ -223,15 +222,9 @@ describe('validateVisualProofManifest', () => {
 });
 
 describe('runVisualProofCapture', () => {
-  const dirs: string[] = [];
-  afterEach(() => {
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-  });
-  const logsDir = () => {
-    const d = mkdtempSync(join(tmpdir(), 'vp-test-'));
-    dirs.push(d);
-    return d;
-  };
+  const tempDirs = createTempDirs();
+  afterEach(() => tempDirs.cleanup());
+  const logsDir = () => tempDirs.makeSync('vp-test-');
   const qa = { start: ['npm', 'start'], readyPath: '/', readyTimeoutSeconds: 5 };
   const requirement = { required: true as const, routes: [route('/settings')] };
   const cmdResult = (patch: Partial<CommandResult> = {}): CommandResult => ({
