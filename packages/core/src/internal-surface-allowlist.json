@@ -15,6 +15,11 @@
   "CheckHeuristics",
   "CheckResumeStore",
   "ChecksConfigSource",
+  "CommandCapture",
+  "CommandOutputCorrelation",
+  "CommandOutputRecord",
+  "CommandOutputSink",
+  "CommandOutputStream",
   "CommandRunCounts",
   "CompileCommand",
   "ContainedReviewDeps",
@@ -93,6 +98,7 @@
   "TicketWriteback",
   "UnknownConstitutionChecker",
   "UnsupportedQueueBackendError",
+  "addCommandOutputSink",
   "agentMemoryPath",
   "buildBacktestRecord",
   "buildClassifierPrompt",
@@ -117,6 +123,7 @@
   "listFactoryWorktrees",
   "loadAgentMemoryCtx",
   "mirrorSlicePlanToTicket",
+  "openCommandCapture",
   "parseClassifierOutput",
   "parseCommandCounts",
   "parseNumstat",
@@ -145,5 +152,6 @@
   "ticketTrackerOf",
   "toClassificationRecord",
   "triageFeedback",
-  "upsertRiskReceipt"
+  "upsertRiskReceipt",
+  "withCommandOutputCapture"
 ]

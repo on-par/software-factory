@@ -1,4 +1,5 @@
 import { checkerParentEnv } from '../environment/checker-env.js';
+import { openCommandCapture } from '../command-output/index.js';
 import { runCommand, type RunCommandOptions } from '../utils/command-runner.js';
 
 /** Orchestration-only variables: the run-config snapshot plus the supervisor's merge/ship flags.
@@ -15,13 +16,26 @@ export const VERIFICATION_SCRUBBED_ENV_VARS = [
 /** Checker commands start from the env allow-list (#1590), so host secrets never reach agent-written scripts.
  * The accepted snapshot and merge flags belong to orchestration, not the repository being checked.
  * An explicit undefined survives the command runner's parent-env merge as a deletion. */
-export function runVerificationCommand(argv: readonly string[], options: RunCommandOptions) {
-  return runCommand(argv, {
-    ...options,
-    parentEnv: checkerParentEnv(options.parentEnv ?? process.env),
-    env: {
-      ...options.env,
-      ...Object.fromEntries(VERIFICATION_SCRUBBED_ENV_VARS.map((name) => [name, undefined])),
-    },
-  });
+export async function runVerificationCommand(argv: readonly string[], options: RunCommandOptions) {
+  const capture = openCommandCapture();
+  try {
+    return await runCommand(argv, {
+      ...options,
+      parentEnv: checkerParentEnv(options.parentEnv ?? process.env),
+      env: {
+        ...options.env,
+        ...Object.fromEntries(VERIFICATION_SCRUBBED_ENV_VARS.map((name) => [name, undefined])),
+      },
+      ...(capture
+        ? {
+            onOutput: (stream, chunk) => {
+              options.onOutput?.(stream, chunk);
+              capture.write(stream, chunk);
+            },
+          }
+        : {}),
+    });
+  } finally {
+    capture?.end();
+  }
 }

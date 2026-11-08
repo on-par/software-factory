@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- Nested checker, verify and app_smoke output is now captured live per stream, with run, issue, lane, phase, command id and sequence correlation, and redacted before any in-process sink sees it; nothing is exported yet (#3994).
+
 ## 0.9.34 - 2026-11-07
 
 A failing pre-PLAN base health checker's full output is now written to `<logsDir>/issue-<n>/check-base-health/`, the same way CHECK does (#3991).

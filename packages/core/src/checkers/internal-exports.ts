@@ -36,3 +36,4 @@ export {
   type SummarizeCommandRunOptions,
 } from './command-output.js';
 export { resolveWorkspaceTestRunners } from './evidence-workspace.js';
+export * from '../command-output/index.js'; // Live nested command output capture (#3994)

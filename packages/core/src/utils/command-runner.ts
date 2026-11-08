@@ -34,6 +34,8 @@ export interface RunCommandOptions {
    *  own GitHub calls); every other command — checkers running agent-written
    *  code, repo scripts — gets an environment without them. */
   githubAuth?: boolean;
+  /** Called per raw chunk as it arrives, with the stream it came from. A throwing hook is ignored. */
+  onOutput?: (stream: 'stdout' | 'stderr', chunk: Uint8Array) => void;
 }
 
 export interface CommandResult {
@@ -122,6 +124,7 @@ async function runCommandDetached(
     (resolve) => {
       child.stdout?.on('data', (chunk: Buffer) => {
         if (settled) return;
+        tapOutput(options, 'stdout', chunk);
         stdoutLen += chunk.length;
         if (stdoutLen > maxBuffer) {
           maxBufferExceeded = true;
@@ -132,6 +135,7 @@ async function runCommandDetached(
       });
       child.stderr?.on('data', (chunk: Buffer) => {
         if (settled) return;
+        tapOutput(options, 'stderr', chunk);
         stderrLen += chunk.length;
         if (stderrLen > maxBuffer) {
           maxBufferExceeded = true;
@@ -200,6 +204,27 @@ function isGitHubClient(bin: string): boolean {
   return name === 'gh' || name === 'git';
 }
 
+function tapOutput(options: RunCommandOptions, stream: 'stdout' | 'stderr', chunk: Uint8Array): void {
+  try {
+    options.onOutput?.(stream, chunk);
+  } catch {
+    // a throwing hook must not affect the command
+  }
+}
+
+function outputTap(options: RunCommandOptions, stream: 'stdout' | 'stderr') {
+  return [
+    {
+      transform: function* (chunk: Uint8Array) {
+        tapOutput(options, stream, chunk);
+        yield chunk;
+      },
+      binary: true as const,
+    },
+    'pipe' as const,
+  ];
+}
+
 async function runCommandAttached(
   argv: readonly string[],
   options: RunCommandOptions,
@@ -213,6 +238,7 @@ async function runCommandAttached(
     extendEnv: false,
     reject: false,
     all: false,
+    ...(options.onOutput ? { stdout: outputTap(options, 'stdout'), stderr: outputTap(options, 'stderr') } : {}),
   });
 
   const exitCode = typeof r.exitCode === 'number' ? r.exitCode : -1;

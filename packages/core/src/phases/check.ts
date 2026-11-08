@@ -3,6 +3,7 @@
 import { type WorkKey } from '../work/work-key.js';
 import { join } from 'node:path';
 
+import { withCommandOutputCapture } from '../command-output/index.js';
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import { type BaselineReport, extractFailingTestNames, runBaselineCheckers } from '../checkers/baseline.js';
 import { type FlakeRerun, rerunTestsChecker } from '../checkers/flaky-rerun.js';
@@ -215,7 +216,11 @@ export async function checkPhase(opts: Parameters<typeof checkPhaseImpl>[0]): Pr
       worktreePath: opts.worktree,
       log: opts.log,
     },
-    () => checkPhaseImpl(opts),
+    () =>
+      withCommandOutputCapture(
+        { runId: opts.runId ?? null, issue: String(opts.issue), laneId: opts.laneId ?? null, phase: 'check' },
+        () => checkPhaseImpl(opts),
+      ),
     (r) => r.passed,
     (r) =>
       `check ${r.passed ? 'passed' : 'failed'} (${r.summary.passes} pass, ${r.summary.failures} fail, ` +
