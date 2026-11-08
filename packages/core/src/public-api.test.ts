@@ -328,6 +328,7 @@ const INTERNAL_API_KEYS = [
   'registerProcessGroup',
   'savePrRunState',
   'UnsupportedQueueBackendError', // #3890
+  ...'assertVisualProofForHead VisualProofMissingError'.split(' '), // #2232
   'createGithubQueueBackend', // #3890
   'createQueueBackend', // #3890
   'LINEAR_API_KEY_ENV',

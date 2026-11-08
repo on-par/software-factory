@@ -6,8 +6,11 @@ import type { Octokit } from '@octokit/rest';
 import type { EventKind, FactoryEvent, ParkReason } from '@on-par/factory-core';
 import type { CiOutcome, InfraRerunOutcome, WatchChecksOptions } from '@on-par/factory-core/internal';
 import {
+  assertVisualProofForHead,
   hasAnyCiSignal,
+  resolveSelfIdentity,
   syncLandBranch,
+  VisualProofMissingError,
   warnNoBranchProtectionOnce,
   watchChecksWithInfraRerun,
 } from '@on-par/factory-core/internal';
@@ -98,7 +101,8 @@ export function isLandLeftOpen(err: unknown): boolean {
     err instanceof AwaitingReviewError ||
     err instanceof CiFailedError ||
     err instanceof AwaitingCiError ||
-    err instanceof BaseCiPendingError
+    err instanceof BaseCiPendingError ||
+    err instanceof VisualProofMissingError
   );
 }
 
@@ -414,6 +418,12 @@ export async function landOpenPullRequest(opts: {
             await syncNow(reason);
             return 'resynced' as const;
           }
+          const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
+          await assertVisualProofForHead(
+            octokit,
+            { owner, repo: repoName, prNumber, prBody: pr.body, headSha: verifiedSha ?? pr.head.sha },
+            () => resolveSelfIdentity(octokit).then((self) => self.id ?? -1),
+          );
           if (state.isDraft && state.id) {
             log('land', `PR #${prNumber} still a draft — re-issuing ready-for-review (attempt ${attempt})`);
             await markPullRequestReady(octokit, state.id).catch((err: unknown) =>
@@ -436,6 +446,10 @@ export async function landOpenPullRequest(opts: {
       } catch (err: any) {
         if (err instanceof BaseCiPendingError) {
           err.prNumber = prNumber;
+          log('land', err.message);
+          throw err;
+        }
+        if (err instanceof VisualProofMissingError) {
           log('land', err.message);
           throw err;
         }

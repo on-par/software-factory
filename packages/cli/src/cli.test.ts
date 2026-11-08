@@ -1483,11 +1483,12 @@ describe('cli', () => {
         },
       });
 
-      // get: pre-watch behind check, the CI watch head read, the under-lock behind check (#3654) and the base check (#3916).
+      // get: pre-watch behind check, the CI watch head read, the under-lock behind check (#3654), the visual proof marker read (#2232) and the base check (#3916).
       expect(calls).toEqual([
         ['get', 123],
         ['get', 123],
         ['watch', 'abc123'],
+        ['get', 123],
         ['get', 123],
         ['get', 123],
         ['merge', 'abc123'],

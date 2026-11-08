@@ -43,3 +43,5 @@ export {
   withCommandOutputExport,
   type CommandOutputFlushReport,
 } from '../command-output/otlp-export.js';
+// UI visual proof gate land check (#2232).
+export { assertVisualProofForHead, VisualProofMissingError } from './visual-proof-attach.js';

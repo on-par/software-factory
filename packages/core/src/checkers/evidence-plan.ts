@@ -205,7 +205,7 @@ export async function runEvidencePlan(
   const results: EvidencePlanResult[] = [];
   for (const entry of entries) {
     if (entry.kind === 'screenshot') {
-      results.push(result(entry, 'SKIP', entry.route));
+      results.push(result(entry, 'SKIP', `enforced by the SHIP visual proof gate: ${entry.route}`));
       continue;
     }
     if (entry.kind === 'none') {
