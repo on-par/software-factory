@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.34 - 2026-11-07
+
+A failing pre-PLAN base health checker's full output is now written to `<logsDir>/issue-<n>/check-base-health/`, the same way CHECK does (#3991).
+All seven published `@on-par` packages move to 0.9.34 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 - The pre-PLAN base health check now writes a failing base checker's full output to `<logsDir>/issue-<n>/check-base-health/`, the same way CHECK does.
 
 ## 0.9.33 - 2026-11-07
