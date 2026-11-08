@@ -3,7 +3,7 @@
 // failure stays red and carries bounded evidence.
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -12,7 +12,7 @@ import { createTempDirs } from '../harness/temp-dir.js';
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
 import type { BaselineReport } from './baseline.js';
-import { type BaseHealthOptions, checkBaseHealth } from './base-health.js';
+import { type BaseHealthOptions, baseHealthReleasedMessage, checkBaseHealth } from './base-health.js';
 import { testsChecker } from './index.js';
 
 const tempDirs = createTempDirs();
@@ -224,5 +224,54 @@ describe('checkBaseHealth: a genuine test failure stays red with bounded evidenc
   it('a passing verify.sh is green (control)', async () => {
     const { res } = await health('echo ok');
     expect(res.kind).toBe('green');
+  });
+});
+
+describe('checkBaseHealth: full-output log for a failing base checker (same convention as CHECK)', () => {
+  const LOG_MARKER = 'BASE-HEALTH-FULL-OUTPUT-MARKER-7f3a';
+  // The marker is printed first, then ~4k chars of filler, so it is far outside the 500-char evidence tail.
+  const FAILING = `echo "${LOG_MARKER}"\nfor i in $(seq 1 80); do echo "filler line $i ................................"; done\necho "stderr says no" >&2\nexit 1`;
+
+  const logsIn = async (dir: string): Promise<string[]> =>
+    existsSync(dir) ? (await readdir(dir)).filter((f) => /^tests-.*\.log$/.test(f)).map((f) => join(dir, f)) : [];
+
+  it('with outputLogDir, a failing verify.sh writes tests-*.log with the full output and links it', async () => {
+    const outputLogDir = join(await tempDirs.make('base-health-logs-'), 'issue-7', 'check-base-health');
+    const { res } = await health(FAILING, { outputLogDir });
+    expect(res.kind).toBe('red');
+    expect(res.failingChecks).toEqual(['tests']);
+    const logs = await logsIn(outputLogDir);
+    expect(logs).toHaveLength(1);
+    const path = logs[0] as string;
+    const text = await readFile(path, 'utf8');
+    expect(text).toContain(LOG_MARKER);
+    expect(text).toContain('exit code: 1');
+    expect(text).toContain('--- stdout ---');
+    expect(text).toContain('--- stderr ---');
+    expect(text).toContain('stderr says no');
+    // The 500-char evidence tail is unchanged: the marker is not in it. The `full output:` link rides along, but the
+    // existing redactSecrets long-token rule masks the path (`issue-7/check-base-health/tests-verify` is a 32+ char
+    // run with digits), so the evidence and the released message carry the link line, not the literal path.
+    const tail = res.evidence?.[0]?.tail ?? '';
+    expect(tail.length).toBeLessThanOrEqual(501);
+    expect(tail).not.toContain(LOG_MARKER);
+    expect(tail).toMatch(/full output: \S+\.log$/);
+    expect(tail).not.toContain(path);
+    expect(baseHealthReleasedMessage(res, 'origin/main', 7)).toMatch(/full output: \S+\.log — no model calls/);
+  });
+
+  it('without outputLogDir, the verdict is identical and no log is written', async () => {
+    const { res, worktree } = await health(FAILING);
+    expect(res.kind).toBe('red');
+    expect(res.failingChecks).toEqual(['tests']);
+    expect(res.evidence?.[0]?.tail).not.toContain('full output:');
+    expect(await logsIn(worktree)).toEqual([]);
+  });
+
+  it('a passing verify.sh writes no log', async () => {
+    const outputLogDir = join(await tempDirs.make('base-health-logs-'), 'check-base-health');
+    const { res } = await health('echo ok', { outputLogDir });
+    expect(res.kind).toBe('green');
+    expect(await logsIn(outputLogDir)).toEqual([]);
   });
 });

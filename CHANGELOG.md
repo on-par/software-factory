@@ -7,6 +7,8 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+- The pre-PLAN base health check now writes a failing base checker's full output to `<logsDir>/issue-<n>/check-base-health/`, the same way CHECK does.
+
 ## 0.9.33 - 2026-11-07
 
 A base check that could not run (timeout, environment exit, missing command or checker crash) is now reported as inconclusive and the base held instead of reported as failing tests, with bounded, redacted evidence (#3989).

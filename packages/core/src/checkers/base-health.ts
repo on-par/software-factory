@@ -86,6 +86,8 @@ export interface BaseHealthOptions {
   testsTimeoutSeconds?: number;
   /** Compile checker timeout in seconds (`request.timeouts.compile`, #3185); undefined = the compile checker's 120s default. */
   compileTimeoutSeconds?: number;
+  /** A failing base checker's full output goes here, linked as `full output: <path>` (same as CHECK); undefined = no log. */
+  outputLogDir?: string;
   /** Strict GitHub CI lookup for a timed-out compile (#3186); absent = CI unknown. */
   requiredChecksVerdict?: (sha: string) => Promise<RequiredChecksVerdict>;
   log: (type: EventKind, msg: string) => void;
@@ -195,6 +197,7 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
     timeoutSeconds,
     testsTimeoutSeconds,
     compileTimeoutSeconds,
+    outputLogDir,
     log,
     deps = {},
   } = opts;
@@ -217,7 +220,7 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
           baseSha,
           laneWorktree: worktree,
           failing: BASE_HEALTH_CHECKERS.map((checker) => ({ checker, result: 'FAIL' as const, details: '' })),
-          ctx: { worktree, specPath: '', env, testsTimeoutSeconds, compileTimeoutSeconds },
+          ctx: { worktree, specPath: '', env, testsTimeoutSeconds, compileTimeoutSeconds, outputLogDir },
           router,
           constitution,
           customCheckerTimeoutSeconds: timeoutSeconds,
@@ -318,7 +321,7 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
             baseSha,
             laneWorktree: worktree,
             failing: cachedFailing.map((checker) => ({ checker, result: 'FAIL' as const, details: '' })),
-            ctx: { worktree, specPath: '', env, testsTimeoutSeconds, compileTimeoutSeconds },
+            ctx: { worktree, specPath: '', env, testsTimeoutSeconds, compileTimeoutSeconds, outputLogDir },
             router,
             constitution,
             customCheckerTimeoutSeconds: timeoutSeconds,
