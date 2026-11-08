@@ -4,12 +4,8 @@ import { exec as execCb, spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { promisify } from 'node:util';
 
-import {
-  type CommandStreamEnd,
-  type CommandStreamSink,
-  endCommandStreamWhenDrained,
-  openCommandStream,
-} from './command-stream.js';
+import type { CommandStreamEnd, CommandStreamSink } from '../command-output/file-sink.js';
+import { endCommandOutputWhenDrained, openCommandOutput } from '../command-output/tap.js';
 import { childProcessEnv, redactExecError } from './github-credentials.js';
 import { spawnSupervisedCommand } from './supervised-exec.js';
 import { killProcessGroup, registerProcessGroup } from '../environment/process-groups.js';
@@ -147,7 +143,7 @@ function execDetached(
       settled = true;
       if (timer) clearTimeout(timer);
       if (stream)
-        endCommandStreamWhenDrained(stream, [child.stdout, child.stderr], {
+        endCommandOutputWhenDrained(stream, [child.stdout, child.stderr], {
           exitCode: code,
           signal,
           timedOut,
@@ -208,7 +204,7 @@ export function createDefaultExecFn(deps: ExecDeps = {}): ExecFn {
   const killGroup = deps.killProcessGroup ?? killProcessGroup;
   return async (cmd, opts) => {
     const env = childProcessEnv(process.env, opts.env, { githubAuth: opts.githubAuth });
-    const stream = openCommandStream([cmd], { cwd: opts.cwd, shell: true });
+    const stream = openCommandOutput([cmd], { cwd: opts.cwd, shell: true });
     if (!opts.onPgid) {
       const pending = exec(cmd, {
         cwd: opts.cwd,

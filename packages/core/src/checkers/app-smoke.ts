@@ -9,7 +9,7 @@ import type { CheckerOutput } from '../types/index.js';
 import { checkerParentEnv } from '../environment/checker-env.js';
 import { childProcessEnv } from '../utils/github-credentials.js';
 import type { CommandResult } from '../utils/command-runner.js';
-import { endCommandStreamWhenDrained, openCommandStream } from '../utils/command-stream.js';
+import { endCommandOutputWhenDrained, openCommandOutput } from '../command-output/tap.js';
 import { stripAnsi, writeCommandLog } from './command-log.js';
 import type { CheckerContext } from './index.js';
 import { runVerificationCommand, VERIFICATION_SCRUBBED_ENV_VARS } from './run-command.js';
@@ -56,7 +56,7 @@ export const defaultStartApp: AppSmokeDeps['startApp'] = (argv, { cwd, env, onPg
   const deregister = child.pid !== undefined ? registerProcessGroup(child.pid) : () => {};
   child.once('exit', deregister);
   child.once('error', deregister);
-  const stream = openCommandStream(argv, { cwd });
+  const stream = openCommandOutput(argv, { cwd });
   child.stdout?.on('data', (chunk: Buffer) => {
     stream?.write('stdout', chunk);
     collect(chunk);
@@ -68,7 +68,7 @@ export const defaultStartApp: AppSmokeDeps['startApp'] = (argv, { cwd, env, onPg
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     child.on('exit', (code, signal) => {
       if (stream)
-        endCommandStreamWhenDrained(stream, [child.stdout, child.stderr], {
+        endCommandOutputWhenDrained(stream, [child.stdout, child.stderr], {
           exitCode: code,
           signal,
           timedOut: false,

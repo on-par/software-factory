@@ -8,6 +8,7 @@ import type { HarnessDeclaration } from '../config/index.js';
 import type { ModelRegistry } from '../models/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
+import { modelOutputExec } from './model-exec.js';
 import { CommandHarness } from './command.js';
 import type { HarnessContractScenarios } from './contract.js';
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
@@ -136,7 +137,8 @@ async function checkCommitsInWorktree(
 /** Runs every contract-kit case against the declared harness; never throws for a failing case. */
 export async function runHarnessCheck(opts: HarnessCheckOptions): Promise<HarnessCheckResult[]> {
   const { id, declaration, model, registry } = opts;
-  const execFn = opts.execFn ?? defaultExecFn;
+  // A harness check runs the agent CLI: its output is model output and is never exported (ADR-0177).
+  const execFn = modelOutputExec(opts.execFn ?? defaultExecFn);
   const dir = await mkdtemp(join(tmpdir(), 'factory-harness-check-'));
   try {
     await execFn('git init -q', { cwd: dir });

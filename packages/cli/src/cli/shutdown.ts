@@ -1,10 +1,10 @@
-// packages/cli/src/cli/shutdown.ts — first SIGINT/SIGTERM stops tracked agent process groups and exits 130 (#1615)
+// packages/cli/src/cli/shutdown.ts — first SIGINT/SIGTERM stops tracked agent process groups, flushes exported command output and exits 130 (#1615)
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { styleText } from 'node:util';
 import { getFactoryPaths } from '@on-par/factory-core';
-import { formatStopMarker, killTrackedProcessGroups } from '@on-par/factory-core/internal';
+import { closeCommandOutputSession, formatStopMarker, killTrackedProcessGroups } from '@on-par/factory-core/internal';
 
 type ShutdownSignal = 'SIGINT' | 'SIGTERM';
 const SHUTDOWN_SIGNALS: ShutdownSignal[] = ['SIGINT', 'SIGTERM'];
@@ -20,6 +20,8 @@ export interface ShutdownOptions {
   graceMs?: number;
   signals?: ShutdownSignals;
   killTracked?: (opts: { graceMs: number }) => Promise<unknown>;
+  /** Flushes exported command output within the budget, after the sweep; a no-op when export is off. */
+  flushOutput?: (budgetMs: number) => Promise<unknown>;
   writeStop?: (path: string, body: string) => void;
   exit?: (code: number) => void;
   log?: (line: string) => void;
@@ -31,6 +33,8 @@ export interface ShutdownHandle {
 
 export const SHUTDOWN_EXIT_CODE = 130;
 export const SHUTDOWN_GRACE_MS = 3000;
+/** Budget for flushing exported command output after the sweep, so a 10 s container stop still fits. */
+export const SIGNAL_FLUSH_BUDGET_MS = 2500;
 
 function defaultWriteStop(path: string, body: string): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -45,6 +49,7 @@ export function installShutdown(controller: AbortController, options: ShutdownOp
   const signals = options.signals ?? process;
   const graceMs = options.graceMs ?? SHUTDOWN_GRACE_MS;
   const killTracked = options.killTracked ?? ((o: { graceMs: number }) => killTrackedProcessGroups(o));
+  const flushOutput = options.flushOutput ?? ((budgetMs: number) => closeCommandOutputSession('signal', budgetMs));
   const writeStop = options.writeStop ?? defaultWriteStop;
   const exit = options.exit ?? ((code: number) => process.exit(code));
   const log = options.log ?? ((line: string) => console.error(styleText('dim', line)));
@@ -64,6 +69,11 @@ export function installShutdown(controller: AbortController, options: ShutdownOp
       await killTracked({ graceMs });
     } catch {
       // Exit regardless of sweep failures.
+    }
+    try {
+      await flushOutput(SIGNAL_FLUSH_BUDGET_MS);
+    } catch {
+      // Exit regardless of flush failures; an unflushed session simply has no end record.
     }
     exit(SHUTDOWN_EXIT_CODE);
   };

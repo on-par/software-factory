@@ -6,7 +6,7 @@ import { execa } from 'execa';
 import { basename } from 'node:path';
 
 import { killProcessGroup, registerProcessGroup } from '../environment/process-groups.js';
-import { endCommandStreamWhenDrained, openCommandStream } from './command-stream.js';
+import { endCommandOutputWhenDrained, openCommandOutput } from '../command-output/tap.js';
 import { childProcessEnv, redactGitHubCredentials } from './github-credentials.js';
 import { spawnSupervisedCommand } from './supervised-exec.js';
 
@@ -86,7 +86,7 @@ async function runCommandDetached(
   const pid = child.pid;
   const deregister = pid !== undefined ? registerProcessGroup(pid) : () => {};
   if (pid !== undefined) options.onPgid?.(pid);
-  const stream = openCommandStream(argv, { cwd: options.cwd });
+  const stream = openCommandOutput(argv, { cwd: options.cwd });
   child.once('exit', deregister);
   child.once('error', deregister);
 
@@ -162,7 +162,12 @@ async function runCommandDetached(
 
   if (timer) clearTimeout(timer);
   if (stream)
-    endCommandStreamWhenDrained(stream, [child.stdout, child.stderr], { exitCode, signal, timedOut, maxBufferExceeded });
+    endCommandOutputWhenDrained(stream, [child.stdout, child.stderr], {
+      exitCode,
+      signal,
+      timedOut,
+      maxBufferExceeded,
+    });
 
   const isTerminated = timedOut || maxBufferExceeded || signal !== null;
   if (isTerminated && pid !== undefined) {
@@ -221,7 +226,7 @@ async function runCommandAttached(
     all: false,
   });
   // Tap the raw pipes before execa's own buffering and maxBuffer truncation.
-  const stream = openCommandStream(argv, { cwd: options.cwd });
+  const stream = openCommandOutput(argv, { cwd: options.cwd });
   if (stream) {
     subprocess.stdout?.on('data', (chunk: Buffer | string) => stream.write('stdout', chunk));
     subprocess.stderr?.on('data', (chunk: Buffer | string) => stream.write('stderr', chunk));

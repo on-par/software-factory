@@ -8,7 +8,7 @@ import {
   type CommandStreamIo,
   openCommandStream,
   startCommandStreamSession,
-} from './command-stream.js';
+} from './file-sink.js';
 
 const dirs = createTempDirs();
 afterEach(() => dirs.cleanup());

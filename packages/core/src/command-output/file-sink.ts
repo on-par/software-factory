@@ -1,16 +1,13 @@
-// src/utils/command-stream.ts — opt-in live NDJSON stream of a command's raw stdout/stderr, written as it arrives.
+// src/command-output/file-sink.ts — opt-in live NDJSON file of a command's raw stdout/stderr, written as it arrives.
 
 import { closeSync, mkdirSync, openSync, writeSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import type { Readable } from 'node:stream';
 
-import { redactGitHubCredentials } from './github-credentials.js';
+import { redactGitHubCredentials } from '../utils/github-credentials.js';
+import { fileStats as stats, nextCommandId, PROCESS_TAG, warnOnce as warnOnceMessage } from './state.js';
 
 /** When set on the factory process, every command run through the command runners streams its output into this dir. */
 export const COMMAND_STREAM_DIR_ENV = 'FACTORY_COMMAND_STREAM_DIR';
-
-/** How long a detached run waits for its stdio to drain after exit before writing the end record. */
-const DRAIN_GRACE_MS = 250;
 
 export type OutputStream = 'stdout' | 'stderr';
 
@@ -26,6 +23,11 @@ export interface CommandStreamSink {
   write(stream: OutputStream, chunk: Buffer | string): void;
   /** Writes the end record and closes the file. Later writes and ends are ignored. */
   end(result: CommandStreamEnd): void;
+}
+
+/** An open stream file and the command id its name carries. */
+export interface CommandStreamFile extends CommandStreamSink {
+  readonly id: string;
 }
 
 /** File and warning seam so tests can fail a write mid-stream and capture warnings. */
@@ -45,27 +47,10 @@ const nodeIo: CommandStreamIo = {
   warn: (message) => console.warn(message),
 };
 
-/** Failure kinds already warned about in this process, so a broken stream dir warns once, not once per command. */
-const warned = new Set<string>();
-
 function warnOnce(io: CommandStreamIo, state: 'unavailable' | 'incomplete', err: unknown): void {
   const code = (err as NodeJS.ErrnoException | undefined)?.code ?? 'UNKNOWN';
-  const message = `factory: command output stream ${state}: ${code}`;
-  if (warned.has(message)) return;
-  warned.add(message);
-  try {
-    io.warn(message);
-  } catch {
-    // a broken warning sink must not reach the command
-  }
+  warnOnceMessage(`factory: command output stream ${state}: ${code}`, io.warn);
 }
-
-/** Process start time (epoch ms) and pid: shared by this process's session and command stream file names. */
-const PROCESS_TAG = `${Math.round(performance.timeOrigin)}-${process.pid}`;
-let sequence = 0;
-
-/** Counts reported in the session end file, reset when a session starts. */
-const stats = { commands: 0, writeErrors: 0, unavailable: false };
 
 /** Writes one whole file that must not already exist; throws on any failure. */
 function writeNewFile(io: CommandStreamIo, path: string, value: unknown): void {
@@ -140,15 +125,16 @@ export function openCommandStream(
   opts: { cwd?: string; shell?: boolean } = {},
   env: NodeJS.ProcessEnv = process.env,
   io: CommandStreamIo = nodeIo,
-): CommandStreamSink | undefined {
+): CommandStreamFile | undefined {
   const dir = env[COMMAND_STREAM_DIR_ENV]?.trim();
   if (!dir) return undefined;
   stats.commands++;
 
   let fd: number;
+  let id: string;
   try {
     io.mkdir(dir);
-    fd = openUnique(dir, commandLabel(opts.shell ? (argv[0] ?? '').trim().split(/\s+/) : argv), io);
+    ({ fd, id } = openUnique(dir, commandLabel(opts.shell ? (argv[0] ?? '').trim().split(/\s+/) : argv), io));
   } catch (err) {
     stats.unavailable = true;
     warnOnce(io, 'unavailable', err);
@@ -187,6 +173,7 @@ export function openCommandStream(
   });
 
   return {
+    id,
     write(stream, chunk) {
       if (closed) return;
       const data = typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : chunk;
@@ -215,38 +202,13 @@ export function openCommandStream(
   };
 }
 
-function openUnique(dir: string, label: string, io: CommandStreamIo): number {
+function openUnique(dir: string, label: string, io: CommandStreamIo): { fd: number; id: string } {
   for (;;) {
-    const name = `cmd-${PROCESS_TAG}-${String(++sequence).padStart(6, '0')}-${label}.ndjson`;
+    const id = nextCommandId();
     try {
-      return io.open(join(dir, name));
+      return { fd: io.open(join(dir, `cmd-${id}-${label}.ndjson`)), id };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
     }
   }
-}
-
-/** Ends the stream once both pipes have closed, or after a short grace period when a backgrounded grandchild
- *  keeps them open. Never delays the caller: the end record may land just after the runner returns. */
-export function endCommandStreamWhenDrained(
-  sink: CommandStreamSink,
-  pipes: readonly (Readable | null | undefined)[],
-  result: CommandStreamEnd,
-): void {
-  const open = pipes.filter((p): p is Readable => !!p && !p.readableEnded && !p.destroyed);
-  if (open.length === 0) {
-    sink.end(result);
-    return;
-  }
-  let pending = open.length;
-  const done = () => {
-    clearTimeout(timer);
-    sink.end(result);
-  };
-  const timer = setTimeout(done, DRAIN_GRACE_MS);
-  timer.unref();
-  for (const pipe of open)
-    pipe.once('close', () => {
-      if (--pending === 0) done();
-    });
 }

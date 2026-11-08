@@ -92,6 +92,11 @@ export const CHECKER_ENV_ALLOWLIST: readonly string[] = [
 
 const CREDENTIAL_NAME = /(?:TOKEN|SECRET|PASSWORD|_AUTH|API_?KEY|CREDENTIAL|PRIVATE_KEY)/i;
 
+/** True when an env var name looks like it holds a credential (`*_TOKEN`, `*_API_KEY`, `*_SECRET`, …). */
+export function isCredentialEnvName(name: string): boolean {
+  return CREDENTIAL_NAME.test(name);
+}
+
 const EXACT = new Set(CHECKER_ENV_ALLOWLIST.filter((e) => !e.endsWith('*')).map((e) => e.toUpperCase()));
 const PREFIXES = CHECKER_ENV_ALLOWLIST.filter((e) => e.endsWith('*')).map((e) => e.slice(0, -1).toUpperCase());
 
@@ -99,7 +104,7 @@ const PREFIXES = CHECKER_ENV_ALLOWLIST.filter((e) => e.endsWith('*')).map((e) =>
 export function isCheckerEnvAllowed(name: string, extra: readonly string[] = []): boolean {
   const upper = name.toUpperCase();
   if (EXACT.has(upper) || extra.some((e) => e.toUpperCase() === upper)) return true;
-  return PREFIXES.some((p) => upper.startsWith(p)) && !CREDENTIAL_NAME.test(name);
+  return PREFIXES.some((p) => upper.startsWith(p)) && !isCredentialEnvName(name);
 }
 
 /** The allow-listed subset of `parent`, honoring `FACTORY_CHECKER_ENV_ALLOW` in `parent`. */

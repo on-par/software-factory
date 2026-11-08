@@ -268,7 +268,11 @@ describe('app_smoke registry opt-in', () => {
     vi.stubEnv('FACTORY_COMMAND_STREAM_DIR', streamDir);
     try {
       const app = defaultStartApp(
-        [process.execPath, '-e', 'process.stdout.write("ready é\\n"); process.stderr.write("warn\\n"); process.exitCode = 4'],
+        [
+          process.execPath,
+          '-e',
+          'process.stdout.write("ready é\\n"); process.stderr.write("warn\\n"); process.exitCode = 4',
+        ],
         { cwd: process.cwd(), env: process.env },
       );
       expect(await app.exited).toEqual({ code: 4, signal: null });

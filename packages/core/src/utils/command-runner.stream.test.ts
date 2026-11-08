@@ -96,9 +96,7 @@ function streamFiles(dir: string): { name: string; records: StreamRecord[] }[] {
 
 function streamBytes(records: StreamRecord[], stream: 'stdout' | 'stderr'): Buffer {
   return Buffer.concat(
-    records
-      .filter((r) => r.type === 'chunk' && r.stream === stream)
-      .map((r) => Buffer.from(String(r.data), 'base64')),
+    records.filter((r) => r.type === 'chunk' && r.stream === stream).map((r) => Buffer.from(String(r.data), 'base64')),
   );
 }
 

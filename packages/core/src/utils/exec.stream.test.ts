@@ -35,9 +35,7 @@ function read(streamDir: string) {
     .map((l) => JSON.parse(l) as Record<string, unknown>);
   const bytes = (stream: string) =>
     Buffer.concat(
-      lines
-        .filter((l) => l.type === 'chunk' && l.stream === stream)
-        .map((l) => Buffer.from(String(l.data), 'base64')),
+      lines.filter((l) => l.type === 'chunk' && l.stream === stream).map((l) => Buffer.from(String(l.data), 'base64')),
     ).toString('utf-8');
   return { lines, stdout: bytes('stdout'), stderr: bytes('stderr'), end: lines.find((l) => l.type === 'end') };
 }

@@ -52,7 +52,7 @@ const GITHUB_TOKEN_PATTERN = /\b(?:gh[pousr]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_
 
 /** Values shorter than this are not treated as secrets for value-based
  *  redaction — masking e.g. "1" everywhere would destroy the text. */
-const MIN_SECRET_LENGTH = 8;
+export const MIN_SECRET_LENGTH = 8;
 
 /**
  * Masks GitHub credentials in `text`: the literal value of every GitHub

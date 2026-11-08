@@ -9,6 +9,7 @@ import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
 import { DEFAULT_CODEX_CONTEXT_CEILING } from '../harness/codex-context-ceiling.js';
 import { CommandHarness } from '../harness/command.js';
+import { modelOutputExec } from '../harness/model-exec.js';
 import type { CodingHarness, HarnessFailureReason, HarnessLiveUsage, HarnessUsage } from '../harness/index.js';
 import { taskRequiresAgenticHarness } from '../harness/index.js';
 import type { ProviderFailure, ProviderFailureKind } from '../harness/provider-failure.js';
@@ -163,17 +164,22 @@ export class CliModelExecutor implements ModelExecutor {
   private ollamaAgenticHarness: OllamaAgenticHarness;
   private harnesses: Record<string, HarnessFactory>;
 
+  /** The exec every harness gets: model executions, never exported as command output (ADR-0177). */
+  private execFn: ExecFn;
+
   constructor(
-    private execFn: ExecFn = defaultExecFn,
+    execFn: ExecFn = defaultExecFn,
     private fetchFn: FetchFn = globalThis.fetch,
     harnessOverrides: Record<string, CodingHarness> = {},
   ) {
-    this.claudeHarness = new ClaudeCliHarness(execFn);
-    this.codexHarness = new CodexCliHarness(execFn);
+    const modelExec = modelOutputExec(execFn);
+    this.execFn = modelExec;
+    this.claudeHarness = new ClaudeCliHarness(modelExec);
+    this.codexHarness = new CodexCliHarness(modelExec);
     this.ollamaHarness = new OllamaHttpHarness(fetchFn);
-    this.opencodeHarness = new OpenCodeHarness(execFn);
-    this.piHarness = new PiHarness(execFn);
-    this.ollamaAgenticHarness = new OllamaAgenticHarness(fetchFn, execFn);
+    this.opencodeHarness = new OpenCodeHarness(modelExec);
+    this.piHarness = new PiHarness(modelExec);
+    this.ollamaAgenticHarness = new OllamaAgenticHarness(fetchFn, modelExec);
     this.harnesses = {
       'claude-cli': () => this.claudeHarness,
       'codex-cli': () => this.codexHarness,

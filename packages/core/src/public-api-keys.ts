@@ -16,6 +16,9 @@ export const TESTING_API_KEYS = [
   'resolveLatencyMs',
   'applyLatency',
   'simCommitAll',
+  'startOtlpTestCollector',
+  'commandRecords',
+  'reassembleStream',
 ];
 // The root "// KPIs" block (PUBLIC_API_KEYS above), re-exported from a Node-dep-free entry point (no harness/router deps).
 export const KPIS_API_KEYS = [

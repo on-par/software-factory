@@ -1,15 +1,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
-import {
-  COMMAND_STREAM_DIR_ENV,
-  type CommandStreamIo,
-  endCommandStreamWhenDrained,
-  openCommandStream,
-} from './command-stream.js';
+import { COMMAND_STREAM_DIR_ENV, type CommandStreamIo, openCommandStream } from './file-sink.js';
 
 const dirs = createTempDirs();
 afterEach(async () => {
@@ -193,41 +187,5 @@ describe('openCommandStream', () => {
     };
     const sink = openCommandStream(['true'], {}, { [COMMAND_STREAM_DIR_ENV]: '/d' }, io);
     expect(() => sink?.end(DONE)).not.toThrow();
-  });
-});
-
-describe('endCommandStreamWhenDrained', () => {
-  const sink = () => {
-    const mem = memoryIo();
-    return { mem, sink: openCommandStream(['true'], {}, { [COMMAND_STREAM_DIR_ENV]: '/d' }, mem.io)! };
-  };
-  const ended = (mem: ReturnType<typeof memoryIo>) => mem.lines().some((l) => l.type === 'end');
-
-  it('ends at once when there are no open pipes', () => {
-    const s = sink();
-    endCommandStreamWhenDrained(s.sink, [null, undefined], DONE);
-    expect(ended(s.mem)).toBe(true);
-  });
-
-  it('waits for open pipes to close', async () => {
-    const s = sink();
-    const out = new PassThrough();
-    const err = new PassThrough();
-    endCommandStreamWhenDrained(s.sink, [out, err], DONE);
-    out.destroy();
-    await new Promise((r) => setImmediate(r));
-    expect(ended(s.mem)).toBe(false);
-    err.destroy();
-    await new Promise((r) => setImmediate(r));
-    expect(ended(s.mem)).toBe(true);
-  });
-
-  it('ends after a grace period when a pipe stays open', () => {
-    vi.useFakeTimers();
-    const s = sink();
-    endCommandStreamWhenDrained(s.sink, [new PassThrough()], DONE);
-    expect(ended(s.mem)).toBe(false);
-    vi.advanceTimersByTime(300);
-    expect(ended(s.mem)).toBe(true);
   });
 });
