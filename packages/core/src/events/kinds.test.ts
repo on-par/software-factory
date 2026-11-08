@@ -108,6 +108,17 @@ describe('EVENT_TRAITS', () => {
   });
 });
 
+describe('command output export kinds (#3995)', () => {
+  it('resolves both kinds to their severities through eventTraitsFor', () => {
+    expect(eventTraitsFor('command_output_export')).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+    expect(eventTraitsFor('command_output_export_degraded')).toEqual({
+      severity: 'warn',
+      isPark: false,
+      isTerminal: false,
+    });
+  });
+});
+
 describe('eventTraitsFor', () => {
   it('treats issue_unparked as a non-park info event', () => {
     expect(eventTraitsFor('issue_unparked')).toEqual({ severity: 'info', isPark: false, isTerminal: false });

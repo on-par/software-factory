@@ -113,6 +113,8 @@ Every other key is optional. `pr.footer` defaults to `This PR was made by Softwa
 
 **Tracker.** The `tracker` key picks the ticket tracker per repo: `kind` is `github` (default) or `linear`. A `linear` block holds `teamKey`, `projects` (Linear project name or id → `owner/repo`), `readyLabel` (default `factory:ready`), `laneLabelGroup` (default `lane`) and `states.ready` / `states.inProgress` / `states.parked` (default `Todo` / `In Progress` / `Todo`). The API key comes only from the `LINEAR_API_KEY` environment variable, never from config. `factory doctor` checks the key and names any project with ready issues but no repo mapping. `factory run`, `factory supervise` and `factory status` read the queue from Linear; a Linear run's branch, PR title and body carry the issue key (`Fixes KEY` on the final slice, `Part of KEY` before it, so Linear's GitHub integration moves the issue), its park, environment-failure and slice-plan comments go to the Linear issue (a failed comment only warns), the no-auto-merge hold reads the issue's Linear labels, and KPIs count Linear keys; building Linear issues in lanes comes in a later slice of #3872.
 
+**Command output export.** Off by default. Set `FACTORY_COMMAND_OUTPUT_EXPORT=otlp` plus the standard `OTEL_EXPORTER_OTLP_*` env to send redacted CHECK command output to any OTLP/HTTP endpoint, with a bounded queue and a per-CHECK sent/dropped/failed event. See [docs/ops/command-output-export.md](docs/ops/command-output-export.md).
+
 ## Updating
 
 ```bash

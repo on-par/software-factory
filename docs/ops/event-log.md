@@ -41,3 +41,12 @@ A feedback round on a factory PR (`factory respond <pr>` or a queued review rewo
   number triaged actionable, question and out-of-scope.
 - `feedback_round_replied` (info): the round answered its items, with the replies posted, the threads resolved and
   the reviewers re-requested. A failed reply, resolve or review request logs a `rework` warning and the round goes on.
+
+## Command output export events
+
+When opt-in OTLP export of CHECK command output is on (see [command-output-export.md](command-output-export.md)),
+each CHECK phase logs one summary:
+
+- `command_output_export` (info): `N sent, 0 dropped, 0 failed`; nothing was lost.
+- `command_output_export_degraded` (warn): records were dropped or failed, or the opt-in was requested with invalid
+  `OTEL_*` config. The run is unaffected.

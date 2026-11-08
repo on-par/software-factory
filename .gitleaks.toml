@@ -16,3 +16,7 @@ regexes = ['''AKIAABCDEFGHIJKLMNOP''']
 [[allowlists]]
 description = "Fake Linear API key fixture in packages/core/src/work/linear-preflight.test.ts and packages/cli/src/cli/doctor-linear.test.ts (also present in git history)"
 regexes = ['''lin_api_SECRET123''']
+
+[[allowlists]]
+description = "Fake PEM private-key fixture used to prove redaction before OTLP export (packages/core/src/command-output/otlp-export.test.ts); not a real credential"
+paths = ['''^packages/core/src/command-output/otlp-export\.test\.ts$''']
