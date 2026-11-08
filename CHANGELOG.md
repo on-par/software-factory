@@ -11,6 +11,10 @@ section to `## X.Y.Z - date`. See
 
 - CHECK command output (checkers, verify, app smoke) is now captured live per line, redacted, and tagged with run, issue, lane, phase, command id and sequence number for an in-process sink; no exporter ships yet (#3994).
 
+### Changed
+
+- A `ci-failed` park now leaves the PR open. A required check that is red on base but whose log names files the PR changed gets CI rework. Baseline and budget-exhausted park notes name each failing check, its run link and the files and commits it flagged, with secrets redacted (#3998).
+
 ## 0.9.34 - 2026-11-07
 
 A failing pre-PLAN base health checker's full output is now written to `<logsDir>/issue-<n>/check-base-health/`, the same way CHECK does (#3991).

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { CiFailureEvidence } from '../types/index.js';
 import {
   attributableCodeqlAlerts,
+  attributeByJobLogs,
   attributeCiFailure,
   ciCheckReworkSummary,
   ciReworkSummary,
@@ -345,5 +346,38 @@ describe('ciCheckReworkSummary (#3537)', () => {
   it('omits the error line when there are none', () => {
     const summary = ciCheckReworkSummary([{ name: 'ci', conclusion: 'failure' }], [], []);
     expect(summary.results[0].details).not.toContain('Log fetch errors');
+  });
+});
+
+describe('attributeByJobLogs (#3998)', () => {
+  const ev: CiFailureEvidence = {
+    failingChecks: [
+      { name: 'gitleaks', conclusion: 'failure' },
+      { name: 'CodeQL', conclusion: 'failure' },
+    ],
+    alerts: [],
+    truncated: false,
+  };
+  const base = { baseRef: 'main', baseSha: 'abc', failing: ['gitleaks', 'CodeQL'] };
+  const log = (name: string, files: string[]) => ({ name, jobId: 1, excerpt: '', truncated: false, files });
+
+  it('flips only a matching non-CodeQL check and recomputes baseline', () => {
+    const attr = attributeCiFailure(ev, ['src/a.ts'], base);
+    expect(attr.baseline).toBe(true);
+    const out = attributeByJobLogs(attr, [log('gitleaks', ['src/a.ts', 'x.ts']), log('CodeQL', ['src/a.ts'])], ev, [
+      'src/a.ts',
+    ]);
+    expect(out.items.find((i) => i.ref === 'gitleaks')).toMatchObject({
+      attributable: true,
+      reason: 'log names files changed by this PR: src/a.ts',
+    });
+    expect(out.items.find((i) => i.ref === 'CodeQL')?.attributable).toBe(false);
+    expect(out.baseline).toBe(false);
+  });
+
+  it('ignores log files the PR did not change and returns the input when there are no logs', () => {
+    const attr = attributeCiFailure(ev, ['src/a.ts'], base);
+    expect(attributeByJobLogs(attr, [log('gitleaks', ['other.ts'])], ev, ['src/a.ts'])).toBe(attr);
+    expect(attributeByJobLogs(attr, [], ev, ['src/a.ts'])).toBe(attr);
   });
 });

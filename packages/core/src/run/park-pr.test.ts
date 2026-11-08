@@ -53,15 +53,20 @@ describe('renderParkedPrComment', () => {
 
 describe('parkedPrAction', () => {
   it.each(ALL)('decides for %s', (reason) => {
-    const closeAlways = ['ci-failed', 'ci-infra', 'conflict'].includes(reason);
+    const closeAlways = ['ci-infra', 'conflict'].includes(reason);
     const closeIfRed = ['fail', 'timeout'].includes(reason);
     expect(parkedPrAction(reason, false)).toBe(closeAlways || closeIfRed ? 'close' : 'leave');
-    expect(parkedPrAction(reason, true)).toBe(closeAlways ? 'close' : 'ready');
+    expect(parkedPrAction(reason, true)).toBe(closeAlways ? 'close' : reason === 'ci-failed' ? 'leave' : 'ready');
+  });
+
+  it('leaves a ci-failed PR open whether or not it is green (#3998)', () => {
+    expect(parkedPrAction('ci-failed', false)).toBe('leave');
+    expect(parkedPrAction('ci-failed', true)).toBe('leave');
   });
 });
 
 describe('settleParkedPullRequest', () => {
-  it.each(['ci-failed', 'ci-infra', 'fail', 'conflict', 'timeout'] as const)(
+  it.each(['ci-infra', 'fail', 'conflict', 'timeout'] as const)(
     'closes the PR with one comment naming %s and linking the issue, and keeps the branch',
     async (reason) => {
       const { octokit, createComment, update, deleteRef } = fake();
@@ -91,10 +96,12 @@ describe('settleParkedPullRequest', () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it('still closes a green ci-failed park', async () => {
-    const { octokit, update } = fake();
-    await settleParkedPullRequest({ octokit, ...base, reason: 'ci-failed', greenAndChecked: true, log: vi.fn() });
-    expect(update).toHaveBeenCalledTimes(1);
+  it('leaves a ci-failed PR open without commenting or closing (#3998)', async () => {
+    const { octokit, createComment, update } = fake();
+    const out = await settleParkedPullRequest({ octokit, ...base, reason: 'ci-failed', prNumber: 77, log: vi.fn() });
+    expect(out).toEqual({ action: 'left', prNumber: 77 });
+    expect(createComment).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('leaves the PR alone on an escalate park that is not green', async () => {

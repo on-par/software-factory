@@ -15,10 +15,17 @@ import { claimGuardedRunner } from '../phases/ship-git.js';
 import { stackPositionFor } from '../phases/stack-order.js';
 import type { shipPhase as shipPhaseDefault, ShipResult } from '../phases/ship.js';
 import type { ReviewRouting } from '../review/routing.js';
-import type { CiFailingCheck, CiFailureEvidence, CiSuppressionFinding, Constitution } from '../types/index.js';
+import type {
+  CiFailingCheck,
+  CiFailureEvidence,
+  CiJobLogExcerpt,
+  CiSuppressionFinding,
+  Constitution,
+} from '../types/index.js';
 import { collectFailingJobLogs as collectFailingJobLogsDefault } from '../utils/ci-evidence.js';
 import {
   attributableCodeqlAlerts,
+  attributeByJobLogs,
   attributeCiFailure,
   type BaseCodeqlAlerts,
   type BaseFailingChecks,
@@ -33,6 +40,7 @@ import {
   needsBaseChecks,
   resolveMaxCiReworkRounds,
 } from './ci-rework.js';
+import { renderCiFailureNote } from './ci-failure-note.js';
 import { type CiReworkReentry, type CiReworkRoundPlan, runCiReworkRound } from './ci-rework-round.js';
 import {
   describeSuppression,
@@ -134,6 +142,9 @@ const loadPreviewConfigDefault = (worktree: string): PreviewConfig | undefined =
  * failing jobs' log tails to the worker, under the same budget and guard.
  * After each rework round the committed diff is scanned for suppression attempts (#2818); any hit,
  * or an unreadable diff, parks ci-failed before the re-CHECK, push or re-watch.
+ * A check also failing on base whose log names a file the PR changed is attributable too (#3998). A baseline or
+ * budget-exhausted park appends a note naming each failing check, its run link and the files and commits it flagged;
+ * the park leaves the PR open.
  */
 export async function shipWithCiRework(
   ctx: CiReworkLoopContext,
@@ -211,6 +222,7 @@ export async function shipWithCiRework(
   let rounds = 0;
   let lastCiFailure = ship.ciFailure;
   let suffix = '';
+  let diagnose = false;
   const suppressionPark = (findings: CiSuppressionFinding[]): ShipWithCiReworkResult => {
     const described = describeSuppression(findings);
     ports.events('ship')('ship', `${described} after CI rework round ${rounds} (PR #${ship.prNumber})`);
@@ -284,11 +296,35 @@ export async function shipWithCiRework(
           );
         }
       }
-      const attribution = attributeCiFailure(ship.ciFailure, changed, base, baseAlerts);
-      if (ship.ciFailure) lastCiFailure = { ...ship.ciFailure, attribution };
+      let attribution = attributeCiFailure(ship.ciFailure, changed, base, baseAlerts);
+      let attributionLogs: CiJobLogExcerpt[] = [];
+      const suspect = new Set(attribution.items.filter((i) => i.kind === 'check' && !i.attributable).map((i) => i.ref));
+      const logCandidates = (ship.ciFailure?.failingChecks ?? [])
+        .filter((c) => suspect.has(c.name) && !/codeql/i.test(c.name))
+        .map((c) => c.name);
+      if (logCandidates.length > 0) {
+        const found = await collectLogs({
+          octokit: ports.octokit,
+          owner,
+          repo: repoName,
+          ref: ship.headSha ?? request.branch,
+          checkNames: logCandidates,
+          changedFiles: changed,
+        });
+        attributionLogs = found.jobLogs;
+        attribution = attributeByJobLogs(attribution, attributionLogs, ship.ciFailure, changed);
+      }
+      if (ship.ciFailure) {
+        lastCiFailure = {
+          ...ship.ciFailure,
+          attribution,
+          ...(attributionLogs.length > 0 ? { jobLogs: attributionLogs } : {}),
+        };
+      }
       if (attribution.baseline) {
         const note = 'baseline: no CI failure is attributable to this PR';
         suffix = ` — ${note}`;
+        diagnose = true;
         ports.events('ship')('ship', `${note} (PR #${ship.prNumber})`);
         break;
       }
@@ -298,6 +334,7 @@ export async function shipWithCiRework(
       if (attributable.length === 0 && failingChecks.length === 0) break;
       if (rounds >= maxRounds) {
         suffix = ` — CI rework budget exhausted after ${rounds} round${rounds === 1 ? '' : 's'}`;
+        diagnose = true;
         break;
       }
       rounds++;
@@ -336,10 +373,12 @@ export async function shipWithCiRework(
           repo: repoName,
           ref: ship.headSha ?? request.branch,
           checkNames: failingChecks.map((c) => c.name),
+          changedFiles: changed,
         });
+        const fetched = new Set(logs.jobLogs.map((l) => l.name));
         lastCiFailure = {
           ...(lastCiFailure ?? { failingChecks: [], alerts: [], truncated: false }),
-          jobLogs: logs.jobLogs,
+          jobLogs: [...(lastCiFailure?.jobLogs ?? []).filter((l) => !fetched.has(l.name)), ...logs.jobLogs],
         };
       }
       plan = {
@@ -363,10 +402,12 @@ export async function shipWithCiRework(
     ship = step.ship;
   }
   if (ship.ok) return { ship };
+  const note = diagnose ? renderCiFailureNote(lastCiFailure) : '';
   const message = ship.denied
     ? `ship denied: ${ship.deniedReason}`
     : ship.reason
       ? `ship phase failed: ${ship.reason}${suffix}`
       : `ship phase failed${suffix}`;
-  return { ship, parked: { reason: shipParkReason(ship), message, ciFailure: lastCiFailure ?? ship.ciFailure } };
+  const full = note && !ship.denied ? `${message}\n${note}` : message;
+  return { ship, parked: { reason: shipParkReason(ship), message: full, ciFailure: lastCiFailure ?? ship.ciFailure } };
 }

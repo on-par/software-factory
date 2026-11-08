@@ -16,13 +16,15 @@ export type ParkedPrDisposition = {
   detail?: string;
 };
 
-/** What a park does to its PR: the PR itself is the problem (close), the cause is outside a green PR (ready), or nothing. */
+/** What a park does to its PR: the PR itself is the problem (close), the cause is outside a green PR (ready), or nothing.
+ *  A ci-failed PR stays open for the steward and the park note carries the diagnosis (#3998). */
 export function parkedPrAction(reason: ParkReason, greenAndChecked: boolean): 'close' | 'ready' | 'leave' {
   switch (reason) {
-    case 'ci-failed':
     case 'ci-infra':
     case 'conflict':
       return 'close';
+    case 'ci-failed':
+      return 'leave';
     case 'fail':
     case 'timeout':
       return greenAndChecked ? 'ready' : 'close';

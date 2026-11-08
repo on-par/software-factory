@@ -4,7 +4,10 @@ import type { Octokit } from '@octokit/rest';
 
 import type { CiCodeScanningAlert, CiFailingCheck, CiFailureEvidence, CiJobLogExcerpt } from '../types/index.js';
 
+import { redactSecrets } from '../filing/redact.js';
+
 import { isPassingConclusion, listAllCheckRuns } from './ci-watch.js';
+import { redactGitHubCredentials } from './github-credentials.js';
 
 export const CI_EVIDENCE_LIMITS = {
   maxChecks: 10,
@@ -14,6 +17,7 @@ export const CI_EVIDENCE_LIMITS = {
   maxJobLogs: 3,
   maxLogLines: 150,
   maxLogChars: 16000,
+  maxFlagged: 10,
 } as const;
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -47,9 +51,11 @@ export async function collectCiFailureEvidence(opts: {
     if (failing.length > CI_EVIDENCE_LIMITS.maxChecks) truncated = true;
     failingChecks = failing.slice(0, CI_EVIDENCE_LIMITS.maxChecks).map((r) => {
       const text = r.output?.summary || r.output?.title || '';
+      const url = r.html_url || r.details_url;
       return {
         name: r.name ?? '(unnamed)',
         conclusion: r.conclusion ?? 'null',
+        ...(url ? { url } : {}),
         ...(text ? { summary: clip(text, CI_EVIDENCE_LIMITS.maxSummaryChars) } : {}),
       };
     });
@@ -103,8 +109,9 @@ export async function collectFailingJobLogs(opts: {
   repo: string;
   ref: string;
   checkNames: readonly string[];
+  changedFiles?: readonly string[];
 }): Promise<{ jobLogs: CiJobLogExcerpt[]; errors: string[] }> {
-  const { octokit, owner, repo, ref, checkNames } = opts;
+  const { octokit, owner, repo, ref, checkNames, changedFiles = [] } = opts;
   const jobLogs: CiJobLogExcerpt[] = [];
   const errors: string[] = [];
   let runs;
@@ -126,6 +133,12 @@ export async function collectFailingJobLogs(opts: {
     try {
       const { data } = await octokit.rest.actions.downloadJobLogsForWorkflowRun({ owner, repo, job_id: run.id });
       const text = typeof data === 'string' ? data : String(data);
+      const files = new Set<string>();
+      for (const f of changedFiles) if (text.includes(f)) files.add(f);
+      for (const m of text.matchAll(/^\s*(?:File|Path)\s*:\s*(\S+)/gim)) if (m[1]) files.add(m[1]);
+      const commits = new Set<string>();
+      for (const m of text.matchAll(/\bcommit\s*:?\s*([0-9a-f]{7,40})\b/gi)) if (m[1]) commits.add(m[1]);
+      const flagged = (set: Set<string>): string[] => [...set].slice(0, CI_EVIDENCE_LIMITS.maxFlagged);
       const lines = text.split('\n').map((l) => l.replace(LOG_TIMESTAMP, '').replace(ANSI_ESCAPE, ''));
       let truncated = lines.length > CI_EVIDENCE_LIMITS.maxLogLines;
       let excerpt = lines.slice(-CI_EVIDENCE_LIMITS.maxLogLines).join('\n');
@@ -133,7 +146,16 @@ export async function collectFailingJobLogs(opts: {
         excerpt = excerpt.slice(-CI_EVIDENCE_LIMITS.maxLogChars);
         truncated = true;
       }
-      jobLogs.push({ name, jobId: run.id, excerpt, truncated });
+      const url = run.html_url || run.details_url;
+      jobLogs.push({
+        name,
+        jobId: run.id,
+        excerpt: redactSecrets(redactGitHubCredentials(excerpt)),
+        truncated,
+        ...(url ? { url } : {}),
+        ...(files.size > 0 ? { files: flagged(files) } : {}),
+        ...(commits.size > 0 ? { commits: flagged(commits) } : {}),
+      });
     } catch (err) {
       errors.push(`${name}: ${errorMessage(err)}`);
     }

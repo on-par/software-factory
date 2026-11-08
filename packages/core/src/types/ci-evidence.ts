@@ -5,6 +5,8 @@ export interface CiFailingCheck {
   name: string;
   conclusion: string;
   summary?: string;
+  /** Link to the check run (html_url, else details_url) (#3998). */
+  url?: string;
 }
 
 /** One open code-scanning alert on the PR head (#2814). `location` is "path:line" (or "path" without a line). */
@@ -40,6 +42,12 @@ export interface CiJobLogExcerpt {
   jobId: number;
   excerpt: string;
   truncated: boolean;
+  /** Link to the check run the log came from (#3998). */
+  url?: string;
+  /** Up to 10 files the log flags: PR-changed files named verbatim plus `File:`/`Path:` lines (#3998). */
+  files?: string[];
+  /** Up to 10 commit SHAs the log names (#3998). */
+  commits?: string[];
 }
 
 /** One suppression-guard hit in a SHIP CI rework diff (#2818). */
