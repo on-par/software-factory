@@ -298,7 +298,9 @@ const POLICY =
   ); // #2215, #3449, #3454, #3958
 const PO2 = 'OPENCODE_GO_DEFAULT_MODEL filterRefusedProviders sweepOrphanDrafts'.split(' '); // #3335, #1623
 const GATE = ['allProvidersDown', 'stageBlocked', 'PROVIDER_LEVEL_REASONS', 'TIMED_BREAKER_REASONS']; // #3226
+const OTLP_SESSION = 'flushCommandOutputExports withCommandOutputExport runVerificationCommand'.split(' '); // #3996
 const EXTRA_INTERNAL_KEYS = [
+  ...OTLP_SESSION,
   ...JOB_KEYS,
   ...TAIL,
   ...MORE,

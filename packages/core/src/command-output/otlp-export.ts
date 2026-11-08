@@ -1,5 +1,8 @@
 // packages/core/src/command-output/otlp-export.ts — opt-in OTLP/HTTP export of redacted CHECK command output through
-// the official OpenTelemetry JS SDK, with bounded buffering and explicit loss accounting (#3995)
+// the official OpenTelemetry JS SDK, with bounded buffering, explicit loss accounting (#3995) and run-correlated
+// session start/end records flushed on exit and signals (#3996)
+import { randomUUID } from 'node:crypto';
+
 import type { LogRecordExporter, LogRecordProcessor, ReadableLogRecord } from '@opentelemetry/sdk-logs';
 
 import {
@@ -8,7 +11,7 @@ import {
   registerCommandOutputSink,
   withCommandOutputScope,
 } from './capture.js';
-import { createExportQueue, type ExportQueue, type SendOutcome } from './export-queue.js';
+import { createExportQueue, type ExportCounts, type ExportQueue, type SendOutcome } from './export-queue.js';
 import type { CommandOutputEventKind } from '../events/command-output-traits.js';
 
 type Env = Record<string, string | undefined>;
@@ -24,6 +27,16 @@ export interface CommandOutputExportDeps {
   maxQueued?: number;
   retry?: { initialMs?: number; maxMs?: number; maxAttempts?: number };
 }
+
+export type CommandOutputSessionStatus = 'ok' | 'error' | 'interrupted';
+
+export interface CommandOutputFlushReport extends ExportCounts {
+  runId: string;
+  sessionId: string;
+  complete: boolean;
+}
+
+export const SIGNAL_FLUSH_BUDGET_MS = 2000;
 
 const SEVERITY_INFO = 9;
 const SEVERITY_WARN = 13;
@@ -81,6 +94,9 @@ function headerSecrets(env: Env): string[] {
       }
       value = value.trim();
       if (value.length >= 4) secrets.push(value);
+      // A scheme-prefixed credential ("Bearer <token>") must also be masked when only the token is printed.
+      const credential = value.split(/\s+/).at(-1) ?? '';
+      if (credential !== value && credential.length >= 4) secrets.push(credential);
     }
   }
   return secrets;
@@ -104,10 +120,12 @@ interface ExportSetup {
   exporter: LogRecordExporter;
   queue: ExportQueue<ReadableLogRecord>;
   unregister: () => void;
+  emitLifecycle: (event: 'session.start' | 'session.end', extra?: Record<string, string>) => void;
 }
 
 async function setupExport(
   correlation: CommandOutputCorrelation,
+  sessionId: string,
   protocol: Protocol,
   env: Env,
   deps: CommandOutputExportDeps,
@@ -169,6 +187,7 @@ async function setupExport(
           'factory.issue': record.issue,
           'factory.lane': record.lane,
           'factory.phase': record.phase,
+          'factory.session_id': sessionId,
           'factory.command_id': record.commandId,
           'factory.seq': record.seq,
           'log.iostream': record.stream,
@@ -178,7 +197,93 @@ async function setupExport(
       // export problems never reach the command
     }
   });
-  return { exporter, queue, unregister };
+  const emitLifecycle: ExportSetup['emitLifecycle'] = (event, extra = {}) => {
+    try {
+      logger.emit({
+        body: event === 'session.start' ? 'session start' : 'session end',
+        timestamp: new Date(),
+        severityNumber: SEVERITY_INFO,
+        attributes: {
+          'factory.run_id': correlation.runId,
+          'factory.issue': correlation.issue,
+          'factory.lane': correlation.lane,
+          'factory.phase': correlation.phase,
+          'factory.session_id': sessionId,
+          'factory.event': event,
+          ...extra,
+        },
+      });
+    } catch {
+      // export problems never reach the command
+    }
+  };
+  return { exporter, queue, unregister, emitLifecycle };
+}
+
+interface ActiveSession {
+  runId: string;
+  sessionId: string;
+  end: (
+    status: CommandOutputSessionStatus,
+    signal?: NodeJS.Signals,
+    budgetMs?: number,
+  ) => Promise<CommandOutputFlushReport>;
+}
+
+const activeSessions = new Set<ActiveSession>();
+
+function openSession(
+  correlation: CommandOutputCorrelation,
+  sessionId: string,
+  setup: ExportSetup,
+  log: (type: CommandOutputEventKind, msg: string) => void,
+): ActiveSession {
+  let ended: Promise<CommandOutputFlushReport> | undefined;
+  const run = async (
+    status: CommandOutputSessionStatus,
+    signal: NodeJS.Signals | undefined,
+    budgetMs: number,
+  ): Promise<CommandOutputFlushReport> => {
+    const base = { runId: correlation.runId, sessionId };
+    try {
+      setup.unregister();
+      setup.emitLifecycle('session.end', {
+        'factory.session.status': status,
+        ...(signal === undefined ? {} : { 'factory.signal': signal }),
+      });
+      const c = await setup.queue.close(budgetMs);
+      await Promise.race([setup.exporter.shutdown().catch(() => {}), unrefTimer(EXPORTER_SHUTDOWN_MS)]);
+      activeSessions.delete(session);
+      const interrupted = status === 'interrupted';
+      const msg =
+        `command output export: ${c.sent} sent, ${c.dropped} dropped, ${c.failed} failed (${c.retries} retries)` +
+        (interrupted ? `; session interrupted by ${signal ?? 'signal'}` : '');
+      try {
+        log(c.dropped + c.failed > 0 || interrupted ? 'command_output_export_degraded' : 'command_output_export', msg);
+      } catch {
+        // the export summary must never throw
+      }
+      return { ...base, ...c, complete: c.dropped + c.failed === 0 };
+    } catch {
+      activeSessions.delete(session);
+      return { ...base, sent: 0, dropped: 0, failed: 0, retries: 0, complete: false };
+    }
+  };
+  const session: ActiveSession = {
+    runId: correlation.runId,
+    sessionId,
+    end: (status, signal, budgetMs = DEFAULT_FLUSH_BUDGET_MS) => (ended ??= run(status, signal, budgetMs)),
+  };
+  return session;
+}
+
+/** Ends every active export session as interrupted; resolves with one report per session. */
+export function flushCommandOutputExports(
+  signal: NodeJS.Signals,
+  budgetMs = SIGNAL_FLUSH_BUDGET_MS,
+): Promise<CommandOutputFlushReport[]> {
+  if (activeSessions.size === 0) return Promise.resolve([]);
+  return Promise.all([...activeSessions].map((s) => s.end('interrupted', signal, budgetMs)));
 }
 
 export async function withCommandOutputExport<T>(
@@ -193,25 +298,25 @@ export async function withCommandOutputExport<T>(
     if (res.warning !== undefined) log('command_output_export_degraded', res.warning);
     return withCommandOutputScope(correlation, fn);
   }
+  const sessionId = randomUUID().slice(0, 8);
   let setup: ExportSetup;
   try {
-    setup = await setupExport(correlation, res.protocol, env, deps);
+    setup = await setupExport(correlation, sessionId, res.protocol, env, deps);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     log('command_output_export_degraded', `command output export disabled: setup failed: ${reason}`);
     return withCommandOutputScope(correlation, fn);
   }
+  const session = openSession(correlation, sessionId, setup, log);
+  setup.emitLifecycle('session.start');
+  activeSessions.add(session);
+  let status: CommandOutputSessionStatus = 'ok';
   try {
     return await withCommandOutputScope(correlation, fn);
+  } catch (err) {
+    status = 'error';
+    throw err;
   } finally {
-    try {
-      setup.unregister();
-      const c = await setup.queue.close(deps.flushBudgetMs ?? DEFAULT_FLUSH_BUDGET_MS);
-      await Promise.race([setup.exporter.shutdown().catch(() => {}), unrefTimer(EXPORTER_SHUTDOWN_MS)]);
-      const msg = `command output export: ${c.sent} sent, ${c.dropped} dropped, ${c.failed} failed (${c.retries} retries)`;
-      log(c.dropped + c.failed > 0 ? 'command_output_export_degraded' : 'command_output_export', msg);
-    } catch {
-      // the export summary must never throw over fn's result or error
-    }
+    await session.end(status, undefined, deps.flushBudgetMs ?? DEFAULT_FLUSH_BUDGET_MS);
   }
 }

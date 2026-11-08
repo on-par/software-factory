@@ -1,10 +1,16 @@
-// packages/cli/src/cli/shutdown.ts — first SIGINT/SIGTERM stops tracked agent process groups and exits 130 (#1615)
+// packages/cli/src/cli/shutdown.ts — first SIGINT/SIGTERM stops tracked agent process groups, flushes OTLP command
+// output exports within a bounded budget and exits 130 (#1615, #3996)
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { styleText } from 'node:util';
 import { getFactoryPaths } from '@on-par/factory-core';
-import { formatStopMarker, killTrackedProcessGroups } from '@on-par/factory-core/internal';
+import {
+  type CommandOutputFlushReport,
+  flushCommandOutputExports,
+  formatStopMarker,
+  killTrackedProcessGroups,
+} from '@on-par/factory-core/internal';
 
 type ShutdownSignal = 'SIGINT' | 'SIGTERM';
 const SHUTDOWN_SIGNALS: ShutdownSignal[] = ['SIGINT', 'SIGTERM'];
@@ -21,6 +27,7 @@ export interface ShutdownOptions {
   signals?: ShutdownSignals;
   killTracked?: (opts: { graceMs: number }) => Promise<unknown>;
   writeStop?: (path: string, body: string) => void;
+  flushExports?: (signal: NodeJS.Signals) => Promise<readonly CommandOutputFlushReport[]>;
   exit?: (code: number) => void;
   log?: (line: string) => void;
 }
@@ -31,6 +38,8 @@ export interface ShutdownHandle {
 
 export const SHUTDOWN_EXIT_CODE = 130;
 export const SHUTDOWN_GRACE_MS = 3000;
+/** Must exceed the 2 s export flush budget plus the 500 ms exporter shutdown. */
+export const SHUTDOWN_FLUSH_GUARD_MS = 3000;
 
 function defaultWriteStop(path: string, body: string): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -45,6 +54,7 @@ export function installShutdown(controller: AbortController, options: ShutdownOp
   const signals = options.signals ?? process;
   const graceMs = options.graceMs ?? SHUTDOWN_GRACE_MS;
   const killTracked = options.killTracked ?? ((o: { graceMs: number }) => killTrackedProcessGroups(o));
+  const flushExports = options.flushExports ?? ((s: NodeJS.Signals) => flushCommandOutputExports(s));
   const writeStop = options.writeStop ?? defaultWriteStop;
   const exit = options.exit ?? ((code: number) => process.exit(code));
   const log = options.log ?? ((line: string) => console.error(styleText('dim', line)));
@@ -64,6 +74,26 @@ export function installShutdown(controller: AbortController, options: ShutdownOp
       await killTracked({ graceMs });
     } catch {
       // Exit regardless of sweep failures.
+    }
+    let guardTimer: NodeJS.Timeout | undefined;
+    try {
+      const guard = new Promise<'timeout'>((resolve) => {
+        guardTimer = setTimeout(() => resolve('timeout'), SHUTDOWN_FLUSH_GUARD_MS);
+        guardTimer.unref();
+      });
+      const reports = await Promise.race([flushExports(signal), guard]);
+      if (reports === 'timeout') {
+        log(`factory: command output export flush timed out after ${SHUTDOWN_FLUSH_GUARD_MS} ms — records may be lost`);
+      } else {
+        for (const r of reports) {
+          if (r.complete) continue;
+          log(`factory: command output export incomplete for run ${r.runId}: ${r.dropped} dropped, ${r.failed} failed`);
+        }
+      }
+    } catch {
+      // The flush never blocks exit.
+    } finally {
+      clearTimeout(guardTimer);
     }
     exit(SHUTDOWN_EXIT_CODE);
   };
