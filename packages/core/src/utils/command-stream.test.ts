@@ -32,11 +32,13 @@ function records(dir: string): { name: string; lines: Record<string, unknown>[] 
 }
 
 /** In-memory io that can fail chosen write calls (1-based) and split writes into short writes. */
-function memoryIo(opts: { failWrites?: number[]; shortWrites?: boolean; failOpen?: string } = {}) {
+function memoryIo(opts: { failWrites?: number[]; writeCode?: string; shortWrites?: boolean; failOpen?: string } = {}) {
   let calls = 0;
   const opened: string[] = [];
   const chunks: Buffer[] = [];
+  const warnings: string[] = [];
   const io: CommandStreamIo = {
+    warn: (message) => warnings.push(message),
     mkdir: () => {},
     open: (path) => {
       if (opts.failOpen) throw Object.assign(new Error(opts.failOpen), { code: opts.failOpen });
@@ -45,7 +47,10 @@ function memoryIo(opts: { failWrites?: number[]; shortWrites?: boolean; failOpen
     },
     write: (_fd, data) => {
       calls++;
-      if (opts.failWrites?.includes(calls)) throw new Error('ENOSPC');
+      if (opts.failWrites?.includes(calls)) {
+        const code = opts.writeCode ?? 'ENOSPC';
+        throw Object.assign(new Error(code), { code });
+      }
       const n = opts.shortWrites ? Math.max(1, Math.floor(data.length / 2)) : data.length;
       chunks.push(Buffer.from(data.subarray(0, n)));
       return n;
@@ -58,7 +63,7 @@ function memoryIo(opts: { failWrites?: number[]; shortWrites?: boolean; failOpen
       .split('\n')
       .filter(Boolean)
       .map((l) => JSON.parse(l) as Record<string, unknown>);
-  return { io, opened, lines };
+  return { io, opened, lines, warnings };
 }
 
 describe('openCommandStream', () => {
@@ -126,15 +131,33 @@ describe('openCommandStream', () => {
   });
 
   it('returns undefined when the file cannot be created', () => {
-    const mem = memoryIo({ failOpen: 'EACCES' });
+    const mem = memoryIo({ failOpen: 'EPERM' });
+    expect(openCommandStream(['true'], {}, { [COMMAND_STREAM_DIR_ENV]: '/d' }, mem.io)).toBeUndefined();
     expect(openCommandStream(['true'], {}, { [COMMAND_STREAM_DIR_ENV]: '/d' }, mem.io)).toBeUndefined();
     const io: CommandStreamIo = {
       ...mem.io,
       mkdir: () => {
-        throw new Error('EROFS');
+        throw Object.assign(new Error('read-only'), { code: 'EROFS' });
       },
     };
     expect(openCommandStream(['true'], {}, { [COMMAND_STREAM_DIR_ENV]: '/d' }, io)).toBeUndefined();
+    expect(openCommandStream(['true'], {}, { [COMMAND_STREAM_DIR_ENV]: '/d' }, io)).toBeUndefined();
+    // One warning per failure kind per process, never one per command.
+    expect(mem.warnings).toEqual([
+      'factory: command output stream unavailable: EPERM',
+      'factory: command output stream unavailable: EROFS',
+    ]);
+  });
+
+  it('warns once when the first write fails, then returns a sink that never throws', () => {
+    const mem = memoryIo({ failWrites: [1, 2, 3, 4], writeCode: 'EDQUOT' });
+    const sink = openCommandStream(['true'], {}, { [COMMAND_STREAM_DIR_ENV]: '/d' }, mem.io);
+    expect(() => {
+      sink?.write('stdout', Buffer.from('one'));
+      sink?.end(DONE);
+    }).not.toThrow();
+    openCommandStream(['true'], {}, { [COMMAND_STREAM_DIR_ENV]: '/d' }, mem.io)?.end(DONE);
+    expect(mem.warnings).toEqual(['factory: command output stream unavailable: EDQUOT']);
   });
 
   it('completes short writes', () => {
@@ -157,6 +180,7 @@ describe('openCommandStream', () => {
     const lines = mem.lines();
     expect(lines.map((l) => l.type)).toEqual(['start', 'chunk', 'end']);
     expect(lines.at(-1)).toMatchObject({ complete: false, writeErrors: 1, bytes: { stdout: 6, stderr: 5 } });
+    expect(mem.warnings).toEqual(['factory: command output stream incomplete: ENOSPC']);
   });
 
   it('survives a failing close', () => {

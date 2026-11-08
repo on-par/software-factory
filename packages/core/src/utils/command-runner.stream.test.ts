@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import { runCommand, type CommandResult, type RunCommandOptions } from './command-runner.js';
@@ -10,6 +10,17 @@ const STREAM_ENV = 'FACTORY_COMMAND_STREAM_DIR';
 const OBSERVED_LOSS_BYTES = 750_325;
 
 const dirs = createTempDirs();
+/** Collected for the whole file (not a vi spy, which is reset per test): the stream warning is emitted once
+ *  per process, whichever test hits it first. */
+const warnings: string[] = [];
+const realWarn = console.warn;
+beforeAll(() => {
+  console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(' '));
+});
+afterAll(() => {
+  console.warn = realWarn;
+});
+const streamWarnings = () => warnings.filter((msg) => msg.includes('command output stream unavailable'));
 afterEach(async () => {
   vi.unstubAllEnvs();
   await dirs.cleanup();
@@ -215,7 +226,7 @@ describe.each([
     expect(result).toEqual(await baseline(p, 'crash', { ...pathOptions, timeoutMs: 30_000 }));
   }, 60_000);
 
-  it('leaves the command result unchanged when the stream directory is unwritable', async () => {
+  it('warns once per process and leaves the command result unchanged when the stream directory is unwritable', async () => {
     const p = await payload();
     writeFileSync(p.release, '');
     const parent = await dirs.make('sf-stream-out-');
@@ -228,6 +239,10 @@ describe.each([
       expect(readdirSync(streamDir)).toEqual([]);
       expect(result).toEqual(await baseline(p, 'normal', { ...pathOptions, timeoutMs: 60_000 }));
       expect(result.ok).toBe(true);
+      // The baseline run turned streaming off; a second streamed run must not warn again.
+      vi.stubEnv(STREAM_ENV, streamDir);
+      await runCommand(argv(p), { ...pathOptions, timeoutMs: 60_000 });
+      expect(streamWarnings()).toEqual(['factory: command output stream unavailable: EACCES']);
     } finally {
       chmodSync(streamDir, 0o700);
     }

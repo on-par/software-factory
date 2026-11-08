@@ -28,12 +28,13 @@ export interface CommandStreamSink {
   end(result: CommandStreamEnd): void;
 }
 
-/** File seam so tests can fail a write mid-stream. */
+/** File and warning seam so tests can fail a write mid-stream and capture warnings. */
 export interface CommandStreamIo {
   mkdir(dir: string): void;
   open(path: string): number;
   write(fd: number, data: Buffer): number;
   close(fd: number): void;
+  warn(message: string): void;
 }
 
 const nodeIo: CommandStreamIo = {
@@ -41,7 +42,23 @@ const nodeIo: CommandStreamIo = {
   open: (path) => openSync(path, 'ax'),
   write: (fd, data) => writeSync(fd, data),
   close: (fd) => closeSync(fd),
+  warn: (message) => console.warn(message),
 };
+
+/** Failure kinds already warned about in this process, so a broken stream dir warns once, not once per command. */
+const warned = new Set<string>();
+
+function warnOnce(io: CommandStreamIo, state: 'unavailable' | 'incomplete', err: unknown): void {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code ?? 'UNKNOWN';
+  const message = `factory: command output stream ${state}: ${code}`;
+  if (warned.has(message)) return;
+  warned.add(message);
+  try {
+    io.warn(message);
+  } catch {
+    // a broken warning sink must not reach the command
+  }
+}
 
 const PROCESS_TAG = `${Date.now()}-${process.pid}`;
 let sequence = 0;
@@ -61,7 +78,9 @@ function commandLabel(argv: readonly string[]): string {
 
 /** Opens a stream file for one command invocation, or returns undefined when streaming is off or the file
  *  cannot be created. The stream is a diagnostic side channel: no method ever throws, and a failed write
- *  only marks the stream incomplete (`complete: false` and `writeErrors` on the end record). */
+ *  only marks the stream incomplete (`complete: false` and `writeErrors` on the end record). A file that
+ *  cannot be created or whose first write fails warns `unavailable`, a later failed write warns
+ *  `incomplete`; each once per process per errno code. */
 export function openCommandStream(
   argv: readonly string[],
   opts: { cwd?: string; shell?: boolean } = {},
@@ -75,7 +94,8 @@ export function openCommandStream(
   try {
     io.mkdir(dir);
     fd = openUnique(dir, commandLabel(opts.shell ? (argv[0] ?? '').trim().split(/\s+/) : argv), io);
-  } catch {
+  } catch (err) {
+    warnOnce(io, 'unavailable', err);
     return undefined;
   }
 
@@ -88,11 +108,13 @@ export function openCommandStream(
   const append = (record: Record<string, unknown>): void => {
     // After a failed write the file may end in a torn line; a leading newline keeps the next record parseable.
     const lead = failed ? '\n' : '';
-    const line = Buffer.from(`${lead}${JSON.stringify({ seq: seq++, ts: Date.now(), ...record })}\n`, 'utf-8');
+    const n = seq++;
+    const line = Buffer.from(`${lead}${JSON.stringify({ seq: n, ts: Date.now(), ...record })}\n`, 'utf-8');
     try {
       let off = 0;
       while (off < line.length) off += io.write(fd, line.subarray(off));
-    } catch {
+    } catch (err) {
+      if (!failed) warnOnce(io, n === 0 ? 'unavailable' : 'incomplete', err);
       writeErrors++;
       failed = true;
     }
