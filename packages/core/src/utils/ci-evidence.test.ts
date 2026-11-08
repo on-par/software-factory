@@ -128,6 +128,18 @@ describe('collectCiFailureEvidence (#2814)', () => {
   });
 });
 
+describe('collectCiFailureEvidence url (#3998)', () => {
+  it('sets url from html_url, else details_url', async () => {
+    const { octokit } = fakeOctokit([
+      { name: 'a', status: 'completed', conclusion: 'failure', html_url: 'https://gh/a' },
+      { name: 'b', status: 'completed', conclusion: 'failure', details_url: 'https://gh/b' },
+      { name: 'c', status: 'completed', conclusion: 'failure' },
+    ]);
+    const ev = await collectCiFailureEvidence({ octokit, ...base });
+    expect(ev.failingChecks.map((c) => c.url)).toEqual(['https://gh/a', 'https://gh/b', undefined]);
+  });
+});
+
 describe('collectFailingJobLogs (#3537)', () => {
   function logOctokit(runs: unknown[] | Error, logs: Record<number, unknown>) {
     const listForRef = vi.fn(async () => {
@@ -184,6 +196,26 @@ describe('collectFailingJobLogs (#3537)', () => {
     const { jobLogs, errors } = await collectFailingJobLogs({ octokit, ...args, checkNames: ['a', 'b', 'c'] });
     expect(errors).toEqual(['a: no job id', 'b: gone']);
     expect(jobLogs.map((j) => j.name)).toEqual(['c']);
+  });
+
+  it('extracts url, files and commits and redacts secrets from the excerpt (#3998)', async () => {
+    const sha = 'a'.repeat(20) + '1b2c3d4e5f60718293a4';
+    const token = `ghp_${'A1b2'.repeat(9)}`;
+    const text = ['Finding: leak', 'File: src/a.ts', `Commit: ${sha}`, `Secret: ${token}`, 'see src/changed.ts:4'].join(
+      '\n',
+    );
+    const { octokit } = logOctokit([{ ...run(1, 'gitleaks'), html_url: 'https://gh/run/1' }], { 1: text });
+    const { jobLogs } = await collectFailingJobLogs({
+      octokit,
+      ...args,
+      checkNames: ['gitleaks'],
+      changedFiles: ['src/changed.ts', 'src/untouched.ts'],
+    });
+    expect(jobLogs[0].files).toEqual(['src/changed.ts', 'src/a.ts']);
+    expect(jobLogs[0].commits).toEqual([sha]);
+    expect(jobLogs[0].url).toBe('https://gh/run/1');
+    expect(jobLogs[0].excerpt).toContain('<secret>');
+    expect(jobLogs[0].excerpt).not.toContain(token);
   });
 
   it('records a listing error', async () => {

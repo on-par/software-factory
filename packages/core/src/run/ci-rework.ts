@@ -152,6 +152,30 @@ export function attributeCiFailure(
   return { baseline, ...(base ? { baseRef: base.baseRef, baseSha: base.baseSha } : {}), items };
 }
 
+/**
+ * Flips a non-CodeQL check that also fails on base to attributable when its job log names a file this PR
+ * changed (#3998), then recomputes `baseline`. Returns the input unchanged when nothing flips.
+ */
+export function attributeByJobLogs(
+  attribution: CiAttribution,
+  jobLogs: readonly CiJobLogExcerpt[],
+  evidence: CiFailureEvidence | undefined,
+  changedFiles: readonly string[],
+): CiAttribution {
+  const changed = new Set(changedFiles);
+  let flipped = false;
+  const items = attribution.items.map((item) => {
+    if (item.kind !== 'check' || item.attributable || /codeql/i.test(item.ref)) return item;
+    const hit = (jobLogs.find((l) => l.name === item.ref)?.files ?? []).filter((f) => changed.has(f));
+    if (hit.length === 0) return item;
+    flipped = true;
+    return { ...item, attributable: true, reason: `log names files changed by this PR: ${hit.join(', ')}` };
+  });
+  if (!flipped) return attribution;
+  const baseline = items.length > 0 && items.every((i) => !i.attributable) && !evidence?.errors?.length;
+  return { ...attribution, baseline, items };
+}
+
 /** Failing check names on the latest commit of the PR's base branch. Errors propagate to the caller. */
 export async function listBaseFailingChecks(
   octokit: Octokit,

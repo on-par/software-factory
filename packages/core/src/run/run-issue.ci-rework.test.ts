@@ -203,7 +203,7 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(shipPhase).toHaveBeenCalledTimes(3);
     expect(log).toHaveBeenCalledWith(
       'ci-failed',
-      'ship phase failed: CI failed for PR #9 — CI rework budget exhausted after 2 rounds',
+      expect.stringContaining('ship phase failed: CI failed for PR #9 — CI rework budget exhausted after 2 rounds'),
       expect.objectContaining({ ciFailure: ATTRIBUTED }),
     );
   });
@@ -218,7 +218,7 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(reworkWorker).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenCalledWith(
       'ci-failed',
-      'ship phase failed: CI failed for PR #9 — CI rework budget exhausted after 1 round',
+      expect.stringContaining('ship phase failed: CI failed for PR #9 — CI rework budget exhausted after 1 round'),
       expect.objectContaining({ ciFailure: ATTRIBUTED }),
     );
   });
@@ -232,7 +232,9 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(listBaseFailingChecks).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(
       'ci-failed',
-      'ship phase failed: CI failed for PR #9 — baseline: no CI failure is attributable to this PR',
+      expect.stringContaining(
+        'ship phase failed: CI failed for PR #9 — baseline: no CI failure is attributable to this PR',
+      ),
       expect.objectContaining({
         ciFailure: expect.objectContaining({
           attribution: expect.objectContaining({

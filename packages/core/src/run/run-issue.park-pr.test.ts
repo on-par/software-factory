@@ -121,15 +121,14 @@ beforeEach(() => {
 });
 
 describe('runIssue — a park settles the run PR (#3551)', () => {
-  it("draft mode — a CI-failed park closes the run's draft PR and keeps the branch", async () => {
+  it("a CI-failed park leaves the run's PR open and keeps the branch (#3998)", async () => {
     shipPhase.mockResolvedValue({ ok: false, prNumber: 42, reason: 'CI failed for PR #42', ciOutcome: 'failure' });
     const { octokit, createComment, update, deleteRef } = prOctokit();
     const outcome = await runIssue(request, policy, ports(vi.fn<Log>(), octokit));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'ci-failed', prNumber: 42 });
     const prComments = createComment.mock.calls.filter(([args]) => args.issue_number === 42);
-    expect(prComments).toHaveLength(1);
-    expect(prComments[0][0].body).toContain('ci-failed');
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({ pull_number: 42, state: 'closed' }));
+    expect(prComments).toHaveLength(0);
+    expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ state: 'closed' }));
     expect(deleteRef).not.toHaveBeenCalled();
   });
 

@@ -188,6 +188,8 @@ export type CheckRunLike = {
   status?: string | null;
   conclusion?: string | null;
   output?: { title?: string | null; summary?: string | null } | null;
+  html_url?: string | null;
+  details_url?: string | null;
 };
 
 export async function listAllCheckRuns(

@@ -11,7 +11,9 @@ import {
   breakerDir,
   CHECK_OK,
   checkPhase,
+  collectFailingJobLogs,
   listBaseCodeqlAlerts,
+  listBaseFailingChecks,
   listPrChangedFiles,
   type Log,
   mergeBaseIntoWorktree,
@@ -235,7 +237,7 @@ describe('shipWithCiRework — attributable non-CodeQL checks (#3537)', () => {
     expect(reworkWorker).toHaveBeenCalledTimes(2);
     expect(log).toHaveBeenCalledWith(
       'ci-failed',
-      'ship phase failed: CI failed for PR #9 — CI rework budget exhausted after 2 rounds',
+      expect.stringContaining('ship phase failed: CI failed for PR #9 — CI rework budget exhausted after 2 rounds'),
       expect.anything(),
     );
   });
@@ -331,5 +333,90 @@ describe('shipWithCiRework — CodeQL data-flow alerts in unchanged files (#3712
     await runIssue(request, policy, ports(log));
     expect(JSON.stringify(log.mock.calls)).toContain('could not read base CodeQL alerts');
     expect(reworkWorker).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('shipWithCiRework — log-attributed and diagnosed CI failures (#3998)', () => {
+  const URL = 'https://github.com/o/r/actions/runs/1/job/5';
+  const SHA = 'a1b2c3d4'.repeat(5);
+  const GITLEAKS_FAIL: ShipResult = {
+    ok: false,
+    prNumber: 9,
+    reason: 'CI failed for PR #9',
+    ciOutcome: 'failure',
+    ciFailure: {
+      failingChecks: [{ name: 'gitleaks', conclusion: 'failure', url: URL }],
+      alerts: [],
+      truncated: false,
+    },
+    headSha: 'sha',
+  };
+  const SUCCESS: ShipResult = { ok: true, prNumber: 9, ciOutcome: 'success' };
+  const gitleaksLog = (over: { files?: string[]; commits?: string[]; excerpt?: string } = {}) => ({
+    jobLogs: [
+      {
+        name: 'gitleaks',
+        jobId: 5,
+        excerpt: 'leak <secret>',
+        truncated: false,
+        url: URL,
+        files: ['src/a.ts'],
+        ...over,
+      },
+    ],
+    errors: [],
+  });
+
+  beforeEach(() => {
+    listPrChangedFiles.mockResolvedValue(['src/a.ts']);
+    listBaseFailingChecks.mockResolvedValue({ baseRef: 'main', baseSha: 'b'.repeat(40), failing: ['gitleaks'] });
+  });
+
+  it('a check also failing on base whose log names a PR-changed file gets a CI rework round (#3998)', async () => {
+    collectFailingJobLogs.mockResolvedValue(gitleaksLog());
+    shipPhase.mockResolvedValueOnce(GITLEAKS_FAIL).mockResolvedValueOnce(SUCCESS);
+    const log = vi.fn<Log>();
+    expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'ready' });
+    expect(reworkWorker).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(log.mock.calls)).not.toContain('baseline: no CI failure is attributable');
+    expect(collectFailingJobLogs.mock.calls[0][0]).toMatchObject({
+      checkNames: ['gitleaks'],
+      changedFiles: ['src/a.ts'],
+    });
+  });
+
+  it('the log-attributed rework summary names the check and carries a redacted log excerpt (#3998)', async () => {
+    collectFailingJobLogs.mockResolvedValue(gitleaksLog({ excerpt: 'Secret: <secret> in src/a.ts' }));
+    shipPhase.mockResolvedValueOnce(GITLEAKS_FAIL).mockResolvedValueOnce(SUCCESS);
+    await runIssue(request, policy, ports(vi.fn<Log>()));
+    const details = reworkWorker.mock.calls[0][0].summary.results[0].details;
+    expect(details).toContain('gitleaks');
+    expect(details).toContain('<secret>');
+    expect(details).not.toContain('ghp_');
+  });
+
+  it('a baseline park message names the failing check, its run link, and the flagged files and commits (#3998)', async () => {
+    collectFailingJobLogs.mockResolvedValue(gitleaksLog({ files: ['other.ts'], commits: [SHA] }));
+    shipPhase.mockResolvedValue(GITLEAKS_FAIL);
+    const log = vi.fn<Log>();
+    expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'parked', reason: 'ci-failed' });
+    expect(reworkWorker).not.toHaveBeenCalled();
+    const parked = log.mock.calls.find((c) => c[0] === 'ci-failed');
+    const message = String(parked?.[1]);
+    for (const part of ['baseline', 'gitleaks', URL, 'other.ts', SHA]) expect(message).toContain(part);
+    expect(message).not.toContain('leak <secret>');
+  });
+
+  it('a budget-exhausted park message carries the failing check diagnosis (#3998)', async () => {
+    listBaseFailingChecks.mockResolvedValue({ baseRef: 'main', baseSha: 'b'.repeat(40), failing: [] });
+    collectFailingJobLogs.mockResolvedValue(gitleaksLog());
+    shipPhase.mockResolvedValue(GITLEAKS_FAIL);
+    const log = vi.fn<Log>();
+    expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'parked', reason: 'ci-failed' });
+    expect(reworkWorker).toHaveBeenCalledTimes(2);
+    const message = String(log.mock.calls.find((c) => c[0] === 'ci-failed')?.[1]);
+    expect(message).toContain('budget exhausted');
+    expect(message).toContain('gitleaks');
+    expect(message).toContain(URL);
   });
 });
