@@ -110,7 +110,7 @@ export { resolveRunUsageHarness, TRAILING_WINDOW_MS } from './usage/index.js';
 
 // Utils
 export * from './internal-ci.js';
-export { runCommand } from './utils/command-runner.js';
+export * from './internal-commands.js';
 export type { CoverageMetrics } from './utils/coverage-ratchet.js';
 export {
   checkScopedRatchetDrift,

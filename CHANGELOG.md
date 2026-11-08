@@ -7,7 +7,7 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
-- Setting `FACTORY_COMMAND_STREAM_DIR` makes every command the factory runs append its raw stdout/stderr chunks to a per-command NDJSON file as they arrive, before any buffer or `maxBuffer` limit. Off by default; see the README.
+- Setting `FACTORY_COMMAND_STREAM_DIR` makes every command the factory runs append its raw stdout/stderr chunks to a per-command NDJSON file as they arrive, before any buffer or `maxBuffer` limit. Each CLI process also writes a `session-*.json` start file and, at normal exit, a `session-*-end.json` file with its counts. A stream that cannot be created or written prints one `factory: command output stream unavailable|incomplete: <code>` warning per process. Off by default; see the README.
 
 ## 0.9.34 - 2026-11-07
 

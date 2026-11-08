@@ -235,6 +235,13 @@ Checker commands (compile, tests, lint, evidence, `app_smoke`) inherit only an a
 
 Output is raw, not redacted; whoever reads the files must redact it. Records are written synchronously, so a crash keeps everything received so far. The stream is a side channel: a failed write never changes a command's result, verdict or logs. After a failed write the factory stops writing chunks and the `end` record says `complete: false`. A missing `end` record means the factory stopped before the command finished. If a stream file cannot be created or its first write fails, the factory prints `factory: command output stream unavailable: <errno code>` to stderr; a later failed write prints `factory: command output stream incomplete: <errno code>`. Each warning appears once per process per code, not once per command. For a process-group run, the `end` record can land up to 250 ms after the command returns, while the pipes drain. Leave the variable unset to turn streaming off.
 
+Each `factory` process that streams also writes two session files (format 1) in the same directory, named with the same `<process start ms>-<pid>` as its command files. They let a reader tell a CLI that streams but ran no commands apart from an older CLI that never streams:
+
+- `session-<process start ms>-<pid>.json`: written once at startup, before any command runs, for every CLI command. Holds `{"format": 1, "pid", "startedAt", "version"}`. `startedAt` is an ISO timestamp and `version` is the CLI version.
+- `session-<process start ms>-<pid>-end.json`: written when the process exits normally. Holds `{"format": 1, "pid", "commands", "writeErrors", "unavailable", "endedAt"}`: how many commands tried to stream, the failed record writes across them, and whether any stream file (or the session file) could not be created or written. A process that crashes or is killed writes no end file.
+
+Both files are created exclusively and never overwritten. If one cannot be created, the `unavailable` warning above is printed.
+
 ### Preview environment gate
 
 A repo with its own PR preview deployments can opt in to a SHIP gate. Once the PR's hosted CI is green, SHIP finds the preview URL, waits for it to answer, and runs your smoke or e2e command against it. The gate only reads GitHub. It never deploys anything, never merges, and does not replace the CI watch or land's merge gates.

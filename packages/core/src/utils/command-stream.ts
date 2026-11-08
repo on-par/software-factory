@@ -60,8 +60,62 @@ function warnOnce(io: CommandStreamIo, state: 'unavailable' | 'incomplete', err:
   }
 }
 
-const PROCESS_TAG = `${Date.now()}-${process.pid}`;
+/** Process start time (epoch ms) and pid: shared by this process's session and command stream file names. */
+const PROCESS_TAG = `${Math.round(performance.timeOrigin)}-${process.pid}`;
 let sequence = 0;
+
+/** Counts reported in the session end file, reset when a session starts. */
+const stats = { commands: 0, writeErrors: 0, unavailable: false };
+
+/** Writes one whole file that must not already exist; throws on any failure. */
+function writeNewFile(io: CommandStreamIo, path: string, value: unknown): void {
+  const fd = io.open(path);
+  try {
+    const data = Buffer.from(`${JSON.stringify(value)}\n`, 'utf-8');
+    let off = 0;
+    while (off < data.length) off += io.write(fd, data.subarray(off));
+  } finally {
+    io.close(fd);
+  }
+}
+
+/** Marks the start of a CLI process that streams command output: writes `session-<tag>.json` (format 1) into
+ *  the stream dir at once, and `session-<tag>-end.json` with this session's counts from a synchronous exit
+ *  handler. A consumer can then tell "streaming, no commands ran" (start and end, `commands: 0`) apart from
+ *  an older CLI (no session file). Does nothing when streaming is off; never throws. A file that cannot be
+ *  created warns `unavailable` once and is reported as `unavailable: true` in the end file. */
+export function startCommandStreamSession(
+  opts: { version: string },
+  env: NodeJS.ProcessEnv = process.env,
+  io: CommandStreamIo = nodeIo,
+  onExit: (fn: () => void) => void = (fn) => {
+    process.once('exit', fn);
+  },
+): void {
+  const dir = env[COMMAND_STREAM_DIR_ENV]?.trim();
+  if (!dir) return;
+  stats.commands = 0;
+  stats.writeErrors = 0;
+  stats.unavailable = false;
+  const write = (suffix: string, value: Record<string, unknown>) => {
+    try {
+      io.mkdir(dir);
+      writeNewFile(io, join(dir, `session-${PROCESS_TAG}${suffix}.json`), { format: 1, pid: process.pid, ...value });
+    } catch (err) {
+      stats.unavailable = true;
+      warnOnce(io, 'unavailable', err);
+    }
+  };
+  write('', { startedAt: new Date().toISOString(), version: opts.version });
+  onExit(() =>
+    write('-end', {
+      commands: stats.commands,
+      writeErrors: stats.writeErrors,
+      unavailable: stats.unavailable,
+      endedAt: new Date().toISOString(),
+    }),
+  );
+}
 
 /** File-name-safe label from the program name and its first two arguments; never a caller-supplied path. */
 function commandLabel(argv: readonly string[]): string {
@@ -89,12 +143,14 @@ export function openCommandStream(
 ): CommandStreamSink | undefined {
   const dir = env[COMMAND_STREAM_DIR_ENV]?.trim();
   if (!dir) return undefined;
+  stats.commands++;
 
   let fd: number;
   try {
     io.mkdir(dir);
     fd = openUnique(dir, commandLabel(opts.shell ? (argv[0] ?? '').trim().split(/\s+/) : argv), io);
   } catch (err) {
+    stats.unavailable = true;
     warnOnce(io, 'unavailable', err);
     return undefined;
   }
@@ -115,6 +171,8 @@ export function openCommandStream(
       while (off < line.length) off += io.write(fd, line.subarray(off));
     } catch (err) {
       if (!failed) warnOnce(io, n === 0 ? 'unavailable' : 'incomplete', err);
+      if (n === 0) stats.unavailable = true;
+      stats.writeErrors++;
       writeErrors++;
       failed = true;
     }

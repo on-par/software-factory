@@ -616,6 +616,7 @@ const INTERNAL_API_KEYS = [
   'watchChecks',
   'watchChecksWithInfraRerun',
   'runCommand',
+  'startCommandStreamSession',
   ...'withFileLock withGitLock formatStopMarker readStopMarker'.split(' '),
   ...'RunLockHeldError withScopedRunLock runLockDirFor listLiveRunLocks'.split(' '),
   'countUnpushedCommits',

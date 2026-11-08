@@ -3,5 +3,9 @@
 
 import { runEntry } from './entry.js';
 
-// index.js is loaded only after runEntry's Node version gate: its graph imports node:sqlite (#2382).
-void runEntry(async () => (await import('./cli/index.js')).main());
+// index.js and stream-session.js load only after runEntry's Node version gate: their graphs import node:sqlite (#2382).
+// The command stream session starts first, before any command runs, for every CLI command.
+void runEntry(async () => {
+  (await import('./stream-session.js')).startStreamSession();
+  await (await import('./cli/index.js')).main();
+});
