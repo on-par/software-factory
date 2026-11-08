@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- CHECK command output (checkers, verify, app smoke) is now captured live per line, redacted, and tagged with run, issue, lane, phase, command id and sequence number for an in-process sink; no exporter ships yet (#3994).
+
 ## 0.9.34 - 2026-11-07
 
 A failing pre-PLAN base health checker's full output is now written to `<logsDir>/issue-<n>/check-base-health/`, the same way CHECK does (#3991).
