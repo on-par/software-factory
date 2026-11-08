@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defaultIsProcessGroupAlive } from '@on-par/factory-core';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import {
+  type CommandOutputFlushReport,
   killTrackedProcessGroups,
   readStopMarker,
   registerProcessGroup,
@@ -32,7 +33,7 @@ function fakeSignals(): ShutdownSignals & EventEmitter {
 const tick = () => new Promise((r) => setImmediate(r));
 
 describe('installShutdown export flush', () => {
-  function setup(flushExports: () => Promise<never[] | Array<Record<string, unknown>>>) {
+  function setup(flushExports: () => Promise<CommandOutputFlushReport[]>) {
     const signals = fakeSignals();
     const order: string[] = [];
     const lines: string[] = [];
@@ -48,10 +49,10 @@ describe('installShutdown export flush', () => {
       killTracked: async () => {
         order.push('kill');
       },
-      flushExports: (async (sig: NodeJS.Signals) => {
+      flushExports: async (sig: NodeJS.Signals) => {
         order.push(`flush ${sig}`);
         return flushExports();
-      }) as never,
+      },
     });
     return { signals, order, lines, exit };
   }
@@ -89,6 +90,24 @@ describe('installShutdown export flush', () => {
     await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
     expect(lines).toContain('factory: command output export incomplete for run run-9: 2 dropped, 3 failed');
     expect(lines.join('\n')).not.toContain('run-ok');
+  });
+
+  it('a report carrying an error prints the reason instead of counts', async () => {
+    const { signals, lines, exit } = setup(async () => [
+      {
+        runId: 'run-err',
+        sessionId: 'ijkl',
+        complete: false,
+        sent: 0,
+        dropped: 0,
+        failed: 0,
+        retries: 0,
+        error: 'boom',
+      },
+    ]);
+    signals.emit('SIGTERM', 'SIGTERM');
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+    expect(lines).toContain('factory: command output export failed for run run-err: boom');
   });
 
   it('a rejecting flush never blocks exit', async () => {

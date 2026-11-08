@@ -87,6 +87,10 @@ export function installShutdown(controller: AbortController, options: ShutdownOp
       } else {
         for (const r of reports) {
           if (r.complete) continue;
+          if (r.error !== undefined) {
+            log(`factory: command output export failed for run ${r.runId}: ${r.error}`);
+            continue;
+          }
           log(`factory: command output export incomplete for run ${r.runId}: ${r.dropped} dropped, ${r.failed} failed`);
         }
       }

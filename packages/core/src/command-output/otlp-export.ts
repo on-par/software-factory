@@ -34,6 +34,8 @@ export interface CommandOutputFlushReport extends ExportCounts {
   runId: string;
   sessionId: string;
   complete: boolean;
+  /** Set when ending the session threw; the counts are then unknown. */
+  error?: string;
 }
 
 export const SIGNAL_FLUSH_BUDGET_MS = 2000;
@@ -264,9 +266,15 @@ function openSession(
         // the export summary must never throw
       }
       return { ...base, ...c, complete: c.dropped + c.failed === 0 };
-    } catch {
+    } catch (err) {
       activeSessions.delete(session);
-      return { ...base, sent: 0, dropped: 0, failed: 0, retries: 0, complete: false };
+      const error = err instanceof Error ? err.message : String(err);
+      try {
+        log('command_output_export_degraded', `command output export: ending session failed: ${error}`);
+      } catch {
+        // the export summary must never throw
+      }
+      return { ...base, sent: 0, dropped: 0, failed: 0, retries: 0, complete: false, error };
     }
   };
   const session: ActiveSession = {

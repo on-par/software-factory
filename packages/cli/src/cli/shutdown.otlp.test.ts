@@ -1,13 +1,13 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { createTempDirs } from '@on-par/factory-core/testing';
 
 interface Post {
   at: number;
@@ -22,13 +22,14 @@ const allBodies: string[] = [];
 describe.runIf(process.platform === 'linux')('OTLP export flush on exit and signals (mock collector)', () => {
   let server: Server;
   let posts: Post[];
+  const tempDirs = createTempDirs();
   let child: ChildProcess | undefined;
   let tmp: string;
   let endpoint: string;
 
   beforeEach(async () => {
     posts = [];
-    tmp = mkdtempSync(join(tmpdir(), 'otlp-proof-'));
+    tmp = tempDirs.makeSync('otlp-proof-');
     server = createServer((req, res) => {
       const chunks: Buffer[] = [];
       req.on('data', (c: Buffer) => chunks.push(c));
@@ -48,7 +49,7 @@ describe.runIf(process.platform === 'linux')('OTLP export flush on exit and sign
   afterEach(async () => {
     child?.kill('SIGKILL');
     await new Promise((r) => server.close(r));
-    rmSync(tmp, { recursive: true, force: true });
+    await tempDirs.cleanup();
   });
 
   function childSource(mode: 'exit' | 'hang'): string {
