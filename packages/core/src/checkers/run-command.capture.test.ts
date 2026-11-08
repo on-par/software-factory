@@ -1,15 +1,17 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { addCommandOutputSink, withCommandOutputCapture, type CommandOutputRecord } from '../command-output/index.js';
 import { runVerificationCommand } from './run-command.js';
 
 const corr = { runId: 'r', issue: '7', laneId: 'l', phase: 'check' };
+const tempDirs = createTempDirs();
 const disposers: Array<() => void> = [];
-afterEach(() => {
+afterEach(async () => {
+  await tempDirs.cleanup();
   while (disposers.length) disposers.pop()?.();
 });
 
@@ -18,7 +20,7 @@ describe('runVerificationCommand capture', () => {
     let first!: (r: CommandOutputRecord) => void;
     const firstSeen = new Promise<CommandOutputRecord>((res) => (first = res));
     disposers.push(addCommandOutputSink((r) => first(r)));
-    const gate = join(mkdtempSync(join(tmpdir(), 'cap-gate-')), 'go');
+    const gate = join(tempDirs.makeSync('cap-gate-'), 'go');
     const script = `console.log('first line'); const t = setInterval(() => { if (require('fs').existsSync(${JSON.stringify(gate)})) { clearInterval(t); process.exit(0); } }, 20);`;
     const run = withCommandOutputCapture(corr, () => runVerificationCommand([process.execPath, '-e', script], {}));
     const rec = await firstSeen;
