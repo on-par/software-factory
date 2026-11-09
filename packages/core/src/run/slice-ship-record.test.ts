@@ -4,6 +4,7 @@ import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { SlicePlan } from '../readiness/slice-plan.js';
+import { parseSlicePlanComment } from '../readiness/slice-plan.js';
 import { toWorkKey, workKeyFromIssue, type WorkKey } from '../work/work-key.js';
 import { recordShippedSlice } from './slice-ship-record.js';
 
@@ -37,7 +38,7 @@ const plan: SlicePlan = {
 function fakeOctokit() {
   const issues = {
     listComments: vi.fn(async () => ({ data: [] })),
-    createComment: vi.fn(async () => ({ data: { id: 9 } })),
+    createComment: vi.fn(async (a: { body: string }) => ({ data: { id: 9, body: a.body } })),
   };
   const octokit = Object.assign({} as Octokit, {
     rest: { users: { getAuthenticated: async () => ({ data: { id: 1 } }) }, issues },
@@ -45,7 +46,11 @@ function fakeOctokit() {
   return { octokit, issues };
 }
 
-function run(key: WorkKey, ship: { prNumber?: number; alreadyDelivered?: boolean }) {
+const HEAD = 'a'.repeat(40);
+
+type ShipStub = { prNumber?: number; alreadyDelivered?: boolean; headSha?: string };
+
+function run(key: WorkKey, ship: ShipStub, readHeadSha = vi.fn(async () => HEAD)) {
   const { octokit, issues } = fakeOctokit();
   const log = vi.fn();
   const result = recordShippedSlice({
@@ -53,13 +58,22 @@ function run(key: WorkKey, ship: { prNumber?: number; alreadyDelivered?: boolean
     repo: 'o/r',
     key,
     branch: 'b',
+    worktree: '/wt',
     plan,
     index: 1,
     ship,
     stackMode: false,
+    readHeadSha,
     log,
   });
-  return { result, issues, log };
+  return { result, issues, log, readHeadSha };
+}
+
+function savedPlan(issues: ReturnType<typeof fakeOctokit>['issues']): SlicePlan {
+  const body = issues.createComment.mock.calls[0]![0].body;
+  const parsed = parseSlicePlanComment(body);
+  if (parsed?.ok !== true) throw new Error('slice plan comment unreadable');
+  return parsed.plan;
 }
 
 describe('recordShippedSlice', () => {
@@ -94,10 +108,12 @@ describe('recordShippedSlice', () => {
       repo: 'o/r',
       key: toWorkKey('brief-1'),
       branch: 'b',
+      worktree: '/wt',
       plan,
       index: 1,
       ship: { prNumber: 7 },
       stackMode: false,
+      readHeadSha: vi.fn(async () => HEAD),
       store: { find: vi.fn(), save },
       log,
     });
@@ -124,5 +140,38 @@ describe('recordShippedSlice', () => {
     const { result, log } = run(workKeyFromIssue(42), { prNumber: 7 });
     await result;
     expect(log).toHaveBeenCalledWith('ship', expect.stringMatching(/in the slice plan comment$/));
+  });
+
+  it('records the head SHA the ship reported for an opened slice', async () => {
+    const { result, issues, readHeadSha } = run(workKeyFromIssue(42), { prNumber: 7, headSha: HEAD });
+    expect(await result).toBeUndefined();
+    expect(savedPlan(issues).slices[0]!.headSha).toBe(HEAD);
+    expect(readHeadSha).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the worktree HEAD when the ship reported no head SHA', async () => {
+    const readHeadSha = vi.fn(async () => 'b'.repeat(40));
+    const { result, issues } = run(workKeyFromIssue(42), { prNumber: 7 }, readHeadSha);
+    expect(await result).toBeUndefined();
+    expect(savedPlan(issues).slices[0]!.headSha).toBe('b'.repeat(40));
+    expect(readHeadSha).toHaveBeenCalledWith('/wt');
+  });
+
+  it('returns a failure message and writes nothing when the head SHA cannot be read', async () => {
+    const readHeadSha = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    const { result, issues } = run(workKeyFromIssue(42), { prNumber: 7 }, readHeadSha);
+    expect(await result).toBe('slice 1/2 PR #7 opened but its head SHA could not be read: boom');
+    expect(issues.createComment).not.toHaveBeenCalled();
+  });
+
+  it('records a merged slice without reading a head SHA', async () => {
+    const { result, issues, readHeadSha } = run(workKeyFromIssue(42), { prNumber: 7, alreadyDelivered: true });
+    expect(await result).toBeUndefined();
+    const slice = savedPlan(issues).slices[0]!;
+    expect(slice.state).toBe('merged');
+    expect(slice.headSha).toBeUndefined();
+    expect(readHeadSha).not.toHaveBeenCalled();
   });
 });

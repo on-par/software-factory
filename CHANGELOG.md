@@ -21,6 +21,7 @@ section to `## X.Y.Z - date`. See
 ### Fixed
 
 - The `--no-pr` size-gate conflict test now drives `--size-gate stack` instead of the deprecated `slice` alias and captures the deprecation warning, so the verify gate writes no stray stderr and pre-PLAN base health stays green on main (#4011).
+- A stacked slice now records its PR head SHA when it ships, so the restack after a lower slice merges force-pushes with a lease instead of parking after every slice; a slice already on current main is skipped, and an unreadable head parks at the ship with the reason instead of one slice later (#4010).
 
 ## 0.9.34 - 2026-11-07
 

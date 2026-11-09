@@ -245,6 +245,19 @@ describe('restackAfterSquashMerge', () => {
     expect(out.status === 'park' && out.reason).toContain('no recorded head SHA');
   });
 
+  it('skips the restack when an open slice without a recorded head SHA no longer holds the merged head', async () => {
+    // Slice 2 was rebuilt from current main after the squash merge, so it no longer carries slice 1's commits.
+    git(root, 'checkout', '-B', 'factory/9-slice-2', 'main');
+    commit(root, 's2.txt', '2\n', 's2 rebuilt on main');
+    git(root, 'push', '-f', 'origin', 'factory/9-slice-2');
+    const noHead: SlicePlan = {
+      ...plan,
+      slices: plan.slices.map((s) => (s.index === 2 ? { ...s, headSha: undefined } : s)),
+    };
+    const out = await run({ plan: withSliceState(noHead, 3, 'pending') });
+    expect(out.status).toBe('nothing');
+  });
+
   it('parks when an open slice branch is not factory-owned', async () => {
     const out = await run({ plan: withSliceState(plan, 2, 'pr-open', 102, 'contributor/x', 'abc') });
     expect(out.status === 'park' && out.reason).toContain('not factory-owned');
