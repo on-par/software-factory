@@ -18,6 +18,10 @@ section to `## X.Y.Z - date`. See
 
 - A `ci-failed` park now leaves the PR open. A required check that is red on base but whose log names files the PR changed gets CI rework. Baseline and budget-exhausted park notes name each failing check, its run link and the files and commits it flagged, with secrets redacted (#3998).
 
+### Fixed
+
+- The `--no-pr` size-gate conflict test now drives `--size-gate stack` instead of the deprecated `slice` alias and captures the deprecation warning, so the verify gate writes no stray stderr and pre-PLAN base health stays green on main (#4011).
+
 ## 0.9.34 - 2026-11-07
 
 A failing pre-PLAN base health checker's full output is now written to `<logsDir>/issue-<n>/check-base-health/`, the same way CHECK does (#3991).
