@@ -18,6 +18,10 @@ section to `## X.Y.Z - date`. See
 
 - A `ci-failed` park now leaves the PR open. A required check that is red on base but whose log names files the PR changed gets CI rework. Baseline and budget-exhausted park notes name each failing check, its run link and the files and commits it flagged, with secrets redacted (#3998).
 
+### Fixed
+
+- A stacked slice now records its PR head SHA when it ships, so the restack after a lower slice merges force-pushes with a lease instead of parking after every slice; a slice already on current main is skipped, and an unreadable head parks at the ship with the reason instead of one slice later (#4010).
+
 ## 0.9.34 - 2026-11-07
 
 A failing pre-PLAN base health checker's full output is now written to `<logsDir>/issue-<n>/check-base-health/`, the same way CHECK does (#3991).

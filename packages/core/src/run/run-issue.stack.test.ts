@@ -124,18 +124,25 @@ const branch = (k: number) => stackSliceBranch(1, k);
 /** One slice per run (#3367): the nth planPhase call plans slice n, with slices 1..n-1 recorded below it. */
 function stackSetup(opts: { recordBranches?: boolean; pulls?: unknown; lower?: 'pr-open' | 'merged' } = {}) {
   const recordBranches = opts.recordBranches ?? true;
+  const bodies: string[] = [];
   let run = 0;
   planPhase.mockImplementation(async () => {
     const index = ++run;
     let plan = freshPlan();
     if (recordBranches) {
-      for (let i = 1; i < index; i++) plan = withSliceState(plan, i, opts.lower ?? 'pr-open', 100 + i, branch(i));
+      const prior = bodies.at(-1);
+      const parsed = prior === undefined ? null : parseSlicePlanComment(prior);
+      const heads = parsed?.ok === true ? parsed.plan.slices : [];
+      for (let i = 1; i < index; i++) {
+        plan = withSliceState(plan, i, opts.lower ?? 'pr-open', 100 + i, branch(i), heads[i - 1]?.headSha);
+      }
     }
     return { ...PLAN_OK, slice: { plan, index } };
   });
   let pr = 100;
   shipPhase.mockImplementation(async () => ({ ok: true, prNumber: ++pr }));
-  const bodies: string[] = [];
+  let head = 0;
+  const readWorktreeHead = vi.fn(async (_worktree: string) => `wt-head-${++head}`);
   const record = vi.fn(async (a: { body: string }) => {
     bodies.push(a.body);
     return { data: {} };
@@ -165,8 +172,9 @@ function stackSetup(opts: { recordBranches?: boolean; pulls?: unknown; lower?: '
     checkPhase,
     shipPhase,
     createSliceBranch,
+    readWorktreeHead,
   };
-  return { ports, createSliceBranch, record, bodies };
+  return { ports, createSliceBranch, record, bodies, readWorktreeHead };
 }
 
 beforeEach(() => {
@@ -390,5 +398,32 @@ describe('runIssue — stack mode builds one slice per run (ADR-0161)', () => {
     const arg = update.mock.calls[0]![0] as { pull_number: number; body: string };
     expect(arg.pull_number).toBe(101);
     expect(arg.body).toContain('next: slice 2 #102');
+  });
+
+  it('records the head SHA the ship phase reported for each shipped slice', async () => {
+    const { ports, bodies } = stackSetup();
+    let pr = 100;
+    shipPhase.mockImplementation(async () => {
+      const n = ++pr;
+      return { ok: true, prNumber: n, headSha: `ship-head-${n - 100}` };
+    });
+    await runSlices(ports, 2);
+
+    const last = parseSlicePlanComment(bodies.at(-1)!);
+    expect(last?.ok).toBe(true);
+    if (last?.ok !== true) return;
+    expect(last.plan.slices.map((s) => s.headSha)).toEqual(['ship-head-1', 'ship-head-2', undefined]);
+  });
+
+  it('records the worktree HEAD when the ship phase reports no head SHA', async () => {
+    const { ports, bodies } = stackSetup();
+    await runSlices(ports, 2);
+
+    const last = parseSlicePlanComment(bodies.at(-1)!);
+    expect(last?.ok).toBe(true);
+    if (last?.ok !== true) return;
+    const heads = last.plan.slices.slice(0, 2).map((s) => s.headSha);
+    expect(heads.every((h) => typeof h === 'string' && h.length > 0)).toBe(true);
+    expect(heads[0]).not.toBe(heads[1]);
   });
 });

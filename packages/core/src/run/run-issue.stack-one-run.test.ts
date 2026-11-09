@@ -150,6 +150,8 @@ describe('run-issue --stack through the real slice gate (#3798)', () => {
     const createSliceBranch = vi.fn(async (_o: { branch: string; startPoint: string }) => {});
     let pr = 100;
     const shipPhase = vi.fn(async () => ({ ok: true, prNumber: ++pr }));
+    let head = 0;
+    const readWorktreeHead = vi.fn(async (_worktree: string) => `head-${++head}`);
     const ports = {
       router: new ModelRouter(models, routes, false, executor),
       octokit: github.octokit,
@@ -165,6 +167,7 @@ describe('run-issue --stack through the real slice gate (#3798)', () => {
       })),
       shipPhase: shipPhase as never,
       createSliceBranch,
+      readWorktreeHead,
     };
     const outcomes: RunOutcome[] = [];
 
@@ -195,5 +198,6 @@ describe('run-issue --stack through the real slice gate (#3798)', () => {
       ['pr-open', branch(2), 102],
       ['pr-open', branch(3), 103],
     ]);
+    expect(github.plan().slices.map((s) => s.headSha)).toEqual(['head-1', 'head-2', 'head-3']);
   });
 });

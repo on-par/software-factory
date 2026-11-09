@@ -39,7 +39,7 @@ interface Candidate {
   index: number;
   prNumber: number;
   branch: string;
-  recorded: string;
+  recorded?: string;
 }
 
 const detail = gitErrorDetail;
@@ -57,7 +57,8 @@ async function succeeds(cwd: string, ...args: string[]): Promise<boolean> {
   }
 }
 
-/** Rebases every open slice above a squash-merged slice, bottom-up with `--onto`, and pushes them in one leased atomic push. */
+/** Rebases every open slice above a squash-merged slice, bottom-up with `--onto`, and pushes them in one leased atomic push.
+ *  The recorded head SHA is required per layer that will be pushed, so an open slice already on current main is skipped. */
 export async function restackAfterSquashMerge(opts: StackRestackOptions): Promise<StackRestackOutcome> {
   const { repoRoot, octokit, plan, mergedIndex, mergedPrNumber, savePlan } = opts;
   const remote = opts.remote ?? 'origin';
@@ -89,10 +90,12 @@ export async function restackAfterSquashMerge(opts: StackRestackOptions): Promis
         s.prNumber,
       );
     }
-    if (s.headSha === undefined) {
-      return park(`${label} PR #${s.prNumber} has no recorded head SHA; refusing to force-push`, s.index, s.prNumber);
-    }
-    candidates.push({ index: s.index, prNumber: s.prNumber, branch, recorded: s.headSha });
+    candidates.push({
+      index: s.index,
+      prNumber: s.prNumber,
+      branch,
+      ...(s.headSha !== undefined ? { recorded: s.headSha } : {}),
+    });
   }
 
   let mergedHead: string;
@@ -150,6 +153,9 @@ export async function restackAfterSquashMerge(opts: StackRestackOptions): Promis
   const oldHeads: string[] = [];
   for (const c of run) {
     const label = `slice ${c.index}/${n}`;
+    if (c.recorded === undefined) {
+      return park(`${label} PR #${c.prNumber} has no recorded head SHA; refusing to force-push`, c.index, c.prNumber);
+    }
     let head: string;
     try {
       head = await git(repoRoot, 'rev-parse', remoteRef(c));
