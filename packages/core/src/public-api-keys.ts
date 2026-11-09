@@ -83,3 +83,25 @@ export const LAND_DEFERRED_INTERNAL_KEYS = [
 
 /** Root names added by the WorkKey identity (ADR-0168, #3639). */
 export const WORK_KEY_API_KEYS = ['isNumericWorkKey', 'issueNumberOf', 'toWorkKey', 'workKeyFromIssue'];
+
+/** Root names added by the canonical run lifecycle state machine (ADR-0177). */
+export const LIFECYCLE_API_KEYS = [
+  'assertLifecycleTransition',
+  'canTransitionLifecycle',
+  'describeLifecycle',
+  'FINAL_LIFECYCLE_STATES',
+  'fromLaneStatus',
+  'fromRunStatus',
+  'isFinalLifecycleState',
+  'isResumableLifecycleState',
+  'isTerminalLifecycleState',
+  'laneStatusFromLifecycle',
+  'LIFECYCLE_LABELS',
+  'LIFECYCLE_STATES',
+  'LIFECYCLE_TRANSITIONS',
+  'LifecycleTransitionError',
+  'prRunStatusFromLifecycle',
+  'RESUMABLE_LIFECYCLE_STATES',
+  'TERMINAL_LIFECYCLE_STATES',
+  'toRunStatus',
+];

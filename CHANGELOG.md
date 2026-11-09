@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- A canonical run-lifecycle state machine (`describeLifecycle`, `LIFECYCLE_STATES`, `LIFECYCLE_TRANSITIONS`) with lossless projections to `RunStatus`, `LaneStatus` and `PrRunStatus`, so the CLI, TUI, dashboard and agents read one explicit state graph instead of six drifting vocabularies (ADR-0177).
 - SHIP captures, embeds and enforces real rendered UI proof per head for configured UI changes; land refuses marked PRs without it (#2232).
 - OTLP command output export now emits run-correlated session start/end records and flushes pending records within a bounded budget on normal exit, Ctrl-C (exit 130) and SIGTERM, reporting any loss (#3996).
 - Opt-in export of redacted CHECK command output to any OTLP/HTTP endpoint (FACTORY_COMMAND_OUTPUT_EXPORT=otlp plus standard OTEL_EXPORTER_OTLP_* env), with a bounded queue, retry with backoff, and a per-CHECK sent/dropped/failed event (#3995).

@@ -212,6 +212,29 @@ export {
 export type { BuildRoute, DesignSmellFinding, ParkReason, RunAttribution, RunOutcome } from './run/outcome.js';
 export { parkEvents, parkReasonFor } from './run/outcome.js';
 
+// Canonical run lifecycle (ADR-0177)
+export type { LifecycleDescriptor, LifecycleState, LifecycleStateDescriptor } from './lifecycle/index.js';
+export {
+  assertLifecycleTransition,
+  canTransitionLifecycle,
+  describeLifecycle,
+  FINAL_LIFECYCLE_STATES,
+  fromLaneStatus,
+  fromRunStatus,
+  isFinalLifecycleState,
+  isResumableLifecycleState,
+  isTerminalLifecycleState,
+  laneStatusFromLifecycle,
+  LIFECYCLE_LABELS,
+  LIFECYCLE_STATES,
+  LIFECYCLE_TRANSITIONS,
+  LifecycleTransitionError,
+  prRunStatusFromLifecycle,
+  RESUMABLE_LIFECYCLE_STATES,
+  TERMINAL_LIFECYCLE_STATES,
+  toRunStatus,
+} from './lifecycle/index.js';
+
 // Run policy
 export type { RunBudget, RunPolicy } from './run/policy.js';
 
