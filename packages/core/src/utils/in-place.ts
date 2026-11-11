@@ -21,10 +21,11 @@ export type InPlaceCheckoutProblem =
 
 const MAX_LISTED_FILES = 20;
 
-function porcelainPath(line: string): string {
+function porcelainEntry(line: string): { status: string; path: string } {
+  const status = line.slice(0, 2).trim();
   const path = line.slice(3);
   const arrow = path.indexOf(' -> ');
-  return arrow === -1 ? path : path.slice(arrow + 4);
+  return { status, path: arrow === -1 ? path : path.slice(arrow + 4) };
 }
 
 async function revParse(repoRoot: string, args: string[]): Promise<string> {
@@ -36,16 +37,19 @@ async function revParse(repoRoot: string, args: string[]): Promise<string> {
 export async function checkInPlaceCheckout(repoRoot: string): Promise<InPlaceCheckoutProblem | null> {
   await gitFetch(repoRoot);
   const { stdout: status } = await execGit(['status', '--porcelain'], { cwd: repoRoot });
-  const files = status
+  const entries = status
     .split('\n')
     .filter((line) => line.trim() !== '')
-    .map(porcelainPath);
-  if (files.length > 0) {
-    const listed = files.slice(0, MAX_LISTED_FILES).join(', ');
-    const more = files.length > MAX_LISTED_FILES ? ` (+${files.length - MAX_LISTED_FILES} more)` : '';
+    .map(porcelainEntry);
+  if (entries.length > 0) {
+    const listed = entries
+      .slice(0, MAX_LISTED_FILES)
+      .map((entry) => `${entry.status} ${entry.path}`)
+      .join(', ');
+    const more = entries.length > MAX_LISTED_FILES ? ` (+${entries.length - MAX_LISTED_FILES} more)` : '';
     return {
       kind: 'dirty',
-      files,
+      files: entries.map((entry) => entry.path),
       message: `in-place run refused: the checkout has uncommitted changes: ${listed}${more} — commit, stash or discard them, or use a fresh clone`,
     };
   }
