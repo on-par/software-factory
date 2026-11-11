@@ -54,6 +54,16 @@ export interface ShipIssueOptions {
   prerequisiteStack?: PrerequisiteStackTarget;
   /** --in-place / FACTORY_WORKSPACE=in-place (#3904): run in the current checkout, no worktree */
   inPlace?: boolean;
+  /** run-issue only, from FACTORY_BASE_HEALTH_REPAIR=1: a confirmed red pre-PLAN base enters PLAN instead of releasing. */
+  baseHealthRepair?: boolean;
+}
+
+/** The explicit base-repair signal for `run-issue`. */
+export const BASE_HEALTH_REPAIR_ENV = 'FACTORY_BASE_HEALTH_REPAIR';
+
+/** True only for the exact string `1`. Unset, empty, `0`, `true`, ` 1` and every other value are off (fail closed). */
+export function baseHealthRepairRequested(env: NodeJS.ProcessEnv): boolean {
+  return env[BASE_HEALTH_REPAIR_ENV] === '1';
 }
 
 const FORBIDDEN_CHARS = /[\s~^:?*[\\]/;

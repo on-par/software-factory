@@ -82,7 +82,9 @@ function pickWinner(configPath: string, env: NodeJS.ProcessEnv): Winner {
   }
   const repo = readRepoConfigFile(configPath);
   if (repo !== undefined) return { raw: repo, source: 'repo', path: configPath };
-  return { raw: {}, source: 'packaged defaults' };
+  // Packaged defaults are the v2 shape. Without the stamp an overrides-only snapshot has no `version`, so every
+  // loader read it as a legacy v1 file and warned that a .factory/config.yaml that does not exist is v1 (#4018).
+  return { raw: { version: 2 }, source: 'packaged defaults' };
 }
 
 export function resolveRunConfigLadder(configPath: string, env: NodeJS.ProcessEnv = process.env): RunConfigLadder {

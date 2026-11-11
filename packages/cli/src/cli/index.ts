@@ -2380,6 +2380,7 @@ async function cmdRunIssue(
     inPlace?: boolean;
     json?: boolean;
     export?: string;
+    baseHealthRepair?: boolean; // FACTORY_BASE_HEALTH_REPAIR=1 (run-issue action); flows to every shipIssue below
   },
 ) {
   if (opts.runChildren) throw new CliExitError('--run-children was removed; oversized issues stack with --stack', 2);
@@ -3998,8 +3999,7 @@ function probeClaudeKeychain(): KeychainProbeStatus {
   if (process.platform !== 'darwin') return { status: 'skipped', detail: 'skipped — not macOS' };
   if (!coreOps.isCommandAvailable('claude')) return { status: 'skipped', detail: 'skipped — claude CLI not on PATH' };
   if (process.env.ANTHROPIC_API_KEY) return { status: 'skipped', detail: 'skipped — ANTHROPIC_API_KEY auth in use' };
-  // Check the entry for the profile child `claude` runs will use (CLAUDE_CONFIG_DIR), not
-  // always the default one.
+  // Check the entry for the profile child `claude` runs will use (CLAUDE_CONFIG_DIR), not always the default one.
   const service = claudeKeychainService();
   const profile = { service, configDir: claudeConfigDirOverride() };
   try {

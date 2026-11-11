@@ -118,9 +118,44 @@ describe('holdRunConfigSnapshot (#3600)', () => {
     const release = holdRunConfigSnapshot(getFactoryPaths(root).config, {
       FACTORY_CONFIG_OVERRIDES: 'disk:\n  minFreeGb: 2\n',
     });
-    expect(JSON.parse(runConfigSource()!)).toEqual({ disk: { minFreeGb: 2 } });
+    expect(JSON.parse(runConfigSource()!)).toEqual({ version: 2, disk: { minFreeGb: 2 } });
     expect(runConfigOrigin()).toBe('FACTORY_CONFIG_OVERRIDES');
     release();
+  });
+
+  it('an override-only snapshot loads as v2 with no v1 adapter warning for a config file that does not exist (#4018)', () => {
+    const root = tmp.makeSync('run-config-frag-v2-');
+    const warnings: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => void warnings.push(args.join(' '));
+    try {
+      const release = holdRunConfigSnapshot(getFactoryPaths(root).config, {
+        FACTORY_CONFIG_OVERRIDES: 'disk:\n  minFreeGb: 2\n',
+      });
+      expect(loadRepoConfig(root)).toEqual({ version: 2 });
+      expect(loadRepoConfig(tmp.makeSync('run-config-frag-wt-'))).toEqual({ version: 2 });
+      release();
+    } finally {
+      console.warn = realWarn;
+    }
+    expect(warnings).toEqual([]);
+    expect(existsSync(getFactoryPaths(root).config)).toBe(false);
+  });
+
+  it('a real v1 repo file still loads through the adapter with its migration warning', () => {
+    const config = sourceCheckout('config.yaml', 'tiers:\n  worker: [claude-sonnet-5-5]\n');
+    const warnings: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => void warnings.push(args.join(' '));
+    try {
+      expect(loadRepoConfig(join(config, '..', '..'))).toMatchObject({
+        version: 2,
+        tiers: { worker: ['claude-sonnet-5-5'] },
+      });
+    } finally {
+      console.warn = realWarn;
+    }
+    expect(warnings).toEqual([expect.stringContaining(`${config} is v1 — loaded via the v1→v2 compatibility adapter`)]);
   });
 
   it('a daemon snapshot still wins over overrides', () => {

@@ -101,6 +101,8 @@ describe('resolveRunConfigLadder (#3906)', () => {
       FACTORY_CONFIG_OVERRIDES: 'disk:\n  minFreeGb: 2\n',
     });
     expect(ladder).toMatchObject({ source: 'packaged defaults', raw: { disk: { minFreeGb: 2 } } });
+    // Packaged defaults are v2: the snapshot says so, or loaders read it as a legacy v1 file (#4018).
+    expect(ladder.raw).toEqual({ version: 2, disk: { minFreeGb: 2 } });
   });
 
   it('rejects an unknown key in FACTORY_CONFIG_OVERRIDES naming the source', () => {

@@ -1,5 +1,7 @@
 // src/checkers/command-output.ts — runner-output parsing shared by CHECK and summarizeCommandRun
 
+import { StringDecoder } from 'node:string_decoder';
+
 import type { CommandResult } from '../utils/command-runner.js';
 import { stripAnsi } from './command-log.js';
 
@@ -61,23 +63,67 @@ export function outputTail(text: string, maxChars: number): string {
   return `…${lineStart >= 0 && lineStart < maxChars / 2 ? tail.slice(lineStart + 1) : tail}`;
 }
 
+/** vitest's header for one test's own console output: `stderr | file > suite > test` (or `stdout | …`). */
+const TEST_CONSOLE_HEADER = /^(?:stdout|stderr) \| \S/;
+
+/** Drops vitest's per-test console blocks (the header line through the next blank line). They are what a test
+ *  printed, passing or not, never the run's failure report. Left in, the last warning a passing test wrote to
+ *  stderr became the whole evidence of a verify that failed in a later step (#4018, #4011). */
+export function stripTestConsoleBlocks(text: string): string {
+  const kept: string[] = [];
+  let inBlock = false;
+  for (const line of stripAnsi(text).split(/\r?\n/)) {
+    if (TEST_CONSOLE_HEADER.test(line)) inBlock = true;
+    else if (inBlock) inBlock = line.trim() !== '';
+    else kept.push(line);
+  }
+  return kept.join('\n');
+}
+
 export function describeCommandFailureTail(r: CommandResult, maxChars: number): string {
-  const output = r.stderr.trim() !== '' ? r.stderr : r.stdout;
+  const stderr = stripTestConsoleBlocks(r.stderr);
+  const output = stderr.trim() !== '' ? stderr : stripTestConsoleBlocks(r.stdout);
   return outputTail(output, maxChars) || (r.timedOut ? 'timed out' : `exit code ${r.exitCode}`);
 }
 
-/** Failed-test evidence when a known runner format is found on stdout or stderr, else the output's tail. */
-export function describeTestFailure(r: CommandResult, maxChars: number): string {
-  const stdoutEvidence = extractFailedTestEvidence(r.stdout);
+/** Characters of interleaved output combinedOutputTail keeps: room for the failing step after test console noise. */
+export const COMBINED_TAIL_CHARS = 64 * 1024;
+
+/** The end of a command's stdout and stderr together, in arrival order (#4018). A multi-step script such as
+ *  `verify.sh` stops at its failing step, so that step's message is what it printed last, whichever stream it used. */
+export function combinedOutputTail(maxChars: number = COMBINED_TAIL_CHARS): {
+  onOutput: (stream: 'stdout' | 'stderr', chunk: Buffer) => void;
+  text: () => string;
+} {
+  const decoders = { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') };
+  let text = '';
+  return {
+    onOutput: (stream, chunk) => {
+      text += decoders[stream].write(chunk);
+      if (text.length > 2 * maxChars) text = text.slice(-maxChars);
+    },
+    text: () => text.slice(-maxChars),
+  };
+}
+
+/** Failed-test evidence when a known runner format is found on stdout or stderr, else the output's tail.
+ *  Test console blocks never count as evidence; after a stdout marker, stderr contributes its own marker block
+ *  when it has one (vitest prints the FAIL details there), else what is left of it. With no marker, `combined`
+ *  (combinedOutputTail's text, when the runner streamed output) supplies the tail, so a script that failed after
+ *  its tests is described by its failing step rather than by the last warning a test wrote to stderr. */
+export function describeTestFailure(r: CommandResult, maxChars: number, combined?: string): string {
+  const stderr = stripTestConsoleBlocks(r.stderr);
+  const stderrEvidence = extractFailedTestEvidence(stderr);
+  const stdoutEvidence = extractFailedTestEvidence(stripTestConsoleBlocks(r.stdout));
   if (stdoutEvidence) {
-    const stderr = stripIncidentalCommanderNoise(stripAnsi(r.stderr));
-    return (stderr ? `${stdoutEvidence}\nstderr:\n${stderr}` : stdoutEvidence).slice(0, maxChars);
+    const rest = stripIncidentalCommanderNoise(stderrEvidence ?? stderr);
+    return (rest ? `${stdoutEvidence}\nstderr:\n${rest}` : stdoutEvidence).slice(0, maxChars);
   }
 
-  const stderrEvidence = extractFailedTestEvidence(r.stderr);
   if (stderrEvidence) return stderrEvidence.slice(0, maxChars);
 
-  return describeCommandFailureTail(r, maxChars);
+  const tail = combined === undefined ? '' : outputTail(stripTestConsoleBlocks(combined), maxChars);
+  return tail || describeCommandFailureTail(r, maxChars);
 }
 
 export interface SummarizeCommandRunOptions {

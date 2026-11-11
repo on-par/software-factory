@@ -34,6 +34,7 @@ import {
   type LintScope,
 } from './lint-scope.js';
 import {
+  combinedOutputTail,
   describeCommandFailureTail,
   describeTestFailure,
   extractFailedTestEvidence,
@@ -210,9 +211,11 @@ const runFullTests: CheckerFn = async (ctx) => {
     const run = ctx.runCommand ?? runCommand;
     const timeoutSeconds = ctx.testsTimeoutSeconds ?? DEFAULT_TESTS_TIMEOUT_SECONDS;
     const timeoutMs = timeoutSeconds * 1000;
+    // Arrival-order tail: a script that fails after its tests is described by its failing step (#4018).
+    const combined = combinedOutputTail();
     // A kill at the timeout must never read as a real test failure (#2299): lead with it.
     const describeFailure = (r: CommandResult): string => {
-      const evidence = describeTestFailure(r, 500);
+      const evidence = describeTestFailure(r, 500, combined.text());
       if (!r.timedOut) return evidence;
       const head = `timed out after ${timeoutSeconds}s (raise timeouts.tests_seconds or FACTORY_TESTS_TIMEOUT)`;
       return evidence === 'timed out' ? head : `${head}\n${evidence}`;
@@ -234,6 +237,7 @@ const runFullTests: CheckerFn = async (ctx) => {
         timeoutMs,
         env: ctx.env,
         onPgid: ctx.onPgid,
+        onOutput: combined.onOutput,
       });
       if (r.ok) return { checker: 'tests', result: 'PASS', details: TESTS_PASS_DETAILS[cmd.runner] };
       // For pytest, fail closed: a surface that cannot run (pytest missing, import error) is FAIL, never SKIP

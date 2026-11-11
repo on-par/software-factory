@@ -22,7 +22,8 @@ import { randomUUID } from 'node:crypto';
 import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
-import { baseHealthReleasedMessage, type checkBaseHealth } from '../checkers/base-health.js';
+import type { checkBaseHealth } from '../checkers/base-health.js';
+import { baseHealthGate } from './base-health-gate.js';
 import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import { installLaneDependencies as installLaneDependenciesDefault } from './lane-install.js';
@@ -217,6 +218,8 @@ export interface RunRequest extends ReworkRequestFields {
   baselineCachePath?: string;
   /** check.baselineCacheTtlHours (#3540); undefined = 24. */
   baselineCacheTtlHours?: number;
+  /** Explicit base-repair run (`run-issue` with FACTORY_BASE_HEALTH_REPAIR=1): a confirmed red base enters PLAN. */
+  baseHealthRepair?: boolean;
   /** The repo config file (`.factory/config.yaml|yml|json`) to scan in the pre-PLAN template-token preflight (#2586); undefined = constitution only. */
   repoConfigFile?: { absPath: string; relPath: string };
   /** state/flaky-tests.json (#2303); undefined = no flake ledger or filing. */
@@ -596,22 +599,16 @@ async function runIssueOnce(
           log('environment_warning', `base health check failed: ${errorMessage(err)} — continuing to PLAN`);
           return undefined;
         });
-      // Inconclusive (a base check could not run) never reads as failing checks and never enters PLAN either.
-      if ((health?.kind === 'red' || health?.kind === 'inconclusive') && health.baseSha !== undefined) {
-        log('environment-released', baseHealthReleasedMessage(health, request.parentBaseRef ?? 'origin/main', workKey));
-        return {
-          state: 'released',
-          reason: 'environment',
-          branch: request.branch,
-          reworkRounds: 0,
-          baseSha: health.baseSha,
-          failingChecks: health.failingChecks,
-          ...(health.awaitingCi ? { awaitingCi: true } : {}),
-          ...(health.confirmedLocally ? { confirmedLocally: true } : {}),
-          ...(health.evidence?.length ? { baseEvidence: health.evidence } : {}),
-          ...(health.kind === 'inconclusive' ? { baseInconclusive: true as const } : {}),
-        };
-      }
+      // Red or inconclusive releases; an explicit base-repair run enters PLAN on a confirmed red only.
+      const ref = request.parentBaseRef ?? 'origin/main';
+      const gate = baseHealthGate(health, {
+        ref,
+        workKey,
+        branch: request.branch,
+        repair: !!request.baseHealthRepair,
+        log,
+      });
+      if (gate) return gate;
     }
 
     // Run-start HEAD (#1210): captured exactly once, before PLAN, for local-only
