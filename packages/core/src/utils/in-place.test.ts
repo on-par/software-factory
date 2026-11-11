@@ -16,14 +16,27 @@ describe('in-place checkout', () => {
   const kit = new PipelineTestKit();
   afterEach(() => kit.cleanup());
 
-  it('reports dirty and untracked files by path', async () => {
+  it('reports dirty and untracked files with their status codes', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     await writeFile(join(repoRoot, 'README.md'), 'changed\n');
     await writeFile(join(repoRoot, 'new.txt'), 'x\n');
     const problem = await checkInPlaceCheckout(repoRoot);
     expect(problem?.kind).toBe('dirty');
     expect(problem?.kind === 'dirty' && problem.files.sort()).toEqual(['README.md', 'new.txt']);
-    expect(problem?.message).toContain('README.md, new.txt');
+    expect(problem?.message).toContain('M README.md');
+    expect(problem?.message).toContain('?? new.txt');
+  });
+
+  it('shows a status code per file and caps the listing at 20', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const names = Array.from({ length: 21 }, (_, i) => `u${String(i).padStart(2, '0')}.txt`);
+    await Promise.all(names.map((name) => writeFile(join(repoRoot, name), 'x\n')));
+    const problem = await checkInPlaceCheckout(repoRoot);
+    expect(problem?.kind).toBe('dirty');
+    expect(problem?.kind === 'dirty' && problem.files).toHaveLength(21);
+    expect(problem?.message).toContain('(+1 more)');
+    expect(problem?.message).toContain('?? u00.txt');
+    expect(problem?.message).not.toContain('?? u20.txt');
   });
 
   it('refuses a checkout on another branch', async () => {
