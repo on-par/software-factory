@@ -7,12 +7,19 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.35 - 2026-11-11
+
+A failed tests check now quotes the step that actually failed instead of a passing test's stderr, an override-only run no longer warns about a v1 config file it does not have, and `factory run-issue` accepts an explicit base-repair signal, `FACTORY_BASE_HEALTH_REPAIR=1` (#4018). The release also carries rendered UI proof in SHIP, opt-in OTLP export of CHECK command output, open PRs on `ci-failed` parks and a stacked-slice restack fix (#2232, #3994, #3995, #3996, #3998, #4010, #4011).
+All seven published `@on-par` packages move to 0.9.35 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - SHIP captures, embeds and enforces real rendered UI proof per head for configured UI changes; land refuses marked PRs without it (#2232).
 - OTLP command output export now emits run-correlated session start/end records and flushes pending records within a bounded budget on normal exit, Ctrl-C (exit 130) and SIGTERM, reporting any loss (#3996).
 - Opt-in export of redacted CHECK command output to any OTLP/HTTP endpoint (FACTORY_COMMAND_OUTPUT_EXPORT=otlp plus standard OTEL_EXPORTER_OTLP_* env), with a bounded queue, retry with backoff, and a per-CHECK sent/dropped/failed event (#3995).
 - CHECK command output (checkers, verify, app smoke) is now captured live per line, redacted, and tagged with run, issue, lane, phase, command id and sequence number for an in-process sink; no exporter ships yet (#3994).
+- `factory run-issue` accepts an explicit base-repair signal, `FACTORY_BASE_HEALTH_REPAIR=1` (exactly `1`). On a confirmed red pre-PLAN base the run records `base_repair_proceeding` with the failing checks and enters PLAN instead of releasing. An inconclusive base still releases, any other value changes nothing, and CHECK still compares against the base baseline (#4018).
 
 ### Changed
 
@@ -21,6 +28,8 @@ section to `## X.Y.Z - date`. See
 ### Fixed
 
 - The `--no-pr` size-gate conflict test now drives `--size-gate stack` instead of the deprecated `slice` alias and captures the deprecation warning, so the verify gate writes no stray stderr and pre-PLAN base health stays green on main (#4011).
+- A failed tests check (pre-PLAN base health and CHECK) now quotes the step that failed. Before, the evidence for a `verify.sh` that failed after its tests was the last warning a passing test wrote to stderr, so a green test was blamed (#4011, #4018). Test console output (`stdout | ` / `stderr | ` blocks) is no longer quoted as evidence, and with no failing-test marker the evidence is the end of the command's output in the order it was written (#4018).
+- A run with `FACTORY_CONFIG_OVERRIDES` and no repo config file no longer warns that a `.factory/config.yaml` that does not exist is v1: the override snapshot is built on the v2 packaged defaults (#4018).
 - A stacked slice now records its PR head SHA when it ships, so the restack after a lower slice merges force-pushes with a lease instead of parking after every slice; a slice already on current main is skipped, and an unreadable head parks at the ship with the reason instead of one slice later (#4010).
 
 ## 0.9.34 - 2026-11-07

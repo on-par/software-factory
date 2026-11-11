@@ -185,6 +185,15 @@ not ready, 2 is invalid).
 
 On a disposable, one-job container the clone is already the isolation boundary. `factory run-issue <N> --in-place` (or `FACTORY_WORKSPACE=in-place`) runs plan, build, check and ship in the current checkout on the normal factory branch, with no second worktree and no second install. It refuses to start, before PLAN, unless the checkout is clean and on the default branch at the fetched `origin/<default>` tip. The size gate is off in place, and `--base-branch` and `--stack` are refused. Worktree mode stays the default. A host whose disk does not survive the run adds `--json` (the final result as one `schemaVersion 3` object on the last stdout line, progress on stderr; schema in `packages/cli/schemas/run-result.schema.json`) and `--export <dir>` (the run's state file, events and cost records, written on every exit path); both also work on `run-brief` and `ship`, for one run only.
 
+## Repairing a red base
+
+Before PLAN, every run checks that the base branch is healthy (compile, lint and tests on `origin/<default>`). A red or inconclusive base normally releases the issue before any model call. A run whose job is to repair that base can opt in to proceed: start `factory run-issue <N>` with `FACTORY_BASE_HEALTH_REPAIR=1`.
+
+- Only the exact value `1` turns it on. An unset variable, an empty value, `0`, `true` or any other value behaves as before.
+- On a confirmed red base the run records a `base_repair_proceeding` event with the failing checks and their evidence, then enters PLAN.
+- An inconclusive base (a check that could not run, for example a timeout) still releases. A red that only waits on CI for a timed-out compile also still releases.
+- CHECK still compares the change against the base baseline, and no permission, gate or merge rule is relaxed. The signal applies to `run-issue` only. `ship`, `run` and the other commands ignore it.
+
 ## Recipes
 
 Each recipe is a complete, minimal `.factory/config.yaml`. Copy it to the repo, then run `factory doctor`.
