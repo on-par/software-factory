@@ -47,6 +47,13 @@ describe('buildPlanPrompt', () => {
       constitutionCtx: '',
     });
 
+  it('evidence step turns each high-level criterion into concrete tested behaviour', () => {
+    const prompt = riskyPrompt();
+    expect(prompt).toContain('names the criterion it');
+    expect(prompt).toContain('translate it into that concrete, testable behaviour');
+    expect(prompt).not.toContain('Its claim restates that criterion.');
+  });
+
   it('tells the planner to single-quote list items containing ": " (#2216)', () => {
     expect(riskyPrompt()).toContain("Single-quote any list item that contains ': '");
   });

@@ -55,6 +55,8 @@ The run works in an isolated git worktree and ends at a ready-for-review PR. `fa
 
 File new work with the **Factory task** issue template, [`.github/ISSUE_TEMPLATE/factory-task.yml`](.github/ISSUE_TEMPLATE/factory-task.yml). It asks for the problem statement, in/out of scope, acceptance criteria, and verification that the factory needs to ship an issue on its own. Bugs use `factory-bug.yml`.
 
+Write acceptance criteria as high-level outcomes in plain language, for example "A customer can see why their order was held". Avoid listing code changes, file names or commands, because PLAN decides how. Gherkin is optional: Given/When/Then still passes the ready check. The ready check warns on a criterion that only describes a change.
+
 ## Steer events
 
 When you or a bot steer a factory run, record it with `factory steer`:

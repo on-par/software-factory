@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- Acceptance criteria are high-level outcomes by default (#3962). The ready check accepts plain business-language criteria and Gherkin, and warns (without blocking) "describes a change, not an outcome" on a criterion that only lists a code change. `factory draft`, enrichment, decomposition and the readiness judge ask for outcomes and use Given/When/Then only when the input does (judge prompt is now `readiness-judge/v2`), and PLAN translates each outcome into concrete, tested behaviour in its evidence plan.
+
 ## 0.9.36 - 2026-11-12
 
 Runs no longer run the full compile, lint and test suite before PLAN; CHECK is the only test gate and must end green (#4029). An in-place run that is killed after its PR opens now resumes on a fresh clone from the PR's frozen plan (#4025), and a 401 from GitHub re-reads credentials once instead of parking the run (#4027).

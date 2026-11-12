@@ -7,7 +7,7 @@ import { extractJsonObject } from './decompose.js';
 import { stripEnrichedBlock } from './enrich.js';
 import { readCachedVerdict, readinessCacheKey, writeCachedVerdict } from './judge-cache.js';
 
-export const READINESS_PROMPT_VERSION = 'readiness-judge/v1';
+export const READINESS_PROMPT_VERSION = 'readiness-judge/v2';
 export const READINESS_INPUT_CAP = 64_000;
 
 export interface ReadinessInput {
@@ -40,6 +40,7 @@ const RUBRIC = [
   '- "ready-with-assumptions": buildable once 1-5 stated assumptions are made. "questions" is empty.',
   '- "not-ready": there are 1-5 blocking questions only a human can answer, for example a contradiction or a missing product decision. It may also carry up to 5 assumptions.',
   "Plain text with no headings is fine. Never judge size. If the author grants latitude, assume, don't ask.",
+  'Acceptance criteria stated as plain-language outcomes are fine and preferred; never ask for Given/When/Then, file names or commands. A criterion that only lists code changes may get an acceptance assumption that restates the intended outcome.',
   'Output exactly one JSON object and nothing else, shaped like:',
   '{"schemaVersion": 1, "verdict": "ready" | "ready-with-assumptions" | "not-ready", "summary": "<=200 chars", "assumptions": [{"aspect": "...", "text": "..."}], "questions": [{"aspect": "...", "text": "..."}]}',
   'The aspect is one of: problem, scope, acceptance, verification, contradiction, decision, other.',

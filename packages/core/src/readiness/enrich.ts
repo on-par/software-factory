@@ -80,7 +80,7 @@ Output ONLY the Markdown sections to append. Do not add a prose wrapper, explana
 The output must contain populated Markdown headings with exactly these labels:
 ${FACTORY_TASK_REQUIRED_FIELDS.map((field) => `- ${field}`).join('\n')}
 
-Under Acceptance criteria, include one or more Markdown checkbox items (for example, \`- [ ] ...\`). Preserve useful factual detail from the source body. Do not invent files, architecture, or unrelated scope. If the body is bare, use the title only for narrowly stated details.
+Under Acceptance criteria, include one or more Markdown checkbox items (for example, \`- [ ] ...\`). Write each criterion as a high-level outcome: what must be true when the work is done, from the user's or the business's point of view, in plain language. Do not list code changes. Use Given/When/Then only when the original body already uses it. Preserve useful factual detail from the source body. Do not invent files, architecture, or unrelated scope. If the body is bare, use the title only for narrowly stated details.
 
 Missing scorer fields: ${input.missing.join(', ') || 'none'}
 

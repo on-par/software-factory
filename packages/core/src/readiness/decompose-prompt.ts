@@ -72,6 +72,7 @@ Every story must be independently INVEST-valid:
 - Estimable: it must carry acceptance criteria and verification steps.
 - Small: at most 5 in-scope items and at most 5 acceptance criteria.
 - Testable: every acceptance criterion has a When and a Then.
+- Write each acceptance criterion's name and then items as high-level outcomes from the user's or the business's point of view, not as code changes, file names or commands; the when items name the user action or trigger in plain words.
 
 Split along separate code: each story should change different files. If the stories would mostly edit the same files, they belong in one story.
 

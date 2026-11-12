@@ -282,6 +282,13 @@ describe('parseIssueDraftOutput', () => {
 });
 
 describe('buildIssueDraftPrompt', () => {
+  it('asks for outcome criteria and Given/When/Then only when the idea asks for Gherkin', () => {
+    const prompt = buildIssueDraftPrompt('idea');
+    expect(prompt).toContain('high-level outcome');
+    expect(prompt).toContain('unless the idea asks for Gherkin');
+    expect(prompt).not.toContain('Given …, When …, Then …');
+  });
+
   it('truncates an idea over the cap with a note', () => {
     const prompt = buildIssueDraftPrompt('a'.repeat(DRAFT_IDEA_CAP + 5));
     expect(prompt).toContain('[truncated — 5 more characters]');

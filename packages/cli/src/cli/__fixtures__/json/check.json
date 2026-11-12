@@ -10,8 +10,8 @@
     "cost": 0.02,
     "unpriced": false,
     "cached": false,
-    "promptVersion": "readiness-judge/v1",
-    "bodyHash": "b39bcb0edc325bf6a69d03b86e06eb1d"
+    "promptVersion": "readiness-judge/v2",
+    "bodyHash": "4d4bac7112cee4cc411c501c4eb1a137"
   },
   "template": "factory-task",
   "score": 0,

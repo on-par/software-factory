@@ -143,6 +143,7 @@ describe('buildDecompositionPrompt', () => {
     expect(prompt).toContain('1 to 5 items');
     expect(prompt).toContain('acceptanceCriteria');
     expect(prompt).toContain('outOfScope');
+    expect(prompt).toContain('high-level outcomes');
     expect(prompt).toContain('soThat');
     expect(prompt).toContain('verification');
     expect(prompt).toContain('"depends on", "after we", "once the", "blocked by", or "requires story"');

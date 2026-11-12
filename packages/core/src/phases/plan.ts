@@ -167,7 +167,10 @@ ${constitutionCtx ? '5. The constitution above defines the standards for this pr
    Any behaviorDelta row with verdict worse or unknown must be fixed in the approach or
    also listed in openQuestions. For any other change, omit these three keys.
 7. EVIDENCE PLAN. Decide what evidence will prove each acceptance criterion in the issue.
-   Write one evidencePlan entry per acceptance criterion. Its claim restates that criterion.
+   Write one evidencePlan entry per acceptance criterion. Its claim names the criterion it
+   proves, then states the concrete behaviour its test or command checks. When a criterion is a
+   high-level business outcome, translate it into that concrete, testable behaviour; do not just
+   restate a sentence no test can check, and do not drop a criterion because of its wording.
    Each entry has a kind, and each kind has required fields:
    - fail-to-pass-test: claim, test — the test file path followed by each test name in double
      quotes, e.g. src/foo.test.ts "does x" (pytest: tests/test_foo.py::test_x); no prose, flags
