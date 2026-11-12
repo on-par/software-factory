@@ -1,4 +1,4 @@
-// packages/core/src/readiness/criteria.ts — per-criterion grading for factory check (#1730). Pure — no I/O.
+// packages/core/src/readiness/criteria.ts — per-criterion grading for factory check (#1730; outcome-first, #3962). Pure — no I/O.
 import { extractIssueSections, findSection } from './index.js';
 
 export type CriterionGrade = 'structured' | 'unstructured' | 'empty';
@@ -9,9 +9,9 @@ export interface CriterionFinding {
   /** Criterion text with the `- [ ]` marker stripped and continuation lines joined by a space; '' when empty. */
   text: string;
   grade: CriterionGrade;
-  /** False when the criterion has no Then clause and names no concrete value, command, file, or output. Always false for `empty`. */
+  /** False when the criterion only prescribes an implementation change instead of stating an outcome. Always false for `empty`. */
   observable: boolean;
-  /** 'no observable outcome' when grade is 'unstructured' and !observable; absent otherwise. */
+  /** 'describes a change, not an outcome' when the criterion is prescriptive; absent otherwise. */
   note?: string;
 }
 
@@ -29,15 +29,16 @@ const CHECKBOX_LINE_RE = /^ {0,3}[-*+] *\[[ xX]\](.*)$/;
 const CONTINUATION_RE = /^\s+\S/;
 const LIST_ITEM_RE = /^\s*(?:[-*+]|\d+[.)])\s/;
 
-const OBSERVABLE_RES: readonly RegExp[] = [
-  /\bthen\b/i,
+const CHANGE_VERB_RE =
+  /^(?:add|adds|remove|removes|delete|rename|refactor|create|update|change|move|extract|introduce|implement|replace|wire|bump|edit|modify|export|split|inline|convert|migrate)\b/i;
+const CODE_REF_RES: readonly RegExp[] = [
   /`[^`]+`/,
-  /\d/,
-  /"[^"]+"|'[^']+'/,
-  /\b[\w.-]+\.[a-z]{1,5}\b/i,
+  /\b[\w.-]+\.(?:ts|tsx|js|mjs|cjs|json|ya?ml|md|py|go|rs|sh|css|html|toml)\b/i,
   /\S+\/\S+/,
-  /\b(exits?|prints?|outputs?|returns?|logs?|emits?|shows?|displays?|status|error)\b/i,
 ];
+const OUTCOME_CUE_RE =
+  /\b(?:then|so that|can|cannot|can't|sees?|users?|customers?|operators?|contributors?|authors?|no longer|still|exits?|prints?|outputs?|returns?|shows?|displays?|reports?|fails?|passes?|gets?)\b/i;
+const PRESCRIPTIVE_NOTE = 'describes a change, not an outcome';
 
 const COMMAND_WORDS = [
   'npm',
@@ -70,11 +71,15 @@ function gradeText(text: string): Omit<CriterionFinding, 'index' | 'text'> {
   if (text === '') return { grade: 'empty', observable: false };
   const when = /\bwhen\b/i.exec(text);
   const structured = when !== null && /\bthen\b/i.test(text.slice(when.index + when[0].length));
-  const observable = OBSERVABLE_RES.some((re) => re.test(text));
-  if (structured) return { grade: 'structured', observable };
-  return observable
-    ? { grade: 'unstructured', observable }
-    : { grade: 'unstructured', observable, note: 'no observable outcome' };
+  const lead = text.replace(/^[\s*_`>#:-]+/, '');
+  const prescriptive =
+    !structured &&
+    CHANGE_VERB_RE.test(lead) &&
+    CODE_REF_RES.some((re) => re.test(text)) &&
+    !OUTCOME_CUE_RE.test(text);
+  if (structured) return { grade: 'structured', observable: true };
+  if (prescriptive) return { grade: 'unstructured', observable: false, note: PRESCRIPTIVE_NOTE };
+  return { grade: 'unstructured', observable: true };
 }
 
 export function assessAcceptanceCriteria(section: string): CriterionFinding[] {

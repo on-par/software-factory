@@ -69,9 +69,9 @@ function assessTestable(ac: string): IssueInvestFinding {
   if (findings.length === 0) return warn('no acceptance criteria');
   const empty = findings.find((f) => f.grade === 'empty');
   if (empty) return warn(`criterion ${empty.index} is empty`);
-  const vague = findings.find((f) => f.grade === 'unstructured' && !f.observable);
-  if (vague) return warn(`criterion ${vague.index} has no observable outcome`);
-  return { letter: 'testable', status: 'pass', reason: `${findings.length} criteria are checkable` };
+  const change = findings.find((f) => f.grade !== 'empty' && !f.observable);
+  if (change) return warn(`criterion ${change.index} describes a change, not an outcome`);
+  return { letter: 'testable', status: 'pass', reason: `${findings.length} criteria state outcomes` };
 }
 
 export function assessIssueInvest(

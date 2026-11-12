@@ -113,16 +113,27 @@ describe('gradeIssueInvest', () => {
     expect(find(gradeIssueInvest(body()), 'valuable').status).toBe('pass');
   });
 
-  it('Testable warns on missing, empty, and vague criteria; passes structured ones', () => {
+  it('Testable warns on missing, empty, and change-only criteria; passes structured ones', () => {
     expect(find(gradeIssueInvest(body({ criteria: [] })), 'testable').reason).toBe('no acceptance criteria');
     expect(find(gradeIssueInvest(body({ criteria: ['When x, then y', ''] })), 'testable').reason).toBe(
       'criterion 2 is empty',
     );
-    const vague = find(gradeIssueInvest(body({ criteria: ['When x, then y', 'it is good'] })), 'testable');
-    expect(vague.reason).toBe('criterion 2 has no observable outcome');
+    expect(find(gradeIssueInvest(body({ criteria: ['When x, then y', 'it is good'] })), 'testable').status).toBe('pass');
+    const change = find(
+      gradeIssueInvest(body({ criteria: ['When x, then y', 'add a `foo` field to `bar.ts`'] })),
+      'testable',
+    );
+    expect(change).toMatchObject({ status: 'warn', reason: 'criterion 2 describes a change, not an outcome' });
     expect(find(gradeIssueInvest(body()), 'testable')).toMatchObject({
       status: 'pass',
-      reason: '1 criteria are checkable',
+      reason: '1 criteria state outcomes',
     });
+  });
+
+  it('Testable passes plain business-language outcome criteria with no warning', () => {
+    const r = gradeIssueInvest(
+      body({ criteria: ['A customer can see why their order was held', 'Support staff can release a held order'] }),
+    );
+    expect(find(r, 'testable')).toMatchObject({ status: 'pass', reason: '2 criteria state outcomes' });
   });
 });

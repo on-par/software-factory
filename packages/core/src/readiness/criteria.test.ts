@@ -19,9 +19,32 @@ describe('assessAcceptanceCriteria', () => {
     expect(multi[0]).toMatchObject({ grade: 'structured', text: 'Given a When b Then c' });
   });
 
-  it('flags a vague criterion as having no observable outcome', () => {
-    const [f] = assessAcceptanceCriteria('- [ ] works correctly');
-    expect(f).toMatchObject({ grade: 'unstructured', observable: false, note: 'no observable outcome' });
+  it('accepts a plain business-language outcome', () => {
+    const [f] = assessAcceptanceCriteria('- [ ] A customer can see why their order was held');
+    expect(f).toMatchObject({ grade: 'unstructured', observable: true });
+    expect(f?.note).toBeUndefined();
+  });
+
+  it('flags a change-only criterion as describing a change, not an outcome', () => {
+    const [f] = assessAcceptanceCriteria('- [ ] add a `foo` field to `bar.ts`');
+    expect(f).toMatchObject({ grade: 'unstructured', observable: false, note: 'describes a change, not an outcome' });
+    const [g] = assessAcceptanceCriteria('- [ ] Rename src/a.ts to src/b.ts');
+    expect(g).toMatchObject({ observable: false, note: 'describes a change, not an outcome' });
+  });
+
+  it('does not flag a change verb with an outcome cue or without a code reference', () => {
+    const [f] = assessAcceptanceCriteria('- [ ] Add `retry` so that users no longer see failures');
+    expect(f?.observable).toBe(true);
+    const [g] = assessAcceptanceCriteria('- [ ] Add a way for customers to see holds');
+    expect(g?.observable).toBe(true);
+  });
+
+  it('never flags Given/When/Then criteria as prescriptive, even when they name code', () => {
+    const [f] = assessAcceptanceCriteria(
+      '- [ ] Given a repo, When I add `foo` to `bar.ts`, Then `factory check` passes',
+    );
+    expect(f).toMatchObject({ grade: 'structured', observable: true });
+    expect(f?.note).toBeUndefined();
   });
 
   it('treats a concrete unstructured criterion as observable', () => {
@@ -93,6 +116,20 @@ describe('gradeIssueCriteria', () => {
   it('grades checked items like unchecked and keeps warnings out of problems', () => {
     const r = gradeIssueCriteria(issue('- [x] works correctly', '`npm test`'));
     expect(r.findings[0]?.grade).toBe('unstructured');
+    expect(r.pass).toBe(true);
+  });
+
+  it('keeps a prescriptive criterion out of problems', () => {
+    const r = gradeIssueCriteria(issue('- [ ] add a `foo` field to `bar.ts`', '`npm test`'));
+    expect(r.findings[0]?.observable).toBe(false);
+    expect(r.problems).toEqual([]);
+    expect(r.pass).toBe(true);
+  });
+
+  it('passes checkbox items plus a fenced gherkin block', () => {
+    const ac = '- [ ] A customer can see why their order was held\n\n```gherkin\nGiven a held order\nWhen I open it\nThen I see the reason\n```';
+    const r = gradeIssueCriteria(issue(ac, '`npm test`'));
+    expect(r.findings).toHaveLength(1);
     expect(r.pass).toBe(true);
   });
 });

@@ -198,11 +198,18 @@ ${verification}
     expect(lines).toContain('  no acceptance criteria');
   });
 
-  it('keeps a vague criterion as a warning with exit 0', async () => {
-    const { lines, d } = deps(task('- [ ] works correctly'));
+  it('warns that change-only criteria describe changes, not outcomes, with exit 0', async () => {
+    const { lines, d } = deps(task('- [ ] add a `foo` field to `bar.ts`'));
     const r = await runIssueCheck(7, { judge: false }, d);
     expect(r.exitCode).toBe(0);
-    expect(lines.join('\n')).toContain('(no observable outcome)');
+    expect(lines.join('\n')).toContain('(describes a change, not an outcome)');
+  });
+
+  it('passes plain business-language outcome criteria without a note', async () => {
+    const { lines, d } = deps(task('- [ ] A customer can see why their order was held'));
+    const r = await runIssueCheck(7, { judge: false }, d);
+    expect(r.exitCode).toBe(0);
+    expect(lines.join('\n')).not.toContain('(describes a change');
   });
 
   it('includes criteria in --json and null for epics', async () => {
