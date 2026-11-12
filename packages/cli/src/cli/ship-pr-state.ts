@@ -1,7 +1,6 @@
 // packages/cli/src/cli/ship-pr-state.ts — restore a run's resumable state from its PR on start and persist it there on every run-state update (#3909, ADR-0174)
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -138,7 +137,13 @@ async function restoreFrozenSpec(opts: {
   const { octokit, repo, prNumber, issueNum, state, frozenSpec, log } = opts;
   const { specPath, brief } = frozenSpec;
   try {
-    if (existsSync(specPath)) return;
+    if (
+      await access(specPath).then(
+        () => true,
+        () => false,
+      )
+    )
+      return;
     if (state === null || state.status === 'parked') return;
     const loaded = await loadPrFrozenSpec({ octokit, repo, prNumber, key: workKeyFromIssue(issueNum) });
     for (const ig of loaded.ignored) {
@@ -150,7 +155,13 @@ async function restoreFrozenSpec(opts: {
       return;
     }
     await mkdir(dirname(specPath), { recursive: true });
-    await writeFile(specPath, loaded.state.spec, { mode: 0o600 });
+    try {
+      // 'wx' creates the file atomically and fails if a local spec appeared meanwhile, so a local spec always wins.
+      await writeFile(specPath, loaded.state.spec, { mode: 0o600, flag: 'wx' });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') return;
+      throw err;
+    }
     try {
       await createPlanReuseStore(specPath).recordFrozen(brief);
     } catch (err) {
