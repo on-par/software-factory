@@ -65,6 +65,13 @@ The process exits with the run's code: the `run-issue` codes (`0` success, `1`, 
 a setup error (bad flags, missing secret, clone failure, or a run that ended without a result). A child killed by a signal
 exits `1`. The status line's `outcome` and `exitReason` say why.
 
+## Restarting an interrupted job
+
+The first push happens in SHIP, after CHECK passes. Once the PR is open, the run saves its frozen plan in a hidden
+factory-owned PR comment. A rerun on a fresh clone continues on the PR branch with no PLAN call, unless the issue body
+changed since the plan was saved or the run was parked. A kill before the first push leaves nothing on the remote, so
+the rerun starts over.
+
 ## Manual verification (after a release)
 
 ```sh

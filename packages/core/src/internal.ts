@@ -272,14 +272,7 @@ export { createRunRuntime, type RunRuntime } from './daemon/run-runtime.js';
 export { findOpenPR } from './phases/ship.js';
 export { settleParkedPullRequest } from './run/park-pr.js';
 export { findAdoptablePr, lookupOpenPrByIssue, lookupOpenPrByBranch, type OpenPrLookup } from './run/adopt-pr.js'; // findAdoptablePr + the shared open-PR lookup (#3439)
-export {
-  loadPrRunState,
-  prRunStatusFor,
-  reconcilePrRunState,
-  savePrRunState,
-  type PrRunRound,
-  type PrRunState,
-} from './run/pr-run-state.js'; // a run's resumable state in a factory-owned PR comment (#3909)
+export * from './run/pr-state-exports.js'; // PR-comment run state (#3909) and frozen spec (#4025)
 export { MAX_REWORK_ROUNDS } from './phases/check.js';
 export { readStackSliceGate } from './phases/stack-approval.js';
 export type { StackPullReviews } from './phases/stack-approval.js';
@@ -458,6 +451,7 @@ export {
   createCheckResumeStore,
   createPlanReuseStore,
   formatBaseMovedRefusal,
+  issueBodyHash,
 } from './run/resume-context.js';
 export type { CheckResumeRecord, CheckResumeStore, PlanReuseRecord, PlanReuseStore } from './run/resume-context.js';
 // Pre-PLAN base health (#2339)

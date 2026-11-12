@@ -361,6 +361,7 @@ async function shipIssueFrom(
     factoryConfig,
     paths,
     log,
+    frozenSpec: opts.inPlace ? { specPath, brief: work.brief } : undefined,
   });
   const reworkClaim = claimReworkRequests(paths, issueNum, ctx?.resumeFrom || ctx?.localOnly || noPr, log);
   const request = {

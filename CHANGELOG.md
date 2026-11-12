@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Fixed
 
+- An in-place run killed after its PR opened and restarted on a fresh clone now restores its frozen plan from the PR and continues on the PR branch without re-running PLAN (#4025).
 - A GitHub call that fails with 401 Bad credentials now re-reads `GITHUB_TOKEN`/`GH_TOKEN`/`gh auth token` once and retries with a newly valid token, instead of parking the run (#4027).
 - The in-place dirty-checkout refusal now prints each file's git status code next to its path (`M README.md, ?? new.txt`) instead of paths alone (#4024).
 

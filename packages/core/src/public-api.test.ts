@@ -327,6 +327,10 @@ const INTERNAL_API_KEYS = [
   'reconcilePrRunState',
   'registerProcessGroup',
   'savePrRunState',
+  'loadPrFrozenSpec', // #4025
+  'savePrFrozenSpec',
+  'loadReusablePlan',
+  'issueBodyHash',
   'UnsupportedQueueBackendError', // #3890
   ...'assertVisualProofForHead VisualProofMissingError'.split(' '), // #2232
   'createGithubQueueBackend', // #3890

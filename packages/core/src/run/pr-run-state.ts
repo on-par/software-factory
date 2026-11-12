@@ -260,20 +260,13 @@ export function prRunStatusFor(status: RunStatus, ciPending?: boolean): PrRunSta
   }
 }
 
-export async function loadPrRunState(deps: {
-  octokit: SelfIdentityOctokit;
-  repo: string;
-  prNumber: number;
-  key: WorkKey;
-}): Promise<PrRunStateLoad> {
-  const { octokit, repo, prNumber, key } = deps;
+/** Every comment on the PR, all pages, reduced to the fields the trust checks need (#4025). */
+export async function listPrStateComments(
+  octokit: SelfIdentityOctokit,
+  repo: string,
+  prNumber: number,
+): Promise<PrStateComment[]> {
   const [owner, name] = repo.split('/');
-  let self: SelfIdentity | undefined;
-  try {
-    self = await resolveSelfIdentity(octokit);
-  } catch {
-    self = undefined;
-  }
   const comments: PrStateComment[] = [];
   for (let page = 1; ; page++) {
     const { data } = await octokit.rest.issues.listComments({
@@ -294,6 +287,23 @@ export async function loadPrRunState(deps: {
     }
     if (data.length < PAGE_SIZE) break;
   }
+  return comments;
+}
+
+export async function loadPrRunState(deps: {
+  octokit: SelfIdentityOctokit;
+  repo: string;
+  prNumber: number;
+  key: WorkKey;
+}): Promise<PrRunStateLoad> {
+  const { octokit, repo, prNumber, key } = deps;
+  let self: SelfIdentity | undefined;
+  try {
+    self = await resolveSelfIdentity(octokit);
+  } catch {
+    self = undefined;
+  }
+  const comments = await listPrStateComments(octokit, repo, prNumber);
   return selectTrustedPrRunState(comments, self, key);
 }
 

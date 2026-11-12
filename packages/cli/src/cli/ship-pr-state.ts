@@ -1,6 +1,8 @@
 // packages/cli/src/cli/ship-pr-state.ts — restore a run's resumable state from its PR on start and persist it there on every run-state update (#3909, ADR-0174)
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 import { workKeyFromIssue, type EventKind } from '@on-par/factory-core';
@@ -8,6 +10,9 @@ import {
   MAX_REWORK_ROUNDS,
   countReviewReworkRuns,
   createFileReviewReworkStore,
+  createPlanReuseStore,
+  issueBodyHash,
+  loadPrFrozenSpec,
   loadPrRunState,
   lookupOpenPrByBranch,
   prRunStatusFor,
@@ -15,6 +20,7 @@ import {
   resolveMaxReviewReworkRuns,
   reconcilePrRunState,
   runStateFile,
+  savePrFrozenSpec,
   savePrRunState,
   type PrRunRound,
   type IssueRunStateBase,
@@ -29,6 +35,7 @@ export interface RestoredPrRunState {
 }
 
 type Log = (kind: EventKind, msg: string) => void;
+type FrozenSpecOpts = { specPath: string; brief: string };
 type RunStateRecorder = (update: RunStateUpdate) => Promise<void>;
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -75,6 +82,7 @@ export async function restorePrRunStateForRun(opts: {
   runsDir: string;
   maxReviewReworkRuns: number;
   log: Log;
+  frozenSpec?: FrozenSpecOpts;
 }): Promise<RestoredPrRunState | undefined> {
   const { octokit, repo, branch, issueNum, log } = opts;
   try {
@@ -100,6 +108,8 @@ export async function restorePrRunStateForRun(opts: {
       const at = state.updatedAt;
       store.record({ reviewId, pr: prNumber, issue: issueNum, lane: '', reviewer: '', queuedAt: at, startedAt: at });
     }
+    if (opts.frozenSpec)
+      await restoreFrozenSpec({ octokit, repo, prNumber, issueNum, state, frozenSpec: opts.frozenSpec, log });
     const { used, cap } = state.reviewRework;
     log(
       'pr_state_loaded',
@@ -112,8 +122,53 @@ export async function restorePrRunStateForRun(opts: {
   }
 }
 
-/** The frozen spec's sha256 and the text of its `## Goal` section; null when the file is unreadable. */
-async function readSpecSummary(specPath: string): Promise<{ sha256: string; summary: string } | null> {
+/**
+ * Restores the frozen spec and its plan-reuse sidecar from the PR so a fresh clone skips PLAN (#4025). A local spec
+ * wins, a parked run replans, and a spec planned from an older issue body is not reused. Never throws.
+ */
+async function restoreFrozenSpec(opts: {
+  octokit: Octokit;
+  repo: string;
+  prNumber: number;
+  issueNum: number;
+  state: PrRunState | null;
+  frozenSpec: FrozenSpecOpts;
+  log: Log;
+}): Promise<void> {
+  const { octokit, repo, prNumber, issueNum, state, frozenSpec, log } = opts;
+  const { specPath, brief } = frozenSpec;
+  try {
+    if (existsSync(specPath)) return;
+    if (state === null || state.status === 'parked') return;
+    const loaded = await loadPrFrozenSpec({ octokit, repo, prNumber, key: workKeyFromIssue(issueNum) });
+    for (const ig of loaded.ignored) {
+      log('pr_state_ignored', `ignored PR #${prNumber} comment ${ig.commentId} as a frozen plan: ${ig.reason}`);
+    }
+    if (loaded.status === 'none') return;
+    if (loaded.state.bodyHash !== issueBodyHash(brief)) {
+      log('pr_state_loaded', `frozen plan on PR #${prNumber} was planned from an older issue body — planning afresh`);
+      return;
+    }
+    await mkdir(dirname(specPath), { recursive: true });
+    await writeFile(specPath, loaded.state.spec, { mode: 0o600 });
+    try {
+      await createPlanReuseStore(specPath).recordFrozen(brief);
+    } catch (err) {
+      await rm(specPath, { force: true });
+      log('pr_state_failed', `could not reuse the frozen plan from PR #${prNumber}: ${errorMessage(err)}`);
+      return;
+    }
+    log(
+      'pr_state_loaded',
+      `restored the frozen plan from PR #${prNumber} to ${specPath} — this run continues on the PR branch without re-planning`,
+    );
+  } catch (err) {
+    log('pr_state_failed', `could not restore the frozen plan from the PR: ${errorMessage(err)}`);
+  }
+}
+
+/** The frozen spec's sha256, text and the text of its `## Goal` section; null when the file is unreadable. */
+async function readSpecSummary(specPath: string): Promise<{ sha256: string; summary: string; text: string } | null> {
   try {
     const text = await readFile(specPath, 'utf8');
     const lines = text.split('\n');
@@ -121,7 +176,7 @@ async function readSpecSummary(specPath: string): Promise<{ sha256: string; summ
     const body = start < 0 ? [] : lines.slice(start + 1);
     const end = body.findIndex((l) => /^##\s/.test(l));
     const summary = (end < 0 ? body : body.slice(0, end)).join('\n').trim();
-    return { sha256: createHash('sha256').update(text).digest('hex'), summary };
+    return { sha256: createHash('sha256').update(text).digest('hex'), summary, text };
   } catch {
     return null;
   }
@@ -142,6 +197,8 @@ export function prRunStateRecorder(
     runsDir: string;
     maxReviewReworkRuns: number;
     restored?: RestoredPrRunState;
+    /** The issue brief of an in-place run: when set, the frozen spec is saved to the PR too (#4025). */
+    brief?: string;
     log: Log;
   },
 ): (update: RunStateUpdate) => Promise<void> {
@@ -150,6 +207,7 @@ export function prRunStateRecorder(
   let prNumber = opts.restored?.prNumber;
   let attempts = 0;
   let lastSaved: string | undefined;
+  let lastSpecSha: string | undefined;
   const headSha = async (pr: number): Promise<string | undefined> => {
     const [owner, name] = repo.split('/');
     const { data } = await octokit.rest.pulls.get({ owner, repo: name, pull_number: pr });
@@ -189,11 +247,29 @@ export function prRunStateRecorder(
       };
       known = state;
       const fingerprint = JSON.stringify({ ...state, updatedAt: '' });
-      if (fingerprint === lastSaved) return;
-      await savePrRunState({ octokit, repo, prNumber, state });
-      lastSaved = fingerprint;
+      if (fingerprint !== lastSaved) {
+        await savePrRunState({ octokit, repo, prNumber, state });
+        lastSaved = fingerprint;
+      }
     } catch (err) {
       log('pr_state_failed', `could not save run state to the PR: ${errorMessage(err)}`);
+    }
+    try {
+      if (opts.brief === undefined || prNumber === undefined) return;
+      const spec = await readSpecSummary(opts.specPath);
+      if (spec === null || spec.sha256 === lastSpecSha) return;
+      lastSpecSha = spec.sha256;
+      const saved = await savePrFrozenSpec({
+        octokit,
+        repo,
+        prNumber,
+        state: { version: 1, key: workKeyFromIssue(issueNum), bodyHash: issueBodyHash(opts.brief), spec: spec.text },
+      });
+      if (saved === null) {
+        log('pr_state_failed', 'frozen spec too large for one PR comment — a fresh-clone restart will re-plan');
+      }
+    } catch (err) {
+      log('pr_state_failed', `could not save the frozen spec to the PR: ${errorMessage(err)}`);
     }
   };
 }
@@ -212,6 +288,7 @@ export async function shipRunStateRecorder(
     factoryConfig: Parameters<typeof resolveMaxReviewReworkRuns>[0];
     paths: { reviewRework: string; runs: string };
     log: Log;
+    frozenSpec?: FrozenSpecOpts;
   },
 ): Promise<(base: Omit<IssueRunStateBase, 'issue' | 'branch'> & { specPath: string }) => RunStateRecorder> {
   const { paths, factoryConfig, branch, issueNum } = opts;
@@ -226,7 +303,12 @@ export async function shipRunStateRecorder(
   };
   const local = (base: IssueRunStateBase): RunStateRecorder => runStateRecorder(paths.runs, base);
   if (skip) return (base) => local({ ...base, issue: issueNum, branch });
-  const restored = await restorePrRunStateForRun({ ...shared, branch });
+  const restored = await restorePrRunStateForRun({ ...shared, branch, frozenSpec: opts.frozenSpec });
   return (base) =>
-    prRunStateRecorder(local({ ...base, issue: issueNum, branch }), { ...shared, specPath: base.specPath, restored });
+    prRunStateRecorder(local({ ...base, issue: issueNum, branch }), {
+      ...shared,
+      specPath: base.specPath,
+      restored,
+      brief: opts.frozenSpec?.brief,
+    });
 }
