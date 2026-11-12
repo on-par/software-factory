@@ -76,15 +76,6 @@ async function prune(issueDir: string, current: string): Promise<void> {
   );
 }
 
-/** `{ outputLogDir: <logsDir>/issue-<key>/<name> }` when logsDir is set, else `{}`; spread into checker options. */
-export function outputLogDirOption(
-  logsDir: string | undefined,
-  issue: WorkKey,
-  name: string,
-): { outputLogDir?: string } {
-  return logsDir === undefined ? {} : { outputLogDir: join(logsDir, `issue-${issue}`, name) };
-}
-
 export async function writeRunPhaseLog(opts: RunPhaseLogOptions): Promise<string | undefined> {
   if (!opts.logsDir) return undefined;
   const issueDir = join(opts.logsDir, `issue-${opts.issue}`);

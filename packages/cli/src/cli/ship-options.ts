@@ -54,16 +54,16 @@ export interface ShipIssueOptions {
   prerequisiteStack?: PrerequisiteStackTarget;
   /** --in-place / FACTORY_WORKSPACE=in-place (#3904): run in the current checkout, no worktree */
   inPlace?: boolean;
-  /** run-issue only, from FACTORY_BASE_HEALTH_REPAIR=1: a confirmed red pre-PLAN base enters PLAN instead of releasing. */
-  baseHealthRepair?: boolean;
 }
 
-/** The explicit base-repair signal for `run-issue`. */
+/** The retired base-repair env flag for `run-issue` (#4029). */
 export const BASE_HEALTH_REPAIR_ENV = 'FACTORY_BASE_HEALTH_REPAIR';
 
-/** True only for the exact string `1`. Unset, empty, `0`, `true`, ` 1` and every other value are off (fail closed). */
-export function baseHealthRepairRequested(env: NodeJS.ProcessEnv): boolean {
-  return env[BASE_HEALTH_REPAIR_ENV] === '1';
+/** Deprecated (#4029): repair is now the default. Returns the warning to print when a caller still sets the flag. Delete with the flag once callers migrate. */
+export function baseHealthRepairDeprecation(env: NodeJS.ProcessEnv): string | undefined {
+  return env[BASE_HEALTH_REPAIR_ENV] === '1'
+    ? `${BASE_HEALTH_REPAIR_ENV}=1 is deprecated and has no effect: every run now enters PLAN on a red base and CHECK must end green (#4029)`
+    : undefined;
 }
 
 const FORBIDDEN_CHARS = /[\s~^:?*[\\]/;

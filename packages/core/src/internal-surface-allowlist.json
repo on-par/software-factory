@@ -97,6 +97,7 @@
   "buildBacktestRecord",
   "buildClassifierPrompt",
   "changedPathsFromDiff",
+  "checkBaseHealth",
   "classifierGateReason",
   "classifierPolicyVersion",
   "classifyPrShadow",

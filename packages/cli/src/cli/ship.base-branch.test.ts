@@ -20,7 +20,7 @@ describe('shipIssue --base-branch (#3764)', () => {
 
   it('passes origin/<ref> to runIssue as parentBaseRef', async () => {
     await shipIssue(5, { baseBranch: 'feat/x', sizeGate: undefined }, ctx());
-    expect(phases.checkBaseHealth.mock.calls[0][0]).toMatchObject({ baseRef: 'origin/feat/x' });
+    expect(phases.planPhase).toHaveBeenCalled();
     expect((phases.checkPhase.mock.calls[0][0] as any).parentBaseRef).toBe('origin/feat/x');
     expect((phases.shipPhase.mock.calls[0][0] as any).baseBranch).toBe('feat/x');
   });

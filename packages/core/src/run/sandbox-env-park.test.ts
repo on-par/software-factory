@@ -192,7 +192,7 @@ describe('runIssue — sandbox environment park (#3332)', () => {
 
     const outcome = await runIssue(request, policy, ports);
 
-    expect(runBaseline).toHaveBeenCalled();
+    expect(runBaseline).not.toHaveBeenCalled();
     expect(outcome).not.toMatchObject({ reason: 'sandbox-env' });
   });
 });

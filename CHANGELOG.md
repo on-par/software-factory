@@ -12,6 +12,10 @@ section to `## X.Y.Z - date`. See
 - A GitHub call that fails with 401 Bad credentials now re-reads `GITHUB_TOKEN`/`GH_TOKEN`/`gh auth token` once and retries with a newly valid token, instead of parking the run (#4027).
 - The in-place dirty-checkout refusal now prints each file's git status code next to its path (`M README.md, ?? new.txt`) instead of paths alone (#4024).
 
+### Changed
+
+- Runs no longer run the base-health compile/lint/tests suite before PLAN; CHECK is the only test gate and fixes forward any failing test, including one already red on main, and `FACTORY_BASE_HEALTH_REPAIR` is deprecated and has no effect (#4029).
+
 ## 0.9.35 - 2026-11-11
 
 A failed tests check now quotes the step that actually failed instead of a passing test's stderr, an override-only run no longer warns about a v1 config file it does not have, and `factory run-issue` accepts an explicit base-repair signal, `FACTORY_BASE_HEALTH_REPAIR=1` (#4018). The release also carries rendered UI proof in SHIP, opt-in OTLP export of CHECK command output, open PRs on `ci-failed` parks and a stacked-slice restack fix (#2232, #3994, #3995, #3996, #3998, #4010, #4011).

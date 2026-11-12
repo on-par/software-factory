@@ -96,6 +96,8 @@ async function run(opts: { results: CommandResult[]; files?: string[]; affected?
     log: (type, msg) => logs.push([type, msg]),
     testsAffected: opts.affected === false ? null : { command: 'npx vitest related --run {files}', fullOn: undefined },
     runBaseline: async (o) => ({ baseSha: o.baseSha, checkers: [] }) as BaselineReport,
+    // The round-1 flake re-run (#4029) reproduces the failure; it stays out of the recorded argv sequence.
+    runCommand: async () => FULL_FAIL,
     runCheckers: async (ctx: CheckerContext) => {
       ctx.runCommand = fakeRun;
       ctx.checks = { test: 'npm test' };

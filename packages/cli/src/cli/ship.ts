@@ -61,7 +61,7 @@ import {
   startEgressProxy,
   worktreeSandboxFor,
 } from '@on-par/factory-core/internal';
-import { baseChecksVerdict, baseHealthWithCi } from './base-health-ci.js';
+import { baseChecksVerdict } from './base-health-ci.js';
 import { formatDeprecation } from './octokit.js';
 import { restoredLoggingBreaker } from './provider-restored-log.js';
 import type { CliDeps, ConfigLoaderKey, CoreOpKey, GitOpKey, ShellOpKey } from './index.js';
@@ -141,7 +141,6 @@ async function shipIssueFrom(
     | 'buildPhase'
     | 'checkPhase'
     | 'shipPhase'
-    | 'checkBaseHealth'
     | ConfigLoaderKey
     | GitOpKey
     | ShellOpKey
@@ -418,7 +417,6 @@ async function shipIssueFrom(
     hostBuildSlot: shipHostBuildSlot(factoryConfig, issueNum, log, slotWhere),
     shipPhase: shipPhaseForMode,
     requiredChecksVerdict: baseChecksVerdict(octokit, ghOwner, ghName, baseHealthOpts),
-    checkBaseHealth: deps.checkBaseHealth ?? baseHealthWithCi(octokit, ghOwner, ghName, baseHealthOpts),
     resolveConstitution: () =>
       // Resolved once so the build worker can't author its own standards; a caller-provided local-only workspace keeps its own.
       constitutionLoader.resolve(

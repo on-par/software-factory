@@ -103,7 +103,7 @@ describe('checkPhase headed-mode warnings', () => {
               passes: 0,
               skips: 0,
               total: 1,
-              results: [{ checker: 'tests', result: 'FAIL', details: 'fix config' }],
+              results: [{ checker: 'compile', result: 'FAIL', details: 'fix config' }],
             }
           : green;
       },

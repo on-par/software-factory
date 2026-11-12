@@ -46,7 +46,7 @@ describe('describeBaseline', () => {
 describe('checkPhase baseline cache wiring (#3540)', () => {
   it('forwards requiredChecksVerdict to runBaseline and logs baseline-cache-invalidated', async () => {
     const worktree = await tempDirs.make('check-baseline-3540-');
-    await writeFile(join(worktree, 'package.json'), JSON.stringify({ scripts: { test: 'exit 1' } }));
+    await writeFile(join(worktree, 'package.json'), JSON.stringify({ scripts: { build: 'exit 1' } }));
     await writeFile(join(worktree, 'issue-77.md'), '# Spec: failing checks\n');
     const logs: Array<[string, string]> = [];
     const requiredChecksVerdict = async () => ({ green: true, reason: 'ok' });
@@ -63,11 +63,11 @@ describe('checkPhase baseline cache wiring (#3540)', () => {
       log: (type, msg) => logs.push([type, msg]),
       runBaseline: async (o) => {
         forwarded = o.requiredChecksVerdict;
-        o.onCacheInvalidated?.('tests', 'r');
+        o.onCacheInvalidated?.('compile', 'r');
         return { baseSha: o.baseSha, checkers: [] };
       },
     });
     expect(forwarded).toBe(requiredChecksVerdict);
-    expect(logs).toContainEqual(['baseline-cache-invalidated', 'baseline cache invalidated: abc1234567 tests — r']);
+    expect(logs).toContainEqual(['baseline-cache-invalidated', 'baseline cache invalidated: abc1234567 compile — r']);
   });
 });

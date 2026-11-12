@@ -5,7 +5,7 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import type { Octokit } from '@octokit/rest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { baseChecksVerdict, baseHealthWithCi, resetBasePushWorkflowReports } from './base-health-ci.js';
+import { baseChecksVerdict, resetBasePushWorkflowReports } from './base-health-ci.js';
 
 const forbidden = () => Object.assign(new Error('Forbidden'), { status: 403 });
 
@@ -73,59 +73,4 @@ describe('baseChecksVerdict (#3290)', () => {
       msg: expect.stringContaining('push workflow Release failure on dddddddd'),
     });
   });
-});
-
-describe('baseHealthWithCi (#3287)', () => {
-  it('passes pushFallback so a 403 protection API with green push checks is green', async () => {
-    const SHA = 'c'.repeat(40);
-    const lookup = baseHealthWithCi(octokit403(), 'o', 'r');
-    // checkBaseHealth consults the CI lookup for a timed-out compile: green CI drops it, so the base is green.
-    const res = await lookup({
-      worktree: '/nonexistent',
-      constitution: null,
-      router: {} as never,
-      env: {},
-      log: () => {},
-      deps: {
-        runCommand: (async () => ({ stdout: `${SHA}\n`, exitCode: 0 })) as never,
-        runBaseline: (async () => ({
-          baseSha: SHA,
-          checkers: [{ checker: 'compile', verdict: 'fails-on-base', baseTimedOut: true }],
-        })) as never,
-        memo: new Map(),
-      },
-    });
-    expect(res.kind).toBe('green');
-  });
-
-  it.each(['skipped', 'neutral'])(
-    'does not list hosted-ci as failing when the required check is %s (#3871)',
-    async (conclusion) => {
-      const SHA = 'c'.repeat(40);
-      const base = octokit403() as any;
-      base.rest.repos.getStatusChecksProtection = async () => ({ data: { contexts: ['test'] } });
-      base.rest.checks.listForRef = async () => ({
-        data: { check_runs: [{ name: 'test', status: 'completed', conclusion, check_suite: { id: 1 } }] },
-      });
-      base.rest.actions.listWorkflowRunsForRepo = async () => ({ data: { workflow_runs: [] } });
-      const res = await baseHealthWithCi(
-        base as Octokit,
-        'o',
-        'r',
-      )({
-        worktree: '/nonexistent',
-        constitution: null,
-        router: {} as never,
-        env: {},
-        log: () => {},
-        deps: {
-          runCommand: (async () => ({ stdout: `${SHA}\n`, exitCode: 0 })) as never,
-          runBaseline: (async () => ({ baseSha: SHA, checkers: [] })) as never,
-          memo: new Map(),
-        },
-      });
-      expect(res.kind).toBe('green');
-      expect((res as { failingChecks?: string[] }).failingChecks ?? []).not.toContain('hosted-ci');
-    },
-  );
 });

@@ -230,20 +230,18 @@ describe('runIssue — constitution checker preflight (#2585)', () => {
   it('parks with the config cause before PLAN with a file:line message for a <checker-name> placeholder', async () => {
     const { dir, constitution } = setup(['<checker-name>', 'compile']);
     try {
-      const checkBaseHealth = vi.fn();
       const router = fakeRouter();
       const events = vi.fn();
       const outcome = await runIssue(
         baseRequest(),
         basePolicy(),
-        basePorts({ router, resolveConstitution: () => constitution, checkBaseHealth, events: () => events }),
+        basePorts({ router, resolveConstitution: () => constitution, events: () => events }),
       );
       expect(outcome).toMatchObject({ state: 'parked', reason: 'config' });
       const message = events.mock.calls.find((c) => c[0] === 'config')?.[1];
       expect(message).toContain(".factory/constitution.md:5: unknown checker '<checker-name>'");
       expect(message).toContain('custom_*');
       expect(planPhase).not.toHaveBeenCalled();
-      expect(checkBaseHealth).not.toHaveBeenCalled();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1966,76 +1964,6 @@ describe('runIssue — flaky ledger and issue filing (#2303)', () => {
   });
 });
 
-describe('runIssue — pre-PLAN base health (#2339)', () => {
-  const BASE = 'a'.repeat(40);
-  const health = (kind: 'green' | 'red' | 'skipped') =>
-    vi.fn<NonNullable<RunPorts['checkBaseHealth']>>().mockResolvedValue({
-      kind,
-      ...(kind === 'skipped' ? {} : { baseSha: BASE }),
-      failingChecks: kind === 'red' ? ['tests'] : [],
-      cached: false,
-    });
-
-  it('red base before PLAN releases with zero model calls and never enters PLAN', async () => {
-    const router = fakeRouter();
-    const run = vi.spyOn(router, 'run');
-    const recordPhase = vi.fn().mockResolvedValue(undefined);
-    const log = vi.fn();
-    const outcome = await runIssue(
-      baseRequest(),
-      basePolicy(),
-      basePorts({ router, recordPhase, events: () => log, checkBaseHealth: health('red') }),
-    );
-
-    expect(outcome).toMatchObject({
-      state: 'released',
-      reason: 'environment',
-      baseSha: BASE,
-      failingChecks: ['tests'],
-      reworkRounds: 0,
-    });
-    for (const phase of [planPhase, buildPhase, checkPhase, shipPhase]) expect(phase).not.toHaveBeenCalled();
-    expect(run).not.toHaveBeenCalled();
-    expect(recordPhase).not.toHaveBeenCalledWith('plan');
-    expect(log.mock.calls.map((c) => c[0])).toContain('environment-released');
-  });
-
-  it.each(['green', 'skipped'] as const)('a %s base proceeds to PLAN', async (kind) => {
-    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ checkBaseHealth: health(kind) }));
-    expect(outcome.state).toBe('ready');
-    expect(planPhase).toHaveBeenCalledTimes(1);
-  });
-
-  it('a thrown port logs environment_warning and proceeds to PLAN', async () => {
-    const log = vi.fn();
-    const checkBaseHealth = vi.fn().mockRejectedValue(new Error('boom'));
-    await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => log, checkBaseHealth }));
-    expect(log.mock.calls.map((c) => c[0])).toContain('environment_warning');
-    expect(planPhase).toHaveBeenCalledTimes(1);
-  });
-
-  it('an absent port proceeds to PLAN', async () => {
-    await runIssue(baseRequest(), basePolicy(), basePorts());
-    expect(planPhase).toHaveBeenCalledTimes(1);
-  });
-
-  it('never calls the port for a local-only run', async () => {
-    const checkBaseHealth = health('red');
-    await runIssue(baseRequest({ localOnly: true }), basePolicy(), basePorts({ checkBaseHealth }));
-    expect(checkBaseHealth).not.toHaveBeenCalled();
-  });
-
-  it('passes the baseline cache path and lane worktree to the port', async () => {
-    const checkBaseHealth = health('green');
-    await runIssue(baseRequest({ baselineCachePath: '/tmp/cache.json' }), basePolicy(), basePorts({ checkBaseHealth }));
-    expect(checkBaseHealth.mock.calls[0][0]).toMatchObject({
-      worktree: '/tmp/wt',
-      cachePath: '/tmp/cache.json',
-      timeoutSeconds: 60,
-    });
-  });
-});
-
 describe('runIssue — plan reuse after environment release (#2340)', () => {
   const ENV = {
     baseSha: 'abc1234567890def',
@@ -2109,20 +2037,6 @@ describe('runIssue — plan reuse after environment release (#2340)', () => {
     expect(planReuse.record).not.toHaveBeenCalled();
   });
 
-  it('a pre-PLAN base-health release neither loads nor clears', async () => {
-    const planReuse = fakeStore();
-    const checkBaseHealth = vi.fn<NonNullable<RunPorts['checkBaseHealth']>>().mockResolvedValue({
-      kind: 'red',
-      baseSha: 'a'.repeat(40),
-      failingChecks: ['tests'],
-      cached: false,
-    });
-    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ planReuse, checkBaseHealth }));
-    expect(outcome.state).toBe('released');
-    expect(planReuse.load).not.toHaveBeenCalled();
-    expect(planReuse.clear).not.toHaveBeenCalled();
-  });
-
   it.each(['load', 'clear', 'record'] as const)(
     'a failing %s is a warning and never changes the outcome',
     async (op) => {
@@ -2193,7 +2107,6 @@ describe('runIssue — config template-token preflight (#2586)', () => {
     const run = vi.spyOn(router, 'run');
     const recordPhase = vi.fn().mockResolvedValue(undefined);
     const events = vi.fn();
-    const checkBaseHealth = vi.fn();
     const outcome = await runIssue(
       baseRequest({ repoConfigFile: { absPath: configPath, relPath: '.factory/config.yaml' } }),
       basePolicy(),
@@ -2201,13 +2114,11 @@ describe('runIssue — config template-token preflight (#2586)', () => {
         router,
         recordPhase,
         events: () => events,
-        checkBaseHealth,
         resolveConstitution: () => constitutionAt(constitutionPath),
       }),
     );
     expect(outcome).toMatchObject({ state: 'parked', reason: 'config' });
     for (const phase of [planPhase, buildPhase, checkPhase, shipPhase]) expect(phase).not.toHaveBeenCalled();
-    expect(checkBaseHealth).not.toHaveBeenCalled();
     expect(run).not.toHaveBeenCalled();
     expect(recordPhase).not.toHaveBeenCalledWith('plan');
     expect(events).toHaveBeenCalledWith('config', expect.stringContaining(expected), STAMPED);
@@ -2269,7 +2180,6 @@ describe('runIssue — preflight config failure ends with the config cause (#258
     const router = fakeRouter();
     const run = vi.spyOn(router, 'run');
     const events = vi.fn();
-    const checkBaseHealth = vi.fn();
     const recordPhase = vi.fn().mockResolvedValue(undefined);
     const outcome = await runIssue(
       baseRequest(),
@@ -2277,7 +2187,6 @@ describe('runIssue — preflight config failure ends with the config cause (#258
       basePorts({
         router,
         recordPhase,
-        checkBaseHealth,
         events: () => events,
         resolveConstitution: () => constitution,
       }),
@@ -2287,7 +2196,6 @@ describe('runIssue — preflight config failure ends with the config cause (#258
     expect((outcome as { failingChecks?: unknown }).failingChecks).toBeUndefined();
     expect(run).not.toHaveBeenCalled();
     for (const phase of [planPhase, buildPhase, checkPhase, shipPhase]) expect(phase).not.toHaveBeenCalled();
-    expect(checkBaseHealth).not.toHaveBeenCalled();
     expect(recordPhase).not.toHaveBeenCalledWith('check');
     const kinds = events.mock.calls.map((c) => c[0]);
     expect(kinds).toContain('config');
