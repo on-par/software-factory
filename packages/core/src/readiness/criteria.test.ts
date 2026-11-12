@@ -127,7 +127,8 @@ describe('gradeIssueCriteria', () => {
   });
 
   it('passes checkbox items plus a fenced gherkin block', () => {
-    const ac = '- [ ] A customer can see why their order was held\n\n```gherkin\nGiven a held order\nWhen I open it\nThen I see the reason\n```';
+    const ac =
+      '- [ ] A customer can see why their order was held\n\n```gherkin\nGiven a held order\nWhen I open it\nThen I see the reason\n```';
     const r = gradeIssueCriteria(issue(ac, '`npm test`'));
     expect(r.findings).toHaveLength(1);
     expect(r.pass).toBe(true);

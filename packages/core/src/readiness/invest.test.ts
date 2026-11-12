@@ -118,7 +118,9 @@ describe('gradeIssueInvest', () => {
     expect(find(gradeIssueInvest(body({ criteria: ['When x, then y', ''] })), 'testable').reason).toBe(
       'criterion 2 is empty',
     );
-    expect(find(gradeIssueInvest(body({ criteria: ['When x, then y', 'it is good'] })), 'testable').status).toBe('pass');
+    expect(find(gradeIssueInvest(body({ criteria: ['When x, then y', 'it is good'] })), 'testable').status).toBe(
+      'pass',
+    );
     const change = find(
       gradeIssueInvest(body({ criteria: ['When x, then y', 'add a `foo` field to `bar.ts`'] })),
       'testable',

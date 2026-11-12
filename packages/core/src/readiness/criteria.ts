@@ -73,10 +73,7 @@ function gradeText(text: string): Omit<CriterionFinding, 'index' | 'text'> {
   const structured = when !== null && /\bthen\b/i.test(text.slice(when.index + when[0].length));
   const lead = text.replace(/^[\s*_`>#:-]+/, '');
   const prescriptive =
-    !structured &&
-    CHANGE_VERB_RE.test(lead) &&
-    CODE_REF_RES.some((re) => re.test(text)) &&
-    !OUTCOME_CUE_RE.test(text);
+    !structured && CHANGE_VERB_RE.test(lead) && CODE_REF_RES.some((re) => re.test(text)) && !OUTCOME_CUE_RE.test(text);
   if (structured) return { grade: 'structured', observable: true };
   if (prescriptive) return { grade: 'unstructured', observable: false, note: PRESCRIPTIVE_NOTE };
   return { grade: 'unstructured', observable: true };
