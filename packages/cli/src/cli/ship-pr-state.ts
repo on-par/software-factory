@@ -137,13 +137,6 @@ async function restoreFrozenSpec(opts: {
   const { octokit, repo, prNumber, issueNum, state, frozenSpec, log } = opts;
   const { specPath, brief } = frozenSpec;
   try {
-    if (
-      await access(specPath).then(
-        () => true,
-        () => false,
-      )
-    )
-      return;
     if (state === null || state.status === 'parked') return;
     const loaded = await loadPrFrozenSpec({ octokit, repo, prNumber, key: workKeyFromIssue(issueNum) });
     for (const ig of loaded.ignored) {
