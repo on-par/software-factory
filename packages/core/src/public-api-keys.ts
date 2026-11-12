@@ -1,5 +1,6 @@
 // src/public-api-keys.ts — expected ./testing and ./kpis export names, split from public-api.test.ts
 export const TESTING_API_KEYS = [
+  'loadReusablePlan', // #4025
   'StubModelExecutor',
   'StubCodingHarness',
   'codingHarnessContractCases',

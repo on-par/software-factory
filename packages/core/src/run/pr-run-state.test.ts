@@ -9,6 +9,7 @@ import {
   MAX_ENCODED_CHARS,
   decodePrRunState,
   encodePrRunState,
+  listPrStateComments,
   loadPrRunState,
   prRunStatusFor,
   reconcilePrRunState,
@@ -313,5 +314,23 @@ describe('savePrRunState / loadPrRunState', () => {
     const { octokit } = fakeOctokit({ selfId: 'fail', comments: [{ id: 3, user: { id: SELF }, body }] });
     const loaded = await loadPrRunState({ octokit, repo: 'o/r', prNumber: 9, key });
     expect(loaded).toEqual({ status: 'none', ignored: [{ commentId: 3, reason: 'identity-unavailable' }] });
+  });
+
+  it('listPrStateComments pages through all comments', async () => {
+    const all = Array.from({ length: 101 }, (_, i) => ({ id: i + 1, user: { id: SELF }, body: `c${i}` }));
+    const pages: number[] = [];
+    const rest = {
+      issues: {
+        listComments: async ({ page }: { page: number }) => {
+          pages.push(page);
+          return { data: all.slice((page - 1) * 100, page * 100) };
+        },
+      },
+    };
+    const octokit = Object.assign({} as Octokit, { rest });
+    const listed = await listPrStateComments(octokit, 'o/r', 9);
+    expect(listed).toHaveLength(101);
+    expect(listed[100]).toMatchObject({ id: 101, authorId: SELF, body: 'c100' });
+    expect(pages).toEqual([1, 2]);
   });
 });
