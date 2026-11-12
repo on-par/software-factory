@@ -208,8 +208,8 @@ export function prRunStateRecorder(
     runsDir: string;
     maxReviewReworkRuns: number;
     restored?: RestoredPrRunState;
-    /** The issue brief of an in-place run: when set, the frozen spec is saved to the PR too (#4025). */
-    brief?: string;
+    /** Saves the frozen spec to the PR once a PR number is known (in-place runs only, #4025). */
+    saveFrozenSpec?: (prNumber: number) => Promise<void>;
     log: Log;
   },
 ): (update: RunStateUpdate) => Promise<void> {
@@ -218,7 +218,6 @@ export function prRunStateRecorder(
   let prNumber = opts.restored?.prNumber;
   let attempts = 0;
   let lastSaved: string | undefined;
-  let lastSpecSha: string | undefined;
   const headSha = async (pr: number): Promise<string | undefined> => {
     const [owner, name] = repo.split('/');
     const { data } = await octokit.rest.pulls.get({ owner, repo: name, pull_number: pr });
@@ -265,16 +264,35 @@ export function prRunStateRecorder(
     } catch (err) {
       log('pr_state_failed', `could not save run state to the PR: ${errorMessage(err)}`);
     }
+    if (opts.saveFrozenSpec && prNumber !== undefined) await opts.saveFrozenSpec(prNumber);
+  };
+}
+
+/** Saves the frozen spec to the PR when it changed since the last save. Never throws. */
+function frozenSpecSaver(opts: {
+  octokit: Octokit;
+  repo: string;
+  issueNum: number;
+  frozenSpec: FrozenSpecOpts;
+  log: Log;
+}): (prNumber: number) => Promise<void> {
+  const { octokit, repo, issueNum, frozenSpec, log } = opts;
+  let lastSpecSha: string | undefined;
+  return async (prNumber) => {
     try {
-      if (opts.brief === undefined || prNumber === undefined) return;
-      const spec = await readSpecSummary(opts.specPath);
+      const spec = await readSpecSummary(frozenSpec.specPath);
       if (spec === null || spec.sha256 === lastSpecSha) return;
       lastSpecSha = spec.sha256;
       const saved = await savePrFrozenSpec({
         octokit,
         repo,
         prNumber,
-        state: { version: 1, key: workKeyFromIssue(issueNum), bodyHash: issueBodyHash(opts.brief), spec: spec.text },
+        state: {
+          version: 1,
+          key: workKeyFromIssue(issueNum),
+          bodyHash: issueBodyHash(frozenSpec.brief),
+          spec: spec.text,
+        },
       });
       if (saved === null) {
         log('pr_state_failed', 'frozen spec too large for one PR comment — a fresh-clone restart will re-plan');
@@ -320,6 +338,6 @@ export async function shipRunStateRecorder(
       ...shared,
       specPath: base.specPath,
       restored,
-      brief: opts.frozenSpec?.brief,
+      saveFrozenSpec: opts.frozenSpec && frozenSpecSaver({ ...shared, frozenSpec: opts.frozenSpec }),
     });
 }

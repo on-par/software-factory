@@ -329,7 +329,6 @@ const INTERNAL_API_KEYS = [
   'savePrRunState',
   'loadPrFrozenSpec', // #4025
   'savePrFrozenSpec',
-  'loadReusablePlan',
   'issueBodyHash',
   'UnsupportedQueueBackendError', // #3890
   ...'assertVisualProofForHead VisualProofMissingError'.split(' '), // #2232

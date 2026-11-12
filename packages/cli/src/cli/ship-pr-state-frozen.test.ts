@@ -1,15 +1,14 @@
 // packages/cli/src/cli/ship-pr-state-frozen.test.ts — an in-place run resumes on a fresh clone with its frozen plan from the PR (#4025)
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { defaultFactoryConfig } from '@on-par/factory-config';
 import type { Octokit } from '@octokit/rest';
 import { workKeyFromIssue, type EventKind } from '@on-par/factory-core';
-import { createTempDirs } from '@on-par/factory-core/testing';
+import { createTempDirs, loadReusablePlan } from '@on-par/factory-core/testing';
 import {
   createPlanReuseStore,
   issueBodyHash,
-  loadReusablePlan,
   savePrFrozenSpec,
   savePrRunState,
   type PrRunState,
@@ -274,6 +273,37 @@ describe('ship PR frozen plan', () => {
       });
       expect(restored?.prNumber).toBe(9);
       expect(events.some((e) => e.kind === 'pr_state_failed' && e.msg.includes('list down'))).toBe(true);
+    });
+
+    it('logs and carries on when the frozen spec cannot be saved to the PR or written locally', async () => {
+      const fake = await runOneAndKill(BRIEF);
+      const b = freshClone();
+      mkdirSync(join(b, 'state', 'plans'), { recursive: true });
+      chmodSync(join(b, 'state', 'plans'), 0o500);
+      try {
+        await shipRunStateRecorder(false, shipOpts(fake.octokit, b, { specPath: specIn(b), brief: BRIEF }));
+      } finally {
+        chmodSync(join(b, 'state', 'plans'), 0o700);
+      }
+      expect(events.some((e) => e.kind === 'pr_state_failed' && e.msg.includes('restore the frozen plan'))).toBe(true);
+
+      const down = fakeOctokit();
+      Object.assign(down.octokit.rest.issues, {
+        createComment: async ({ body }: { body: string }) => {
+          if (body.includes('factory:frozen-spec')) throw new Error('create down');
+          const c = { id: 500, user: { id: SELF }, body };
+          down.comments.push(c);
+          return { data: c };
+        },
+      });
+      const a = join(dir, 'E');
+      mkdirSync(join(a, 'state', 'plans'), { recursive: true });
+      writeFileSync(specIn(a), SPEC);
+      const record = (
+        await shipRunStateRecorder(false, shipOpts(down.octokit, a, { specPath: specIn(a), brief: BRIEF }))
+      )(baseUpdate(a));
+      await record({ status: 'shipping', prNumber: 9 });
+      expect(events.some((e) => e.msg.includes('could not save the frozen spec to the PR: create down'))).toBe(true);
     });
   });
 });

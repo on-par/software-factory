@@ -275,7 +275,6 @@ export { findAdoptablePr, lookupOpenPrByIssue, lookupOpenPrByBranch, type OpenPr
 export { loadPrRunState, prRunStatusFor, reconcilePrRunState, savePrRunState } from './run/pr-run-state.js'; // PR-comment run state (#3909)
 export type { PrRunRound, PrRunState } from './run/pr-run-state.js';
 export { loadPrFrozenSpec, savePrFrozenSpec } from './run/pr-frozen-spec.js'; // frozen spec of an in-place run (#4025)
-export { loadReusablePlan } from './run/plan-reuse-load.js';
 export { MAX_REWORK_ROUNDS } from './phases/check.js';
 export { readStackSliceGate } from './phases/stack-approval.js';
 export type { StackPullReviews } from './phases/stack-approval.js';
