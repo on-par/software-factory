@@ -22,8 +22,6 @@ import { randomUUID } from 'node:crypto';
 import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
-import type { checkBaseHealth } from '../checkers/base-health.js';
-import { baseHealthGate } from './base-health-gate.js';
 import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import { installLaneDependencies as installLaneDependenciesDefault } from './lane-install.js';
@@ -45,7 +43,7 @@ import { classifyCheckFailure } from './check-verdict.js';
 import { withSingleTerminalEvent } from './terminal-events.js';
 import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
 import { parkPayload, postEnvironmentReleaseComment, publishParkComment } from './park-comment.js';
-import { createRunPhaseLogger, outputLogDirOption } from './run-phase-log.js';
+import { createRunPhaseLogger } from './run-phase-log.js';
 import { providerFailureRecorder } from './provider-failure-recorder.js';
 import { gateBuildTarget, pickOrderedProvider, type ProviderPick } from './provider-breaker-gate.js';
 import {
@@ -218,8 +216,6 @@ export interface RunRequest extends ReworkRequestFields {
   baselineCachePath?: string;
   /** check.baselineCacheTtlHours (#3540); undefined = 24. */
   baselineCacheTtlHours?: number;
-  /** Explicit base-repair run (`run-issue` with FACTORY_BASE_HEALTH_REPAIR=1): a confirmed red base enters PLAN. */
-  baseHealthRepair?: boolean;
   /** The repo config file (`.factory/config.yaml|yml|json`) to scan in the pre-PLAN template-token preflight (#2586); undefined = constitution only. */
   repoConfigFile?: { absPath: string; relPath: string };
   /** state/flaky-tests.json (#2303); undefined = no flake ledger or filing. */
@@ -296,8 +292,6 @@ export interface RunPorts extends CiReworkPorts, LinearRunPorts {
   checkPhase?: typeof checkPhaseDefault;
   hostBuildSlot?: <T>(phase: 'build' | 'check', fn: () => Promise<T>) => Promise<T>;
   shipPhase?: typeof shipPhaseDefault;
-  /** Pre-PLAN health check of origin/main (#2339). Absent = skipped (existing callers/tests unchanged). */
-  checkBaseHealth?: typeof checkBaseHealth;
   /** GitHub CI verdict for a base SHA (#3540), forwarded to CHECK's baseline cache cross-check. Absent = no cross-check. */
   requiredChecksVerdict?: (sha: string) => Promise<RequiredChecksVerdict>;
   /** Frozen-plan reuse after an environment release (#2340). Absent = always plan (existing callers/tests unchanged). */
@@ -575,40 +569,6 @@ async function runIssueOnce(
       for (const m of unknownConfigKeyMessages(request.repoConfigFile)) log('config_unknown_key', m);
       for (const m of codexSandboxWarningMessages(request.repoConfigFile)) log('config_invalid_value', m);
       for (const m of sizeGateModeWarningMessages(request.repoConfigFile)) log('config_invalid_value', m);
-    }
-
-    // Pre-PLAN base health (#2339): a red origin/main releases the issue before any model spend;
-    // the CLI turns `released` into LaneEnvironmentPauseError, whose runLane branch writes the base hold.
-    if (ports.checkBaseHealth && !request.localOnly) {
-      const health = await ports
-        .checkBaseHealth({
-          worktree: ports.workspace.path,
-          constitution,
-          router: ports.router,
-          env: laneEnv(appPort, process.env, appBaseUrl, ports.workspace.path, runId),
-          ...(request.parentBaseRef !== undefined ? { baseRef: request.parentBaseRef } : {}),
-          cachePath: request.baselineCachePath,
-          cacheTtlHours: request.baselineCacheTtlHours,
-          timeoutSeconds: request.timeouts.check,
-          testsTimeoutSeconds: request.timeouts.tests,
-          compileTimeoutSeconds: request.timeouts.compile,
-          ...outputLogDirOption(request.logsDir, workKey, 'check-base-health'),
-          log: (type, msg) => log(type, msg),
-        })
-        .catch((err): undefined => {
-          log('environment_warning', `base health check failed: ${errorMessage(err)} — continuing to PLAN`);
-          return undefined;
-        });
-      // Red or inconclusive releases; an explicit base-repair run enters PLAN on a confirmed red only.
-      const ref = request.parentBaseRef ?? 'origin/main';
-      const gate = baseHealthGate(health, {
-        ref,
-        workKey,
-        branch: request.branch,
-        repair: !!request.baseHealthRepair,
-        log,
-      });
-      if (gate) return gate;
     }
 
     // Run-start HEAD (#1210): captured exactly once, before PLAN, for local-only

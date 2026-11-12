@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- Runs no longer run the base-health compile/lint/tests suite before PLAN; CHECK is the only test gate and fixes forward any failing test, including one already red on main, and `FACTORY_BASE_HEALTH_REPAIR` is deprecated and has no effect (#4029).
+
 ### Fixed
 
 - The in-place dirty-checkout refusal now prints each file's git status code next to its path (`M README.md, ?? new.txt`) instead of paths alone (#4024).

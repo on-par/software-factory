@@ -4,7 +4,7 @@ import { dirname, join, relative } from 'node:path';
 import * as FactoryCore from '@on-par/factory-core';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
-import { LaneEnvironmentPauseError, type CliDeps } from './index.js';
+import { type CliDeps } from './index.js';
 import {
   coreFakes,
   daemonDeps,
@@ -95,60 +95,6 @@ describe('cli commands (via main dispatch)', () => {
         vi.unstubAllEnvs();
         rmSync(stubDir, { recursive: true, force: true });
       }
-    });
-
-    it('red base from the pre-PLAN health check throws LaneEnvironmentPauseError before planPhase', async () => {
-      const baseSha = 'a'.repeat(40);
-      const red = vi.fn<NonNullable<CliDeps['checkBaseHealth']>>(async () => ({
-        kind: 'red' as const,
-        baseSha,
-        failingChecks: ['tests'],
-        cached: false,
-      }));
-
-      const err = await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo }, { checkBaseHealth: red }).catch(
-        (e: unknown) => e,
-      );
-
-      expect(err).toBeInstanceOf(LaneEnvironmentPauseError);
-      expect((err as LaneEnvironmentPauseError).baseSha).toBe(baseSha);
-      expect((err as LaneEnvironmentPauseError).failingChecks).toEqual(['tests']);
-      expect(phases.planPhase).not.toHaveBeenCalled();
-    });
-
-    it('an inconclusive pre-PLAN base check throws LaneEnvironmentPauseError marked inconclusive, with redacted evidence', async () => {
-      const baseSha = 'a'.repeat(40);
-      const inconclusive = vi.fn<NonNullable<CliDeps['checkBaseHealth']>>(async () => ({
-        kind: 'inconclusive' as const,
-        baseSha,
-        failingChecks: [],
-        cached: false,
-        evidence: [
-          {
-            checker: 'tests',
-            cause: 'timeout' as const,
-            command: 'bash scripts/verify.sh --no-e2e',
-            timeoutSeconds: 300,
-            tail: 'timed out after 300s',
-          },
-        ],
-      }));
-
-      const err = await shipIssue(
-        5,
-        {},
-        { repoRoot: h.repoRoot, ghRepo: h.ghRepo },
-        { checkBaseHealth: inconclusive },
-      ).catch((e: unknown) => e);
-
-      expect(err).toBeInstanceOf(LaneEnvironmentPauseError);
-      const pause = err as LaneEnvironmentPauseError;
-      expect(pause.failingChecks).toEqual([]);
-      expect(pause.inconclusive).toBe(true);
-      expect(pause.baseEvidence).toBe(
-        'tests: timeout after 300s — `bash scripts/verify.sh --no-e2e`: timed out after 300s',
-      );
-      expect(phases.planPhase).not.toHaveBeenCalled();
     });
 
     it('a .factory/config template token parks the run before planPhase with file:line', async () => {

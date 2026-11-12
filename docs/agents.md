@@ -187,12 +187,11 @@ On a disposable, one-job container the clone is already the isolation boundary. 
 
 ## Repairing a red base
 
-Before PLAN, every run checks that the base branch is healthy (compile, lint and tests on `origin/<default>`). A red or inconclusive base normally releases the issue before any model call. A run whose job is to repair that base can opt in to proceed: start `factory run-issue <N>` with `FACTORY_BASE_HEALTH_REPAIR=1`.
+No base-health check runs before PLAN. Every run enters PLAN, and CHECK runs the full verify once and is the only test gate. A failing test, including one already red on `main`, goes back to BUILD until CHECK is green; it is never waived against a base baseline.
 
-- Only the exact value `1` turns it on. An unset variable, an empty value, `0`, `true` or any other value behaves as before.
-- On a confirmed red base the run records a `base_repair_proceeding` event with the failing checks and their evidence, then enters PLAN.
-- An inconclusive base (a check that could not run, for example a timeout) still releases. A red that only waits on CI for a timed-out compile also still releases.
-- CHECK still compares the change against the base baseline, and no permission, gate or merge rule is relaxed. The signal applies to `run-issue` only. `ship`, `run` and the other commands ignore it.
+- `FACTORY_BASE_HEALTH_REPAIR=1` is deprecated. `factory run-issue` only prints a warning and carries on; the flag will be removed once callers migrate.
+- Non-test checkers (compile, lint, custom checkers) that also fail on the base can still release the run as an environment failure at CHECK.
+- No permission, gate or merge rule is relaxed.
 
 ## Recipes
 

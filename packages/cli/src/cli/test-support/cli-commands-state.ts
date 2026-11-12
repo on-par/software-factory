@@ -377,12 +377,7 @@ export function makePhaseFakes() {
       return h.checkResult;
     }),
     shipPhase: vi.fn<NonNullable<CliDeps['shipPhase']>>(async (_opts) => h.shipResult),
-    checkBaseHealth: vi.fn<NonNullable<CliDeps['checkBaseHealth']>>(async () => ({
-      kind: 'skipped' as const,
-      failingChecks: [],
-      cached: false,
-    })),
-  } satisfies Pick<CliDeps, 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase' | 'checkBaseHealth'>;
+  } satisfies Pick<CliDeps, 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase'>;
 }
 /** Fresh phase doubles per test, spread into every main/shipIssue call (CliDeps phase overrides). */
 export let phases = makePhaseFakes();

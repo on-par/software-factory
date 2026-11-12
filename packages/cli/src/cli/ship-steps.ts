@@ -313,7 +313,6 @@ export interface RunRequestInput {
     baseBranch?: string;
     prerequisiteStack?: PrerequisiteStackTarget;
     parkOverBudget?: boolean;
-    baseHealthRepair?: boolean;
   };
   ctx?: {
     blockedBehind?: number[];
@@ -396,7 +395,6 @@ export function buildRunRequest({
     blockUnresolvedRegressions: resolveDesignRegressionBlock(factoryConfig),
     hermeticGit: resolveHermeticGit(repoConfig),
     baselineCacheTtlHours: resolveBaselineCacheTtlHours(repoConfig),
-    ...(opts.baseHealthRepair === true ? { baseHealthRepair: true } : {}),
     readinessUpdateIssueBody: resolveReadinessUpdateIssueBody(factoryConfig),
     publishFromBuild: resolveBuildPublish(factoryConfig),
     sizeGateMode,

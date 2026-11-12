@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { CliExitError } from './errors.js';
 import {
   BASE_HEALTH_REPAIR_ENV,
-  baseHealthRepairRequested,
+  baseHealthRepairDeprecation,
   baseBranchConflict,
   baseBranchOrExit,
   baseRemoteRef,
@@ -170,16 +170,15 @@ describe('resolveShipSizeGate', () => {
   });
 });
 
-describe('baseHealthRepairRequested (FACTORY_BASE_HEALTH_REPAIR)', () => {
-  it('is on only for the exact string 1', () => {
+describe('baseHealthRepairDeprecation (FACTORY_BASE_HEALTH_REPAIR)', () => {
+  it('returns a warning only for the exact value 1', () => {
     expect(BASE_HEALTH_REPAIR_ENV).toBe('FACTORY_BASE_HEALTH_REPAIR');
-    expect(baseHealthRepairRequested({ FACTORY_BASE_HEALTH_REPAIR: '1' })).toBe(true);
+    expect(baseHealthRepairDeprecation({ FACTORY_BASE_HEALTH_REPAIR: '1' })).toContain('FACTORY_BASE_HEALTH_REPAIR');
   });
 
-  it.each([undefined, '', ' ', '0', 'false', 'true', 'TRUE', 'yes', 'on', ' 1', '1 ', '01', '1\n', '2'])(
-    'fails closed for %j',
-    (value) => {
-      expect(baseHealthRepairRequested(value === undefined ? {} : { FACTORY_BASE_HEALTH_REPAIR: value })).toBe(false);
-    },
-  );
+  it.each([undefined, '', '0', 'true', ' 1', '1 '])('returns nothing for %j', (value) => {
+    expect(
+      baseHealthRepairDeprecation(value === undefined ? {} : { FACTORY_BASE_HEALTH_REPAIR: value }),
+    ).toBeUndefined();
+  });
 });

@@ -1,15 +1,18 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { createTempDirs } from '@on-par/factory-core/testing';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
+import type { Constitution } from '../types/index.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
+import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
@@ -52,6 +55,8 @@ const MODELS: ModelsConfig = {
   },
 };
 
+const tempDirs = createTempDirs();
+afterEach(() => tempDirs.cleanup());
 const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-base-health-'));
 afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
 
@@ -86,148 +91,77 @@ const policy: RunPolicy = {
   effective: {} as RunPolicy['effective'],
 };
 
-describe('runIssue — pre-PLAN base health tests timeout (#3095)', () => {
-  it('forwards request.timeouts.tests to the base health port as testsTimeoutSeconds', async () => {
-    const checkBaseHealth = vi.fn<NonNullable<RunPorts['checkBaseHealth']>>().mockResolvedValue({
-      kind: 'red',
-      baseSha: 'a'.repeat(40),
-      failingChecks: ['tests'],
-      cached: false,
-    });
-    const ports: RunPorts = {
-      router: new ModelRouter(MODELS, ROUTES),
-      octokit: {} as Octokit,
-      workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
-      events: () => () => {},
-      breaker: new ProviderBreaker(join(breakerDir, 'breaker.json')),
-      resolveConstitution: () => null,
-      checkBaseHealth,
-    };
-    await runIssue(request, policy, ports);
-    expect(checkBaseHealth.mock.calls[0][0]).toMatchObject({
-      timeoutSeconds: 60,
-      testsTimeoutSeconds: 600,
-      compileTimeoutSeconds: 900,
-    });
-  });
+const PLAN_PARKED: PlanResult = {
+  ok: false,
+  route: 'claude',
+  specPath: '/tmp/wt/spec.md',
+  model: 'm',
+  designArtifact: null,
+  escalate: 'stop here',
+};
 
-  it('passes check.baselineCacheTtlHours to the port as cacheTtlHours (#3540)', async () => {
-    const checkBaseHealth = vi.fn<NonNullable<RunPorts['checkBaseHealth']>>().mockResolvedValue({
-      kind: 'red',
-      baseSha: 'a'.repeat(40),
-      failingChecks: ['tests'],
-      cached: false,
-    });
-    const ports: RunPorts = {
-      router: new ModelRouter(MODELS, ROUTES),
-      octokit: {} as Octokit,
-      workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
-      events: () => () => {},
-      breaker: new ProviderBreaker(join(breakerDir, 'breaker.json')),
-      resolveConstitution: () => null,
-      checkBaseHealth,
-    };
-    await runIssue({ ...request, baselineCacheTtlHours: 6 }, policy, ports);
-    expect(checkBaseHealth.mock.calls[0][0]).toMatchObject({ cacheTtlHours: 6 });
-  });
-
-  it.each([
-    ['with request.logsDir: <logsDir>/issue-<n>/check-base-health', '/tmp/factory-logs'],
-    ['without request.logsDir: no outputLogDir', undefined],
-  ])('passes the base health full-output log dir %s', async (_label, logsDir) => {
-    const checkBaseHealth = vi.fn<NonNullable<RunPorts['checkBaseHealth']>>().mockResolvedValue({
-      kind: 'red',
-      baseSha: 'a'.repeat(40),
-      failingChecks: ['tests'],
-      cached: false,
-    });
-    const ports: RunPorts = {
-      router: new ModelRouter(MODELS, ROUTES),
-      octokit: {} as Octokit,
-      workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
-      events: () => () => {},
-      breaker: new ProviderBreaker(join(breakerDir, 'breaker.json')),
-      resolveConstitution: () => null,
-      checkBaseHealth,
-    };
-    await runIssue({ ...request, ...(logsDir ? { logsDir } : {}) }, policy, ports);
-    const passed = checkBaseHealth.mock.calls[0][0];
-    if (logsDir) expect(passed.outputLogDir).toBe(join(logsDir, 'issue-1', 'check-base-health'));
-    else expect(passed).not.toHaveProperty('outputLogDir');
-  });
-});
-
-describe('runIssue — pre-PLAN base health evidence', () => {
-  const BASE = 'c'.repeat(40);
-  const portsWith = (result: Awaited<ReturnType<NonNullable<RunPorts['checkBaseHealth']>>>) => {
+describe('runIssue — no pre-PLAN base health (#4029)', () => {
+  const makePorts = (extra: Partial<RunPorts> = {}) => {
     const log = vi.fn<(type: string, msg: string) => void>();
-    const router = new ModelRouter(MODELS, ROUTES);
+    const planPhase = vi.fn<typeof realPlanPhase>().mockResolvedValue(PLAN_PARKED);
     const ports: RunPorts = {
-      router,
+      router: new ModelRouter(MODELS, ROUTES),
       octokit: {} as Octokit,
       workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
       events: () => log,
       breaker: new ProviderBreaker(join(breakerDir, 'breaker.json')),
       resolveConstitution: () => null,
-      checkBaseHealth: vi.fn<NonNullable<RunPorts['checkBaseHealth']>>().mockResolvedValue(result),
+      planPhase,
+      ...extra,
     };
-    return { ports, log, routerRun: vi.spyOn(router, 'run') };
+    return { ports, log, planPhase };
   };
-  const released = (log: ReturnType<typeof vi.fn>) =>
-    log.mock.calls.filter((c) => c[0] === 'environment-released').map((c) => String(c[1]));
 
-  it('an inconclusive base is held before PLAN, never reported as failing tests, with the evidence in the message', async () => {
-    const evidence = [
-      {
-        checker: 'tests',
-        cause: 'timeout' as const,
-        command: 'bash scripts/verify.sh --no-e2e',
-        timeoutSeconds: 300,
-        tail: 'timed out after 300s (raise timeouts.tests_seconds or FACTORY_TESTS_TIMEOUT)',
-      },
-    ];
-    const { ports, log, routerRun } = portsWith({
-      kind: 'inconclusive',
-      baseSha: BASE,
-      failingChecks: [],
-      cached: false,
-      evidence,
-    });
-    const outcome = await runIssue(request, policy, ports);
-    expect(outcome).toMatchObject({ state: 'released', reason: 'environment', baseSha: BASE, failingChecks: [] });
-    expect(outcome).toMatchObject({ baseEvidence: evidence });
-    expect(outcome).toMatchObject({ baseInconclusive: true });
-    expect(routerRun).not.toHaveBeenCalled();
-    const [msg] = released(log);
-    expect(msg).toBeDefined();
-    expect(msg).not.toMatch(/fails tests/);
-    expect(msg).toContain('could not run');
-    expect(msg).toContain('tests: timeout after 300s');
-    expect(msg).toContain('bash scripts/verify.sh --no-e2e');
-    expect(msg).toContain('timed out after 300s');
+  it('runs no base health check before PLAN even when a red checker is supplied', async () => {
+    const spy = vi
+      .fn()
+      .mockResolvedValue({ kind: 'red', baseSha: 'a'.repeat(40), failingChecks: ['tests'], cached: false });
+    const { ports, planPhase } = makePorts();
+    const loose = { ...ports, checkBaseHealth: spy } as RunPorts;
+    await runIssue(request, policy, loose);
+    expect(spy).not.toHaveBeenCalled();
+    expect(planPhase).toHaveBeenCalledTimes(1);
   });
 
-  it('a red base keeps releasing and now names the failing evidence', async () => {
-    const { ports, log } = portsWith({
-      kind: 'red',
-      baseSha: BASE,
-      failingChecks: ['tests'],
-      cached: false,
-      evidence: [
-        {
-          checker: 'tests',
-          command: 'bash scripts/verify.sh --no-e2e',
-          exitCode: 1,
-          tail: 'verify.sh failed: FAIL  src/math.test.ts > add > adds',
-        },
-      ],
-    });
-    const outcome = await runIssue(request, policy, ports);
-    expect(outcome).toMatchObject({ state: 'released', reason: 'environment', failingChecks: ['tests'] });
-    expect(outcome).not.toHaveProperty('baseInconclusive');
-    const [msg] = released(log);
-    expect(msg).toContain(`origin/main ${BASE.slice(0, 8)} fails tests before PLAN`);
-    expect(msg).toContain('exit 1');
-    expect(msg).toContain('FAIL  src/math.test.ts > add > adds');
+  it('a red origin/main no longer releases the issue before PLAN', async () => {
+    const spy = vi
+      .fn()
+      .mockResolvedValue({ kind: 'red', baseSha: 'c'.repeat(40), failingChecks: ['tests'], cached: false });
+    const { ports, log } = makePorts();
+    const outcome = await runIssue(request, policy, { ...ports, checkBaseHealth: spy } as RunPorts);
+    expect(outcome).not.toMatchObject({ state: 'released', reason: 'environment' });
+    expect(log.mock.calls.filter((c) => c[0] === 'environment-released')).toEqual([]);
+  });
+
+  it('config preflight still parks a bad config before PLAN with no base health run', async () => {
+    const dir = await tempDirs.make('run-issue-no-base-health-');
+    try {
+      const path = join(dir, 'constitution.md');
+      writeFileSync(path, '---\nproduct: acme\nversion: 1\ncheckers:\n  - bogus_checker\n---\nbody');
+      const spy = vi.fn();
+      const { ports, planPhase } = makePorts({
+        resolveConstitution: (): Constitution => ({
+          source: 'repo',
+          product: 'acme',
+          version: 1,
+          checkers: ['bogus_checker'],
+          body: 'stds',
+          path,
+          requireTests: true,
+          repoInstance: { relPath: '.factory/constitution.md', absPath: path },
+        }),
+      });
+      const outcome = await runIssue(request, policy, { ...ports, checkBaseHealth: spy } as RunPorts);
+      expect(outcome).toMatchObject({ state: 'parked', reason: 'config' });
+      expect(planPhase).not.toHaveBeenCalled();
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

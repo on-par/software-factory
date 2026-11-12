@@ -2380,7 +2380,6 @@ async function cmdRunIssue(
     inPlace?: boolean;
     json?: boolean;
     export?: string;
-    baseHealthRepair?: boolean; // FACTORY_BASE_HEALTH_REPAIR=1 (run-issue action); flows to every shipIssue below
   },
 ) {
   if (opts.runChildren) throw new CliExitError('--run-children was removed; oversized issues stack with --stack', 2);
@@ -4031,8 +4030,6 @@ export interface CliDeps {
   buildPhase?: RunPorts['buildPhase'];
   checkPhase?: RunPorts['checkPhase'];
   shipPhase?: RunPorts['shipPhase'];
-  /** Pre-PLAN base health check (#2339) forwarded into RunPorts by shipIssue. Defaults to the factory-core checkBaseHealth. */
-  checkBaseHealth?: RunPorts['checkBaseHealth'];
   /** Config loaders and resolvers. Each defaults to the factory-core export of the same name. */
   loadModelsConfig?: typeof loadModelsConfig;
   loadRoutesConfig?: typeof loadRoutesConfig;

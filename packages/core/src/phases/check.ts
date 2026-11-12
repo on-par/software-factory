@@ -43,6 +43,7 @@ import { resolveReworkRoute } from './plan-routes.js';
 export { LENS_REVIEW_CHECKER, lensShowstopperRefs, remainingShowstoppers };
 import type {
   BaseFailureCause,
+  CheckerOutput,
   CheckSummary,
   Constitution,
   FailoverReason,
@@ -159,6 +160,13 @@ export function isEnvironmentFailure(summary: CheckSummary, baseline: BaselineRe
   const failing = failingCheckerNames(summary);
   if (failing.length === 0) return false;
   return failing.every((name) => baseline.checkers.some((c) => c.checker === name && c.verdict === 'fails-on-base'));
+}
+
+/** Round-1 FAIL results worth comparing against base: never evidence_plan, side_effects or tests (#4029). */
+export function baselineCandidates(summary: CheckSummary): CheckerOutput[] {
+  return summary.results.filter(
+    (result) => !['evidence_plan', 'side_effects', 'tests'].includes(result.checker) && result.result === 'FAIL',
+  );
 }
 
 /** Checkers rework ignores on partial overlap (#1929): fails-on-base with no new failing tests. Empty without a usable baseline. */
@@ -414,20 +422,16 @@ async function checkPhaseImpl(opts: {
   }
 
   let baseline: BaselineReport | undefined;
-  if (
-    summary.results.some(
-      (result) => !['evidence_plan', 'side_effects'].includes(result.checker) && result.result === 'FAIL',
-    )
-  ) {
+  // Tests are never baselined (#4029): a failing test, even one red on main, is fixed forward in rework.
+  const candidates = baselineCandidates(summary);
+  if (candidates.length > 0) {
     if (diffBase === undefined) {
       log('check', 'baseline skipped: no base SHA for this run');
     } else {
       baseline = await (runBaseline ?? runBaselineCheckers)({
         baseSha: diffBase,
         laneWorktree: worktree,
-        failing: summary.results.filter(
-          (result) => !['evidence_plan', 'side_effects'].includes(result.checker) && result.result === 'FAIL',
-        ),
+        failing: candidates,
         ctx: {
           ...ctx,
           outputLogDir: checkBaseDir,
@@ -451,24 +455,22 @@ async function checkPhaseImpl(opts: {
 
   // Serial re-run (#2301): a tests failure that passes alone is flaky; act on it (#2302).
   let flakeRerun: FlakeRerun | undefined;
-  if (environmentCause) {
-    const testsFail = summary.results.find((r) => r.checker === 'tests' && r.result === 'FAIL');
-    if (testsFail) {
-      flakeRerun = await rerunTestsChecker({ ...ctx, runCommand: runCommand ?? ctx.runCommand }, testsFail.details);
+  const testsFail = summary.results.find((r) => r.checker === 'tests' && r.result === 'FAIL');
+  if (testsFail) {
+    flakeRerun = await rerunTestsChecker({ ...ctx, runCommand: runCommand ?? ctx.runCommand }, testsFail.details);
+    log(
+      'check',
+      `flaky re-run: ${flakeRerun.verdict} (${flakeRerun.mode}, ${flakeRerun.tests.length} tests)` +
+        (flakeRerun.reason ? ` — ${flakeRerun.reason}` : ''),
+    );
+    if (flakeRerun.verdict === 'passed') {
+      summary = markTestsFlaky(summary, flakeRerun);
+      summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
+      environmentCause = isEnvironmentFailure(summary, baseline);
       log(
         'check',
-        `flaky re-run: ${flakeRerun.verdict} (${flakeRerun.mode}, ${flakeRerun.tests.length} tests)` +
-          (flakeRerun.reason ? ` — ${flakeRerun.reason}` : ''),
+        `tests passed on serial re-run — flaky, treating tests as PASS${environmentCause ? '' : '; continuing'}`,
       );
-      if (flakeRerun.verdict === 'passed') {
-        summary = markTestsFlaky(summary, flakeRerun);
-        summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
-        environmentCause = isEnvironmentFailure(summary, baseline);
-        log(
-          'check',
-          `tests passed on serial re-run — flaky, treating tests as PASS${environmentCause ? '' : '; continuing'}`,
-        );
-      }
     }
   }
 

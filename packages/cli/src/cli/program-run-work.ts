@@ -6,7 +6,7 @@ import type { ProgramHandlers } from './index.js';
 import { cmdJob, type JobCommandOptions } from './job-command.js';
 import type { RunOptions } from './run.js';
 import { validateUntilDoneFlags, type UntilDoneFlagOptions } from './run-until-done.js';
-import { baseHealthRepairRequested } from './ship-options.js';
+import { baseHealthRepairDeprecation } from './ship-options.js';
 import type { SteerOptions } from './steer.js';
 
 /** `run`'s flags: the queue drain's own (RunOptions) plus the single-issue lifecycle's (#3908). */
@@ -116,9 +116,9 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
       "When the run ends, on any exit path, copy this run's state file, events and cost records into <dir>",
     )
     .action(async (issueNum, opts) => {
-      // The base-repair signal is an env contract, not a flag: only the exact value `1` turns it on.
-      const baseHealthRepair = baseHealthRepairRequested(process.env);
-      await handlers.cmdRunIssue(handlers.parseIssueArg(issueNum), { ...opts, baseHealthRepair });
+      const note = baseHealthRepairDeprecation(process.env);
+      if (note) process.stderr.write(`warning: ${note}\n`);
+      await handlers.cmdRunIssue(handlers.parseIssueArg(issueNum), opts);
     });
 
   program

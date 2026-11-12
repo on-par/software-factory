@@ -86,14 +86,17 @@ describe('partial base overlap (#1929)', () => {
     ({
       baseSha: o.baseSha,
       checkers: [
-        { checker: 'tests', verdict: 'fails-on-base', baseResult: 'FAIL' },
+        { checker: 'compile', verdict: 'fails-on-base', baseResult: 'FAIL' },
         { checker: 'lint', verdict: 'clean-on-base', baseResult: 'PASS' },
       ],
     }) as BaselineReport;
 
   const makePartialWorktree = async () => {
     const { worktree, specPath } = await makeFailingWorktree();
-    await writeFile(join(worktree, 'package.json'), JSON.stringify({ scripts: { test: 'exit 1', lint: 'exit 1' } }));
+    await writeFile(
+      join(worktree, 'package.json'),
+      JSON.stringify({ scripts: { build: 'exit 1', test: 'exit 0', lint: 'exit 1' } }),
+    );
     return { worktree, specPath };
   };
 
@@ -185,14 +188,14 @@ describe('partial base overlap (#1929)', () => {
   it('cross-run held matches the filtered or the full unfiltered signature', { timeout: 120_000 }, async () => {
     const first = await heldRun('never-matches');
     expect(first.result.failureSignature).toContain('lint:');
-    expect(first.result.failureSignature).not.toContain('tests:');
+    expect(first.result.failureSignature).not.toContain('compile:');
 
     const filtered = await heldRun(first.result.failureSignature as string);
     expect(filtered.result.crossRunStuck).toBe(true);
     expect(filtered.stub.calls).toHaveLength(0);
 
     const full = stuckSignature(first.result.summary, new Set());
-    expect(full).toContain('tests:');
+    expect(full).toContain('compile:');
     const unfiltered = await heldRun(full);
     expect(unfiltered.result.crossRunStuck).toBe(true);
     expect(unfiltered.stub.calls).toHaveLength(0);
@@ -216,14 +219,14 @@ describe('partial base overlap (#1929)', () => {
         return partialBaseline(o);
       },
     });
-    expect(seen[0]).toEqual(expect.arrayContaining(['tests', 'lint']));
+    expect(seen[0]).toEqual(expect.arrayContaining(['compile', 'lint']));
     expect(stub.calls.length).toBeGreaterThanOrEqual(1);
     expect(result.reworkRounds).toBe(1);
     expect(result.environment).toBeUndefined();
     expect(stub.calls[0].prompt).toContain('### lint');
-    expect(stub.calls[0].prompt).not.toContain('### tests');
+    expect(stub.calls[0].prompt).not.toContain('### compile');
     expect(result.failureSignature).toContain('lint:');
-    expect(result.failureSignature).not.toContain('tests:');
+    expect(result.failureSignature).not.toContain('compile:');
   });
 
   it('stops rework when only base-failing checkers remain', { timeout: 120_000 }, async () => {
@@ -234,7 +237,7 @@ describe('partial base overlap (#1929)', () => {
         calls++;
         await writeFile(
           join(worktree, 'package.json'),
-          JSON.stringify({ scripts: { test: 'exit 1', lint: 'exit 0' } }),
+          JSON.stringify({ scripts: { build: 'exit 1', test: 'exit 0', lint: 'exit 0' } }),
         );
         return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
       },
@@ -254,7 +257,7 @@ describe('partial base overlap (#1929)', () => {
     expect(calls).toBe(1);
     expect(messages.some((m) => m.includes('only base-failing checkers remain'))).toBe(true);
     expect(result.passed).toBe(false);
-    expect(result.failureSignature).toContain('tests:');
+    expect(result.failureSignature).toContain('compile:');
   });
 });
 
@@ -312,7 +315,7 @@ describe('rework cause environment (#1927)', () => {
     verdict: 'fails-on-base' | 'clean-on-base',
     extra: { logsDir?: string; priorFailureSignature?: string; confirmedLocally?: true } = {},
   ) => {
-    const { worktree, specPath } = await makeFailingWorktree();
+    const { worktree, specPath } = await makeCompileFailingWorktree();
     const { router, stub } = makeRouter();
     const order: string[] = [];
     const reworks: ReworkInfo[] = [];
@@ -662,7 +665,7 @@ describe('rework cause environment (#1927)', () => {
 describe('checkPhase baseline (#1925)', () => {
   const cleanReport = (baseSha: string): BaselineReport => ({
     baseSha,
-    checkers: [{ checker: 'tests', verdict: 'clean-on-base', baseResult: 'PASS' }],
+    checkers: [{ checker: 'compile', verdict: 'clean-on-base', baseResult: 'PASS' }],
   });
 
   it('does not call the baseline when round 1 passes', { timeout: 120_000 }, async () => {
@@ -687,7 +690,7 @@ describe('checkPhase baseline (#1925)', () => {
   });
 
   it('reports a clean base without changing the outcome', { timeout: 120_000 }, async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
+    const { worktree, specPath } = await makeCompileFailingWorktree();
     const { router } = makeRouter();
     const baseOpts = { issue: workKeyFromIssue(77), worktree, specPath, router, constitution: null, autoRework: false };
     const without = await checkPhase({ ...baseOpts, log: () => {} });
@@ -719,7 +722,7 @@ describe('checkPhase baseline (#1925)', () => {
   });
 
   it('logs when a checker also fails on base', { timeout: 120_000 }, async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
+    const { worktree, specPath } = await makeCompileFailingWorktree();
     const { router } = makeRouter();
     const logs: string[] = [];
     await checkPhase({
@@ -737,7 +740,7 @@ describe('checkPhase baseline (#1925)', () => {
         baseSha: o.baseSha,
         checkers: [
           {
-            checker: 'tests',
+            checker: 'compile',
             verdict: 'fails-on-base',
             baseResult: 'FAIL',
             sharedFailingTests: ['a'],
@@ -746,11 +749,11 @@ describe('checkPhase baseline (#1925)', () => {
         ],
       }),
     });
-    expect(logs.some((m) => m.includes('tests also fails on base (1 shared, 1 new failing tests)'))).toBe(true);
+    expect(logs.some((m) => m.includes('compile also fails on base (1 shared, 1 new failing tests)'))).toBe(true);
   });
 
   it('passes a BaselineCache only when baselineCachePath is set (#1926)', { timeout: 120_000 }, async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
+    const { worktree, specPath } = await makeCompileFailingWorktree();
     const { router } = makeRouter();
     const caches: unknown[] = [];
     const base = {
@@ -773,7 +776,7 @@ describe('checkPhase baseline (#1925)', () => {
   });
 
   it('marks cached baseline entries in the log (#1926)', { timeout: 120_000 }, async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
+    const { worktree, specPath } = await makeCompileFailingWorktree();
     const { router } = makeRouter();
     const logs: string[] = [];
     await checkPhase({
@@ -789,14 +792,14 @@ describe('checkPhase baseline (#1925)', () => {
       diffBase: 'abc1234567',
       runBaseline: async (o) => ({
         baseSha: o.baseSha,
-        checkers: [{ checker: 'tests', verdict: 'clean-on-base', baseResult: 'PASS', cached: true }],
+        checkers: [{ checker: 'compile', verdict: 'clean-on-base', baseResult: 'PASS', cached: true }],
       }),
     });
-    expect(logs.some((m) => m.includes('tests clean on base (cached)'))).toBe(true);
+    expect(logs.some((m) => m.includes('compile clean on base (cached)'))).toBe(true);
   });
 
   it('runs the baseline once even when rework rounds happen', { timeout: 120_000 }, async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
+    const { worktree, specPath } = await makeCompileFailingWorktree();
     const { router } = makeRouter();
     let calls = 0;
     const result = await checkPhase({
@@ -818,7 +821,7 @@ describe('checkPhase baseline (#1925)', () => {
   });
 
   it('survives a rejecting baseline and records the error', { timeout: 120_000 }, async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
+    const { worktree, specPath } = await makeCompileFailingWorktree();
     const { router } = makeRouter();
     const result = await checkPhase({
       issue: workKeyFromIssue(77),
@@ -838,7 +841,7 @@ describe('checkPhase baseline (#1925)', () => {
   });
 
   it('skips the baseline when diffBase is undefined', { timeout: 120_000 }, async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
+    const { worktree, specPath } = await makeCompileFailingWorktree();
     const { router } = makeRouter();
     const logs: string[] = [];
     let calls = 0;
@@ -2381,6 +2384,15 @@ async function makeFailingWorktree(): Promise<{ worktree: string; specPath: stri
   return { worktree, specPath };
 }
 
+/** Only the compile checker fails (build script exits 1; no test script): the baselined, non-test failure (#4029). */
+async function makeCompileFailingWorktree(): Promise<{ worktree: string; specPath: string }> {
+  const worktree = await setup.worktree('check-phase-compile-fail-');
+  await writeFixture(worktree, 'package.json', JSON.stringify({ scripts: { build: 'exit 1', test: 'exit 0' } }));
+  const specPath = join(worktree, 'issue-77.md');
+  await writeFixture(worktree, 'issue-77.md', '# Spec: failing compile\n');
+  return { worktree, specPath };
+}
+
 async function makeCleanGitWorktree(): Promise<{ worktree: string; specPath: string }> {
   const worktree = await setup.worktree('check-phase-clean-git-');
   const specPath = join(worktree, 'issue-817.md');
@@ -2650,7 +2662,8 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
     const fake = vi.fn(async () => ({ ...okResult, exitCode: 1, ok: false }));
     const { result } = await run(['tests'], 'fails-on-base', fake);
     expect(result.flakeRerun?.verdict).toBe('reproduced');
-    expect(result.environment?.failingChecks).toEqual(['tests']);
+    expect(result.environment).toBeUndefined();
+    expect(result.reworkRounds).toBe(1);
     expect(result.summary.results[0]?.result).toBe('FAIL');
   });
 
@@ -2660,7 +2673,7 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
     });
     const { result, logs } = await run(['tests'], 'fails-on-base', fake);
     expect(result.flakeRerun).toMatchObject({ verdict: 'not-run', reason: expect.stringContaining('spawn ENOENT') });
-    expect(result.environment?.failingChecks).toEqual(['tests']);
+    expect(result.environment).toBeUndefined();
     expect(result.summary.results[0]?.result).toBe('FAIL');
     expect(logs.some((l) => l.startsWith('flaky re-run: not-run') && l.includes('spawn ENOENT'))).toBe(true);
   });
@@ -2672,10 +2685,10 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
     expect(result.flakeRerun).toBeUndefined();
     expect(result.environment).toBeDefined();
   });
-  it('skips the re-run when the cause is not environment', async () => {
+  it('re-runs on any tests failure, whatever the base verdict (#4029)', async () => {
     const fake = vi.fn(async () => okResult);
     const { result } = await run(['tests'], 'clean-on-base', fake, { maxReworkRounds: 0 });
-    expect(fake).not.toHaveBeenCalled();
-    expect(result.flakeRerun).toBeUndefined();
+    expect(fake).toHaveBeenCalledTimes(1);
+    expect(result.flakeRerun?.verdict).toBe('passed');
   });
 });

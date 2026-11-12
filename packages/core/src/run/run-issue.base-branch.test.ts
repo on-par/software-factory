@@ -1,11 +1,10 @@
-// packages/core/src/run/run-issue.base-branch.test.ts — parentBaseRef from --base-branch reaches base health, CHECK and SHIP (#3764)
+// packages/core/src/run/run-issue.base-branch.test.ts — parentBaseRef from --base-branch reaches CHECK and SHIP (#3764)
 
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { checkBaseHealth as realCheckBaseHealth } from '../checkers/base-health.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
@@ -24,7 +23,6 @@ const planPhase = vi.fn<typeof realPlanPhase>();
 const buildPhase = vi.fn<typeof realBuildPhase>();
 const checkPhase = vi.fn<typeof realCheckPhase>();
 const shipPhase = vi.fn<typeof realShipPhase>();
-const checkBaseHealth = vi.fn<typeof realCheckBaseHealth>();
 
 const PLAN_OK: PlanResult = { ok: true, route: 'codex', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null };
 const BUILD_OK: BuildResult = { ok: true, model: 'm', route: 'codex' };
@@ -103,7 +101,6 @@ function run(overrides: Partial<RunRequest>) {
     buildPhase,
     checkPhase,
     shipPhase,
-    checkBaseHealth,
   };
   return runIssue(request(overrides), policy, ports);
 }
@@ -113,17 +110,9 @@ beforeEach(() => {
   buildPhase.mockReset().mockResolvedValue(BUILD_OK);
   checkPhase.mockReset().mockResolvedValue(CHECK_OK);
   shipPhase.mockReset().mockResolvedValue({ ok: true, prNumber: 7 });
-  checkBaseHealth
-    .mockReset()
-    .mockResolvedValue({ kind: 'green', baseSha: 'a'.repeat(40), failingChecks: [], cached: false });
 });
 
 describe('runIssue — parentBaseRef from --base-branch (#3764)', () => {
-  it('passes parentBaseRef to checkBaseHealth as baseRef', async () => {
-    await run({ parentBaseRef: 'origin/feat/x' });
-    expect(checkBaseHealth.mock.calls[0][0].baseRef).toBe('origin/feat/x');
-  });
-
   it('passes the stripped parentBaseRef to shipPhase as baseBranch', async () => {
     await run({ parentBaseRef: 'origin/feat/x' });
     expect(shipPhase.mock.calls[0][0].baseBranch).toBe('feat/x');
@@ -134,9 +123,8 @@ describe('runIssue — parentBaseRef from --base-branch (#3764)', () => {
     expect(checkPhase.mock.calls[0][0].parentBaseRef).toBe('origin/feat/x');
   });
 
-  it('omits baseRef and baseBranch when parentBaseRef is unset', async () => {
+  it('omits baseBranch when parentBaseRef is unset', async () => {
     await run({});
-    expect(checkBaseHealth.mock.calls[0][0]).not.toHaveProperty('baseRef');
     expect(shipPhase.mock.calls[0][0]).not.toHaveProperty('baseBranch');
   });
 });

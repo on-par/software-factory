@@ -1,7 +1,7 @@
 // packages/cli/src/cli/base-health-ci.ts — base health port with the strict GitHub CI lookup bound in (#3186)
 
 import type { Octokit } from '@octokit/rest';
-import { checkBaseHealth, fetchRequiredChecksVerdict, logEvent } from '@on-par/factory-core/internal';
+import { fetchRequiredChecksVerdict, logEvent } from '@on-par/factory-core/internal';
 
 type RequiredChecksVerdict = Awaited<ReturnType<typeof fetchRequiredChecksVerdict>>;
 
@@ -51,18 +51,4 @@ export function baseChecksVerdict(
         },
       },
     );
-}
-
-export function baseHealthWithCi(
-  octokit: Octokit,
-  owner: string,
-  repo: string,
-  opts: BaseChecksOptions = {},
-): (opts: Parameters<typeof checkBaseHealth>[0]) => ReturnType<typeof checkBaseHealth> {
-  return (healthOpts) =>
-    checkBaseHealth({
-      ...healthOpts,
-      // The gate in run.ts uses the same helper, so both see the same verdict on 403-protection repos (#3287, #3290).
-      requiredChecksVerdict: baseChecksVerdict(octokit, owner, repo, opts),
-    });
 }
