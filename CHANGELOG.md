@@ -7,13 +7,14 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Fixed
+
+- A GitHub call that fails with 401 Bad credentials now re-reads `GITHUB_TOKEN`/`GH_TOKEN`/`gh auth token` once and retries with a newly valid token, instead of parking the run (#4027).
+- The in-place dirty-checkout refusal now prints each file's git status code next to its path (`M README.md, ?? new.txt`) instead of paths alone (#4024).
+
 ### Changed
 
 - Runs no longer run the base-health compile/lint/tests suite before PLAN; CHECK is the only test gate and fixes forward any failing test, including one already red on main, and `FACTORY_BASE_HEALTH_REPAIR` is deprecated and has no effect (#4029).
-
-### Fixed
-
-- The in-place dirty-checkout refusal now prints each file's git status code next to its path (`M README.md, ?? new.txt`) instead of paths alone (#4024).
 
 ## 0.9.35 - 2026-11-11
 

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createFactoryOctokit,
   formatDeprecation,
+  isBadCredentialsError,
   isOctokitDeprecationWarning,
   isOctokitRequestLogLine,
   MAX_THROTTLE_RETRIES,
@@ -195,5 +196,119 @@ describe('createFactoryOctokit request log (#1004)', () => {
     );
     expect(isOctokitRequestLogLine('POST /repos/o/r/labels failed: 422')).toBe(false);
     expect(isOctokitRequestLogLine('boom')).toBe(false);
+  });
+});
+
+describe('createFactoryOctokit credential refresh (#4027)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function setup(resolve: (() => string | undefined) | undefined, status: (auth: string) => number) {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const seen: string[] = [];
+    const fetch = async (_url: unknown, init?: { headers?: Record<string, string> }) => {
+      const auth = String(init?.headers?.authorization ?? '');
+      seen.push(auth);
+      const code = status(auth);
+      const body = code === 200 ? {} : { message: code === 401 ? 'Bad credentials' : 'Forbidden' };
+      return new Response(JSON.stringify(body), { status: code, headers: { 'content-type': 'application/json' } });
+    };
+    const resolveToken = vi.fn(resolve ?? (() => undefined));
+    const octokit = createFactoryOctokit('stale', {
+      throttle: false,
+      resolveToken: resolve ? resolveToken : undefined,
+    });
+    const get = () => octokit.rest.issues.get({ owner: 'o', repo: 'r', issue_number: 1, request: { fetch } });
+    return { seen, resolveToken, get, errorSpy, warnSpy };
+  }
+  const byToken = (auth: string) => (auth === 'token fresh' ? 200 : 401);
+
+  it('re-reads credentials after a 401 and retries with the new token', async () => {
+    const t = setup(() => 'fresh', byToken);
+    await expect(t.get()).resolves.toBeDefined();
+    expect(t.seen).toEqual(['token stale', 'token fresh']);
+    expect(t.resolveToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the refreshed token on later requests without re-reading', async () => {
+    const t = setup(() => 'fresh', byToken);
+    await t.get();
+    await t.get();
+    expect(t.seen[2]).toBe('token fresh');
+    expect(t.resolveToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('rethrows the original 401 when the re-read yields no token', async () => {
+    const t = setup(() => undefined, byToken);
+    await expect(t.get()).rejects.toMatchObject({ status: 401 });
+    expect(t.seen).toHaveLength(1);
+  });
+
+  it('rethrows the original 401 when the re-read yields the same token', async () => {
+    const t = setup(() => 'stale', byToken);
+    await expect(t.get()).rejects.toMatchObject({ status: 401 });
+    expect(t.seen).toHaveLength(1);
+  });
+
+  it('rethrows the original 401 when the re-read throws', async () => {
+    const t = setup(() => {
+      throw new Error('boom');
+    }, byToken);
+    await expect(t.get()).rejects.toMatchObject({ status: 401 });
+    expect(t.seen).toHaveLength(1);
+  });
+
+  it('retries at most once when the refreshed token also gets a 401', async () => {
+    const t = setup(
+      () => 'fresh',
+      () => 401,
+    );
+    await expect(t.get()).rejects.toMatchObject({ status: 401 });
+    expect(t.seen).toEqual(['token stale', 'token fresh']);
+    expect(t.resolveToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-read on non-401 errors', async () => {
+    const t = setup(
+      () => 'fresh',
+      () => 403,
+    );
+    await expect(t.get()).rejects.toMatchObject({ status: 403 });
+    expect(t.resolveToken).not.toHaveBeenCalled();
+  });
+
+  it('does not retry when no resolveToken is configured', async () => {
+    const t = setup(undefined, byToken);
+    await expect(t.get()).rejects.toMatchObject({ status: 401 });
+    expect(t.seen).toHaveLength(1);
+  });
+
+  it('never writes a token value to console or the rethrown error', async () => {
+    const t = setup(
+      () => 'fresh',
+      () => 401,
+    );
+    const err = await t.get().then(
+      () => new Error('unexpected success'),
+      (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
+    );
+    const printed = [...t.errorSpy.mock.calls, ...t.warnSpy.mock.calls].flat().map(String);
+    for (const text of [...printed, String(err), err.message]) {
+      expect(text).not.toContain('stale');
+      expect(text).not.toContain('fresh');
+    }
+  });
+
+  it('sends the constructor token as the authorization header', async () => {
+    const t = setup(undefined, () => 200);
+    await t.get();
+    expect(t.seen).toEqual(['token stale']);
+  });
+
+  it('isBadCredentialsError recognises only status 401', () => {
+    expect(isBadCredentialsError({ status: 401 })).toBe(true);
+    expect(isBadCredentialsError({ status: 403 })).toBe(false);
+    expect(isBadCredentialsError(null)).toBe(false);
+    expect(isBadCredentialsError('401')).toBe(false);
   });
 });
