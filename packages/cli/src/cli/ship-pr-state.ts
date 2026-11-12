@@ -1,6 +1,6 @@
 // packages/cli/src/cli/ship-pr-state.ts — restore a run's resumable state from its PR on start and persist it there on every run-state update (#3909, ADR-0174)
 import { createHash } from 'node:crypto';
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
