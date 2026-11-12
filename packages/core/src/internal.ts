@@ -272,7 +272,10 @@ export { createRunRuntime, type RunRuntime } from './daemon/run-runtime.js';
 export { findOpenPR } from './phases/ship.js';
 export { settleParkedPullRequest } from './run/park-pr.js';
 export { findAdoptablePr, lookupOpenPrByIssue, lookupOpenPrByBranch, type OpenPrLookup } from './run/adopt-pr.js'; // findAdoptablePr + the shared open-PR lookup (#3439)
-export * from './run/pr-state-exports.js'; // PR-comment run state (#3909) and frozen spec (#4025)
+export { loadPrRunState, prRunStatusFor, reconcilePrRunState, savePrRunState } from './run/pr-run-state.js'; // PR-comment run state (#3909)
+export type { PrRunRound, PrRunState } from './run/pr-run-state.js';
+export { loadPrFrozenSpec, savePrFrozenSpec } from './run/pr-frozen-spec.js'; // frozen spec of an in-place run (#4025)
+export { loadReusablePlan } from './run/plan-reuse-load.js';
 export { MAX_REWORK_ROUNDS } from './phases/check.js';
 export { readStackSliceGate } from './phases/stack-approval.js';
 export type { StackPullReviews } from './phases/stack-approval.js';
