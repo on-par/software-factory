@@ -698,9 +698,9 @@ function resolveGitHubToken(shell: ShellOps = shellOps): string | undefined {
 let octokitFactory: (() => Octokit) | undefined;
 
 function getOctokit(shell: ShellOps = shellOps, options?: FactoryOctokitOptions): Octokit {
-  return octokitFactory
-    ? octokitFactory()
-    : selectOctokit(process.env, () => createFactoryOctokit(resolveGitHubToken(shell), options));
+  if (octokitFactory) return octokitFactory();
+  const resolveToken = () => resolveGitHubToken(shell);
+  return selectOctokit(process.env, () => createFactoryOctokit(resolveToken(), { ...options, resolveToken }));
 }
 
 export function errorDetail(err: unknown): string {
