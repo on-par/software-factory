@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.36 - 2026-11-12
+
+Runs no longer run the full compile, lint and test suite before PLAN; CHECK is the only test gate and must end green (#4029). An in-place run that is killed after its PR opens now resumes on a fresh clone from the PR's frozen plan (#4025), and a 401 from GitHub re-reads credentials once instead of parking the run (#4027).
+All seven published `@on-par` packages move to 0.9.36 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Fixed
 
 - An in-place run killed after its PR opened and restarted on a fresh clone now restores its frozen plan from the PR and continues on the PR branch without re-running PLAN (#4025).
