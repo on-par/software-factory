@@ -53,6 +53,14 @@ export interface FactoryOctokitOptions {
   /** Test-only seam: false turns off @octokit/plugin-throttling, whose write group spaces every
    *  POST/PATCH/PUT/DELETE about a second apart. Defaults to true; production callers never pass it. */
   throttle?: boolean;
+  /** Re-reads credentials after a 401 Bad credentials (#4027). Called at most once per failed
+   *  request; a different non-empty result replaces the client's token. Never logged. */
+  resolveToken?: () => string | undefined;
+}
+
+/** True when a GitHub call failed with 401 (bad credentials). */
+export function isBadCredentialsError(err: unknown): boolean {
+  return (err as { status?: unknown } | null | undefined)?.status === 401;
 }
 
 type ResponseHeaders = Record<string, string | number | undefined>;
@@ -93,7 +101,8 @@ export function formatDeprecation(d: GitHubApiDeprecation): string {
 
 /** The client every CLI GitHub call goes through. `@octokit/plugin-retry` handles transient
  *  5xx/network failures with its default bounded backoff; the throttle handlers above cover
- *  primary and secondary rate limits (#641). Deprecated routes are reported once per client (#2218). */
+ *  primary and secondary rate limits (#641). Deprecated routes are reported once per client (#2218).
+ *  A 401 re-reads credentials once via `options.resolveToken` and retries with a newly valid token (#4027). */
 export function createFactoryOctokit(token?: string, options: FactoryOctokitOptions = {}): Octokit {
   const seen = new Set<string>();
   const stderr = options.stderr ?? ((line: string) => console.error(line));
@@ -107,12 +116,32 @@ export function createFactoryOctokit(token?: string, options: FactoryOctokitOpti
       if (!isOctokitRequestLogLine(message)) console.error(message);
     },
   };
+  let current = token?.trim() || undefined;
   const octokit = new FactoryOctokit({
-    auth: token,
     throttle: { enabled: options.throttle ?? true, onRateLimit, onSecondaryRateLimit },
     log,
     // @octokit/request reads its own `request.log` (default console), not the client's `log`.
     request: { log },
+  });
+  octokit.hook.before('request', (opts) => {
+    if (current) opts.headers.authorization = `token ${current}`;
+  });
+  octokit.hook.wrap('request', async (request, opts) => {
+    const used = current;
+    try {
+      return await request(opts);
+    } catch (err) {
+      if (!options.resolveToken || !isBadCredentialsError(err)) throw err;
+      let next: string | undefined;
+      try {
+        next = options.resolveToken()?.trim() || undefined;
+      } catch {
+        throw err;
+      }
+      if (!next || next === used) throw err;
+      current = next;
+      return request(opts);
+    }
   });
   const record = (opts: { method?: string; url?: string }, headers: ResponseHeaders | undefined): void => {
     try {
