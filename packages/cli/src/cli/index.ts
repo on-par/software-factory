@@ -30,6 +30,7 @@ import {
   type QueueDeferCause,
   type QueuePreflightOps,
 } from './queue-preflight.js';
+import type { DraftAdoptionOps } from './queue-preflight-draft.js';
 import {
   type Environment,
   type EnvironmentProxySettings,
@@ -3598,6 +3599,7 @@ export function createQueuePreflightOps(
     stackOnOpenPrerequisite?: boolean;
     onDeferred?: (issue: number, message: string, cause?: QueueDeferCause) => void;
     laneFileHold?: LaneFileHoldLookup;
+    draftAdoption?: DraftAdoptionOps;
   } = {},
 ): QueuePreflightOps {
   return makeQueuePreflightOps(octokit, owner, repo, {
