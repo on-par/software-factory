@@ -6,9 +6,12 @@ import { resolveMergePolicy, resolveSizeGateMode, type FactoryConfig, type WorkK
 import {
   createOctokitQueueClient,
   logEvent,
+  resolveBranchPrefix,
+  resolveDraftPrPolicy,
   resolveQueueClaimSettleMs,
   resolveQueueStackOnOpenPrerequisite,
   resolveTrackerConfig,
+  watchChecks,
   withAdmissionGuard,
   type GithubQueueBackendOptions,
   type QueueBackend,
@@ -18,6 +21,7 @@ import { admissionStateReaderFor } from './admission.js';
 import type { getFactoryPaths } from '@on-par/factory-core';
 import { laneFileHoldLookup } from './lane-file-hold.js';
 import { selectQueueBackend } from './queue-backend-select.js';
+import { makeDraftAdoptionOps } from './queue-preflight-draft.js';
 import type { createDeferralTracker } from './queue-startup.js';
 import { reportQueueOrderConflict } from './run-order-conflict.js';
 import type { RunRuntime } from './run.js';
@@ -57,6 +61,13 @@ export function createRunQueue(input: {
               stackOnOpenPrerequisite: resolveQueueStackOnOpenPrerequisite(factoryConfig),
               laneFileHold: laneFileHoldLookup(paths.laneFiles, ghRepo),
               onDeferred: input.deferrals.onDeferred,
+              draftAdoption: makeDraftAdoptionOps(octokit, owner, repo, {
+                branchPrefix: resolveBranchPrefix(factoryConfig),
+                draftMode: resolveDraftPrPolicy(factoryConfig).draft,
+                iterateFile: paths.iterate,
+                probeCi: (headSha) =>
+                  watchChecks({ octokit, owner, repo, ref: headSha, deadlineMs: 60_000, settleMs: 0, probeNoCi: true }),
+              }),
             }),
           ),
         onConflict: (issue, verdict) => {

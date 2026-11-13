@@ -20,6 +20,7 @@ import { errorDetail } from './index.js';
 import { findOpenPRForIssue } from './land.js';
 import { getPullRequestLandState } from './land-pr.js';
 import { findMergedClosingPr } from './queue-merged-closing-pr.js';
+import { factoryDraftDecision, type DraftAdoptionOps } from './queue-preflight-draft.js';
 import { readPrerequisiteState } from './queue-prerequisite-state.js';
 import { preflightOpenPrerequisites, stackedPullDecision } from './queue-preflight-prerequisite-stack.js';
 
@@ -81,6 +82,8 @@ export interface QueuePreflightOps {
   stackOnOpenPrerequisite?: boolean;
   /** True when `branch` still holds commit `sha` (compare status ahead or identical); false for a missing branch (#3368). */
   branchContains(sha: string, branch: string): Promise<boolean>;
+  /** #4039: adopt or CI-rework the issue's own factory draft that has no draftReason; absent keeps today's park. */
+  draftAdoption?: DraftAdoptionOps;
 }
 
 export function makeQueuePreflightOps(
@@ -95,6 +98,7 @@ export function makeQueuePreflightOps(
     onDeferred?: (issue: number, message: string, cause?: QueueDeferCause) => void;
     laneFileHold?: LaneFileHoldLookup;
     sleep?: (ms: number) => Promise<void>;
+    draftAdoption?: DraftAdoptionOps;
   },
 ): QueuePreflightOps {
   let self: Promise<SelfIdentity> | undefined;
@@ -133,6 +137,7 @@ export function makeQueuePreflightOps(
     onDeferred: opts.onDeferred,
     laneFileHold: opts.laneFileHold,
     sleep: opts.sleep ?? defaultSleep,
+    draftAdoption: opts.draftAdoption,
     getPullRefs: async (prNumber) => {
       const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
       return { headRef: data.head.ref, baseRef: data.base.ref, headSha: data.head.sha, body: data.body ?? '' };
@@ -437,6 +442,10 @@ export async function preflightQueuedIssue(
     if (s.isDraft === false) return undefined;
     if (s.isDraft === true && (await deps.ciPendingDraft?.(issue.number, pr.number).catch(() => false))) {
       return { kind: 'adopt', branch: pr.branch }; // #3968: land watches CI, flips ready and merges
+    }
+    if (s.isDraft === true) {
+      const adopted = await factoryDraftDecision(issue.number, pr, deps.draftAdoption, deps.onDeferred);
+      if (adopted) return adopted;
     }
     return { kind: 'park', reason: `PR #${pr.number} is draft or its draft state is unavailable` };
   };

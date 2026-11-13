@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Fixed
+
+- Queue preflight now adopts the issue's own factory draft PR left without a draft reason (an interrupted SHIP or a ci-failed park): green or pending CI lands it, red CI queues CI rework, instead of parking it as "is draft" (#4039).
+
 ## 0.9.36 - 2026-11-12
 
 Runs no longer run the full compile, lint and test suite before PLAN; CHECK is the only test gate and must end green (#4029). An in-place run that is killed after its PR opens now resumes on a fresh clone from the PR's frozen plan (#4025), and a 401 from GitHub re-reads credentials once instead of parking the run (#4027).
