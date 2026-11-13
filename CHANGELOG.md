@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Fixed
 
+- Visual proof now uploads for factory-opened PRs; the guard refuses only an evidence branch equal to the PR head branch or under `factory/` (#4038).
 - Queue preflight now adopts the issue's own factory draft PR left without a draft reason (an interrupted SHIP or a ci-failed park): green or pending CI lands it, red CI queues CI rework, instead of parking it as "is draft" (#4039).
 
 ## 0.9.36 - 2026-11-12
