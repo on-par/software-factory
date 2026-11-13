@@ -47,10 +47,16 @@ export async function attachVisualProof(
 ): Promise<VisualProofResult> {
   const { owner, repo, prNumber, branch } = target;
   const evidenceBranch = target.evidenceBranch ?? DEFAULT_EVIDENCE_BRANCH;
-  if (evidenceBranch === branch || branch.startsWith('factory/')) {
+  if (evidenceBranch === branch) {
     return fail(
       result,
-      `refusing to write visual proof to the PR branch ${branch}; set visualProof.evidenceBranch to a dedicated branch`,
+      `refusing to write visual proof to the PR branch ${branch}; set visualProof.evidenceBranch to a branch other than the PR head branch`,
+    );
+  }
+  if (evidenceBranch.startsWith('factory/')) {
+    return fail(
+      result,
+      `refusing to write visual proof to the reserved branch ${evidenceBranch}; set visualProof.evidenceBranch to a branch outside factory/`,
     );
   }
   if (!result.outDir) return fail(result, 'upload failed: capture output directory unknown');

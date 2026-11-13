@@ -127,18 +127,41 @@ describe('attachVisualProof', () => {
     expect(r).toMatchObject({ status: 'fail', diagnostic: expect.stringContaining('embedded asset unavailable') });
   });
 
-  it('writes only to the configured evidence branch, never the PR head branch', async () => {
+  it('uploads proof for a factory/* PR head branch to the default evidence branch', async () => {
+    const { octokit, git } = fakeOctokit();
+    const r = await attachVisualProof(octokit, { ...target, branch: 'factory/12-x' }, passResult, readFile);
+    expect(r.status).toBe('pass');
+    expect(r.images?.[0]?.url).toBe(
+      'https://github.com/o/r/blob/commitsha000000/visual-proof/7/run-9/abcdef012345/0-settings-default-1280x800.png?raw=true',
+    );
+    expect(git.createRef).toHaveBeenCalledWith(expect.objectContaining({ ref: 'refs/heads/factory-evidence' }));
+    expect(r.diagnostic).toBeUndefined();
+  });
+
+  it('refuses an evidence branch equal to the PR head branch', async () => {
     for (const t of [
       { ...target, branch: 'factory-evidence' },
-      { ...target, branch: 'factory/12-x' },
+      { ...target, branch: 'proof', evidenceBranch: 'proof' },
     ]) {
       const { octokit, git } = fakeOctokit();
       const r = await attachVisualProof(octokit, t, passResult, readFile);
       expect(r.status).toBe('fail');
-      expect(r.diagnostic).toContain('refusing to write visual proof');
+      expect(r.diagnostic).toContain('refusing to write visual proof to the PR branch');
       expect(git.createBlob).not.toHaveBeenCalled();
       expect(git.createRef).not.toHaveBeenCalled();
+      expect(git.updateRef).not.toHaveBeenCalled();
     }
+  });
+
+  it('refuses a factory/* evidence branch', async () => {
+    const { octokit, git } = fakeOctokit();
+    const r = await attachVisualProof(octokit, { ...target, evidenceBranch: 'factory/proof' }, passResult, readFile);
+    expect(r.status).toBe('fail');
+    expect(r.diagnostic).toContain('factory/proof');
+    expect(r.diagnostic).not.toContain('PR branch feat/ui');
+    expect(git.createBlob).not.toHaveBeenCalled();
+    expect(git.createRef).not.toHaveBeenCalled();
+    expect(git.updateRef).not.toHaveBeenCalled();
   });
 
   it('fails when the capture directory is unknown', async () => {
