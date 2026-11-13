@@ -16,6 +16,10 @@ The numeric daemon lane (`run.laneId`, default 1) that serialises runs in [packa
 
 One attempt to take one issue through PLAN → BUILD → CHECK → SHIP, ending in a `RunOutcome` (shipped, parked, ...). See [packages/core/src/run/run-issue.ts](packages/core/src/run/run-issue.ts), [packages/core/src/run/outcome.ts](packages/core/src/run/outcome.ts) ([ADR-0054](docs/adr/0054-runoutcome-is-a-core-owned-value-type-park-classification-is-structural-not-instanceof.md)); daemon run records live in [packages/core/src/daemon/run-store.ts](packages/core/src/daemon/run-store.ts).
 
+### Lifecycle state
+
+The canonical state of a run in the one explicit machine (`LIFECYCLE_STATES` in [packages/core/src/lifecycle/lifecycle.ts](packages/core/src/lifecycle/lifecycle.ts)), with legal edges in `LIFECYCLE_TRANSITIONS` and lossless projections to `RunStatus`, `LaneStatus` and `PrRunStatus`; see [ADR-0177](docs/adr/0177-the-run-lifecycle-is-one-canonical-state-machine-with-lossless-projections-to-the-legacy-vocabularies.md). The daemon's `RepoState`, the queue's label-derived claim status and the worktree GC decision are separate machines, not lifecycle states.
+
 ### Run lock
 
 A fail-fast (never queued) lock that stops two processes from force-recreating the same per-issue worktree and branch. It has two tiers. The checkout tier is `.factory/run.lock`, taken by `run`, `supervise` and `local-small-overnight`, which pick issues dynamically. The issue tier is `.factory/locks/run/<WorkKey>`, taken by `ship`, `run-issue`, `run-brief` and `resume`. Each tier refuses while a live holder of the other exists, so parallel one-shot CLI runs mean different issues, still bounded by claims and `host.maxBuilds` slots. See [docs/ops/run-lock.md](docs/ops/run-lock.md) and [packages/core/src/utils/run-lock.ts](packages/core/src/utils/run-lock.ts).

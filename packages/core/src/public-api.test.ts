@@ -10,6 +10,7 @@ import {
   ITERATE_INTERNAL_KEYS,
   KPIS_API_KEYS,
   LAND_DEFERRED_INTERNAL_KEYS,
+  LIFECYCLE_API_KEYS,
   TESTING_API_KEYS,
   WORK_KEY_API_KEYS,
 } from './public-api-keys.js';
@@ -689,7 +690,9 @@ const INTERNAL_API_KEYS = [
 ];
 describe('public API surface (ADR-0004)', () => {
   it('root export exposes exactly the documented public API', () => {
-    expect(Object.keys(publicApi).sort()).toEqual([...PUBLIC_API_KEYS, ...WORK_KEY_API_KEYS].sort());
+    expect(Object.keys(publicApi).sort()).toEqual(
+      [...PUBLIC_API_KEYS, ...WORK_KEY_API_KEYS, ...LIFECYCLE_API_KEYS].sort(),
+    );
   });
   it('SIZE_GATE_MODES lists exactly off and stack (#3835)', () => {
     expect(SIZE_GATE_MODES).toEqual(['off', 'stack']);
