@@ -1,10 +1,9 @@
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { StackPullReviews } from '@on-par/factory-core/internal';
 import { claimIterateCommand, createFileIterateStore } from '@on-par/factory-core/internal';
-import { describe, expect, it, vi } from 'vitest';
+import { createTempDirs } from '@on-par/factory-core/testing';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { preflightQueuedIssue } from './index.js';
 import {
@@ -13,6 +12,12 @@ import {
   type DraftAdoptionOps,
   type FactoryDraftFacts,
 } from './queue-preflight-draft.js';
+
+const tmp = createTempDirs();
+
+afterEach(async () => {
+  await tmp.cleanup();
+});
 
 const baseDeps = {
   expectedHeadRepoFullName: 'on-par/software-factory',
@@ -166,7 +171,7 @@ describe('makeDraftAdoptionOps', () => {
   });
 
   it('queueCiRework records an iterate run that the next ship claims', async () => {
-    const file = join(mkdtempSync(join(tmpdir(), 'draft-adopt-')), 'iterate.json');
+    const file = join(tmp.makeSync('draft-adopt-'), 'iterate.json');
     await makeDraftAdoptionOps({} as any, 'o', 'r', opts(file)).queueCiRework(7, 71);
     const claimed = claimIterateCommand(createFileIterateStore(file), 7);
     expect(claimed).toMatchObject({ pr: 71, issue: 7, actor: 'factory-queue-preflight' });

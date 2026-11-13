@@ -1,16 +1,22 @@
 // run-queue.test.ts — createRunQueue wires factory draft adoption into the GitHub queue preflight (#4039)
 
-import { mkdirSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { createTempDirs } from '@on-par/factory-core/testing';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createRunQueue } from './run-queue.js';
 
+const tmp = createTempDirs();
+
+afterEach(async () => {
+  await tmp.cleanup();
+});
+
 describe('createRunQueue draft adoption wiring (#4039)', () => {
   it('hands the preflight ops a draftAdoption whose CI probe reads the head SHA checks', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'run-queue-'));
+    const dir = tmp.makeSync('run-queue-');
     mkdirSync(join(dir, 'state'));
     const octokit: any = {
       rest: {
