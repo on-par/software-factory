@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.37 - 2026-11-14
+
+SHIP no longer parks a run just because CI is still pending at the CI-watch deadline: the visual-proof gate classifies and captures regardless of CI, leaving the usual CI-pending draft (#4047). Requiring UI proof is now configurable with `visualProof.mode` (`required` default, `advisory`, `off`) (#4047), visual proof uploads for factory-opened PRs (#4038), and queue preflight adopts a factory draft left without a draft reason (#4039).
+All seven published `@on-par` packages move to 0.9.37 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Fixed
 
 - Visual proof now uploads for factory-opened PRs; the guard refuses only an evidence branch equal to the PR head branch or under `factory/` (#4038).
