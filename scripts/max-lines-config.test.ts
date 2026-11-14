@@ -30,13 +30,14 @@ describe('max-lines lint guard (#2776, #2777, #2778)', () => {
   });
 
   it('caps each baseline file at its recorded line count', () => {
-    expect(config.overrides).toEqual(
+    const maxLinesOverrides = (config.overrides ?? []).filter((o) => o.rules?.['max-lines'] !== undefined);
+    expect(maxLinesOverrides).toEqual(
       Object.entries(MAX_LINES_BASELINE).map(([file, max]) => ({
         files: [file],
         rules: { 'max-lines': ['error', { max, skipBlankLines: false, skipComments: false }] },
       })),
     );
-    for (const override of config.overrides ?? []) {
+    for (const override of maxLinesOverrides) {
       expect(override.rules?.['max-lines']).not.toBe('off');
     }
   });

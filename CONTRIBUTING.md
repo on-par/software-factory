@@ -27,6 +27,7 @@ bash scripts/verify.sh --no-e2e   # format, build, ADR index, config checks, typ
 bash scripts/verify.sh            # the same, plus the coverage ratchet
 ```
 
+- `npm install` installs a lefthook pre-commit hook that runs `oxlint --fix` and `prettier --write` on staged files.
 - Both paths run `npm ci` first and `npm run test` (Vitest with the coverage thresholds in `vitest.config.ts`).
 - CI runs the suite as parallel shards on every PR and enforces coverage on the merged report. `main` must stay green.
 - Never lower a coverage threshold in `vitest.config.ts`. If the ratchet says coverage rose, raise the threshold in the same PR.

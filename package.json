@@ -11,6 +11,7 @@
     "qs": "6.16.0"
   },
   "scripts": {
+    "prepare": "[ -n \"$CI\" ] || lefthook install",
     "build": "tsc -b && npm run copy-assets --workspace @on-par/factory-config",
     "dev": "npm run dev --workspace @on-par/factory-cli",
     "lint": "oxlint --type-aware --deny-warnings .",
@@ -47,6 +48,7 @@
     "graphql": "16.15.0",
     "jsdom": "^30.1.3",
     "knip": "^6.44.1",
+    "lefthook": "2.2.2",
     "oxlint": "^1.91.0",
     "oxlint-tsgolint": "^7.0.2004",
     "prettier": "3.9.10",
