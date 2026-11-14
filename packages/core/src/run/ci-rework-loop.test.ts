@@ -444,4 +444,31 @@ describe('shipWithCiRework — visual proof gate (#2232)', () => {
     expect(result).toMatchObject({ status: 'not-required', headSha: 'a'.repeat(40) });
     expect(listPrChangedFiles).toHaveBeenCalled();
   });
+
+  // A directory as the spec makes the plan's evidencePlan unreadable, which alone builds a gate.
+  const unreadablePlan = { ...request, specPath: breakerDir };
+
+  it('builds a gate with no visualProof section when the plan needs proof (#4047)', async () => {
+    shipPhase.mockResolvedValueOnce({ ok: true, prNumber: 9 });
+    await runIssue(unreadablePlan, policy, { ...ports(vi.fn<Log>()), loadVisualProofConfig: () => undefined });
+    expect(shipPhase.mock.calls[0][0]).toHaveProperty('visualProofGate');
+    expect(shipPhase.mock.calls[0][0]).not.toHaveProperty('visualProofMode');
+  });
+
+  it('builds no gate when visualProof.mode is off, even when the plan needs proof (#4047)', async () => {
+    shipPhase.mockResolvedValueOnce({ ok: true, prNumber: 9 });
+    const log = vi.fn<Log>();
+    const off = { ...VISUAL_PROOF, mode: 'off' as const };
+    await runIssue(unreadablePlan, policy, { ...ports(log), loadVisualProofConfig: () => off });
+    expect(shipPhase.mock.calls[0][0]).not.toHaveProperty('visualProofGate');
+    expect(log).toHaveBeenCalledWith('ship', 'visual proof is off by config (visualProof.mode: off)');
+  });
+
+  it('passes visualProofMode advisory to SHIP with the gate (#4047)', async () => {
+    shipPhase.mockResolvedValueOnce({ ok: true, prNumber: 9 });
+    const advisory = { ...VISUAL_PROOF, mode: 'advisory' as const };
+    await runIssue(request, policy, { ...ports(vi.fn<Log>()), loadVisualProofConfig: () => advisory });
+    expect(shipPhase.mock.calls[0][0]).toMatchObject({ visualProofMode: 'advisory' });
+    expect(shipPhase.mock.calls[0][0]).toHaveProperty('visualProofGate');
+  });
 });

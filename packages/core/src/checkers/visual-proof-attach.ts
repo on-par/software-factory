@@ -5,11 +5,15 @@ import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 
+import type { VisualProofMode } from '../config/visual-proof-section.js';
 import { upsertMarkedBlock } from '../review/marked-block.js';
 import type { VisualProofResult } from './visual-proof.js';
 
 export const VISUAL_PROOF_STATUS_CONTEXT = 'factory/visual-proof';
+/** Start marker of a required-mode block: land enforces proof only when the PR body carries it. */
 export const VISUAL_PROOF_START = '<!-- factory:visual-proof v1 required -->';
+/** Start marker of an advisory-mode block (#4047): same end marker, never enforced by land. */
+export const VISUAL_PROOF_ADVISORY_START = '<!-- factory:visual-proof v1 advisory -->';
 export const VISUAL_PROOF_END = '<!-- /factory:visual-proof -->';
 export const DEFAULT_EVIDENCE_BRANCH = 'factory-evidence';
 
@@ -128,13 +132,20 @@ export async function attachVisualProof(
 
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim().slice(0, DIAGNOSTIC_MAX);
 
-export function renderVisualProofBlock(result: VisualProofResult): string {
+/** The modes that publish a block; `off` never runs the gate. */
+export type PublishedVisualProofMode = Exclude<VisualProofMode, 'off'>;
+
+const startMarker = (mode: PublishedVisualProofMode): string =>
+  mode === 'advisory' ? VISUAL_PROOF_ADVISORY_START : VISUAL_PROOF_START;
+
+export function renderVisualProofBlock(result: VisualProofResult, mode: PublishedVisualProofMode = 'required'): string {
   const short = head12(result.headSha);
+  const advisory = mode === 'advisory';
   const lines = [
-    VISUAL_PROOF_START,
+    startMarker(mode),
     '### Visual proof',
     '',
-    `**Result: ${result.status}** · run \`${result.runId}\` · head \`${short}\``,
+    `**Result: ${result.status}**${advisory ? ' (advisory)' : ''} · run \`${result.runId}\` · head \`${short}\``,
     '',
   ];
   for (const image of result.images ?? []) {
@@ -146,6 +157,9 @@ export function renderVisualProofBlock(result: VisualProofResult): string {
     );
   }
   if (result.status !== 'pass') {
+    if (advisory) {
+      lines.push('- Advisory: `visualProof.mode` is `advisory`, so this result does not block SHIP or merge');
+    }
     lines.push(
       `- Diagnostic: ${oneLine(result.diagnostic ?? 'no diagnostic recorded')}`,
       `- Remedy: fix the cause above, then re-run SHIP (\`factory resume --from ship\`) to capture proof for ${short}`,
@@ -161,26 +175,47 @@ export async function publishVisualProof(
   octokit: Octokit,
   target: { owner: string; repo: string; prNumber: number },
   result: VisualProofResult,
+  mode: PublishedVisualProofMode = 'required',
 ): Promise<void> {
   const { owner, repo, prNumber } = target;
   const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
-  const body = upsertMarkedBlock(data.body, renderVisualProofBlock(result), {
-    start: VISUAL_PROOF_START,
-    end: VISUAL_PROOF_END,
-  });
+  const body = upsertVisualProofBlock(data.body, renderVisualProofBlock(result, mode), mode);
   if (body !== (data.body ?? '')) await octokit.rest.pulls.update({ owner, repo, pull_number: prNumber, body });
   const pass = result.status === 'pass';
+  const diagnostic = oneLine(result.diagnostic ?? `visual proof ${result.status}`);
+  // Advisory non-pass stamps `success` with an "advisory:" description rather than skipping the
+  // status (#4047). A failure/error would read as red to anything that treats the context as a
+  // required check (ci-watch's readRequiredState, GitHub branch protection, the awaiting-CI recheck);
+  // skipping it would leave a repo that lists factory/visual-proof as required waiting forever on
+  // "not reported yet". Land is unaffected: it only enforces the status under the required marker.
+  const state = pass || mode === 'advisory' ? 'success' : 'failure';
+  const description = pass
+    ? `visual proof captured for ${head12(result.headSha)}`
+    : mode === 'advisory'
+      ? `advisory: visual proof ${result.status}: ${diagnostic}`
+      : diagnostic;
   await octokit.rest.repos.createCommitStatus({
     owner,
     repo,
     sha: result.headSha,
     context: VISUAL_PROOF_STATUS_CONTEXT,
-    state: pass ? 'success' : 'failure',
-    description: (pass
-      ? `visual proof captured for ${head12(result.headSha)}`
-      : oneLine(result.diagnostic ?? `visual proof ${result.status}`)
-    ).slice(0, STATUS_DESCRIPTION_MAX),
+    state,
+    description: description.slice(0, STATUS_DESCRIPTION_MAX),
   });
+}
+
+/** Writes the block in place of either marker variant, so switching modes never leaves two blocks. */
+export function upsertVisualProofBlock(
+  body: string | null | undefined,
+  block: string,
+  mode: PublishedVisualProofMode,
+): string {
+  const start = startMarker(mode);
+  const other = mode === 'advisory' ? VISUAL_PROOF_START : VISUAL_PROOF_ADVISORY_START;
+  const swapped = body?.includes(other)
+    ? upsertMarkedBlock(body, block, { start: other, end: VISUAL_PROOF_END })
+    : body;
+  return upsertMarkedBlock(swapped, block, { start, end: VISUAL_PROOF_END });
 }
 
 export class VisualProofMissingError extends Error {

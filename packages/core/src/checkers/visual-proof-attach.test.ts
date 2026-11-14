@@ -5,6 +5,8 @@ import {
   attachVisualProof,
   publishVisualProof,
   renderVisualProofBlock,
+  VISUAL_PROOF_ADVISORY_START,
+  VISUAL_PROOF_END,
   VISUAL_PROOF_START,
   VISUAL_PROOF_STATUS_CONTEXT,
   VisualProofMissingError,
@@ -238,6 +240,58 @@ describe('renderVisualProofBlock and publishVisualProof', () => {
     expect(call?.description).toHaveLength(140);
   });
 
+  const failed: VisualProofResult = {
+    status: 'fail',
+    headSha: HEAD,
+    runId: 'r',
+    captures: [],
+    diagnostic: 'capture exited 1',
+  };
+  const count = (text: string, needle: string) => text.split(needle).length - 1;
+
+  it('renders an advisory block with its own start marker and an advisory note (#4047)', () => {
+    const block = renderVisualProofBlock(failed, 'advisory');
+    expect(block.startsWith(VISUAL_PROOF_ADVISORY_START)).toBe(true);
+    expect(block).not.toContain(VISUAL_PROOF_START);
+    expect(block.endsWith(VISUAL_PROOF_END)).toBe(true);
+    expect(block).toContain('**Result: fail** (advisory)');
+    expect(block).toContain('does not block SHIP or merge');
+    expect(block).toContain('- Diagnostic: capture exited 1');
+  });
+
+  it('stamps success with an advisory description for an advisory non-pass (#4047)', async () => {
+    const { octokit, repos, pulls } = fakeOctokit();
+    await publishVisualProof(octokit, target, failed, 'advisory');
+    expect(pulls.update.mock.calls[0]?.[0].body).toContain(VISUAL_PROOF_ADVISORY_START);
+    expect(repos.createCommitStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: VISUAL_PROOF_STATUS_CONTEXT,
+        state: 'success',
+        description: 'advisory: visual proof fail: capture exited 1',
+      }),
+    );
+  });
+
+  it('replaces a required block with the advisory one in place, and back (#4047)', async () => {
+    const required = `Intro\n\n${renderVisualProofBlock(failed)}\n\nOutro`;
+    const { octokit, pulls } = fakeOctokit();
+    pulls.get.mockResolvedValueOnce({ data: { body: required } });
+    await publishVisualProof(octokit, target, failed, 'advisory');
+    const advisoryBody = pulls.update.mock.calls[0]?.[0].body ?? '';
+    expect(advisoryBody).not.toContain(VISUAL_PROOF_START);
+    expect(count(advisoryBody, VISUAL_PROOF_ADVISORY_START)).toBe(1);
+    expect(count(advisoryBody, VISUAL_PROOF_END)).toBe(1);
+    expect(advisoryBody.indexOf('Intro')).toBeLessThan(advisoryBody.indexOf(VISUAL_PROOF_ADVISORY_START));
+    expect(advisoryBody.indexOf(VISUAL_PROOF_END)).toBeLessThan(advisoryBody.indexOf('Outro'));
+
+    pulls.get.mockResolvedValueOnce({ data: { body: `${advisoryBody}\n\n${renderVisualProofBlock(failed)}` } });
+    await publishVisualProof(octokit, target, withImages);
+    const requiredBody = pulls.update.mock.calls[1]?.[0].body ?? '';
+    expect(requiredBody).not.toContain(VISUAL_PROOF_ADVISORY_START);
+    expect(count(requiredBody, VISUAL_PROOF_START)).toBe(1);
+    expect(count(requiredBody, VISUAL_PROOF_END)).toBe(1);
+  });
+
   it('does not rewrite an unchanged body', async () => {
     const { octokit, pulls } = fakeOctokit();
     const block = renderVisualProofBlock(withImages);
@@ -291,6 +345,12 @@ describe('assertVisualProofForHead', () => {
 
   it('throws when the status was not created by the factory', async () => {
     await expect(run(marked, [status('success', 99)]).result).rejects.toBeInstanceOf(VisualProofMissingError);
+  });
+
+  it('does not enforce an advisory block (#4047)', async () => {
+    const { repos, result } = run(`body\n${VISUAL_PROOF_ADVISORY_START}\nx\n${VISUAL_PROOF_END}`, [status('failure')]);
+    await expect(result).resolves.toBeUndefined();
+    expect(repos.listCommitStatusesForRef).not.toHaveBeenCalled();
   });
 
   it('passes for a factory-created success status', async () => {

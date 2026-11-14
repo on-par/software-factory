@@ -204,8 +204,12 @@ export async function shipWithCiRework(
     : undefined;
   const visualProofConfig = (ports.loadVisualProofConfig ?? loadVisualProofConfigDefault)(ports.workspace.path);
   const { routes: planRoutes, error: planRoutesError } = await readPlanScreenshotRoutes(request.specPath);
+  // No section at all stays `required`: plan screenshot entries then fail with the
+  // "no visualProof section" diagnostic. Only an explicit `mode: off` skips the gate (#4047).
+  const visualProofMode = visualProofConfig?.mode ?? 'required';
+  if (visualProofMode === 'off') ports.events('ship')('ship', 'visual proof is off by config (visualProof.mode: off)');
   const visualProofGate: VisualProofGate | undefined =
-    visualProofConfig || planRoutes.length > 0 || planRoutesError
+    visualProofMode !== 'off' && (visualProofConfig || planRoutes.length > 0 || planRoutesError)
       ? async (pr) => {
           if (planRoutesError) throw new Error(planRoutesError);
           const changedFiles = await listChanged(ports.octokit, owner, repoName, pr.prNumber);
@@ -233,7 +237,12 @@ export async function shipWithCiRework(
               result,
             );
           }
-          await publishVisualProof(ports.octokit, { owner, repo: repoName, prNumber: pr.prNumber }, result);
+          await publishVisualProof(
+            ports.octokit,
+            { owner, repo: repoName, prNumber: pr.prNumber },
+            result,
+            visualProofMode,
+          );
           return result;
         }
       : undefined;
@@ -261,6 +270,7 @@ export async function shipWithCiRework(
     ...(ports.claimSignal ? { run: claimGuardedRunner(ports.claimSignal) } : {}),
     ...(previewGate ? { previewGate } : {}),
     ...(visualProofGate ? { visualProofGate } : {}),
+    ...(visualProofGate && visualProofMode === 'advisory' ? { visualProofMode } : {}),
     laneId: request.lane,
     reviewRouting: inputs.reviewRouting,
     ...(inputs.pinNote ? { pinNotes: [inputs.pinNote] } : {}),

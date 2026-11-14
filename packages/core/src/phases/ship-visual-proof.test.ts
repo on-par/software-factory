@@ -31,11 +31,24 @@ describe('runVisualProofGate (#2232)', () => {
     expect(r.diagnostic).toBeUndefined();
   });
 
-  it('is unavailable without calling the gate while CI is pending', async () => {
-    const gate = vi.fn();
-    const r = await runVisualProofGate(gate, PR, { log: vi.fn(), ciPending: true });
-    expect(gate).not.toHaveBeenCalled();
-    expect(r).toMatchObject({ status: 'unavailable', diagnostic: 'CI pending, visual proof not captured' });
+  it('still runs the gate while CI is pending and notes it in the log (#4047)', async () => {
+    const gate = vi.fn(async () => result({ status: 'not-required' }));
+    const log = vi.fn();
+    const r = await runVisualProofGate(gate, PR, { log, ciPending: true });
+    expect(gate).toHaveBeenCalledWith(PR);
+    expect(r.status).toBe('not-required');
+    expect(log).toHaveBeenCalledWith('ship', 'visual proof not-required for PR #4 (abcdef012345) (CI pending)');
+  });
+
+  it('turns a gate error into unavailable while CI is pending (#4047)', async () => {
+    const r = await runVisualProofGate(
+      async () => {
+        throw new Error('no port');
+      },
+      PR,
+      { log: vi.fn(), ciPending: true },
+    );
+    expect(r).toMatchObject({ status: 'unavailable', headSha: HEAD, diagnostic: 'no port' });
   });
 
   it('turns a gate error into unavailable', async () => {
