@@ -6,8 +6,6 @@ import type { EventKind } from '../events/kinds.js';
 /** Classifies, captures, attaches and publishes visual proof for the PR's exact head. */
 export type VisualProofGate = (pr: { prNumber: number; headSha: string }) => Promise<VisualProofResult>;
 
-const CI_PENDING_DIAGNOSTIC = 'CI pending, visual proof not captured';
-
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 const unavailable = (headSha: string, diagnostic: string): VisualProofResult => ({
@@ -23,19 +21,18 @@ export async function runVisualProofGate(
   pr: { prNumber: number; headSha: string },
   ctx: { log: (type: EventKind, msg: string) => void; ciPending: boolean },
 ): Promise<VisualProofResult> {
+  // CI pending does not skip the gate: it classifies first and captures locally,
+  // so neither depends on CI; landing still enforces proof on the head (#4047).
   let result: VisualProofResult;
-  if (ctx.ciPending) {
-    result = unavailable(pr.headSha, CI_PENDING_DIAGNOSTIC);
-  } else {
-    try {
-      result = await gate(pr);
-    } catch (err) {
-      result = unavailable(pr.headSha, errorMessage(err));
-    }
+  try {
+    result = await gate(pr);
+  } catch (err) {
+    result = unavailable(pr.headSha, errorMessage(err));
   }
   ctx.log(
     'ship',
     `visual proof ${result.status} for PR #${pr.prNumber} (${pr.headSha.slice(0, 12)})` +
+      (ctx.ciPending ? ' (CI pending)' : '') +
       (result.diagnostic ? `: ${result.diagnostic}` : ''),
   );
   return result;

@@ -11,6 +11,8 @@ section to `## X.Y.Z - date`. See
 
 - Visual proof now uploads for factory-opened PRs; the guard refuses only an evidence branch equal to the PR head branch or under `factory/` (#4038).
 - Queue preflight now adopts the issue's own factory draft PR left without a draft reason (an interrupted SHIP or a ci-failed park): green or pending CI lands it, red CI queues CI rework, instead of parking it as "is draft" (#4039).
+- SHIP no longer parks a run just because CI is still pending: the visual-proof gate still classifies (non-UI changes are not required) and captures locally, so SHIP leaves the usual CI-pending draft; a capture failure still fails SHIP (#4047).
+- New `visualProof.mode` (`required` default, `advisory`, `off`): `advisory` captures and embeds proof but only warns on a fail or unavailable result (SHIP, park and land are unaffected), and `off` skips the gate (#4047).
 
 ## 0.9.36 - 2026-11-12
 

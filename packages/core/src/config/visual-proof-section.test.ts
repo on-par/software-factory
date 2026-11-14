@@ -12,6 +12,15 @@ describe('VisualProofConfigSchema (#2232)', () => {
     expect(parsed.routes[0]).toMatchObject({ state: 'default', viewport: { width: 1280, height: 800 } });
   });
 
+  it('defaults mode to required and accepts the three modes (#4047)', () => {
+    expect(VisualProofConfigSchema.parse(base).mode).toBe('required');
+    for (const mode of ['required', 'advisory', 'off'] as const) {
+      expect(VisualProofConfigSchema.parse({ ...base, mode }).mode).toBe(mode);
+    }
+    expect(VisualProofConfigSchema.safeParse({ ...base, mode: 'warn' }).success).toBe(false);
+    expect(VisualProofConfigSchema.safeParse({ ...base, mode: true }).success).toBe(false);
+  });
+
   it('enforces bounds', () => {
     const bad = (patch: Record<string, unknown>) => VisualProofConfigSchema.safeParse({ ...base, ...patch }).success;
     expect(bad({ maxCaptures: 6 })).toBe(false);

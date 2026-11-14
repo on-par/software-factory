@@ -12,6 +12,7 @@ import type { WorkRequest } from '../work/index.js';
 import type { WorkKey } from '../work/work-key.js';
 import type { CommandRunner } from './ship-git.js';
 import type { PreviewGate } from './ship-preview.js';
+import type { PublishedVisualProofMode } from '../checkers/visual-proof-attach.js';
 import type { VisualProofGate } from './ship-visual-proof.js';
 import type { WalkthroughShipOpts } from './ship-walkthrough.js';
 import type { PrerequisiteStackTarget } from '../queue/prerequisite-stack.js';
@@ -76,5 +77,7 @@ export interface ShipPhaseOptions {
   previewGate?: PreviewGate;
   /** UI visual proof gate (#2232): runs after the preview gate and before mark-ready. */
   visualProofGate?: VisualProofGate;
+  /** `visualProof.mode` (#4047): `advisory` warns on a non-pass result instead of failing SHIP. Default `required`. */
+  visualProofMode?: PublishedVisualProofMode;
   ciWatch?: typeof watchChecksWithInfraRerun;
 }

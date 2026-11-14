@@ -43,11 +43,48 @@ describe('finishShip visual proof gate (#2232)', () => {
     expect(graphql).not.toHaveBeenCalled();
   });
 
-  it('keeps the PR a draft when CI is pending', async () => {
+  it('leaves a ci-pending draft when CI is pending and proof is not required (#4047)', async () => {
+    const gate = vi.fn(async () => proof({ status: 'not-required' }));
+    const { finish, graphql } = setup(gate);
+    const r = await finish({ ciOutcome: 'timeout' });
+    expect(gate).toHaveBeenCalledWith({ prNumber: 5, headSha: HEAD });
+    expect(r).toMatchObject({
+      ok: true,
+      draft: true,
+      ciPending: true,
+      draftReason: 'ci-pending',
+      ciOutcome: 'timeout',
+      visualProof: { status: 'not-required' },
+    });
+    expect(graphql).not.toHaveBeenCalled();
+  });
+
+  it('captures proof while CI is pending and leaves a ci-pending draft with it (#4047)', async () => {
     const gate = vi.fn(async () => proof({}));
-    const r = await setup(gate).finish({ ciOutcome: 'timeout' });
-    expect(gate).not.toHaveBeenCalled();
-    expect(r).toMatchObject({ ok: false, draft: true, ciPending: true, ciOutcome: 'timeout' });
+    const { finish, graphql } = setup(gate);
+    const r = await finish({ ciOutcome: 'timeout' });
+    expect(gate).toHaveBeenCalledTimes(1);
+    expect(r).toMatchObject({
+      ok: true,
+      draft: true,
+      ciPending: true,
+      draftReason: 'ci-pending',
+      visualProof: { status: 'pass', headSha: HEAD },
+    });
+    expect(graphql).not.toHaveBeenCalled();
+  });
+
+  it('fails SHIP with unavailable proof when the gate throws while CI is pending (#4047)', async () => {
+    const r = await setup(async () => {
+      throw new Error('start exited');
+    }).finish({ ciOutcome: 'timeout' });
+    expect(r).toMatchObject({
+      ok: false,
+      draft: true,
+      ciPending: true,
+      visualProof: { status: 'unavailable', diagnostic: 'start exited' },
+    });
+    expect(r.reason).toContain('start exited');
   });
 
   it('includes visualProof in the ok result on pass and marks ready', async () => {
@@ -65,6 +102,47 @@ describe('finishShip visual proof gate (#2232)', () => {
     const gate = vi.fn(async () => proof({ status: 'not-required' }));
     await setup(gate).finish({ headSha: undefined });
     expect(gate).toHaveBeenCalledWith({ prNumber: 5, headSha: HEAD });
+  });
+
+  it('advisory mode: a non-pass result warns, marks ready and carries visualProof (#4047)', async () => {
+    const gate = async () => proof({ status: 'fail', diagnostic: 'blank or empty image' });
+    const { finish, graphql, log } = setup(gate, { visualProofMode: 'advisory' });
+    const r = await finish();
+    expect(r).toMatchObject({
+      ok: true,
+      prNumber: 5,
+      visualProof: { status: 'fail', diagnostic: 'blank or empty image' },
+    });
+    expect(graphql).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(
+      'warn',
+      `visual proof fail for PR #5 at ${HEAD.slice(0, 12)}: blank or empty image (advisory: not blocking SHIP)`,
+    );
+  });
+
+  it('advisory mode: unavailable proof while CI is pending leaves a ci-pending draft (#4047)', async () => {
+    const { finish, graphql } = setup(
+      async () => {
+        throw new Error('no port');
+      },
+      { visualProofMode: 'advisory' },
+    );
+    const r = await finish({ ciOutcome: 'timeout' });
+    expect(r).toMatchObject({
+      ok: true,
+      draft: true,
+      draftReason: 'ci-pending',
+      visualProof: { status: 'unavailable', diagnostic: 'no port' },
+    });
+    expect(graphql).not.toHaveBeenCalled();
+  });
+
+  it('required mode (explicit): a non-pass result still fails SHIP (#4047)', async () => {
+    const { finish, graphql } = setup(async () => proof({ status: 'unavailable', diagnostic: 'x' }), {
+      visualProofMode: 'required',
+    });
+    expect(await finish()).toMatchObject({ ok: false, visualProof: { status: 'unavailable' } });
+    expect(graphql).not.toHaveBeenCalled();
   });
 
   it('behaves as before with no gate', async () => {

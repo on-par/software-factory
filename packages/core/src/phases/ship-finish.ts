@@ -54,7 +54,11 @@ export async function finishShip(ctx: {
   if (opts.visualProofGate) {
     const sha = await currentSha();
     visualProof = await runVisualProofGate(opts.visualProofGate, { prNumber, headSha: sha }, { log, ciPending });
-    if (visualProof.status !== 'pass' && visualProof.status !== 'not-required') {
+    const nonPass = visualProof.status !== 'pass' && visualProof.status !== 'not-required';
+    if (nonPass && opts.visualProofMode === 'advisory') {
+      // Advisory mode (#4047): the block and status already say so; never fail SHIP or park.
+      log('warn', `${visualProofFailureReason(prNumber, visualProof)} (advisory: not blocking SHIP)`);
+    } else if (nonPass) {
       return {
         ok: false,
         prNumber,

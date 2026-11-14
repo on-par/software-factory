@@ -277,6 +277,7 @@ qa:
   start: [npm, run, start] # must listen on $PORT; the gate sets HOST=127.0.0.1
   readyPath: /
 visualProof:
+  mode: required # required (default) | advisory | off
   uiPaths: ['src/ui/**', 'web/**/*.css'] # changed files matching these make proof required
   routes: # 1-10 routes
     - route: /settings
@@ -329,11 +330,13 @@ It must write `manifest.json` into `VISUAL_PROOF_OUT_DIR`, one entry per selecte
 - a `file` that is absolute, contains `..` or leaves the out dir
 - a file that is not a PNG, is under 2048 bytes (`blank or empty image`) or is over 5 MiB
 
-Other diagnostics: `visual proof required by the plan's screenshot entries (...) but .factory config has no visualProof section`, `plan screenshot route <r> is not in visualProof.routes`, `UI files not covered by any visualProof route: <files>`, `qa.start missing`, `no leased lane port — enable environment.ports`, start exited or never ready, `capture command timed out after Ns`, a non-zero capture exit (a 200 from the app does not make it pass), `upload failed: ...`, `embedded asset unavailable: ...` and `CI pending, visual proof not captured`.
+Other diagnostics: `visual proof required by the plan's screenshot entries (...) but .factory config has no visualProof section`, `plan screenshot route <r> is not in visualProof.routes`, `UI files not covered by any visualProof route: <files>`, `qa.start missing`, `no leased lane port — enable environment.ports`, start exited or never ready, `capture command timed out after Ns`, a non-zero capture exit (a 200 from the app does not make it pass), `upload failed: ...` and `embedded asset unavailable: ...`.
 
-A valid capture is committed through the Git Data API to `evidenceBranch` under `visual-proof/<pr>/<run>/<head12>/`, read back, and embedded in the PR body's "Visual proof" block as `github.com/.../blob/<commit>/...?raw=true` images with run, head, route, state and viewport next to each. The result is `pass`, `fail` or `unavailable`. Screenshots are never committed to the PR branch. Any non-pass leaves the PR unmarked as ready and parks the run `fail`; the park policy then decides what happens to the PR. CI-rework does not retry a visual proof failure. The block and the status are rewritten on each SHIP.
+`visualProof.mode` sets how much a result counts. `required` (the default) is the blocking gate described below. `advisory` still classifies, captures, uploads and embeds proof, but a `fail` or `unavailable` result is only logged as a warning and noted as advisory in the PR body's block: SHIP does not fail, the run does not park, and land does not block. The `factory/visual-proof` status is then `success` with an `advisory:` description, so it never reads as red CI. `off` skips the gate, even when the plan names screenshots. A repo with no `visualProof` section whose plan names screenshots still fails with the "no visualProof section" diagnostic.
 
-Land enforces the result. A PR whose body carries the visual proof block is only merged when its exact head commit has a `factory/visual-proof` success status created by the factory's own identity. After a push, the older head has no such status, so land leaves the PR open with the remedy `re-run SHIP (factory resume --from ship) to capture proof for <head12>`. Land never re-captures. A PR without the block merges as before. Runs that change no UI start no app and no browser, and repos without a `visualProof` section and without plan screenshots behave as before.
+A valid capture is committed through the Git Data API to `evidenceBranch` under `visual-proof/<pr>/<run>/<head12>/`, read back, and embedded in the PR body's "Visual proof" block as `github.com/.../blob/<commit>/...?raw=true` images with run, head, route, state and viewport next to each. The result is `pass`, `fail` or `unavailable`. Screenshots are never committed to the PR branch. In `required` mode, any non-pass leaves the PR unmarked as ready and parks the run `fail`; the park policy then decides what happens to the PR. CI-rework does not retry a visual proof failure. The block and the status are rewritten on each SHIP.
+
+Land enforces the result. A PR whose body carries the required visual proof block is only merged when its exact head commit has a `factory/visual-proof` success status created by the factory's own identity. After a push, the older head has no such status, so land leaves the PR open with the remedy `re-run SHIP (factory resume --from ship) to capture proof for <head12>`. Land never re-captures. A PR without the block merges as before. Runs that change no UI start no app and no browser, and repos without a `visualProof` section and without plan screenshots behave as before.
 
 ## Open-core boundary
 

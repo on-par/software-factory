@@ -26,8 +26,17 @@ const VisualProofRouteSchema = z
   })
   .strict();
 
+export const VisualProofModeSchema = z
+  .enum(['required', 'advisory', 'off'])
+  .default('required')
+  .describe(
+    'required: a non-pass result fails SHIP and blocks land. advisory: proof is still captured and embedded, but a non-pass result only warns. off: the gate is skipped (#4047)',
+  );
+export type VisualProofMode = z.infer<typeof VisualProofModeSchema>;
+
 export const VisualProofConfigSchema = z
   .object({
+    mode: VisualProofModeSchema,
     uiPaths: z.array(z.string().min(1)).min(1).describe('Globs over repo-relative paths that make up user-visible UI'),
     routes: z.array(VisualProofRouteSchema).min(1).max(10),
     command: z
