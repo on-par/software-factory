@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+
+import { recordArgs } from '../test-support/recorders.js';
 
 import { DEFAULT_CI_NO_CHECKS_GRACE_MS, detectNoCiConfigured, watchChecks } from './ci-watch.js';
 
@@ -24,9 +26,9 @@ describe('watchChecks up-front no-CI probe (#2488)', () => {
       commits?: Array<{ sha: string }>;
     } = {},
   ) {
-    const getContent = vi.fn(
+    const { calls: contentCalls, fn: getContent } = recordArgs(
       opts.getContent ??
-        (async () => {
+        (async (..._args: unknown[]): Promise<any> => {
           throw notFound();
         }),
     );
@@ -43,47 +45,39 @@ describe('watchChecks up-front no-CI probe (#2488)', () => {
         },
       },
     };
-    return { octokit: octokit as any, getContent, ...createClock() };
+    return { octokit: octokit as any, contentCalls, ...createClock() };
+  }
+
+  async function watchWithInfos(t: ReturnType<typeof setup>) {
+    const infos: unknown[] = [];
+    const outcome = await watchChecks({
+      ...base,
+      octokit: t.octokit,
+      noChecksGraceMs: DEFAULT_CI_NO_CHECKS_GRACE_MS,
+      onNoChecks: (i) => void infos.push(i),
+      sleep: t.sleep,
+      now: t.now,
+    });
+    return { outcome, infos };
   }
 
   it('skips the CI wait without the grace period when the repo has no workflows and no default-branch checks', async () => {
     const t = setup();
-    const onNoChecks = vi.fn();
-
-    const outcome = await watchChecks({
-      ...base,
-      octokit: t.octokit,
-      noChecksGraceMs: DEFAULT_CI_NO_CHECKS_GRACE_MS,
-      onNoChecks,
-      sleep: t.sleep,
-      now: t.now,
-    });
+    const { outcome, infos } = await watchWithInfos(t);
 
     expect(outcome).toBe('no-checks');
     expect(t.now()).toBeLessThan(5_000);
     expect(t.sleeps).toEqual([]);
-    expect(onNoChecks).toHaveBeenCalledTimes(1);
-    expect(onNoChecks).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: 'no-ci-configured', defaultBranch: 'main' }),
-    );
+    expect(infos).toEqual([expect.objectContaining({ reason: 'no-ci-configured', defaultBranch: 'main' })]);
   });
 
   it('still waits the grace period when the PR head has a workflow file', async () => {
     const t = setup({ getContent: async () => ({ data: [{ type: 'file', name: 'ci.yml' }] }) });
-    const onNoChecks = vi.fn();
-
-    const outcome = await watchChecks({
-      ...base,
-      octokit: t.octokit,
-      noChecksGraceMs: DEFAULT_CI_NO_CHECKS_GRACE_MS,
-      onNoChecks,
-      sleep: t.sleep,
-      now: t.now,
-    });
+    const { outcome, infos } = await watchWithInfos(t);
 
     expect(outcome).toBe('no-checks');
     expect(t.now()).toBeGreaterThanOrEqual(DEFAULT_CI_NO_CHECKS_GRACE_MS);
-    expect(onNoChecks).toHaveBeenCalledWith(expect.objectContaining({ reason: 'grace-elapsed' }));
+    expect(infos).toContainEqual(expect.objectContaining({ reason: 'grace-elapsed' }));
   });
 
   it('still waits the grace period when a recent default-branch commit has a status', async () => {
@@ -111,7 +105,7 @@ describe('watchChecks up-front no-CI probe (#2488)', () => {
 
     await watchChecks({ ...base, octokit: t.octokit, deadlineMs: 30_000, sleep: t.sleep, now: t.now });
 
-    expect(t.getContent).not.toHaveBeenCalled();
+    expect(t.contentCalls).toEqual([]);
   });
 
   it('detectNoCiConfigured returns null when the default branch has no commits', async () => {

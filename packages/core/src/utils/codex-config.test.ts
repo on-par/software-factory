@@ -1,5 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { recordArgs } from '../test-support/recorders.js';
 import { codexChatgptSessionState, codexHasApiKey, hasCodexLoginEvidence } from './codex-config.js';
+
+const recordExec = (fail?: Error) =>
+  recordArgs((_file: string, _args: readonly string[]) => {
+    if (fail) throw fail;
+  });
 
 const noFile = () => {
   throw new Error('ENOENT');
@@ -7,29 +13,27 @@ const noFile = () => {
 
 describe('hasCodexLoginEvidence', () => {
   it('returns true for a non-empty CODEX_API_KEY without running anything', () => {
-    const exec = vi.fn();
+    const { calls: execCalls, fn: exec } = recordExec();
     expect(hasCodexLoginEvidence({ env: { CODEX_API_KEY: 'sk-test' }, exec })).toBe(true);
-    expect(exec).not.toHaveBeenCalled();
+    expect(execCalls).toEqual([]);
   });
 
   it('ignores a whitespace-only CODEX_API_KEY and falls through to login status', () => {
-    const exec = vi.fn();
+    const { calls: execCalls, fn: exec } = recordExec();
     expect(hasCodexLoginEvidence({ env: { CODEX_API_KEY: '   ' }, exec, readFile: noFile })).toBe(true);
-    expect(exec).toHaveBeenCalledTimes(1);
+    expect(execCalls).toHaveLength(1);
   });
 
   it('runs only `codex login status` and never codex exec', () => {
-    const exec = vi.fn();
+    const { calls: execCalls, fn: exec } = recordExec();
     expect(hasCodexLoginEvidence({ env: {}, exec, readFile: noFile })).toBe(true);
-    expect(exec).toHaveBeenCalledTimes(1);
-    expect(exec).toHaveBeenCalledWith('codex', ['login', 'status']);
-    expect(exec.mock.calls.some(([, args]) => (args as string[]).includes('exec'))).toBe(false);
+    expect(execCalls).toEqual([['codex', ['login', 'status']]]);
   });
 
   it('returns false when the command throws (non-zero exit or not found)', () => {
-    const exec = vi.fn(() => {
+    const exec = () => {
       throw new Error('exit 1');
-    });
+    };
     expect(hasCodexLoginEvidence({ env: {}, exec, readFile: noFile })).toBe(false);
   });
 
@@ -58,7 +62,7 @@ describe('codexChatgptSessionState (#2509)', () => {
   it('treats an expired access token with a refresh token as a normal, refreshable login', () => {
     const body = { auth_mode: 'chatgpt', tokens: { access_token: expired, refresh_token: 'r' } };
     expect(codexChatgptSessionState(deps(body))).toBe('refresh-pending');
-    expect(hasCodexLoginEvidence({ ...deps(body), exec: vi.fn() })).toBe(true);
+    expect(hasCodexLoginEvidence({ ...deps(body), exec: () => undefined })).toBe(true);
   });
 
   it('accepts an access token that is still valid', () => {
@@ -68,7 +72,9 @@ describe('codexChatgptSessionState (#2509)', () => {
   it('flags an expired access token with no or an empty refresh token', () => {
     expect(codexChatgptSessionState(deps({ tokens: { access_token: expired } }))).toBe('unusable');
     expect(codexChatgptSessionState(deps({ tokens: { access_token: expired, refresh_token: '  ' } }))).toBe('unusable');
-    expect(hasCodexLoginEvidence({ ...deps({ tokens: { access_token: expired } }), exec: vi.fn() })).toBe(false);
+    expect(hasCodexLoginEvidence({ ...deps({ tokens: { access_token: expired } }), exec: () => undefined })).toBe(
+      false,
+    );
   });
 
   it('flags an unparseable file and a file with no tokens', () => {
@@ -83,9 +89,9 @@ describe('codexChatgptSessionState (#2509)', () => {
   });
 
   it('still fails when codex login status fails', () => {
-    const exec = vi.fn(() => {
+    const exec = () => {
       throw new Error('exit 1');
-    });
+    };
     const body = { tokens: { access_token: jwt(NOW / 1000 + 3600), refresh_token: 'r' } };
     expect(hasCodexLoginEvidence({ ...deps(body), exec })).toBe(false);
   });
@@ -105,11 +111,11 @@ describe('codexHasApiKey (#3214)', () => {
   });
 
   it('reads auth.json under CODEX_HOME, falling back to ~/.codex when blank', () => {
-    const readFile = vi.fn(() => '{}');
+    const { calls, fn: readFile } = recordArgs((_path: string) => '{}');
     codexHasApiKey({ env: { CODEX_HOME: '/c' }, homedir, readFile });
-    expect(readFile).toHaveBeenCalledWith('/c/auth.json');
+    expect(calls).toEqual([['/c/auth.json']]);
     codexHasApiKey({ env: { CODEX_HOME: ' ' }, homedir, readFile });
-    expect(readFile).toHaveBeenLastCalledWith('/home/u/.codex/auth.json');
+    expect(calls).toEqual([['/c/auth.json'], ['/home/u/.codex/auth.json']]);
   });
 
   it('is false for a null, blank or non-string key', () => {

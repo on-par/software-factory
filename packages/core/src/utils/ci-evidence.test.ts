@@ -1,6 +1,7 @@
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
 
+import { recordArgs } from '../test-support/recorders.js';
 import { CI_EVIDENCE_LIMITS, collectCiFailureEvidence, collectFailingJobLogs } from './ci-evidence.js';
 
 function fakeOctokit(runs: unknown[] | Error, alerts?: unknown[] | Error | null) {
@@ -8,13 +9,13 @@ function fakeOctokit(runs: unknown[] | Error, alerts?: unknown[] | Error | null)
     if (runs instanceof Error) throw runs;
     return { data: { check_runs: runs } };
   });
-  const listAlertsForRepo = vi.fn(async () => {
+  const { calls: alertCalls, fn: listAlertsForRepo } = recordArgs(async (_params: unknown) => {
     if (alerts instanceof Error) throw alerts;
     return { data: alerts ?? [] };
   });
   const rest = { checks: { listForRef }, ...(alerts !== null ? { codeScanning: { listAlertsForRepo } } : {}) };
   const octokit: Octokit = Object.assign(Object.create(null), { rest });
-  return { octokit, listForRef, listAlertsForRepo };
+  return { octokit, listForRef, alertCalls };
 }
 
 const base = { owner: 'o', repo: 'r', ref: 'branch', prNumber: 123 };
@@ -22,7 +23,7 @@ const base = { owner: 'o', repo: 'r', ref: 'branch', prNumber: 123 };
 describe('collectCiFailureEvidence (#2814)', () => {
   it('collects failing checks and CodeQL alerts from the PR merge ref', async () => {
     const message = 'The URL of this request depends on a user-provided value.';
-    const { octokit, listAlertsForRepo } = fakeOctokit(
+    const { octokit, alertCalls } = fakeOctokit(
       [
         { name: 'lint', status: 'completed', conclusion: 'success' },
         { name: 'CodeQL', status: 'completed', conclusion: 'failure', output: { summary: '1 new alert' } },
@@ -46,9 +47,7 @@ describe('collectCiFailureEvidence (#2814)', () => {
     });
     expect(evidence.truncated).toBe(false);
     expect(evidence.errors).toBeUndefined();
-    expect(listAlertsForRepo).toHaveBeenCalledWith(
-      expect.objectContaining({ ref: 'refs/pull/123/merge', state: 'open' }),
-    );
+    expect(alertCalls).toEqual([[expect.objectContaining({ ref: 'refs/pull/123/merge', state: 'open' })]]);
   });
 
   it('records the GitHub alert number when present (#3712)', async () => {
@@ -61,14 +60,11 @@ describe('collectCiFailureEvidence (#2814)', () => {
   });
 
   it('does not query code scanning when no failing check is CodeQL', async () => {
-    const { octokit, listAlertsForRepo } = fakeOctokit(
-      [{ name: 'tests', status: 'completed', conclusion: 'failure' }],
-      [],
-    );
+    const { octokit, alertCalls } = fakeOctokit([{ name: 'tests', status: 'completed', conclusion: 'failure' }], []);
     const evidence = await collectCiFailureEvidence({ octokit, ...base });
     expect(evidence.failingChecks).toEqual([{ name: 'tests', conclusion: 'failure' }]);
     expect(evidence.alerts).toEqual([]);
-    expect(listAlertsForRepo).not.toHaveBeenCalled();
+    expect(alertCalls).toEqual([]);
   });
 
   it('truncates checks, alerts, summaries and messages to the caps', async () => {
@@ -146,15 +142,17 @@ describe('collectFailingJobLogs (#3537)', () => {
       if (runs instanceof Error) throw runs;
       return { data: { check_runs: runs } };
     });
-    const downloadJobLogsForWorkflowRun = vi.fn(async ({ job_id }: { job_id: number }) => {
-      const log = logs[job_id];
-      if (log instanceof Error) throw log;
-      return { data: log };
-    });
+    const { calls: downloads, fn: downloadJobLogsForWorkflowRun } = recordArgs(
+      async ({ job_id }: { job_id: number }) => {
+        const log = logs[job_id];
+        if (log instanceof Error) throw log;
+        return { data: log };
+      },
+    );
     const octokit: Octokit = Object.assign(Object.create(null), {
       rest: { checks: { listForRef }, actions: { downloadJobLogsForWorkflowRun } },
     });
-    return { octokit, downloadJobLogsForWorkflowRun };
+    return { octokit, downloads };
   }
   const run = (id: number | undefined, name: string, conclusion = 'failure') => ({
     ...(id === undefined ? {} : { id }),
@@ -181,10 +179,10 @@ describe('collectFailingJobLogs (#3537)', () => {
   it('caps to 3 jobs and only fetches the named failing checks', async () => {
     const runs = [run(1, 'a'), run(2, 'b'), run(3, 'c'), run(4, 'd'), run(5, 'other'), run(6, 'e', 'success')];
     const logs = Object.fromEntries([1, 2, 3, 4, 5, 6].map((i) => [i, `log ${i}`]));
-    const { octokit, downloadJobLogsForWorkflowRun } = logOctokit(runs, logs);
+    const { octokit, downloads } = logOctokit(runs, logs);
     const { jobLogs } = await collectFailingJobLogs({ octokit, ...args, checkNames: ['a', 'b', 'c', 'd', 'e'] });
     expect(jobLogs.map((j) => j.name)).toEqual(['a', 'b', 'c']);
-    expect(downloadJobLogsForWorkflowRun).toHaveBeenCalledTimes(3);
+    expect(downloads.map(([p]) => p.job_id)).toEqual([1, 2, 3]);
     expect(jobLogs[0]).toMatchObject({ excerpt: 'log 1', truncated: false });
   });
 

@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
+import { recordArgs } from '../test-support/recorders.js';
 import {
   DEFAULT_CI_NO_CHECKS_GRACE_MS,
   resolveCiNoChecksGraceMs,
@@ -28,6 +29,9 @@ function createClock() {
   return { now, sleep, sleeps };
 }
 
+const countingStatus = (total: number) =>
+  recordArgs(async () => ({ data: { total_count: total, statuses: total ? [{}] : [], sha: 'abc123' } }));
+
 const pending = [{ status: 'in_progress', conclusion: null }];
 
 describe('watchChecks no-checks early exit and progress (#2386)', () => {
@@ -36,46 +40,45 @@ describe('watchChecks no-checks early exit and progress (#2386)', () => {
   it('returns no-checks after the grace period when there are no check runs and no commit statuses', async () => {
     const { listForRef } = scriptChecks([[]]);
     const { now, sleep } = createClock();
-    const getCombinedStatusForRef = vi.fn(async () => {
+    const { calls, fn: getCombinedStatusForRef } = recordArgs(async () => {
       expect(now()).toBeGreaterThanOrEqual(90_000);
       return { data: { total_count: 0, statuses: [], sha: 'abc123' } };
     });
-    const onNoChecks = vi.fn();
+    const noChecks: unknown[] = [];
     const octokit = { rest: { checks: { listForRef }, repos: { getCombinedStatusForRef } } };
 
     const outcome = await watchChecks({
       ...base,
       octokit: octokit as any,
       noChecksGraceMs: 90_000,
-      onNoChecks,
+      onNoChecks: (i) => void noChecks.push(i),
       sleep,
       now,
     });
 
     expect(outcome).toBe('no-checks');
-    expect(onNoChecks).toHaveBeenCalledTimes(1);
-    expect(onNoChecks.mock.calls[0][0]).toMatchObject({ sha: 'abc123', reason: 'grace-elapsed' });
+    expect(noChecks).toEqual([expect.objectContaining({ sha: 'abc123', reason: 'grace-elapsed' })]);
     expect(now()).toBeGreaterThanOrEqual(90_000);
     expect(now()).toBeLessThanOrEqual(90_000 + 60_000);
-    expect(getCombinedStatusForRef).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(1);
   });
 
   it('keeps watching when commit statuses exist even with zero check runs', async () => {
     const { listForRef } = scriptChecks([[]]);
     const { now, sleep } = createClock();
-    const getCombinedStatusForRef = vi.fn(async () => ({ data: { total_count: 1, statuses: [{}], sha: 'abc123' } }));
+    const { calls: reads, fn: getCombinedStatusForRef } = countingStatus(1);
     const octokit = { rest: { checks: { listForRef }, repos: { getCombinedStatusForRef } } };
 
     const outcome = await watchChecks({ ...base, octokit: octokit as any, noChecksGraceMs: 90_000, sleep, now });
 
     expect(outcome).toBe('timeout');
-    expect(getCombinedStatusForRef).toHaveBeenCalled();
+    expect(reads.length).toBeGreaterThan(0);
   });
 
   it('keeps watching when the combined-status call throws', async () => {
     const { listForRef } = scriptChecks([[]]);
     const { now, sleep } = createClock();
-    const getCombinedStatusForRef = vi.fn(async () => {
+    const { calls, fn: getCombinedStatusForRef } = recordArgs(async () => {
       throw new Error('boom');
     });
     const octokit = { rest: { checks: { listForRef }, repos: { getCombinedStatusForRef } } };
@@ -84,19 +87,19 @@ describe('watchChecks no-checks early exit and progress (#2386)', () => {
 
     expect(outcome).toBe('timeout');
     expect(now()).toBeGreaterThanOrEqual(600_000);
-    expect(getCombinedStatusForRef.mock.calls.length).toBeGreaterThan(3);
+    expect(calls.length).toBeGreaterThan(3);
   });
 
   it('never checks statuses or returns no-checks when noChecksGraceMs is unset', async () => {
     const { listForRef } = scriptChecks([[]]);
     const { now, sleep } = createClock();
-    const getCombinedStatusForRef = vi.fn(async () => ({ data: { total_count: 0, statuses: [], sha: 'abc123' } }));
+    const { calls: reads, fn: getCombinedStatusForRef } = countingStatus(0);
     const octokit = { rest: { checks: { listForRef }, repos: { getCombinedStatusForRef } } };
 
     const outcome = await watchChecks({ ...base, octokit: octokit as any, sleep, now });
 
     expect(outcome).toBe('timeout');
-    expect(getCombinedStatusForRef).not.toHaveBeenCalled();
+    expect(reads).toEqual([]);
   });
 
   it('reports progress at most once per progressIntervalMs with remaining time while checks are pending', async () => {
@@ -130,12 +133,12 @@ describe('watchChecks no-checks early exit and progress (#2386)', () => {
   it('does not report progress when there are no check runs', async () => {
     const { listForRef } = scriptChecks([[]]);
     const { now, sleep } = createClock();
-    const onProgress = vi.fn();
+    const progress: unknown[] = [];
     const octokit = { rest: { checks: { listForRef } } };
 
-    await watchChecks({ ...base, octokit: octokit as any, onProgress, sleep, now });
+    await watchChecks({ ...base, octokit: octokit as any, onProgress: (p) => void progress.push(p), sleep, now });
 
-    expect(onProgress).not.toHaveBeenCalled();
+    expect(progress).toEqual([]);
   });
 });
 
@@ -152,9 +155,9 @@ describe('resolveCiNoChecksGraceMs', () => {
 
 describe('watchChecksWithInfraRerun no-checks (#2386)', () => {
   it('passes no-checks through without listing failed runs or rerunning', async () => {
-    const listForRef = vi.fn(async () => ({ data: { check_runs: [] } }));
-    const rerun = vi.fn(async () => ({ ok: true }));
-    const watch = vi.fn(async () => 'no-checks' as const);
+    const { calls: listCalls, fn: listForRef } = recordArgs(async () => ({ data: { check_runs: [] } }));
+    const { calls: rerunCalls, fn: rerun } = recordArgs(async () => ({ ok: true }));
+    const { calls: watchCalls, fn: watch } = recordArgs(async () => 'no-checks' as const);
 
     const outcome = await watchChecksWithInfraRerun({
       octokit: { rest: { checks: { listForRef } } } as any,
@@ -167,8 +170,8 @@ describe('watchChecksWithInfraRerun no-checks (#2386)', () => {
     });
 
     expect(outcome).toBe('no-checks');
-    expect(watch).toHaveBeenCalledTimes(1);
-    expect(listForRef).not.toHaveBeenCalled();
-    expect(rerun).not.toHaveBeenCalled();
+    expect(watchCalls).toHaveLength(1);
+    expect(listCalls).toEqual([]);
+    expect(rerunCalls).toEqual([]);
   });
 });
