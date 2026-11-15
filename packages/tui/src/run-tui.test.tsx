@@ -1,8 +1,9 @@
 import type { render } from 'ink';
 import type { ReactElement, ReactNode } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { AppProps } from './components/App.js';
+import type { followPlain } from './fallback.js';
 import { runTui } from './run-tui.js';
 
 /** runTui only reads stdout.isTTY and forwards stdout to followPlainFn; one assertion is enough. */
@@ -18,194 +19,129 @@ function appPropsOf(node: ReactNode): AppProps {
   return (node as ReactElement<AppProps>).props;
 }
 
+function recordFollowPlain() {
+  const calls: { file: string; out: NodeJS.WritableStream }[] = [];
+  let stops = 0;
+  const followPlainFn: typeof followPlain = (file, out) => {
+    calls.push({ file, out: out as NodeJS.WritableStream });
+    return () => {
+      stops += 1;
+    };
+  };
+  return { calls, stopCount: () => stops, followPlainFn };
+}
+
+function recordRender(opts: { throws?: Error } = {}) {
+  const nodes: ReactNode[] = [];
+  let exits = 0;
+  const renderFn: typeof render = (node) => {
+    nodes.push(node);
+    if (opts.throws) throw opts.throws;
+    return {
+      rerender: () => {},
+      unmount: () => {},
+      waitUntilExit: async () => {
+        exits += 1;
+      },
+      cleanup: () => {},
+      clear: () => {},
+      waitUntilRenderFlush: async () => {},
+    };
+  };
+  return { nodes, exited: () => exits, renderFn };
+}
+
+async function runTty(extra: Partial<Parameters<typeof runTui>[0]>) {
+  const stdout = fakeStdout(true);
+  const r = recordRender();
+  const f = recordFollowPlain();
+  await runTui({
+    eventsFile: 'events.ndjson',
+    stdout,
+    render: r.renderFn,
+    followPlainFn: f.followPlainFn,
+    ...extra,
+  });
+  expect(r.nodes).toHaveLength(1);
+  return appPropsOf(r.nodes[0]);
+}
+
+async function runUntilSigint(
+  stdout: NodeJS.WriteStream,
+  r: ReturnType<typeof recordRender>,
+  f: ReturnType<typeof recordFollowPlain>,
+) {
+  const promise = runTui({ eventsFile: 'events.ndjson', stdout, render: r.renderFn, followPlainFn: f.followPlainFn });
+  process.emit('SIGINT', 'SIGINT');
+  await expect(promise).resolves.toBeUndefined();
+}
+
 describe('runTui', () => {
   it('falls back to plain printing on a non-TTY stdout, without invoking render', async () => {
     const stdout = fakeStdout(false);
-    const stop = vi.fn();
-    const followPlainFn = vi.fn(() => stop);
-    const renderFn = vi.fn();
+    const f = recordFollowPlain();
+    const r = recordRender();
 
-    const promise = runTui({ eventsFile: 'events.ndjson', stdout, render: renderFn, followPlainFn });
-    process.emit('SIGINT', 'SIGINT');
-    await expect(promise).resolves.toBeUndefined();
+    await runUntilSigint(stdout, r, f);
 
-    expect(followPlainFn).toHaveBeenCalledWith('events.ndjson', stdout);
-    expect(renderFn).not.toHaveBeenCalled();
-    expect(stop).toHaveBeenCalled();
+    expect(f.calls).toEqual([{ file: 'events.ndjson', out: stdout }]);
+    expect(r.nodes).toEqual([]);
+    expect(f.stopCount()).toBe(1);
   });
 
   it('falls back to plain printing when render throws', async () => {
     const stdout = fakeStdout(true);
-    const stop = vi.fn();
-    const followPlainFn = vi.fn(() => stop);
-    const renderFn = vi.fn(() => {
-      throw new Error('ink init failed');
-    });
+    const f = recordFollowPlain();
+    const r = recordRender({ throws: new Error('ink init failed') });
 
-    const promise = runTui({ eventsFile: 'events.ndjson', stdout, render: renderFn, followPlainFn });
-    process.emit('SIGINT', 'SIGINT');
-    await expect(promise).resolves.toBeUndefined();
+    await runUntilSigint(stdout, r, f);
 
-    expect(renderFn).toHaveBeenCalled();
-    expect(followPlainFn).toHaveBeenCalledWith('events.ndjson', stdout);
+    expect(r.nodes).toHaveLength(1);
+    expect(f.calls).toEqual([{ file: 'events.ndjson', out: stdout }]);
+    expect(f.stopCount()).toBe(1);
   });
 
   it('resolves via the Ink app exiting on a TTY stdout', async () => {
     const stdout = fakeStdout(true);
-    const waitUntilExit = vi.fn().mockResolvedValue(undefined);
-    const renderFn = vi.fn<typeof render>(() => ({
-      rerender: vi.fn(),
-      unmount: vi.fn(),
-      waitUntilExit,
-      cleanup: vi.fn(),
-      clear: vi.fn(),
-      waitUntilRenderFlush: vi.fn().mockResolvedValue(undefined),
-    }));
-    const followPlainFn = vi.fn(() => vi.fn());
+    const r = recordRender();
+    const f = recordFollowPlain();
 
     await expect(
-      runTui({ eventsFile: 'events.ndjson', stdout, render: renderFn, followPlainFn }),
+      runTui({ eventsFile: 'events.ndjson', stdout, render: r.renderFn, followPlainFn: f.followPlainFn }),
     ).resolves.toBeUndefined();
 
-    expect(renderFn).toHaveBeenCalled();
-    expect(waitUntilExit).toHaveBeenCalled();
-    expect(followPlainFn).not.toHaveBeenCalled();
+    expect(r.nodes).toHaveLength(1);
+    expect(r.exited()).toBe(1);
+    expect(f.calls).toEqual([]);
   });
 
   it('forwards stopFile through to the rendered App', async () => {
-    const stdout = fakeStdout(true);
-    const waitUntilExit = vi.fn().mockResolvedValue(undefined);
-    const renderFn = vi.fn<typeof render>(() => ({
-      rerender: vi.fn(),
-      unmount: vi.fn(),
-      waitUntilExit,
-      cleanup: vi.fn(),
-      clear: vi.fn(),
-      waitUntilRenderFlush: vi.fn().mockResolvedValue(undefined),
-    }));
-    const followPlainFn = vi.fn(() => vi.fn());
-
-    await runTui({
-      eventsFile: 'events.ndjson',
-      stopFile: '/repo/.factory/STOP',
-      stdout,
-      render: renderFn,
-      followPlainFn,
-    });
-
-    expect(renderFn).toHaveBeenCalled();
-    const call = renderFn.mock.calls[0];
-    expect(call).toBeDefined();
-    expect(appPropsOf(call?.[0]).stopFile).toBe('/repo/.factory/STOP');
+    const props = await runTty({ stopFile: '/repo/.factory/STOP' });
+    expect(props.stopFile).toBe('/repo/.factory/STOP');
   });
 
   it('forwards queueReader and costsFile through to the rendered App', async () => {
-    const stdout = fakeStdout(true);
-    const waitUntilExit = vi.fn().mockResolvedValue(undefined);
-    const renderFn = vi.fn<typeof render>(() => ({
-      rerender: vi.fn(),
-      unmount: vi.fn(),
-      waitUntilExit,
-      cleanup: vi.fn(),
-      clear: vi.fn(),
-      waitUntilRenderFlush: vi.fn().mockResolvedValue(undefined),
-    }));
-    const followPlainFn = vi.fn(() => vi.fn());
-
     const queueReader = { source: 'GitHub', read: async () => ({ entries: [] }), pollMs: 30_000 };
-    await runTui({
-      eventsFile: 'events.ndjson',
-      queueReader,
-      costsFile: '/repo/.factory/costs.jsonl',
-      stdout,
-      render: renderFn,
-      followPlainFn,
-    });
-
-    const call = renderFn.mock.calls[0];
-    expect(call).toBeDefined();
-    const props = appPropsOf(call?.[0]);
+    const props = await runTty({ queueReader, costsFile: '/repo/.factory/costs.jsonl' });
     expect(props.queueReader).toBe(queueReader);
     expect(props.costsFile).toBe('/repo/.factory/costs.jsonl');
   });
 
   it('forwards approvalsDir through to the rendered App', async () => {
-    const stdout = fakeStdout(true);
-    const waitUntilExit = vi.fn().mockResolvedValue(undefined);
-    const renderFn = vi.fn<typeof render>(() => ({
-      rerender: vi.fn(),
-      unmount: vi.fn(),
-      waitUntilExit,
-      cleanup: vi.fn(),
-      clear: vi.fn(),
-      waitUntilRenderFlush: vi.fn().mockResolvedValue(undefined),
-    }));
-    const followPlainFn = vi.fn(() => vi.fn());
-
-    await runTui({
-      eventsFile: 'events.ndjson',
-      approvalsDir: '/repo/.factory/approvals',
-      stdout,
-      render: renderFn,
-      followPlainFn,
-    });
-
-    const call = renderFn.mock.calls[0];
-    expect(call).toBeDefined();
-    expect(appPropsOf(call?.[0]).approvalsDir).toBe('/repo/.factory/approvals');
+    const props = await runTty({ approvalsDir: '/repo/.factory/approvals' });
+    expect(props.approvalsDir).toBe('/repo/.factory/approvals');
   });
 
   it('forwards steeringDir through to the rendered App', async () => {
-    const stdout = fakeStdout(true);
-    const waitUntilExit = vi.fn().mockResolvedValue(undefined);
-    const renderFn = vi.fn<typeof render>(() => ({
-      rerender: vi.fn(),
-      unmount: vi.fn(),
-      waitUntilExit,
-      cleanup: vi.fn(),
-      clear: vi.fn(),
-      waitUntilRenderFlush: vi.fn().mockResolvedValue(undefined),
-    }));
-    const followPlainFn = vi.fn(() => vi.fn());
-
-    await runTui({
-      eventsFile: 'events.ndjson',
-      steeringDir: '/repo/.factory/steering',
-      stdout,
-      render: renderFn,
-      followPlainFn,
-    });
-
-    const call = renderFn.mock.calls[0];
-    expect(call).toBeDefined();
-    expect(appPropsOf(call?.[0]).steeringDir).toBe('/repo/.factory/steering');
+    const props = await runTty({ steeringDir: '/repo/.factory/steering' });
+    expect(props.steeringDir).toBe('/repo/.factory/steering');
   });
 
   it('forwards breakerFile and effectiveConfigLines through to the rendered App', async () => {
-    const stdout = fakeStdout(true);
-    const waitUntilExit = vi.fn().mockResolvedValue(undefined);
-    const renderFn = vi.fn<typeof render>(() => ({
-      rerender: vi.fn(),
-      unmount: vi.fn(),
-      waitUntilExit,
-      cleanup: vi.fn(),
-      clear: vi.fn(),
-      waitUntilRenderFlush: vi.fn().mockResolvedValue(undefined),
-    }));
-    const followPlainFn = vi.fn(() => vi.fn());
-
-    await runTui({
-      eventsFile: 'events.ndjson',
+    const props = await runTty({
       breakerFile: '/repo/.factory/breaker.json',
       effectiveConfigLines: ['router: default'],
-      stdout,
-      render: renderFn,
-      followPlainFn,
     });
-
-    const call = renderFn.mock.calls[0];
-    expect(call).toBeDefined();
-    const props = appPropsOf(call?.[0]);
     expect(props.breakerFile).toBe('/repo/.factory/breaker.json');
     expect(props.effectiveConfigLines).toEqual(['router: default']);
   });

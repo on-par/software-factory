@@ -1,38 +1,77 @@
 import type {
   ApprovalRequest,
   CostsRead,
-  EvidencePack,
   EventKind,
+  EvidencePack,
   FactoryEvent,
   QueueSnapshot,
+  queueSteeringMessage,
+  respondToApproval,
 } from '@on-par/factory-core';
 import { cleanup, render } from 'ink-testing-library';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { App, type QueueReader } from './App.js';
+import { App, type AppProps, type QueueReader } from './App.js';
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
 
-function makeFakeFollow() {
+export function makeFakeFollow() {
   let onEvent: ((e: FactoryEvent) => void) | undefined;
-  const stop = vi.fn();
-  const follow = vi.fn((_file: string, cb: (e: FactoryEvent) => void) => {
+  let stops = 0;
+  const stop = () => {
+    stops += 1;
+  };
+  const follow = (_file: string, cb: (e: FactoryEvent) => void) => {
     onEvent = cb;
     return stop;
-  });
+  };
   return {
     follow,
-    stop,
+    stopCount: () => stops,
     push: (e: FactoryEvent) => onEvent?.(e),
   };
 }
 
-function ev(type: EventKind, msg: string, issue = '192', ts = new Date().toISOString(), lane?: string): FactoryEvent {
+export function recordResponses() {
+  const responses: { dir: string; id: string; res: { approved: boolean; reason?: string } }[] = [];
+  const respondFn: typeof respondToApproval = (dir, id, res) => {
+    responses.push({ dir, id, res });
+    return { id, approved: res.approved, reason: res.reason, respondedAt: '2026-01-01T00:00:00.000Z' };
+  };
+  return { responses, respondFn };
+}
+
+export function recordSteering() {
+  const sent: { dir: string; issue: number; text: string }[] = [];
+  const queueSteeringFn: typeof queueSteeringMessage = (dir, issue, text) => {
+    sent.push({ dir, issue, text });
+    return { id: String(sent.length), issue, text, queuedAt: '2026-01-01T00:00:00.000Z' };
+  };
+  return { sent, queueSteeringFn };
+}
+
+export function ev(
+  type: EventKind,
+  msg: string,
+  issue = '192',
+  ts = new Date().toISOString(),
+  lane?: string,
+): FactoryEvent {
   return lane ? { ts, type, issue, msg, lane } : { ts, type, issue, msg };
 }
+
+export const flush = async () => {
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+};
+
+export const flushEscape = async () => {
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  await flush();
+};
 
 const failureEvidence: EvidencePack = {
   repo: 'on-par/software-factory',
@@ -45,18 +84,6 @@ const failureEvidence: EvidencePack = {
   eventExcerpt: 'tests failed',
   logPath: '/tmp/factory.log',
   relatedIssue: { repo: 'on-par/software-factory', issueNumber: 1392 },
-};
-
-/** Ink schedules re-renders on a microtask; flush it before reading lastFrame(). */
-const flush = async () => {
-  await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setImmediate(resolve));
-};
-
-// ink 7 holds a lone Escape byte for ~20ms (to tell it from the start of a sequence) before delivering it.
-const flushEscape = async () => {
-  await new Promise((resolve) => setTimeout(resolve, 40));
-  await flush();
 };
 
 describe('App', () => {
@@ -86,11 +113,10 @@ describe('App', () => {
   it('hides a stale waiting-to-merge lane unless its phase-snapshot heartbeat is fresh (#1369)', async () => {
     const fake = makeFakeFollow();
     const old = new Date(Date.now() - 60 * 60_000).toISOString();
-    const readSnapshotFn = vi.fn(async (file: string) =>
+    const readSnapshotFn = async (file: string) =>
       file.includes('301')
         ? { issue: 301, phase: 'ship' as const, updatedAt: old, lastActivityAt: new Date().toISOString() }
-        : null,
-    );
+        : null;
     const { lastFrame } = render(
       <App
         eventsFile="ignored"
@@ -105,7 +131,7 @@ describe('App', () => {
     fake.push(ev('plan', 'Starting plan phase', '301', old));
     fake.push(ev('await-merge', 'waiting to merge', '301', old));
     await flush();
-    await vi.waitFor(() => expect(readSnapshotFn).toHaveBeenCalled());
+    await vi.waitFor(() => expect(lastFrame()).toContain('1 stale lane hidden'));
     await flush();
 
     const frame = lastFrame() ?? '';
@@ -237,7 +263,7 @@ describe('App', () => {
     stdin.write('q');
     await flush();
 
-    expect(fake.stop).toHaveBeenCalled();
+    expect(fake.stopCount()).toBe(1);
   });
 
   it('shows the STOP banner once the poll observes the stop file, without disturbing lane rows', async () => {
@@ -657,8 +683,7 @@ describe('App lane drill-down (#1743)', () => {
       },
     };
     const { lastFrame } = render(<App eventsFile="ignored" follow={fake.follow} queueReader={queueReader} />);
-    fake.push(ev('plan', 'Starting plan phase', '1706', undefined, 'prefix'));
-    fake.push(ev('plan', 'Starting plan phase', '1707', undefined, 'prefix'));
+    for (const n of ['1706', '1707']) fake.push(ev('plan', 'Starting plan phase', n, undefined, 'prefix'));
     await flush();
     await flush();
     expect(lastFrame()).toContain('queue unavailable');
@@ -696,19 +721,24 @@ describe('App approvals', () => {
     };
   }
 
-  it('renders the approval prompt on the dashboard tab and after switching tabs', async () => {
+  function renderApproval() {
     const fake = makeFakeFollow();
     const listPendingFn = vi.fn(() => [makeRequest()]);
-    const respondFn = vi.fn();
-    const { lastFrame, stdin } = render(
+    const recorded = recordResponses();
+    const utils = render(
       <App
         eventsFile="ignored"
         follow={fake.follow}
         approvalsDir="/repo/.factory/approvals"
         listPendingFn={listPendingFn}
-        respondFn={respondFn}
+        respondFn={recorded.respondFn}
       />,
     );
+    return { ...utils, responses: recorded.responses };
+  }
+
+  it('renders the approval prompt on the dashboard tab and after switching tabs', async () => {
+    const { lastFrame, stdin } = renderApproval();
     await flush();
 
     expect(lastFrame()).toContain('APPROVAL REQUIRED');
@@ -719,40 +749,18 @@ describe('App approvals', () => {
   });
 
   it('approves with y and the prompt disappears from the frame', async () => {
-    const fake = makeFakeFollow();
-    const listPendingFn = vi.fn(() => [makeRequest()]);
-    const respondFn = vi.fn();
-    const { lastFrame, stdin } = render(
-      <App
-        eventsFile="ignored"
-        follow={fake.follow}
-        approvalsDir="/repo/.factory/approvals"
-        listPendingFn={listPendingFn}
-        respondFn={respondFn}
-      />,
-    );
+    const { responses, lastFrame, stdin } = renderApproval();
     await flush();
 
     stdin.write('y');
     await flush();
 
-    expect(respondFn).toHaveBeenCalledWith('/repo/.factory/approvals', 'req-1', { approved: true });
+    expect(responses).toEqual([{ dir: '/repo/.factory/approvals', id: 'req-1', res: { approved: true } }]);
     expect(lastFrame()).not.toContain('APPROVAL REQUIRED');
   });
 
   it('denies with n then a typed reason then Enter, and q does not exit while typing', async () => {
-    const fake = makeFakeFollow();
-    const listPendingFn = vi.fn(() => [makeRequest()]);
-    const respondFn = vi.fn();
-    const { lastFrame, stdin } = render(
-      <App
-        eventsFile="ignored"
-        follow={fake.follow}
-        approvalsDir="/repo/.factory/approvals"
-        listPendingFn={listPendingFn}
-        respondFn={respondFn}
-      />,
-    );
+    const { responses, lastFrame, stdin } = renderApproval();
     await flush();
 
     stdin.write('n');
@@ -764,7 +772,7 @@ describe('App approvals', () => {
     await flush();
     await flush();
     expect(lastFrame()).toContain('nope');
-    expect(respondFn).not.toHaveBeenCalled();
+    expect(responses).toEqual([]);
 
     stdin.write('q');
     await flush();
@@ -774,23 +782,14 @@ describe('App approvals', () => {
     stdin.write('\r');
     await flush();
 
-    expect(respondFn).toHaveBeenCalledWith('/repo/.factory/approvals', 'req-1', { approved: false, reason: 'nopeq' });
+    expect(responses).toEqual([
+      { dir: '/repo/.factory/approvals', id: 'req-1', res: { approved: false, reason: 'nopeq' } },
+    ]);
     expect(lastFrame()).not.toContain('APPROVAL REQUIRED');
   });
 
   it('cancels deny mode with Escape without calling respondFn', async () => {
-    const fake = makeFakeFollow();
-    const listPendingFn = vi.fn(() => [makeRequest()]);
-    const respondFn = vi.fn();
-    const { lastFrame, stdin } = render(
-      <App
-        eventsFile="ignored"
-        follow={fake.follow}
-        approvalsDir="/repo/.factory/approvals"
-        listPendingFn={listPendingFn}
-        respondFn={respondFn}
-      />,
-    );
+    const { responses, lastFrame, stdin } = renderApproval();
     await flush();
 
     stdin.write('n');
@@ -801,9 +800,35 @@ describe('App approvals', () => {
     await flushEscape();
 
     expect(lastFrame()).toContain('y approve · n deny');
-    expect(respondFn).not.toHaveBeenCalled();
+    expect(responses).toEqual([]);
   });
 });
+
+type Stdin = ReturnType<typeof render>['stdin'];
+
+async function openAndType(stdin: Stdin, text: string) {
+  stdin.write('i');
+  await flush();
+  stdin.write(text);
+  await flush();
+  await flush();
+}
+
+function renderComposer(extra: Partial<AppProps> = {}) {
+  const fake = makeFakeFollow();
+  const steering = recordSteering();
+  const utils = render(
+    <App
+      eventsFile="ignored"
+      follow={fake.follow}
+      steeringDir="/repo/.factory/steering"
+      queueSteeringFn={steering.queueSteeringFn}
+      {...extra}
+    />,
+  );
+  fake.push(ev('plan', 'Starting plan phase', '296'));
+  return { ...utils, fake, sent: steering.sent };
+}
 
 describe('App steering composer', () => {
   it('opens the composer for the active lane on "i"', async () => {
@@ -845,7 +870,7 @@ describe('App steering composer', () => {
         requestedAt: '2026-01-01T00:00:00.000Z',
       },
     ]);
-    const respondFn = vi.fn();
+    const { responses, respondFn } = recordResponses();
     const { lastFrame, stdin } = render(
       <App
         eventsFile="ignored"
@@ -868,205 +893,102 @@ describe('App steering composer', () => {
     stdin.write('y');
     await flush();
 
-    expect(respondFn).toHaveBeenCalledWith('/repo/.factory/approvals', 'req-1', { approved: true });
+    expect(responses).toEqual([{ dir: '/repo/.factory/approvals', id: 'req-1', res: { approved: true } }]);
   });
 
   it('types text then Enter queues the message and closes the composer', async () => {
-    const fake = makeFakeFollow();
-    const queueSteeringFn = vi.fn();
-    const { lastFrame, stdin } = render(
-      <App
-        eventsFile="ignored"
-        follow={fake.follow}
-        steeringDir="/repo/.factory/steering"
-        queueSteeringFn={queueSteeringFn}
-      />,
-    );
-    fake.push(ev('plan', 'Starting plan phase', '296'));
+    const { sent, lastFrame, stdin } = renderComposer();
     await flush();
-
-    stdin.write('i');
-    await flush();
-    stdin.write('hello there');
-    await flush();
-    await flush(); // extra tick: let useInput's effect resubscribe with the updated draft before Enter
+    await openAndType(stdin, 'hello there');
     stdin.write('\r');
     await flush();
 
-    expect(queueSteeringFn).toHaveBeenCalledWith('/repo/.factory/steering', 296, 'hello there');
+    expect(sent).toEqual([{ dir: '/repo/.factory/steering', issue: 296, text: 'hello there' }]);
     expect(lastFrame()).not.toContain('Steer issue #296');
   });
 
   it('Backspace deletes the last composer character', async () => {
-    const fake = makeFakeFollow();
-    const queueSteeringFn = vi.fn();
-    const { stdin } = render(
-      <App
-        eventsFile="ignored"
-        follow={fake.follow}
-        steeringDir="/repo/.factory/steering"
-        queueSteeringFn={queueSteeringFn}
-      />,
-    );
-    fake.push(ev('plan', 'Starting plan phase', '296'));
+    const { sent, stdin } = renderComposer();
     await flush();
-
-    stdin.write('i');
-    await flush();
-    stdin.write('abc');
-    await flush();
-    await flush();
-    stdin.write('\x7f'); // physical Backspace (ink 7: key.backspace)
+    await openAndType(stdin, 'abc');
+    stdin.write('\x7f');
     await flush();
     await flush();
     stdin.write('\r');
     await flush();
 
-    expect(queueSteeringFn).toHaveBeenCalledWith('/repo/.factory/steering', 296, 'ab');
+    expect(sent).toEqual([{ dir: '/repo/.factory/steering', issue: 296, text: 'ab' }]);
   });
 
   it('Escape closes the composer without sending', async () => {
-    const fake = makeFakeFollow();
-    const queueSteeringFn = vi.fn();
-    const { lastFrame, stdin } = render(
-      <App
-        eventsFile="ignored"
-        follow={fake.follow}
-        steeringDir="/repo/.factory/steering"
-        queueSteeringFn={queueSteeringFn}
-      />,
-    );
-    fake.push(ev('plan', 'Starting plan phase', '296'));
+    const { sent, lastFrame, stdin } = renderComposer();
     await flush();
-
     stdin.write('i');
     await flush();
     stdin.write('some text');
     await flush();
-    stdin.write('\x1B'); // escape
+    stdin.write('\x1B');
     await flushEscape();
 
-    expect(queueSteeringFn).not.toHaveBeenCalled();
+    expect(sent).toEqual([]);
     expect(lastFrame()).not.toContain('Steer issue #296');
   });
 
   it('lands a multi-line paste into one draft and sends it as a single message', async () => {
-    const fake = makeFakeFollow();
-    const queueSteeringFn = vi.fn();
-    const { stdin } = render(
-      <App
-        eventsFile="ignored"
-        follow={fake.follow}
-        steeringDir="/repo/.factory/steering"
-        queueSteeringFn={queueSteeringFn}
-      />,
-    );
-    fake.push(ev('plan', 'Starting plan phase', '296'));
+    const { sent, stdin } = renderComposer();
     await flush();
-
-    stdin.write('i');
-    await flush();
-    stdin.write('use a\nand b\n plus packages/x.ts');
-    await flush();
-    await flush(); // extra tick: let useInput's effect resubscribe with the updated draft before Enter
+    await openAndType(stdin, 'use a\nand b\n plus packages/x.ts');
     stdin.write('\r');
     await flush();
 
-    expect(queueSteeringFn).toHaveBeenCalledTimes(1);
-    expect(queueSteeringFn).toHaveBeenCalledWith('/repo/.factory/steering', 296, 'use a\nand b\n plus packages/x.ts');
+    expect(sent).toEqual([{ dir: '/repo/.factory/steering', issue: 296, text: 'use a\nand b\n plus packages/x.ts' }]);
   });
 
   it('shows a warning on the first Enter when a referenced path is missing, and sends on the second Enter', async () => {
-    const fake = makeFakeFollow();
-    const queueSteeringFn = vi.fn();
-    const pathExists = vi.fn(() => false);
-    const { lastFrame, stdin } = render(
-      <App
-        eventsFile="ignored"
-        follow={fake.follow}
-        steeringDir="/repo/.factory/steering"
-        queueSteeringFn={queueSteeringFn}
-        pathExists={pathExists}
-      />,
-    );
-    fake.push(ev('plan', 'Starting plan phase', '296'));
+    const { fake, sent, lastFrame, stdin } = renderComposer({ pathExists: () => false });
     fake.push(ev('worktree', 'Worktree ready at /repo-296', '296'));
     await flush();
-
-    stdin.write('i');
-    await flush();
-    stdin.write('check packages/missing.ts');
-    await flush();
-    await flush(); // extra tick: let useInput's effect resubscribe with the updated draft before Enter
+    await openAndType(stdin, 'check packages/missing.ts');
     stdin.write('\r');
     await flush();
 
-    expect(queueSteeringFn).not.toHaveBeenCalled();
+    expect(sent).toEqual([]);
     expect(lastFrame()).toContain('not found in worktree: packages/missing.ts');
 
-    await flush(); // extra tick: let useInput's effect resubscribe with the warned state before the next Enter
+    await flush();
     stdin.write('\r');
     await flush();
 
-    expect(queueSteeringFn).toHaveBeenCalledWith('/repo/.factory/steering', 296, 'check packages/missing.ts');
+    expect(sent).toEqual([{ dir: '/repo/.factory/steering', issue: 296, text: 'check packages/missing.ts' }]);
   });
 
   it('sends on the first Enter when the referenced path exists', async () => {
-    const fake = makeFakeFollow();
-    const queueSteeringFn = vi.fn();
-    const pathExists = vi.fn(() => true);
-    const { lastFrame, stdin } = render(
-      <App
-        eventsFile="ignored"
-        follow={fake.follow}
-        steeringDir="/repo/.factory/steering"
-        queueSteeringFn={queueSteeringFn}
-        pathExists={pathExists}
-      />,
-    );
-    fake.push(ev('plan', 'Starting plan phase', '296'));
+    const { fake, sent, lastFrame, stdin } = renderComposer({ pathExists: () => true });
     fake.push(ev('worktree', 'Worktree ready at /repo-296', '296'));
     await flush();
-
-    stdin.write('i');
-    await flush();
-    stdin.write('check packages/present.ts');
-    await flush();
-    await flush(); // extra tick: let useInput's effect resubscribe with the updated draft before Enter
+    await openAndType(stdin, 'check packages/present.ts');
     stdin.write('\r');
     await flush();
 
-    expect(queueSteeringFn).toHaveBeenCalledWith('/repo/.factory/steering', 296, 'check packages/present.ts');
+    expect(sent).toEqual([{ dir: '/repo/.factory/steering', issue: 296, text: 'check packages/present.ts' }]);
     expect(lastFrame()).not.toContain('Steer issue #296');
   });
 
   it('renders the queued-for-next-phase-boundary count when listSteeringFn returns entries', async () => {
-    const fake = makeFakeFollow();
-    const listSteeringFn = vi.fn(() => [
-      { id: '1', issue: 296, text: 'a', queuedAt: '2026-01-01T00:00:00.000Z' },
-      { id: '2', issue: 296, text: 'b', queuedAt: '2026-01-01T00:00:01.000Z' },
-    ]);
-    const { lastFrame } = render(
-      <App
-        eventsFile="ignored"
-        follow={fake.follow}
-        steeringDir="/repo/.factory/steering"
-        listSteeringFn={listSteeringFn}
-      />,
-    );
-    fake.push(ev('plan', 'Starting plan phase', '296'));
+    const { lastFrame } = renderComposer({
+      listSteeringFn: () => [
+        { id: '1', issue: 296, text: 'a', queuedAt: '2026-01-01T00:00:00.000Z' },
+        { id: '2', issue: 296, text: 'b', queuedAt: '2026-01-01T00:00:01.000Z' },
+      ],
+    });
     await flush();
-    await flush(); // extra tick: let the steering-poll effect re-run now that state.lanes is populated
+    await flush();
 
     expect(lastFrame()).toContain('steering: 2 message(s) queued for next phase boundary');
   });
 
   it('keeps navigation keys (q, tab, digits) inert while the composer is open', async () => {
-    const fake = makeFakeFollow();
-    const { lastFrame, stdin } = render(
-      <App eventsFile="ignored" follow={fake.follow} steeringDir="/repo/.factory/steering" />,
-    );
-    fake.push(ev('plan', 'Starting plan phase', '296'));
+    const { fake, lastFrame, stdin } = renderComposer();
     fake.push(ev('plan', 'Starting plan phase', '301'));
     await flush();
 
@@ -1080,7 +1002,7 @@ describe('App steering composer', () => {
     stdin.write('2');
     await flush();
 
-    expect(fake.stop).not.toHaveBeenCalled();
+    expect(fake.stopCount()).toBe(0);
     expect(lastFrame()).toContain('Steer issue #');
   });
 });

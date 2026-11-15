@@ -768,7 +768,7 @@
   "packages/repo-context/src/path.ts": 2,
   "packages/repo-context/src/reader.ts": 10,
   "packages/tui/src/components/App.idle.test.tsx": 1,
-  "packages/tui/src/components/App.test.tsx": 29,
+  "packages/tui/src/components/App.test.tsx": 19,
   "packages/tui/src/components/App.tsx": 11,
   "packages/tui/src/components/Dashboard.tsx": 2,
   "packages/tui/src/components/LaneRow.tsx": 1,

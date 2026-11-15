@@ -1,16 +1,20 @@
-import type { FactoryEvent } from '@on-par/factory-core';
-import { describe, expect, it, vi } from 'vitest';
+import type { FactoryEvent, followEvents } from '@on-par/factory-core';
+import { describe, expect, it } from 'vitest';
 
 import { followPlain } from './fallback.js';
 
 function makeFakeFollow() {
   let onEvent: ((e: FactoryEvent) => void) | undefined;
-  const stop = vi.fn();
-  const follow = vi.fn((_file: string, cb: (e: FactoryEvent) => void) => {
+  const follows: { file: string; opts: unknown }[] = [];
+  let stops = 0;
+  const follow: typeof followEvents = (file, cb, opts) => {
+    follows.push({ file, opts });
     onEvent = cb;
-    return stop;
-  });
-  return { follow, stop, push: (e: FactoryEvent) => onEvent?.(e) };
+    return () => {
+      stops += 1;
+    };
+  };
+  return { follow, follows, stopCount: () => stops, push: (e: FactoryEvent) => onEvent?.(e) };
 }
 
 /** The whole stream surface followPlain touches: one write, plus the isTTY flag colorEnabled
@@ -48,10 +52,10 @@ describe('followPlain', () => {
     fake.push({ ts: '2026-01-01T00:00:00.000Z', type: 'plan', issue: '192', msg: 'Starting plan phase' });
 
     expect(chunks).toEqual(['[factory] plan #192: Starting plan phase\n']);
-    expect(fake.follow).toHaveBeenCalledWith('events.ndjson', expect.any(Function), { fromStart: true });
+    expect(fake.follows).toEqual([{ file: 'events.ndjson', opts: { fromStart: true } }]);
 
     stop();
-    expect(fake.stop).toHaveBeenCalled();
+    expect(fake.stopCount()).toBe(1);
   });
 
   it('defaults to process.stdout and the real followEvents', () => {
