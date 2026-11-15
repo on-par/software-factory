@@ -144,6 +144,10 @@ export default defineConfig({
     'anti-slop/no-direct-tmpdir-mkdtemp': 'error',
     // #4051: no call-count assertions or mock-call reads in tests; per-file allowances come from the baseline overrides.
     'anti-slop/no-call-assertions': 'error',
+    // #4052: package boundaries (config ← core ← cli, published-name imports, ADR-0004 subpaths).
+    // scripts/eval.ts runs the stub eval with StubModelExecutor from /testing (ADR-0004: "exercise
+    // the factory without real model CLIs"), so it is the one non-test file allowed to import it.
+    'anti-slop/package-boundaries': ['error', { testingAllowedFiles: ['scripts/eval.ts'] }],
   },
   overrides: [
     ...Object.entries(MAX_LINES_BASELINE).map(([file, max]) => ({

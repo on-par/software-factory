@@ -42,13 +42,11 @@ The factory builds itself, so a change here must keep the factory able to ship t
 
 ### Architecture
 
-- Dependency direction is `config ← core ← cli`. `packages/config` stays zero-dependency.
+- Package boundaries (dependency direction `config ← core ← cli`, zero-dependency config, published-name
+  imports, the ADR-0004 `/internal` and `/testing` subpaths) are enforced by the
+  `anti-slop/package-boundaries` lint rule (`npm run lint`); see ADR-0004. Relative imports use
+  `.js` extensions.
 - Model ids and routing live in `packages/config/src/defaults.ts`, never hard-coded in `core`.
-- `core`'s root export is the narrow public API. Implementation details go behind
-  `@on-par/factory-core/internal` and test helpers behind `@on-par/factory-core/testing`
-  (ADR-0004).
-- Import across packages by published name (`@on-par/factory-core`), never by a relative path
-  across a package boundary. Relative imports use `.js` extensions.
 - A significant design decision is recorded as an ADR in `docs/adr/` in the same change.
 - Code uses the domain terms in `CONTEXT.md` (lane, run, claim, lease, park, rework round,
   trust tier, ...) with the meanings defined there.
