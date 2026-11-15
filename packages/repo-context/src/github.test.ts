@@ -1,9 +1,10 @@
 import { Buffer } from 'node:buffer';
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { FetchLike, FetchLikeResponse } from './github.js';
 import { createGitHubContentsReader, DEFAULT_GITHUB_API_BASE_URL, DEFAULT_MAX_FILE_BYTES } from './github.js';
+import type { DegradeEvent } from './reader.js';
 
 function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}): FetchLikeResponse {
   return {
@@ -40,6 +41,14 @@ function stubFetch(handler: (url: string) => FetchLikeResponse): { fetch: FetchL
 function fileBody(content: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   const base64 = Buffer.from(content, 'utf8').toString('base64');
   return { type: 'file', size: Buffer.byteLength(content, 'utf8'), encoding: 'base64', content: base64, ...overrides };
+}
+
+function collectDegrades() {
+  const events: DegradeEvent[] = [];
+  const onDegrade = (event: DegradeEvent): void => {
+    events.push(event);
+  };
+  return { events, onDegrade };
 }
 
 describe('createGitHubContentsReader URL and headers', () => {
@@ -161,102 +170,77 @@ describe('createGitHubContentsReader readFile happy path', () => {
 
 describe('createGitHubContentsReader readFile degradations', () => {
   it('404 -> not-found', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => jsonResponse(404, { message: 'Not Found' }));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readFile('a.md')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'readFile', path: 'a.md', reason: 'not-found', status: 404 });
+    expect(events).toEqual([{ operation: 'readFile', path: 'a.md', reason: 'not-found', status: 404 }]);
   });
 
   it('401 -> unauthorized', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => jsonResponse(401, { message: 'Bad credentials' }));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readFile('a.md')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith({
-      operation: 'readFile',
-      path: 'a.md',
-      reason: 'unauthorized',
-      status: 401,
-    });
+    expect(events).toEqual([{ operation: 'readFile', path: 'a.md', reason: 'unauthorized', status: 401 }]);
   });
 
   it('403 with x-ratelimit-remaining: 0 -> rate-limited', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => jsonResponse(403, { message: 'rate limited' }, { 'x-ratelimit-remaining': '0' }));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readFile('a.md')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith({
-      operation: 'readFile',
-      path: 'a.md',
-      reason: 'rate-limited',
-      status: 403,
-    });
+    expect(events).toEqual([{ operation: 'readFile', path: 'a.md', reason: 'rate-limited', status: 403 }]);
   });
 
   it('403 without the header -> unauthorized', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => jsonResponse(403, { message: 'forbidden' }));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readFile('a.md')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith({
-      operation: 'readFile',
-      path: 'a.md',
-      reason: 'unauthorized',
-      status: 403,
-    });
+    expect(events).toEqual([{ operation: 'readFile', path: 'a.md', reason: 'unauthorized', status: 403 }]);
   });
 
   it('429 -> rate-limited', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => jsonResponse(429, { message: 'too many requests' }));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readFile('a.md')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith({
-      operation: 'readFile',
-      path: 'a.md',
-      reason: 'rate-limited',
-      status: 429,
-    });
+    expect(events).toEqual([{ operation: 'readFile', path: 'a.md', reason: 'rate-limited', status: 429 }]);
   });
 
   it('500 -> invalid-response', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => jsonResponse(500, { message: 'server error' }));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readFile('a.md')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith({
-      operation: 'readFile',
-      path: 'a.md',
-      reason: 'invalid-response',
-      status: 500,
-    });
+    expect(events).toEqual([{ operation: 'readFile', path: 'a.md', reason: 'invalid-response', status: 500 }]);
   });
 
   it('non-JSON body -> invalid-response', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => textResponse(200, 'not json{'));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readFile('a.md')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith(
+    expect(events).toEqual([
       expect.objectContaining({ operation: 'readFile', path: 'a.md', reason: 'invalid-response' }),
-    );
+    ]);
   });
 
   it('a rejecting fetch -> network', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const fetch: FetchLike = async () => {
       throw new Error('boom');
     };
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readFile('a.md')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith(
+    expect(events).toEqual([
       expect.objectContaining({ operation: 'readFile', path: 'a.md', reason: 'network', detail: 'boom' }),
-    );
+    ]);
   });
 
   it('a response whose text() rejects -> invalid-response', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const fetch: FetchLike = async () => ({
       ok: true,
       status: 200,
@@ -267,63 +251,63 @@ describe('createGitHubContentsReader readFile degradations', () => {
     });
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readFile('a.md')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith(
+    expect(events).toEqual([
       expect.objectContaining({
         operation: 'readFile',
         path: 'a.md',
         reason: 'invalid-response',
         detail: 'stream reset',
       }),
-    );
+    ]);
   });
 
   it('array body (path is a directory) -> wrong-type', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => jsonResponse(200, [{ name: 'x', path: 'dir/x', type: 'file' }]));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readFile('dir')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'readFile', path: 'dir', reason: 'wrong-type' });
+    expect(events).toEqual([{ operation: 'readFile', path: 'dir', reason: 'wrong-type' }]);
   });
 
   it('size above maxFileBytes -> too-large', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => jsonResponse(200, fileBody('hi', { size: 100 })));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', maxFileBytes: 10, fetch, onDegrade });
     expect(await reader.readFile('a.md')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'readFile', path: 'a.md', reason: 'too-large' });
+    expect(events).toEqual([{ operation: 'readFile', path: 'a.md', reason: 'too-large' }]);
   });
 
   it("encoding: 'none' -> too-large, even when size is within maxFileBytes", async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => jsonResponse(200, { type: 'file', size: 10, encoding: 'none', content: '' }));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readFile('a.md')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'readFile', path: 'a.md', reason: 'too-large' });
+    expect(events).toEqual([{ operation: 'readFile', path: 'a.md', reason: 'too-large' }]);
   });
 
   it("encoding: 'utf-8' -> unsupported-content", async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => jsonResponse(200, { type: 'file', size: 2, encoding: 'utf-8', content: 'hi' }));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readFile('a.md')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'readFile', path: 'a.md', reason: 'unsupported-content' });
+    expect(events).toEqual([{ operation: 'readFile', path: 'a.md', reason: 'unsupported-content' }]);
   });
 
   it('base64 content containing a NUL byte -> unsupported-content', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const content = Buffer.from(`a${String.fromCharCode(0)}b`, 'utf8').toString('base64');
     const { fetch } = stubFetch(() => jsonResponse(200, { type: 'file', size: 3, encoding: 'base64', content }));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readFile('a.md')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'readFile', path: 'a.md', reason: 'unsupported-content' });
+    expect(events).toEqual([{ operation: 'readFile', path: 'a.md', reason: 'unsupported-content' }]);
   });
 
   it("'../escape' -> invalid-path and never calls fetch", async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch, calls } = stubFetch(() => jsonResponse(200, fileBody('hi')));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readFile('../escape')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'readFile', path: '../escape', reason: 'invalid-path' });
+    expect(events).toEqual([{ operation: 'readFile', path: '../escape', reason: 'invalid-path' }]);
     expect(calls).toHaveLength(0);
   });
 });
@@ -358,7 +342,7 @@ describe('createGitHubContentsReader readDir', () => {
   });
 
   it('drops symlink, submodule, and malformed entries with no degrade event', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() =>
       jsonResponse(200, [
         { name: 'link', path: 'dir/link', type: 'symlink' },
@@ -371,23 +355,23 @@ describe('createGitHubContentsReader readDir', () => {
     );
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readDir('dir')).toEqual([{ name: 'ok.md', path: 'dir/ok.md', type: 'file' }]);
-    expect(onDegrade).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
   });
 
   it('object body (path is a file) -> wrong-type + EMPTY_DIR', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => jsonResponse(200, fileBody('hi')));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readDir('a.md')).toEqual([]);
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'readDir', path: 'a.md', reason: 'wrong-type' });
+    expect(events).toEqual([{ operation: 'readDir', path: 'a.md', reason: 'wrong-type' }]);
   });
 
   it('404 -> not-found + EMPTY_DIR', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => jsonResponse(404, { message: 'Not Found' }));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.readDir('nope')).toEqual([]);
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'readDir', path: 'nope', reason: 'not-found', status: 404 });
+    expect(events).toEqual([{ operation: 'readDir', path: 'nope', reason: 'not-found', status: 404 }]);
   });
 });
 
@@ -405,36 +389,33 @@ describe('createGitHubContentsReader exists', () => {
   });
 
   it('is false on 404 with onDegrade never called', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => jsonResponse(404, { message: 'Not Found' }));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.exists('nope')).toBe(false);
-    expect(onDegrade).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
   });
 
   it('is false on 403 with an exists onDegrade event', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const { fetch } = stubFetch(() => jsonResponse(403, { message: 'forbidden' }));
     const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', fetch, onDegrade });
     expect(await reader.exists('a.md')).toBe(false);
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'exists', path: 'a.md', reason: 'unauthorized', status: 403 });
+    expect(events).toEqual([{ operation: 'exists', path: 'a.md', reason: 'unauthorized', status: 403 }]);
   });
 });
 
 describe('createGitHubContentsReader robustness', () => {
   it('degrades network / global fetch unavailable when no fetch is available', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const original = (globalThis as { fetch?: FetchLike }).fetch;
     delete (globalThis as { fetch?: FetchLike }).fetch;
     try {
       const reader = createGitHubContentsReader({ owner: 'o', repo: 'r', onDegrade });
       expect(await reader.readFile('a.md')).toBeUndefined();
-      expect(onDegrade).toHaveBeenCalledWith({
-        operation: 'readFile',
-        path: 'a.md',
-        reason: 'network',
-        detail: 'global fetch is unavailable',
-      });
+      expect(events).toEqual([
+        { operation: 'readFile', path: 'a.md', reason: 'network', detail: 'global fetch is unavailable' },
+      ]);
     } finally {
       (globalThis as { fetch?: FetchLike }).fetch = original;
     }

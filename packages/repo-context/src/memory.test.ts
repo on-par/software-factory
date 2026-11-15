@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { createInMemoryReader } from './memory.js';
+import type { DegradeEvent } from './reader.js';
 
 const FIXTURE = {
   'README.md': 'root readme',
@@ -8,6 +9,11 @@ const FIXTURE = {
   'docs/adr/0001-x.md': 'adr one',
   'src/index.ts': 'export {};',
 };
+
+function collectDegrades() {
+  const events: DegradeEvent[] = [];
+  return { events, onDegrade: events.push.bind(events) };
+}
 
 describe('createInMemoryReader construction', () => {
   it('normalizes keys and skips unusable ones', async () => {
@@ -37,17 +43,17 @@ describe('createInMemoryReader readFile', () => {
   });
 
   it('degrades wrong-type when the path is a directory', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const withObserver = createInMemoryReader(FIXTURE, { onDegrade });
     expect(await withObserver.readFile('docs/adr')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'readFile', path: 'docs/adr', reason: 'wrong-type' });
+    expect(events).toEqual([{ operation: 'readFile', path: 'docs/adr', reason: 'wrong-type' }]);
   });
 
   it('degrades invalid-path for an escaping path', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const withObserver = createInMemoryReader(FIXTURE, { onDegrade });
     expect(await withObserver.readFile('../escape')).toBeUndefined();
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'readFile', path: '../escape', reason: 'invalid-path' });
+    expect(events).toEqual([{ operation: 'readFile', path: '../escape', reason: 'invalid-path' }]);
   });
 });
 
@@ -75,31 +81,31 @@ describe('createInMemoryReader readDir', () => {
   });
 
   it('degrades wrong-type when the path is a file', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const withObserver = createInMemoryReader(FIXTURE, { onDegrade });
     expect(await withObserver.readDir('README.md')).toEqual([]);
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'readDir', path: 'README.md', reason: 'wrong-type' });
+    expect(events).toEqual([{ operation: 'readDir', path: 'README.md', reason: 'wrong-type' }]);
   });
 
   it('degrades not-found for an unknown prefix', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const withObserver = createInMemoryReader(FIXTURE, { onDegrade });
     expect(await withObserver.readDir('nope')).toEqual([]);
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'readDir', path: 'nope', reason: 'not-found' });
+    expect(events).toEqual([{ operation: 'readDir', path: 'nope', reason: 'not-found' }]);
   });
 
   it('degrades invalid-path for an escaping path', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const withObserver = createInMemoryReader(FIXTURE, { onDegrade });
     expect(await withObserver.readDir('../escape')).toEqual([]);
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'readDir', path: '../escape', reason: 'invalid-path' });
+    expect(events).toEqual([{ operation: 'readDir', path: '../escape', reason: 'invalid-path' }]);
   });
 
   it('lists an empty tree root with no event', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const empty = createInMemoryReader({}, { onDegrade });
     expect(await empty.readDir('')).toEqual([]);
-    expect(onDegrade).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
   });
 });
 
@@ -123,10 +129,10 @@ describe('createInMemoryReader exists', () => {
   });
 
   it('degrades invalid-path for an escaping path', async () => {
-    const onDegrade = vi.fn();
+    const { events, onDegrade } = collectDegrades();
     const withObserver = createInMemoryReader(FIXTURE, { onDegrade });
     expect(await withObserver.exists('../escape')).toBe(false);
-    expect(onDegrade).toHaveBeenCalledWith({ operation: 'exists', path: '../escape', reason: 'invalid-path' });
+    expect(events).toEqual([{ operation: 'exists', path: '../escape', reason: 'invalid-path' }]);
   });
 });
 
