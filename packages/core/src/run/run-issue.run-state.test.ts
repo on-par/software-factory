@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Octokit } from '@octokit/rest';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import type { RoutesConfig } from '../config/index.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
@@ -16,6 +16,7 @@ import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
+import { EMPTY_MODELS as MODELS } from '../test-support/recorders.js';
 
 const PLAN_OK: PlanResult = { ok: true, route: 'codex', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null };
 const BUILD_OK: BuildResult = { ok: true, model: 'm', route: 'codex' };
@@ -34,14 +35,6 @@ const WORK: WorkRequest = {
 const ROUTES: RoutesConfig = {
   version: 1,
   routes: { build_codex: { tier: 'worker', description: 'stub', requires: 'codex' } },
-};
-
-const MODELS: ModelsConfig = {
-  version: 1,
-  models: {},
-  tiers: {},
-  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
-  routingRules: {},
 };
 
 const tempDirs = createTempDirs();

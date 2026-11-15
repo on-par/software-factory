@@ -24,11 +24,7 @@ export function makeStubModelsConfig(): ModelsConfig {
       },
     },
     tiers: { boss: ['stub-model'] },
-    failover: {
-      triggers: ['rate_limit', 'unavailable', 'auth'],
-      maxRetries: 2,
-      cooldownMs: 0,
-    },
+    failover: { triggers: ['rate_limit', 'unavailable', 'auth'], maxRetries: 2, cooldownMs: 0 },
     routingRules: {},
   };
 }

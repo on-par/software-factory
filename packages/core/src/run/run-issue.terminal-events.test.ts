@@ -19,6 +19,7 @@ import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import type { reworkWorker as realReworkWorker } from '../phases/check.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
+import { EMPTY_MODELS as MODELS } from '../test-support/recorders.js';
 
 const planPhase = vi.fn<typeof realPlanPhase>();
 const buildPhase = vi.fn<typeof realBuildPhase>();
@@ -65,14 +66,6 @@ const request: RunRequest = {
 };
 
 const ROUTES: RoutesConfig = { version: 1, routes: {} };
-const MODELS: ModelsConfig = {
-  version: 1,
-  models: {},
-  tiers: {},
-  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
-  routingRules: {},
-};
-
 const policy: RunPolicy = {
   models: MODELS,
   routes: ROUTES,

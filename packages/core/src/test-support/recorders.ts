@@ -25,3 +25,6 @@ export function sandboxRecordingRouter(models: ModelsConfig, routes: RoutesConfi
   };
   return { router: new ModelRouter(models, routes, false, executor), sandboxes };
 }
+
+const failover = { triggers: [], maxRetries: 0, cooldownMs: 0 };
+export const EMPTY_MODELS: ModelsConfig = { version: 1, models: {}, tiers: {}, failover, routingRules: {} };

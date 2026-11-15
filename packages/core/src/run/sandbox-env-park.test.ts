@@ -21,17 +21,11 @@ import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
+import { EMPTY_MODELS as MODELS } from '../test-support/recorders.js';
 
 const tempDirs = createTempDirs();
 afterAll(() => tempDirs.cleanup());
 
-const MODELS: ModelsConfig = {
-  version: 1,
-  models: {},
-  tiers: {},
-  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
-  routingRules: {},
-};
 const ROUTES: RoutesConfig = { version: 1, routes: {} };
 const BUILD_MODELS: ModelsConfig = {
   ...MODELS,
