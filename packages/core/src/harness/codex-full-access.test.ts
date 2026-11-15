@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { ModelRegistry } from '../models/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
@@ -102,8 +102,8 @@ describe('CodexCliHarness full-access config', () => {
 
   it('explicit workspace-write mode applies without a policy or config', async () => {
     const rec = recordingExec();
-    const log = vi.fn();
-    const harness = new CodexCliHarness(rec.fn, {}, { env: {}, log });
+    const lines: string[] = [];
+    const harness = new CodexCliHarness(rec.fn, {}, { env: {}, log: (l) => lines.push(l) });
 
     await harness
       .run(makeContractRequest({ model: 'codex-model', registry, codexSandbox: 'workspace-write' }))
@@ -122,9 +122,7 @@ describe('CodexCliHarness full-access config', () => {
     expect(rec.calls[0].cmd).toContain('--sandbox workspace-write');
     expect(rec.calls[0].cmd).not.toContain('danger-full-access');
     expect(rec.calls[1].cmd).toContain('--sandbox workspace-write');
-    expect(log).toHaveBeenCalledWith(
-      'codex: workspace-write for task build_codex (network off, writable roots: (none))',
-    );
+    expect(lines).toContain('codex: workspace-write for task build_codex (network off, writable roots: (none))');
   });
 });
 

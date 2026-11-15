@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
 import { diagnoseModels, ModelRegistry } from '../models/index.js';
@@ -258,16 +258,7 @@ describe('OpenCodeHarness failure classification', () => {
 });
 
 describe('OpenCode doctor auth probe', () => {
-  const def = {
-    provider: 'custom' as const,
-    tier: 'worker' as const,
-    costPerMtokInput: 0,
-    costPerMtokOutput: 0,
-    contextWindow: 1000,
-    capabilities: [],
-    harness: 'opencode',
-    providerModel: 'opencode-go/deepseek-v4-flash',
-  };
+  const def = modelsConfig.models['opencode-model'];
   const doctorConfig: ModelsConfig = {
     ...modelsConfig,
     models: {
@@ -276,32 +267,38 @@ describe('OpenCode doctor auth probe', () => {
       'keyless-model': { ...def, envKey: null },
     },
   };
-  const doctorRegistry = new ModelRegistry(doctorConfig);
   const beforeReview = () => new Date('2026-10-01T00:00:00Z');
   const diagnose = (id: string, p: Parameters<typeof diagnoseModels>[1], probes = { now: beforeReview, ...p }) =>
     diagnoseModels(new ModelRegistry({ ...doctorConfig, models: { [id]: doctorConfig.models[id] } }), probes, true)[0];
   const hasOpencode = (cmd: string) => cmd === 'opencode';
+  let probes = 0;
+  const loggedIn = (result: boolean) => () => {
+    probes++;
+    return result;
+  };
+  beforeEach(() => {
+    probes = 0;
+  });
 
   it('reports an OPENCODE_API_KEY model reachable when opencode is logged in and the key is unset', () => {
     const d = diagnose('keyed-model', {
       commandAvailable: hasOpencode,
       envPresent: () => false,
-      opencodeLoggedIn: () => true,
+      opencodeLoggedIn: loggedIn(true),
     });
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (opencode CLI auth; OPENCODE_API_KEY not set)');
   });
 
   it('reports an OPENCODE_API_KEY model reachable via the key override when opencode is not logged in, without consulting the login probe', () => {
-    const opencodeLoggedIn = vi.fn(() => false);
     const d = diagnose('keyed-model', {
       commandAvailable: hasOpencode,
       envPresent: (k) => k === 'OPENCODE_API_KEY',
-      opencodeLoggedIn,
+      opencodeLoggedIn: loggedIn(false),
     });
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (opencode CLI)');
-    expect(opencodeLoggedIn).not.toHaveBeenCalled();
+    expect(probes).toBe(0);
   });
 
   it('marks the model unverified when neither logged in nor keyed', () => {
@@ -317,33 +314,34 @@ describe('OpenCode doctor auth probe', () => {
   });
 
   it('keeps an envKey-less model reachable without consulting the login probe', () => {
-    const opencodeLoggedIn = vi.fn(() => false);
+    const opencodeLoggedIn = loggedIn(false);
     const d = diagnose('keyless-model', { commandAvailable: hasOpencode, envPresent: () => false, opencodeLoggedIn });
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (opencode CLI)');
-    expect(opencodeLoggedIn).not.toHaveBeenCalled();
+    expect(probes).toBe(0);
   });
 
   it('reports a missing opencode CLI without consulting the login probe', () => {
-    const opencodeLoggedIn = vi.fn(() => true);
+    const opencodeLoggedIn = loggedIn(true);
     const d = diagnose('keyed-model', { commandAvailable: () => false, envPresent: () => false, opencodeLoggedIn });
     expect(d.reachable).toBe(false);
     expect(d.reason).toBe('opencode CLI not found on PATH');
-    expect(opencodeLoggedIn).not.toHaveBeenCalled();
+    expect(probes).toBe(0);
   });
 
   it('treats a throwing login probe as not logged in and probes at most once', () => {
-    const opencodeLoggedIn = vi.fn((): boolean => {
+    const opencodeLoggedIn = (): boolean => {
+      probes++;
       throw new Error('boom');
-    });
+    };
     const diags = diagnoseModels(
-      doctorRegistry,
+      new ModelRegistry(doctorConfig),
       { commandAvailable: hasOpencode, envPresent: () => false, opencodeLoggedIn, now: beforeReview },
       true,
     ).filter((d) => d.model.startsWith('keyed-model'));
     expect(diags).toHaveLength(2);
     for (const d of diags) expect(d.unverified).toBe(true);
-    expect(opencodeLoggedIn).toHaveBeenCalledTimes(1);
+    expect(probes).toBe(1);
   });
 });
 
