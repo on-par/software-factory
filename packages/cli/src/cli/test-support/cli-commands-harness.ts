@@ -141,7 +141,7 @@ export function installCliCommandsHarness(): void {
     h.routerResolve = () => 'claude-model';
     h.factoryConfig = {
       merge: { auto: false, comment: '' },
-      worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: false },
+      worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: false, stateBackupKeep: 3, stateBackupMaxAgeDays: 7 },
       sandbox: {
         enabled: true,
         network: { allow: ['api.anthropic.com', 'github.com'] },

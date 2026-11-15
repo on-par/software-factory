@@ -90,7 +90,7 @@
   "packages/cli/src/cli/host-claim-guards.ts": 2,
   "packages/cli/src/cli/host-slot.test.ts": 1,
   "packages/cli/src/cli/host-slot.ts": 7,
-  "packages/cli/src/cli/index.ts": 133,
+  "packages/cli/src/cli/index.ts": 131,
   "packages/cli/src/cli/init-files.ts": 6,
   "packages/cli/src/cli/job-command.ts": 4,
   "packages/cli/src/cli/job-status-contract.ts": 2,

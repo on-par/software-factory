@@ -280,12 +280,16 @@ ci:
 # own tools (jest, eslint, tsc, globbing scripts) may crawl into those nested checkouts. retainMax
 # (default 8, 0 = no count budget) bounds how many finished or failed lane worktrees a repo keeps.
 # Clean, fully pushed ones are evicted oldest first, and all eligible ones are evicted when the disk
-# guard trips (#3970).
+# guard trips (#3970). stateBackupKeep (default 3) and stateBackupMaxAgeDays (default 7) bound
+# rename-aside backup files (*.bak*, queue.bak.relaunch-*, *-relaunch.log) in the state root: the
+# newest N of each kind and anything newer than the age are kept (#4055).
 worktree:
   parent: "~/.factory/worktrees"
   gcTtlDays: 7
   autoGcOnRun: true
   retainMax: 8
+  stateBackupKeep: 3
+  stateBackupMaxAgeDays: 7
 # Lane workspace backend: "host" (git worktrees) or "disposable-docker" (a managed container per
 # lane).
 workspace:

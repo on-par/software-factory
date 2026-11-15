@@ -137,10 +137,16 @@ export function registerAdvancedCommands(program: Command, handlers: ProgramHand
     .description('Clean up stale factory worktrees (gc) and keep/release one for manual work');
   worktreeCmd
     .command('gc')
-    .description('Remove stale factory worktrees (merged/closed branches or older than TTL) and scrub credentials')
+    .description(
+      'Remove stale factory worktrees (merged/closed branches or older than TTL), scrub credentials and list old state backups',
+    )
     .option('--dry-run', 'Preview what would be removed without deleting anything')
     .option('--ttl-days <n>', 'Override worktree.gcTtlDays from .factory/config.yaml (default 7)')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
+    .option(
+      '--prune-state-backups',
+      'Delete old rename-aside backup files (*.bak*, queue.bak.relaunch-*, *-relaunch.log) in the state root; without it gc only lists them',
+    )
     .action(handlers.cmdWorktreeGc);
   worktreeCmd
     .command('keep <issue>')
