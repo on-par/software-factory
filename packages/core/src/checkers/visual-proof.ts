@@ -20,8 +20,6 @@ import {
 } from './visual-proof-manifest.js';
 
 export type { VisualProofCapture, VisualProofRoute } from './visual-proof-manifest.js';
-export { describeVisualProofStep, validateVisualProofManifest } from './visual-proof-manifest.js';
-export { isBlankPng } from './visual-proof-png.js';
 
 export type VisualProofRequirement =
   { required: false } | { required: true; routes: VisualProofRoute[]; diagnostic?: string; uncovered?: string[] };
