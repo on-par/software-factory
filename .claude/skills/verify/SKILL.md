@@ -29,12 +29,13 @@ The factory's own CHECK phase runs `bash scripts/verify.sh --no-e2e` in the buil
 7. `npm run typecheck`
 8. `npm run lint` — Oxlint, type-aware, `--deny-warnings`
 9. `npm run knip` — dead code and unused dependencies
-10. Tests:
+10. `npx tsx scripts/loc-budget.ts` — every package's TypeScript line counts must equal `loc-budget.json` (see [Line budget](#line-budget))
+11. Tests:
     - full path: `npm run test` (Vitest with coverage thresholds), then `npm run coverage-ratchet`
     - `--no-e2e`: `npm run test` (Vitest with coverage thresholds), no ratchet
     - after the tests, `npm run slowest-tests` prints the 5 slowest files and `npm run test-budget` compares the test-step wall-clock time against `TEST_BUDGET_SECONDS` in `scripts/test-budget.ts` (450s; override for one run with `FACTORY_TEST_BUDGET_SECONDS`). It prints `test-budget: PASS` within budget, a warning plus the slowest files when over locally, and fails verify in CI (`CI` set, e.g. `CI=true`) with `test-budget: FAIL` plus the slowest files
-11. `npm run eval -- --stub`
-12. Shell-script tests: `auto-merge-sweep`, `filter-green-prs`, `repo-merge-settings`, `repo-about`, `repo-issue-optics`, `ruleset-copilot-review`, `launchd/install-sweep-plist`, `publish-workspaces` (guards the publish list `scripts/publish-workspaces.txt` against the workspace graph)
+12. `npm run eval -- --stub`
+13. Shell-script tests: `auto-merge-sweep`, `filter-green-prs`, `repo-merge-settings`, `repo-about`, `repo-issue-optics`, `ruleset-copilot-review`, `launchd/install-sweep-plist`, `publish-workspaces` (guards the publish list `scripts/publish-workspaces.txt` against the workspace graph)
 
 CI (`.github/workflows/ci.yml`) runs the same checks as the full path, split into parallel jobs: `static` (format, build, guards, typecheck, lint, knip) and `test (1/3)`…`test (3/3)` (Vitest shards that write blob reports with raw coverage and no thresholds, via `FACTORY_COVERAGE_SHARD=1`). The required `ci` job fails unless all of them succeeded, then merges the shard reports (`vitest --merge-reports`) and enforces the coverage thresholds, the ratchet, and the stub eval on the merged result. A red `ci` names the failing job; read that job's log. CI also runs `scripts/quickstart-smoke.sh` in a separate job. It does not run the `install-sweep-plist` test.
 
@@ -47,6 +48,14 @@ The pre-commit hook (`lefthook.yml`) auto-fixes staged files with `oxlint --fix`
 `anti-slop/no-comments` fails `npm run lint` on any comment except justified lint overrides, rule notes in `oxlint.config.ts` and toolchain directives; to lower an entry in `comments-baseline.json`, delete comments then set the entry to the new count (or delete it at 0), never add or raise one (the CI guard fails it), and the rule cannot be disabled inline.
 
 `anti-slop/package-boundaries` fails `npm run lint` on a forbidden package edge: config importing a workspace package or declaring runtime dependencies, core importing cli or tui, a relative import leaving its package, a deep import of another package's `src/`, another package's `test-support/`, or `@on-par/factory-core/internal` and `/testing` outside the places ADR-0004 allows. The fix is the one each message names (import the published name, move the code, or use the public root). The rule is never disabled inline.
+
+## Line budget
+
+`loc-budget.json` records, per `packages/<pkg>`, the TypeScript source and test line counts. `npx tsx scripts/loc-budget.ts` (in `verify.sh` and the CI `static` job) counts tracked and untracked non-ignored `.ts/.tsx/.mts/.cts` files under `packages/<pkg>/`, excluding `dist/`. `*.test.*` and `*.spec.*` files count as tests; blank lines and comments count. The tree must match the recorded numbers exactly.
+
+- Under budget: lower the number in `loc-budget.json` to the count the failure names, in the same PR.
+- Over budget: delete or reuse existing code first.
+- Growing on purpose: raise the number in `loc-budget.json`. The CI guard fails a raised or added entry until a human applies the `loc-budget:override` label; then the human re-runs `static`, because a label change does not re-trigger CI. Agents never apply `loc-budget:override`. A label applied by a bot or app identity, or by a login in `FACTORY_BOT_LOGINS`, does not count.
 
 ## Coverage gate and ratchet
 
@@ -101,6 +110,7 @@ Local `verify.sh` does not enforce this.
 | `lint`                                    | Fix the code. Warnings fail the build too.                                                                                                |
 | `lint` / test: `max-lines`                | See [Max-lines guard](#max-lines-guard).                                                                                                  |
 | `knip`                                    | Delete the unused export, file, or dependency.                                                                                            |
+| `loc-budget`                              | See [Line budget](#line-budget).                                                                                                          |
 | `test` threshold                          | Add tests for the uncovered lines the report names.                                                                                       |
 | `coverage-ratchet`                        | Raise the named threshold in `vitest.config.ts` to the suggested value.                                                                   |
 | `eval --stub`                             | See the `run-evals` skill.                                                                                                                |

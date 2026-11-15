@@ -51,6 +51,7 @@ npm run lint || {
   exit 1
 }
 npm run knip
+npx tsx scripts/loc-budget.ts
 # Per-file durations for the slowest-files report (#2769). Keep the default
 # console reporter, and keep github-actions annotations in CI (vitest only
 # auto-adds that reporter when none are passed).

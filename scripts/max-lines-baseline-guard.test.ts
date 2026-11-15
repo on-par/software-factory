@@ -36,6 +36,12 @@ describe('isBotActor', () => {
 });
 
 describe('overrideLabelVerdict', () => {
+  it('honours a custom override label', () => {
+    const events = [labeled('alice', 'User', 'labeled', 'loc-budget:override')];
+    expect(overrideLabelVerdict(events, [], 'loc-budget:override')).toEqual({ kind: 'human', actor: 'alice' });
+    expect(overrideLabelVerdict(events, [])).toEqual({ kind: 'absent' });
+  });
+
   it('is absent without a label, after unlabeled, or without an actor; ignores other labels', () => {
     expect(overrideLabelVerdict([], [])).toEqual({ kind: 'absent' });
     expect(overrideLabelVerdict([labeled('a'), labeled('a', 'User', 'unlabeled')], [])).toEqual({ kind: 'absent' });

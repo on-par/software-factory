@@ -78,6 +78,19 @@ describe('.github/workflows/ci.yml', () => {
     expect(step?.run).toContain('"$COMMENTS_BASE_SHA"');
   });
 
+  it('runs the loc budget check and the pull-request loc budget guard in the static job (#4124)', () => {
+    const steps = jobs['static']?.steps ?? [];
+    const check = steps.find((s) => s.run === 'npx tsx scripts/loc-budget.ts');
+    expect(check?.if).toBeUndefined();
+    const guard = steps.find((s) => s.run?.includes('scripts/loc-budget.ts --base'));
+    expect(guard?.if).toBe("github.event_name == 'pull_request'");
+    expect(guard?.env).toMatchObject({
+      GH_TOKEN: '${{ github.token }}',
+      LOC_BUDGET_BOT_LOGINS: '${{ vars.FACTORY_BOT_LOGINS }}',
+    });
+    expect(guard?.run).toContain('"$LOC_BUDGET_BASE_SHA"');
+  });
+
   it('runs the live App installation-token identity suite with the job token, outside coverage', () => {
     const suite = 'packages/core/src/utils/github-identity.live.test.ts';
     const step = jobs['static']?.steps.find((s) => s.run?.includes(suite));

@@ -46,4 +46,11 @@ describe('scripts/verify.sh', () => {
     ).length;
     expect(opened - closed).toBe(0);
   });
+
+  it('runs the loc budget check (#4124)', () => {
+    const knip = lines.findIndex((line) => line === 'npm run knip');
+    const budget = lines.findIndex((line) => line === 'npx tsx scripts/loc-budget.ts');
+    expect(knip).toBeGreaterThanOrEqual(0);
+    expect(budget).toBeGreaterThan(knip);
+  });
 });

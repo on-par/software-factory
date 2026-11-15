@@ -70,6 +70,18 @@ jobs:
           COMMENTS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: npx tsx scripts/comments-baseline-guard.ts --base "$COMMENTS_BASE_SHA"
 
+      - name: LOC budget
+        run: npx tsx scripts/loc-budget.ts
+
+      - name: LOC budget guard
+        if: github.event_name == 'pull_request'
+        env:
+          LOC_BUDGET_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          LOC_BUDGET_PR_NUMBER: ${{ github.event.pull_request.number }}
+          LOC_BUDGET_BOT_LOGINS: ${{ vars.FACTORY_BOT_LOGINS }}
+          GH_TOKEN: ${{ github.token }}
+        run: npx tsx scripts/loc-budget.ts --base "$LOC_BUDGET_BASE_SHA" --pr "$LOC_BUDGET_PR_NUMBER"
+
       - name: Oxlint plugin version guard
         run: bash scripts/check-oxlint-plugin-version.sh
 
