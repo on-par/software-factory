@@ -33,13 +33,26 @@ describe('runBaselineCheckers CI cross-check (#3540)', () => {
     const env = { A: '1' };
     const cache = new BaselineCache(join(dir, 'baseline-cache.json'));
     await cache.set(SHA, hashBaselineEnv(env), hashBaselineCheckerConfig(null), seed);
-    const runCheckers = vi.fn(async (_c: unknown, _r: unknown, _x: unknown, _y: unknown, names: string[]) => ({
-      failures: 0,
-      passes: names.length,
-      skips: 0,
-      total: names.length,
-      results: names.map((n) => ({ checker: n, result: 'PASS' as const, details: 'fresh' })),
-    }));
+    const ran: string[][] = [];
+    const runCheckers = async (_c: unknown, _r: unknown, _x: unknown, _y: unknown, names: string[]) => {
+      ran.push(names);
+      return {
+        failures: 0,
+        passes: names.length,
+        skips: 0,
+        total: names.length,
+        results: names.map((n) => ({ checker: n, result: 'PASS' as const, details: 'fresh' })),
+      };
+    };
+    const lookups: string[] = [];
+    const invalidated: [string, string][] = [];
+    const greenVerdict = async (sha: string) => {
+      lookups.push(sha);
+      return { green: true, reason: 'ok' };
+    };
+    const onCacheInvalidated = (checker: string, reason: string) => {
+      invalidated.push([checker, reason]);
+    };
     const run = (extra: Partial<Parameters<typeof runBaselineCheckers>[0]>) =>
       runBaselineCheckers({
         baseSha: SHA,
@@ -57,39 +70,32 @@ describe('runBaselineCheckers CI cross-check (#3540)', () => {
         ...extra,
       });
     const read = (name: string) => cache.get(SHA, hashBaselineEnv(env), hashBaselineCheckerConfig(null), name);
-    return { run, runCheckers, read };
+    return { run, ran, lookups, invalidated, greenVerdict, onCacheInvalidated, read };
   }
 
   it('drops a cached FAIL when CI is green and re-runs the checker once', async () => {
-    const { run, runCheckers, read } = await setup([out('tests', 'FAIL')]);
-    const onCacheInvalidated = vi.fn();
-    const report = await run({
-      requiredChecksVerdict: async () => ({ green: true, reason: 'ok' }),
-      onCacheInvalidated,
-    });
-    expect(runCheckers).toHaveBeenCalledTimes(1);
-    expect(runCheckers.mock.calls[0][4]).toEqual(['tests']);
-    expect(onCacheInvalidated).toHaveBeenCalledWith('tests', expect.stringContaining('GitHub CI is green'));
+    const { run, ran, invalidated, greenVerdict, onCacheInvalidated, read } = await setup([out('tests', 'FAIL')]);
+    const report = await run({ requiredChecksVerdict: greenVerdict, onCacheInvalidated });
+    expect(ran).toEqual([['tests']]);
+    expect(invalidated).toEqual([['tests', expect.stringContaining('GitHub CI is green')]]);
     expect(report.checkers[0].verdict).toBe('clean-on-base');
     expect((await read('tests'))?.details).toBe('fresh');
   });
 
   it('keeps a cached FAIL when CI is not green', async () => {
-    const { run, runCheckers, read } = await setup([out('tests', 'FAIL')]);
-    const onCacheInvalidated = vi.fn();
+    const { run, ran, invalidated, onCacheInvalidated, read } = await setup([out('tests', 'FAIL')]);
     const report = await run({
       requiredChecksVerdict: async () => ({ green: false, reason: 'pending' }),
       onCacheInvalidated,
     });
-    expect(runCheckers).not.toHaveBeenCalled();
-    expect(onCacheInvalidated).not.toHaveBeenCalled();
+    expect(ran).toEqual([]);
+    expect(invalidated).toEqual([]);
     expect(report.checkers[0].verdict).toBe('fails-on-base');
     expect((await read('tests'))?.result).toBe('FAIL');
   });
 
   it('keeps it when the lookup throws or is absent', async () => {
-    const { run, runCheckers } = await setup([out('tests', 'FAIL')]);
-    const onCacheInvalidated = vi.fn();
+    const { run, ran, invalidated, onCacheInvalidated } = await setup([out('tests', 'FAIL')]);
     const thrown = await run({
       requiredChecksVerdict: async () => {
         throw new Error('rate limited');
@@ -99,26 +105,27 @@ describe('runBaselineCheckers CI cross-check (#3540)', () => {
     const absent = await run({ onCacheInvalidated });
     expect(thrown.checkers[0].verdict).toBe('fails-on-base');
     expect(absent.checkers[0].verdict).toBe('fails-on-base');
-    expect(runCheckers).not.toHaveBeenCalled();
-    expect(onCacheInvalidated).not.toHaveBeenCalled();
+    expect(ran).toEqual([]);
+    expect(invalidated).toEqual([]);
   });
 
   it('never consults CI for a cached PASS', async () => {
-    const { run, runCheckers } = await setup([out('tests', 'PASS')]);
-    const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
-    await run({ requiredChecksVerdict });
-    expect(requiredChecksVerdict).not.toHaveBeenCalled();
-    expect(runCheckers).not.toHaveBeenCalled();
+    const { run, ran, lookups, greenVerdict } = await setup([out('tests', 'PASS')]);
+    await run({ requiredChecksVerdict: greenVerdict });
+    expect(lookups).toEqual([]);
+    expect(ran).toEqual([]);
   });
 
   it('looks CI up once for several cached FAILs', async () => {
-    const { run, runCheckers } = await setup([out('tests', 'FAIL'), out('lint', 'FAIL')]);
-    const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
-    const onCacheInvalidated = vi.fn();
-    await run({ requiredChecksVerdict, onCacheInvalidated });
-    expect(requiredChecksVerdict).toHaveBeenCalledTimes(1);
-    expect(onCacheInvalidated).toHaveBeenCalledTimes(2);
-    expect(runCheckers).toHaveBeenCalledTimes(1);
+    const { run, ran, lookups, invalidated, greenVerdict, onCacheInvalidated } = await setup([
+      out('tests', 'FAIL'),
+      out('lint', 'FAIL'),
+    ]);
+    await run({ requiredChecksVerdict: greenVerdict, onCacheInvalidated });
+    expect(lookups).toEqual([SHA]);
+    expect(invalidated.map(([c]) => c).sort()).toEqual(['lint', 'tests']);
+    expect(ran).toHaveLength(1);
+    expect([...ran[0]].sort()).toEqual(['lint', 'tests']);
   });
 
   describe('confirmedLocally (#3851)', () => {
@@ -147,12 +154,11 @@ describe('runBaselineCheckers CI cross-check (#3540)', () => {
     });
 
     it('re-run after a CI-green cache invalidation that still fails is confirmedLocally (#3851)', async () => {
-      const { run } = await setup([out('links', 'FAIL')]);
+      const { run, lookups, greenVerdict } = await setup([out('links', 'FAIL')]);
       const dir = await tempDirs.make('baseline-rerun-');
-      const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
-      const report = await run({ deps: depsWith(dir, failRun()), requiredChecksVerdict });
+      const report = await run({ deps: depsWith(dir, failRun()), requiredChecksVerdict: greenVerdict });
       expect(report.confirmedLocally).toBe(true);
-      expect(requiredChecksVerdict).toHaveBeenCalledTimes(1);
+      expect(lookups).toEqual([SHA]);
     });
 
     it('does not mark confirmedLocally when CI is not green, the lookup throws, or the FAIL timed out (#3851)', async () => {
