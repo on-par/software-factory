@@ -63,6 +63,17 @@ describe('overrideLabelVerdict', () => {
   });
 });
 
+describe('overrideLabelVerdict with a custom label', () => {
+  it('matches only the requested label', () => {
+    const label = 'loc-budget:override';
+    expect(overrideLabelVerdict([labeled('alice', 'User', 'labeled', label)], [], label)).toEqual({
+      kind: 'human',
+      actor: 'alice',
+    });
+    expect(overrideLabelVerdict([labeled('alice')], [], label)).toEqual({ kind: 'absent' });
+  });
+});
+
 function io(
   overrides: Partial<GuardIo> & { base?: string; head: string },
 ): GuardIo & { errors: string[]; logs: string[] } {

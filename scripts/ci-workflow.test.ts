@@ -77,6 +77,14 @@ describe('.github/workflows/ci.yml', () => {
     expect(step?.env).toHaveProperty('MAX_LINES_BOT_LOGINS');
   });
 
+  it('runs the loc budget check in the static job and the override guard on pull requests (#4124)', () => {
+    const steps = jobs['static']?.steps ?? [];
+    expect(steps.some((s) => s.run === 'npm run loc-budget')).toBe(true);
+    const guard = steps.find((s) => s.run?.includes('scripts/loc-budget.ts --base'));
+    expect(guard?.if).toBe("github.event_name == 'pull_request'");
+    expect(guard?.env).toHaveProperty('LOC_BUDGET_BOT_LOGINS');
+  });
+
   it('runs the call-assertions baseline guard on pull requests in the static job (#4051)', () => {
     const step = jobs['static']?.steps.find((s) => s.run?.includes('scripts/call-assertions-baseline-guard.ts --base'));
     expect(step?.if).toBe("github.event_name == 'pull_request'");

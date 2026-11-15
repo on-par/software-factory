@@ -61,10 +61,12 @@ export function isBotActor(actor: { login: string; type?: string }, botLogins: r
   });
 }
 
-export function overrideLabelVerdict(events: readonly LabelEvent[], botLogins: readonly string[]): OverrideVerdict {
-  const last = events.findLast(
-    (e) => (e.event === 'labeled' || e.event === 'unlabeled') && e.label?.name === MAX_LINES_OVERRIDE_LABEL,
-  );
+export function overrideLabelVerdict(
+  events: readonly LabelEvent[],
+  botLogins: readonly string[],
+  label: string = MAX_LINES_OVERRIDE_LABEL,
+): OverrideVerdict {
+  const last = events.findLast((e) => (e.event === 'labeled' || e.event === 'unlabeled') && e.label?.name === label);
   if (!last || last.event === 'unlabeled' || !last.actor) return { kind: 'absent' };
   return { kind: isBotActor(last.actor, botLogins) ? 'bot' : 'human', actor: last.actor.login };
 }
@@ -91,7 +93,7 @@ export function renderGuardFailure(diff: BaselineDiff, verdict: OverrideVerdict)
   return lines;
 }
 
-function parseArgs(argv: readonly string[]): { base: string; pr: number } | undefined {
+export function parseArgs(argv: readonly string[]): { base: string; pr: number } | undefined {
   const [baseFlag, base, prFlag, pr, ...rest] = argv;
   if (baseFlag !== '--base' || prFlag !== '--pr' || !base || !pr || rest.length > 0) return undefined;
   const number = Number(pr);
@@ -113,7 +115,7 @@ function parseBaseline(text: string, label: string): Record<string, number> {
   return out;
 }
 
-function defaultFetchLabelEvents(repo: string, pr: number): LabelEvent[] {
+export function defaultFetchLabelEvents(repo: string, pr: number): LabelEvent[] {
   const out = execFileSync('gh', ['api', '--paginate', '--slurp', `repos/${repo}/issues/${pr}/events`], {
     encoding: 'utf8',
   });

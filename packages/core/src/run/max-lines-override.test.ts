@@ -26,6 +26,12 @@ describe('max-lines override (#3466)', () => {
     ).toBeUndefined();
   });
 
+  it('strips human-only override labels the factory would apply', () => {
+    expect(
+      withoutHumanOnlyLabels(['no-auto-merge', 'loc-budget:override', ' LOC-BUDGET:OVERRIDE ', 'max-lines:override']),
+    ).toEqual(['no-auto-merge']);
+  });
+
   it('puts the rule in both BUILD prompts', () => {
     const claude = buildClaudePrompt({ issue: workKeyFromIssue(1), branch: 'b', specPath: '/s', constitutionCtx: '' });
     const commitOnly = buildCommitOnlyPrompt({
