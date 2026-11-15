@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { resolvePrecedence } from './precedence.js';
 
@@ -35,15 +35,28 @@ describe('resolvePrecedence', () => {
   });
 
   it('never calls a later read once an earlier one hits', () => {
-    const later = vi.fn(() => 2);
-    resolvePrecedence<number>(
+    const reads: string[] = [];
+    const result = resolvePrecedence<number>(
       [
-        { source: 'repo', read: () => 1 },
-        { source: 'env', read: later },
+        {
+          source: 'repo',
+          read: () => {
+            reads.push('repo');
+            return 1;
+          },
+        },
+        {
+          source: 'env',
+          read: () => {
+            reads.push('env');
+            return 2;
+          },
+        },
       ],
       0,
     );
-    expect(later).not.toHaveBeenCalled();
+    expect(result).toEqual({ value: 1, source: 'repo' });
+    expect(reads).toEqual(['repo']);
   });
 
   it('returns the fallback as source default when nothing hits', () => {

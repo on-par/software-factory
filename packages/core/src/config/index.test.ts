@@ -887,6 +887,12 @@ describe('loadRoutesConfig', () => {
   });
 });
 
+function captureWarnings() {
+  const lines: string[] = [];
+  const warn = vi.spyOn(console, 'warn').mockImplementation((...args) => void lines.push(args.join(' ')));
+  return { lines, warn };
+}
+
 describe('resolveSizeGateMode (#2048)', () => {
   const withMode = (mode?: string) => ({ ...loadFactoryConfig(), sizeGate: mode === undefined ? {} : { mode } });
 
@@ -906,34 +912,34 @@ describe('resolveSizeGateMode (#2048)', () => {
   });
 
   it.each(['file', 'slice'])('resolves %s to stack with one deprecation line naming --stack', (mode) => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { lines, warn } = captureWarnings();
     try {
       expect(resolveSizeGateMode(withMode(mode))).toBe('stack');
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(String(warn.mock.calls[0]?.[0])).toContain('--stack');
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('--stack');
     } finally {
       warn.mockRestore();
     }
   });
 
   it('warns once for repeated resolves of the same config', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { lines, warn } = captureWarnings();
     try {
       const config = withMode('file');
       resolveSizeGateMode(config);
       expect(resolveSizeGateMode(config)).toBe('stack');
-      expect(warn).toHaveBeenCalledTimes(1);
+      expect(lines).toHaveLength(1);
     } finally {
       warn.mockRestore();
     }
   });
 
   it('resolves off and stack without a warning', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { lines, warn } = captureWarnings();
     try {
       expect(resolveSizeGateMode(withMode('off'))).toBe('off');
       expect(resolveSizeGateMode(withMode('stack'))).toBe('stack');
-      expect(warn).not.toHaveBeenCalled();
+      expect(lines).toEqual([]);
     } finally {
       warn.mockRestore();
     }
@@ -942,11 +948,11 @@ describe('resolveSizeGateMode (#2048)', () => {
   it.each(['SLICE', 'OFF', ' off ', 'STACK', ' stack ', 'none'])(
     'resolves unknown mode %s to stack with one warning (#3850)',
     (mode) => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { lines, warn } = captureWarnings();
       try {
         expect(resolveSizeGateMode(withMode(mode))).toBe('stack');
-        expect(warn).toHaveBeenCalledTimes(1);
-        expect(String(warn.mock.calls[0]?.[0])).toContain('off, stack');
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain('off, stack');
       } finally {
         warn.mockRestore();
       }
@@ -954,11 +960,11 @@ describe('resolveSizeGateMode (#2048)', () => {
   );
 
   it('resolves an empty mode to stack with one warning (#3850)', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { lines, warn } = captureWarnings();
     try {
       expect(resolveSizeGateMode(withMode(''))).toBe('stack');
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(String(warn.mock.calls[0]?.[0])).toContain('off, stack');
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('off, stack');
     } finally {
       warn.mockRestore();
     }
@@ -972,14 +978,15 @@ describe('resolveSizeGateMode (#2048)', () => {
   });
 
   it('aliasDeprecatedSizeGateMode maps file and slice to stack and leaves off and stack alone', () => {
-    const warn = vi.fn();
+    const lines: string[] = [];
+    const warn = (line: string) => void lines.push(line);
     expect(aliasDeprecatedSizeGateMode('file', warn)).toBe('stack');
     expect(aliasDeprecatedSizeGateMode('slice', warn)).toBe('stack');
-    expect(warn).toHaveBeenCalledTimes(2);
-    warn.mockClear();
+    expect(lines).toHaveLength(2);
+    lines.length = 0;
     expect(aliasDeprecatedSizeGateMode('off', warn)).toBe('off');
     expect(aliasDeprecatedSizeGateMode('stack', warn)).toBe('stack');
-    expect(warn).not.toHaveBeenCalled();
+    expect(lines).toEqual([]);
   });
 
   it('loads a config file with sizeGate.mode stack and resolves it to stack', async () => {
@@ -1053,13 +1060,14 @@ describe('parseSizeGateMode (#2048)', () => {
   });
 
   it('aliases the raw file and slice strings to stack before validation (#3835)', () => {
-    const warn = vi.fn();
+    const lines: string[] = [];
+    const warn = (line: string) => void lines.push(line);
     expect(parseSizeGateMode(aliasDeprecatedSizeGateMode('slice', warn))).toBe('stack');
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0]?.[0]).toContain('--stack');
-    const quiet = vi.fn();
-    expect(aliasDeprecatedSizeGateMode('bogus', quiet)).toBe('bogus');
-    expect(quiet).not.toHaveBeenCalled();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('--stack');
+    const quiet: string[] = [];
+    expect(aliasDeprecatedSizeGateMode('bogus', (line) => void quiet.push(line))).toBe('bogus');
+    expect(quiet).toEqual([]);
   });
 
   it('returns undefined for anything else', () => {
@@ -1952,10 +1960,11 @@ describe('failover config (#3228)', () => {
   const tmp = createTempDirs();
   let dir: string;
   let warn: ReturnType<typeof vi.spyOn>;
+  let lines: string[];
 
   beforeEach(async () => {
     dir = await tmp.make('failover-config-');
-    warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    ({ lines, warn } = captureWarnings());
   });
 
   afterEach(async () => {
@@ -1990,19 +1999,19 @@ describe('failover config (#3228)', () => {
   it('loads a usage_cap trigger with exactly one warning', async () => {
     const config = await loadWithFailover({ triggers: ['usage_cap', 'rate_limit'] });
     expect(config.failover.triggers).toEqual(['usage_cap', 'rate_limit']);
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0][0])).toContain('usage_cap');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('usage_cap');
   });
 
   it('strips escalateAfterTierExhausted and warns once', async () => {
     const config = await loadWithFailover({ triggers: ['rate_limit'], escalateAfterTierExhausted: true });
     expect(config.failover).not.toHaveProperty('escalateAfterTierExhausted');
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0][0])).toContain('escalateAfterTierExhausted');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('escalateAfterTierExhausted');
   });
 
   it('packaged defaults load without warnings and use kind triggers', () => {
     expect(loadModelsConfig().failover.triggers).toEqual(['rate_limit', 'unavailable', 'auth']);
-    expect(warn).not.toHaveBeenCalled();
+    expect(lines).toEqual([]);
   });
 });
