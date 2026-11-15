@@ -1,5 +1,5 @@
 import type { Octokit } from '@octokit/rest';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { FACTORY_TASK_REQUIRED_FIELDS, scoreIssueReadiness } from '../readiness/index.js';
 import { BlockerFilingError, blockerMarker, fileBlocker, hashBlockerClaim, renderBlockerBody } from './file-blocker.js';
@@ -33,32 +33,38 @@ interface Setup {
 }
 
 function makeFake(s: Setup = {}) {
-  const create = vi.fn(async (params: { body: string }) => {
+  const created: Array<Record<string, unknown> & { body: string }> = [];
+  const requests: Array<{ route: string; params: Record<string, unknown> }> = [];
+  const gets: unknown[] = [];
+  const create = async (params: Record<string, unknown> & { body: string }) => {
+    created.push(params);
     if (s.createThrows) throw new Error('create boom');
     return { data: { number: 501, id: 9501, body: params.body } };
-  });
-  const get = vi.fn(async () => {
+  };
+  const get = async (params: unknown) => {
+    gets.push(params);
     if (s.parentThrows) throw new Error('get boom');
     return { data: { body: s.parentBody ?? 'parent body' } };
-  });
-  const request = vi.fn(async (route: string) => {
+  };
+  const request = async (route: string, params: Record<string, unknown> = {}) => {
+    requests.push({ route, params });
     if (route === LINK && s.linkThrows) throw new Error('link boom');
     if (route === BLOCKED_BY && s.blockedByPostThrows) throw new Error('post boom');
     if (route.startsWith('GET') && s.blockedByGetThrows) throw new Error('get blocked boom');
     if (route.startsWith('GET')) return { data: s.blockedBy ?? [] };
     return { data: {} };
-  });
-  const paginate = vi.fn(async (route: string) => {
+  };
+  const paginate = async (route: string) => {
     if (route === SUB_ROUTE) {
       if (s.subThrows) throw new Error('sub boom');
       return s.subIssues ?? [];
     }
     if (s.dailyThrows) throw new Error('daily boom');
     return s.daily ?? [];
-  });
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test double needs a loose type
   const octokit: any = { request, paginate, rest: { issues: { get, create } } };
-  return { octokit, request, paginate, create, get };
+  return { octokit, created, requests, gets };
 }
 
 function run(fake: { octokit: Octokit }, overrides: Partial<{ claim: unknown; maxPerDay: number }> = {}) {
@@ -83,26 +89,25 @@ async function expectRefusal(promise: Promise<unknown>, reason: BlockerRefusalRe
 }
 
 const markerFor = (parent: number, hash = 'abcdef012345') => blockerMarker(parent, hash);
-const posts = (fake: ReturnType<typeof makeFake>) =>
-  fake.request.mock.calls.filter(([route]) => (route as string).startsWith('POST'));
+const posts = (fake: ReturnType<typeof makeFake>) => fake.requests.filter((r) => r.route.startsWith('POST'));
 
 describe('fileBlocker', () => {
   it("files one child, links it as a sub-issue and adds it to the parent's blocked_by", async () => {
     const fake = makeFake();
     const result = await run(fake);
     expect(result).toEqual({ outcome: 'filed', number: 501 });
-    expect(fake.create).toHaveBeenCalledTimes(1);
-    const params = fake.create.mock.calls[0]![0] as Record<string, unknown>;
+    expect(fake.created).toHaveLength(1);
+    const params = fake.created[0]!;
     expect(params).not.toHaveProperty('labels');
     expect(params.body).toContain(blockerMarker(PARENT, hashBlockerClaim(CLAIM)));
-    expect(fake.request).toHaveBeenCalledWith(
-      LINK,
-      expect.objectContaining({ issue_number: PARENT, sub_issue_id: 9501 }),
-    );
-    expect(fake.request).toHaveBeenCalledWith(
-      BLOCKED_BY,
-      expect.objectContaining({ issue_number: PARENT, issue_id: 9501 }),
-    );
+    expect(fake.requests).toContainEqual({
+      route: LINK,
+      params: expect.objectContaining({ issue_number: PARENT, sub_issue_id: 9501 }),
+    });
+    expect(fake.requests).toContainEqual({
+      route: BLOCKED_BY,
+      params: expect.objectContaining({ issue_number: PARENT, issue_id: 9501 }),
+    });
   });
 
   it('defaults now to the real clock', async () => {
@@ -120,25 +125,24 @@ describe('fileBlocker', () => {
   it('returns the existing child on a re-run with the same claim and creates nothing', async () => {
     const first = makeFake();
     await run(first);
-    const body = (first.create.mock.calls[0]![0] as { body: string }).body;
+    const body = first.created[0]!.body;
     const second = makeFake({
       subIssues: [{ id: 9501, number: 501, title: 'x', body, state: 'open' }],
       blockedBy: [{ number: 501 }],
     });
     await expect(run(second)).resolves.toEqual({ outcome: 'existing', number: 501 });
-    expect(second.create).not.toHaveBeenCalled();
+    expect(second.created).toEqual([]);
     expect(posts(second)).toHaveLength(0);
   });
 
   it('heals a missing blocked_by link on the existing path', async () => {
     const first = makeFake();
     await run(first);
-    const body = (first.create.mock.calls[0]![0] as { body: string }).body;
+    const body = first.created[0]!.body;
     const second = makeFake({ subIssues: [{ id: 9501, number: 501, title: 'x', body, state: 'closed' }] });
     await expect(run(second)).resolves.toEqual({ outcome: 'existing', number: 501 });
-    expect(second.create).not.toHaveBeenCalled();
-    expect(posts(second)).toHaveLength(1);
-    expect(second.request).toHaveBeenCalledWith(BLOCKED_BY, expect.objectContaining({ issue_id: 9501 }));
+    expect(second.created).toEqual([]);
+    expect(posts(second)).toEqual([{ route: BLOCKED_BY, params: expect.objectContaining({ issue_id: 9501 }) }]);
   });
 
   it('refuses with max-blockers-reached', async () => {
@@ -150,14 +154,14 @@ describe('fileBlocker', () => {
       ],
     });
     await expectRefusal(run(fake), 'max-blockers-reached');
-    expect(fake.create).not.toHaveBeenCalled();
+    expect(fake.created).toEqual([]);
     expect(posts(fake)).toHaveLength(0);
   });
 
   it('refuses with parent-is-blocker', async () => {
     const fake = makeFake({ parentBody: `text\n${markerFor(7)}` });
     await expectRefusal(run(fake), 'parent-is-blocker');
-    expect(fake.create).not.toHaveBeenCalled();
+    expect(fake.created).toEqual([]);
     expect(posts(fake)).toHaveLength(0);
   });
 
@@ -166,7 +170,7 @@ describe('fileBlocker', () => {
     const fake = makeFake({ subIssues: [{ id: 5, number: 55, title: CLAIM.title, body: text, state: 'open' }] });
     const result = await run(fake);
     expect(result).toMatchObject({ outcome: 'duplicate', number: 55 });
-    expect(fake.create).not.toHaveBeenCalled();
+    expect(fake.created).toEqual([]);
   });
 
   it('does not treat a closed similar sub-issue as a duplicate', async () => {
@@ -188,7 +192,7 @@ describe('fileBlocker', () => {
       ],
     });
     await expectRefusal(run(fake, { maxPerDay: 2 }), 'daily-cap-reached');
-    expect(fake.create).not.toHaveBeenCalled();
+    expect(fake.created).toEqual([]);
     const passing = makeFake({ daily: [todayMarked(1)] });
     await expect(run(passing, { maxPerDay: 2 })).resolves.toMatchObject({ outcome: 'filed' });
   });
@@ -202,7 +206,7 @@ describe('fileBlocker', () => {
   ] as [string, Setup][])('fails closed when %s', async (_name, setup) => {
     const fake = makeFake(setup);
     await expectRefusal(run(fake), 'listing-unverified');
-    expect(fake.create).not.toHaveBeenCalled();
+    expect(fake.created).toEqual([]);
   });
 
   it('maps a create failure to create-failed', async () => {
@@ -220,7 +224,7 @@ describe('fileBlocker', () => {
   it('maps a blocked_by GET failure on the existing path to link-failed', async () => {
     const first = makeFake();
     await run(first);
-    const body = (first.create.mock.calls[0]![0] as { body: string }).body;
+    const body = first.created[0]!.body;
     const fake = makeFake({
       subIssues: [{ id: 9501, number: 501, title: 'x', body, state: 'open' }],
       blockedByGetThrows: true,
@@ -238,7 +242,8 @@ describe('fileBlocker', () => {
     const error = await expectRefusal(run(fake, { claim }), 'invalid-claim');
     expect(error.name).toBe('BlockerFilingError');
     expect(error.childNumber).toBeUndefined();
-    expect(fake.get).not.toHaveBeenCalled();
+    expect(fake.gets).toEqual([]);
+    expect(fake.requests).toEqual([]);
   });
 });
 
