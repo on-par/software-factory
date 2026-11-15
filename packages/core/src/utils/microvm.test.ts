@@ -13,6 +13,11 @@ import {
   worktreeSandboxFor,
 } from './microvm.js';
 
+const logRecorder = () => {
+  const events: LoggedEvent[] = [];
+  return { events, log: recordingLog(events) };
+};
+
 function makeExec(impl: (cmd: string) => Promise<{ stdout: string; stderr: string }>) {
   const calls: [string, unknown][] = [];
   const exec: ExecFn = (async (cmd, opts) => {
@@ -93,9 +98,9 @@ describe('microVmName', () => {
 describe('createMicroVm', () => {
   it('issues a pre-clean sbx rm, then sbx create with the worktree as writable root plus one --mount per auth path', async () => {
     const { exec, calls } = makeExec(async () => ({ stdout: '', stderr: '' }));
-    const events: LoggedEvent[] = [];
 
-    const created = await createMicroVm(baseOpts({ exec, log: recordingLog(events) }));
+    const { events, log } = logRecorder();
+    const created = await createMicroVm(baseOpts({ exec, log }));
 
     expect(created).toBe(true);
     const cmds = calls.map(([cmd]) => cmd);
@@ -119,9 +124,9 @@ describe('createMicroVm', () => {
 
   it('returns false and issues no create when sbx is not installed', async () => {
     const { exec, calls } = makeExec(async () => ({ stdout: '', stderr: '' }));
-    const events: LoggedEvent[] = [];
 
-    const created = await createMicroVm(baseOpts({ exec, isAvailable: () => false, log: recordingLog(events) }));
+    const { events, log } = logRecorder();
+    const created = await createMicroVm(baseOpts({ exec, isAvailable: () => false, log }));
 
     expect(created).toBe(false);
     expect(calls).toEqual([]);
@@ -145,9 +150,9 @@ describe('createMicroVm', () => {
       if (cmd.includes('sbx create')) throw new Error('sbx create failed');
       return { stdout: '', stderr: '' };
     });
-    const events: LoggedEvent[] = [];
 
-    await expect(createMicroVm(baseOpts({ exec, log: recordingLog(events) }))).resolves.toBe(false);
+    const { events, log } = logRecorder();
+    await expect(createMicroVm(baseOpts({ exec, log }))).resolves.toBe(false);
     expect(events).toContainEqual(
       expect.objectContaining({ type: 'sandbox-unavailable', msg: expect.stringContaining('sbx create failed') }),
     );
@@ -166,10 +171,10 @@ describe('createMicroVm', () => {
 describe('removeMicroVm', () => {
   it('issues sbx rm --force <name>', async () => {
     const { exec, calls } = makeExec(async () => ({ stdout: '', stderr: '' }));
-    const events: LoggedEvent[] = [];
     const name = microVmName('/repo/.worktrees/653');
 
-    await removeMicroVm(baseOpts({ exec, log: recordingLog(events) }));
+    const { events, log } = logRecorder();
+    await removeMicroVm(baseOpts({ exec, log }));
 
     expect(calls).toEqual([[`sbx rm --force ${name}`, expect.objectContaining({ timeoutMs: expect.any(Number) })]]);
     expect(events).toContainEqual(expect.objectContaining({ type: 'sandbox', msg: expect.stringContaining(name) }));
