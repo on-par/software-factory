@@ -48,13 +48,17 @@ describe('claimOf', () => {
 });
 
 describe('fetchIssueRecord', () => {
-  const octokitWith = (get: ReturnType<typeof vi.fn>) => ({ rest: { issues: { get } } }) as never;
+  const octokitWith = (get: (...args: never[]) => unknown) => ({ rest: { issues: { get } } }) as never;
 
   it('calls issues.get once and maps string and object labels', async () => {
-    const get = vi.fn().mockResolvedValue({ data: { state: 'open', labels: ['a', { name: 'b' }, {}] } });
+    const gets: unknown[] = [];
+    const get = async (params: unknown) => {
+      gets.push(params);
+      return { data: { state: 'open', labels: ['a', { name: 'b' }, {}] } };
+    };
     const record = await fetchIssueRecord(octokitWith(get), 'o/r', 5, vi.fn(), new IssueWarnDedup());
     expect(record).toEqual({ kind: 'ok', state: 'open', labels: ['a', 'b', ''] });
-    expect(get).toHaveBeenCalledTimes(1);
+    expect(gets).toHaveLength(1);
   });
 
   it('returns not-configured without a client or repo', async () => {
@@ -67,7 +71,10 @@ describe('fetchIssueRecord', () => {
   });
 
   it('maps a 404 to not-found and any other failure to error, warning each time', async () => {
-    const log = vi.fn();
+    const logs: Array<[string, string]> = [];
+    const log = (t: string, m: string) => {
+      logs.push([t, m]);
+    };
     const notFound = vi.fn().mockRejectedValue(Object.assign(new Error('Not Found'), { status: 404 }));
     expect(await fetchIssueRecord(octokitWith(notFound), 'o/r', 5, log, new IssueWarnDedup())).toEqual({
       kind: 'not-found',
@@ -78,7 +85,7 @@ describe('fetchIssueRecord', () => {
       kind: 'error',
       message: 'rate limit',
     });
-    expect(log).toHaveBeenCalledTimes(2);
-    expect(log.mock.calls[0][1]).toContain('GitHub issue query failed for #5 (Not Found)');
+    expect(logs).toHaveLength(2);
+    expect(logs[0]?.[1]).toContain('GitHub issue query failed for #5 (Not Found)');
   });
 });
