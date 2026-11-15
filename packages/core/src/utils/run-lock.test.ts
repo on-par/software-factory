@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import { workKeyFromIssue } from '../work/work-key.js';
@@ -64,7 +64,10 @@ describe('withRunLock / readRunLockHolder', () => {
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'pid'), '4321');
     writeFileSync(join(lockDir, 'meta.json'), JSON.stringify({ command: 'factory run', host: 'other-host' }));
-    const fn = vi.fn();
+    let ran = false;
+    const fn = async () => {
+      ran = true;
+    };
 
     let rejection: unknown;
     try {
@@ -80,7 +83,7 @@ describe('withRunLock / readRunLockHolder', () => {
     expect(held.lockDir).toBe(lockDir);
     expect(held.holder).toEqual({ pid: 4321, command: 'factory run', host: 'other-host' });
 
-    expect(fn).not.toHaveBeenCalled();
+    expect(ran).toBe(false);
     expect(readFileSync(join(lockDir, 'pid'), 'utf-8')).toBe('4321');
   });
 
@@ -89,7 +92,7 @@ describe('withRunLock / readRunLockHolder', () => {
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'pid'), '4321');
     writeFileSync(join(lockDir, 'meta.json'), JSON.stringify({ command: 'factory run' }));
-    const onReclaim = vi.fn();
+    const reclaimed: Array<number | null> = [];
     let ran = false;
 
     await withRunLock(
@@ -97,11 +100,11 @@ describe('withRunLock / readRunLockHolder', () => {
       async () => {
         ran = true;
       },
-      { isPidAlive: () => false, onReclaim },
+      { isPidAlive: () => false, onReclaim: (pid) => reclaimed.push(pid) },
     );
 
     expect(ran).toBe(true);
-    expect(onReclaim).toHaveBeenCalledWith(4321);
+    expect(reclaimed).toEqual([4321]);
     expect(existsSync(lockDir)).toBe(false);
   });
 
@@ -243,15 +246,15 @@ describe('withScopedRunLock', () => {
   it('reclaims a dead-pid issue lock and calls onReclaim', async () => {
     const paths = makePaths();
     fakeHolder(runLockDirFor(paths, { kind: 'issue', key: keyA }), otherPid);
-    const onReclaim = vi.fn();
+    const reclaimed: Array<number | null> = [];
 
     const result = await withScopedRunLock(paths, { kind: 'issue', key: keyA }, async () => 'ran', {
       isPidAlive: (pid) => pid === process.pid,
-      onReclaim,
+      onReclaim: (pid) => reclaimed.push(pid),
     });
 
     expect(result).toBe('ran');
-    expect(onReclaim).toHaveBeenCalledWith(otherPid);
+    expect(reclaimed).toEqual([otherPid]);
   });
 
   it('nested checkout-scope acquire in one process is a pass-through and the cross-check ignores own pid', async () => {

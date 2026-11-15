@@ -1,7 +1,7 @@
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { PipelineTestKit } from '../test-support/index.js';
 import { detectRemoteBranch, gitFetch, setupWorktree } from './index.js';
@@ -12,6 +12,13 @@ const kit = new PipelineTestKit();
 afterEach(() => kit.cleanup());
 
 describe('pre-existing remote branch (#1868)', () => {
+  function recorder() {
+    const events: Array<[string, string]> = [];
+    const log = (type: string, msg: string) => events.push([type, msg]);
+    const preexisting = () => events.filter(([t]) => t === 'remote-branch-preexisting').map(([, m]) => m);
+    return { log, preexisting };
+  }
+
   async function pushBranch(repoRoot: string, branch: string): Promise<string> {
     await execFile('git', ['commit', '--allow-empty', '-m', 'earlier run'], { cwd: repoRoot });
     await execFile('git', ['push', 'origin', `HEAD:refs/heads/${branch}`], { cwd: repoRoot });
@@ -26,7 +33,7 @@ describe('pre-existing remote branch (#1868)', () => {
     const branch = 'ship-it/207-preexisting';
     const sha = await pushBranch(repoRoot, branch);
     const worktree = kit.trackWorktree(repoRoot, 207);
-    const log = vi.fn();
+    const { log, preexisting } = recorder();
 
     const result = await setupWorktree(repoRoot, branch, worktree, undefined, undefined, log, {
       findOpenPr: async () => ({ status: 'found', prNumber: 42 }),
@@ -34,11 +41,10 @@ describe('pre-existing remote branch (#1868)', () => {
 
     expect(result.remoteBranch).toEqual({ sha, prNumber: 42 });
     expect(result.base).toBe(`origin/${branch}`);
-    const events = log.mock.calls.filter(([type]) => type === 'remote-branch-preexisting');
-    expect(events).toHaveLength(1);
-    expect(events[0][1]).toContain(sha);
-    expect(events[0][1]).toContain('#42');
-    expect(events[0][1]).toContain(`continuing on origin/${branch}`);
+    expect(preexisting()).toHaveLength(1);
+    expect(preexisting()[0]).toContain(sha);
+    expect(preexisting()[0]).toContain('#42');
+    expect(preexisting()[0]).toContain(`continuing on origin/${branch}`);
     const { stdout } = await execFile('git', ['rev-parse', 'HEAD'], { cwd: worktree });
     expect(stdout.trim()).toBe(sha);
   });
@@ -48,16 +54,16 @@ describe('pre-existing remote branch (#1868)', () => {
     const branch = 'ship-it/211-preexisting';
     await pushBranch(repoRoot, branch);
     const worktree = kit.trackWorktree(repoRoot, 211);
-    const log = vi.fn();
+    const { log, preexisting } = recorder();
 
     const result = await setupWorktree(repoRoot, branch, worktree, 'origin/main', undefined, log, {
       findOpenPr: async () => ({ status: 'found', prNumber: 42 }),
     });
 
     expect(result.base).toBe('origin/main');
-    const event = log.mock.calls.find(([type]) => type === 'remote-branch-preexisting');
-    expect(event?.[1]).toContain('#42');
-    expect(event?.[1]).not.toContain('continuing');
+    const [msg] = preexisting();
+    expect(msg).toContain('#42');
+    expect(msg).not.toContain('continuing');
     const { stdout } = await execFile('git', ['rev-parse', 'HEAD'], { cwd: worktree });
     const { stdout: main } = await execFile('git', ['rev-parse', 'origin/main'], { cwd: repoRoot });
     expect(stdout.trim()).toBe(main.trim());
@@ -78,7 +84,7 @@ describe('pre-existing remote branch (#1868)', () => {
     const branch = 'ship-it/208-preexisting';
     const sha = await pushBranch(repoRoot, branch);
     const worktree = kit.trackWorktree(repoRoot, 208);
-    const log = vi.fn();
+    const { log, preexisting } = recorder();
 
     const result = await setupWorktree(repoRoot, branch, worktree, undefined, undefined, log, { findOpenPr });
 
@@ -87,7 +93,7 @@ describe('pre-existing remote branch (#1868)', () => {
     const { stdout: head } = await execFile('git', ['rev-parse', 'HEAD'], { cwd: worktree });
     const { stdout: main } = await execFile('git', ['rev-parse', 'origin/main'], { cwd: repoRoot });
     expect(head.trim()).toBe(main.trim());
-    expect(log).toHaveBeenCalledWith('remote-branch-preexisting', expect.stringContaining(text));
+    expect(preexisting().some((m) => m.includes(text))).toBe(true);
   });
 
   it('reports the PR as not checked when no lookup is injected', async () => {
@@ -95,26 +101,30 @@ describe('pre-existing remote branch (#1868)', () => {
     const branch = 'ship-it/209-preexisting';
     await pushBranch(repoRoot, branch);
     const worktree = kit.trackWorktree(repoRoot, 209);
-    const log = vi.fn();
+    const { log, preexisting } = recorder();
 
     await setupWorktree(repoRoot, branch, worktree, undefined, undefined, log);
 
-    expect(log).toHaveBeenCalledWith('remote-branch-preexisting', expect.stringContaining('not checked'));
+    expect(preexisting().some((m) => m.includes('not checked'))).toBe(true);
   });
 
   it('records nothing and never looks up a PR when the remote branch does not exist', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 210);
-    const log = vi.fn();
-    const findOpenPr = vi.fn();
+    const { log, preexisting } = recorder();
+    let lookups = 0;
+    const findOpenPr = async () => {
+      lookups += 1;
+      return { status: 'absent' as const };
+    };
 
     const result = await setupWorktree(repoRoot, 'ship-it/210-fresh', worktree, undefined, undefined, log, {
       findOpenPr,
     });
 
     expect(result.remoteBranch).toBeNull();
-    expect(log.mock.calls.some(([type]) => type === 'remote-branch-preexisting')).toBe(false);
-    expect(findOpenPr).not.toHaveBeenCalled();
+    expect(preexisting()).toEqual([]);
+    expect(lookups).toBe(0);
   });
 
   it('detectRemoteBranch returns the SHA for an existing branch and null for a missing one', async () => {

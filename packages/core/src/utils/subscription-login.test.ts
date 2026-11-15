@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { defaultModelsConfig } from '@on-par/factory-config';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import { resolveRoleModel, type ProviderOrder } from '../config/provider-order.js';
@@ -22,10 +22,13 @@ function codexHome(auth: unknown): string {
 const chatgptAuth = { tokens: { refresh_token: 'rt' } };
 
 function harness(env: NodeJS.ProcessEnv, failExec: readonly string[] = []) {
-  const exec = vi.fn((file: string) => {
+  const execs: string[] = [];
+  const exec = (file: string) => {
+    execs.push(file);
     if (failExec.includes(file)) throw new Error('not signed in');
-  });
-  const log = vi.fn();
+  };
+  const logs: Array<{ type: string; msg: string; extra?: unknown }> = [];
+  const log = (type: string, msg: string, extra?: unknown) => logs.push({ type, msg, extra });
   const deps: SubscriptionLoginDeps = {
     env,
     platform: 'darwin',
@@ -35,7 +38,7 @@ function harness(env: NodeJS.ProcessEnv, failExec: readonly string[] = []) {
     log,
     logged: new Set(),
   };
-  return { exec, log, deps };
+  return { execs, logs, deps };
 }
 
 afterEach(async () => {
@@ -54,7 +57,7 @@ describe('subscriptionLogin', () => {
 
 describe('filterRefusedProviders (#3335)', () => {
   it('an API-key login is refused for failover like the bench harness (2026-10-20)', () => {
-    const { exec, log, deps } = harness({ CODEX_HOME: codexHome({ OPENAI_API_KEY: 'sk-test' }) });
+    const { execs, logs, deps } = harness({ CODEX_HOME: codexHome({ OPENAI_API_KEY: 'sk-test' }) });
     expect(subscriptionLogin('codex', deps)).toBe('api');
     const { order: filtered, refused } = filterRefusedProviders(order, models, deps);
     for (const role of ['boss', 'worker', 'checker', 'triage'] as const) {
@@ -62,36 +65,39 @@ describe('filterRefusedProviders (#3335)', () => {
     }
     expect(refused).toHaveLength(1);
     expect(refused[0]).toMatchObject({ provider: 'codex', login: 'api' });
-    expect(log).toHaveBeenCalledTimes(1);
-    expect(log).toHaveBeenCalledWith('provider_refused', expect.any(String), {
-      providerRefused: { provider: 'codex', login: 'api', at: new Date(NOW).toISOString() },
-    });
-    expect(exec.mock.calls.some(([file]) => file === 'codex')).toBe(false);
-    expect(JSON.stringify(log.mock.calls)).not.toContain('sk-test');
+    expect(logs).toEqual([
+      {
+        type: 'provider_refused',
+        msg: expect.any(String),
+        extra: { providerRefused: { provider: 'codex', login: 'api', at: new Date(NOW).toISOString() } },
+      },
+    ]);
+    expect(execs).not.toContain('codex');
+    expect(JSON.stringify(logs)).not.toContain('sk-test');
   });
 
   it('a Claude API-key login drops claude so the boss order starts on codex and no claude command runs', () => {
-    const { exec, deps } = harness({ ANTHROPIC_API_KEY: 'sk-ant', CODEX_HOME: codexHome(chatgptAuth) });
+    const { execs, deps } = harness({ ANTHROPIC_API_KEY: 'sk-ant', CODEX_HOME: codexHome(chatgptAuth) });
     const { order: filtered, refused } = filterRefusedProviders(order, models, deps);
     expect(filtered.boss[0]).toBe('gpt-5.6-terra-high');
     expect(resolveRoleModel(filtered, 'boss', 'claude')).toBeUndefined();
     expect(refused).toMatchObject([{ provider: 'claude', login: 'api' }]);
-    expect(exec.mock.calls.some(([file]) => file === 'claude' || file === 'security')).toBe(false);
+    expect(execs.filter((f) => f === 'claude' || f === 'security')).toEqual([]);
   });
 
   it('subscription logins with opencode-go/ models are kept and nothing is logged', () => {
-    const { log, deps } = harness({ OPENCODE_API_KEY: 'k', CODEX_HOME: codexHome(chatgptAuth) });
+    const { logs, deps } = harness({ OPENCODE_API_KEY: 'k', CODEX_HOME: codexHome(chatgptAuth) });
     const result = filterRefusedProviders(order, models, deps);
     expect(result.order).toEqual(order);
     expect(result.refused).toEqual([]);
-    expect(log).not.toHaveBeenCalled();
+    expect(logs).toEqual([]);
   });
 
   it('logs provider_refused once per process per provider', () => {
-    const { log, deps } = harness({ CODEX_HOME: codexHome({ OPENAI_API_KEY: 'sk-test' }) });
+    const { logs, deps } = harness({ CODEX_HOME: codexHome({ OPENAI_API_KEY: 'sk-test' }) });
     filterRefusedProviders(order, models, deps);
     filterRefusedProviders(order, models, deps);
-    expect(log).toHaveBeenCalledTimes(1);
+    expect(logs).toHaveLength(1);
   });
 
   it('an unknown login is refused', () => {

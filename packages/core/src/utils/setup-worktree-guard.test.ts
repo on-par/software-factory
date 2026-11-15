@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { PipelineTestKit } from '../test-support/index.js';
 import { reapLaneWorktree, setupWorktree } from './index.js';
@@ -78,14 +78,15 @@ describe('lane worktree removal guards (#3443)', () => {
     const { repoRoot, worktree, branch, keepsFile } = await lane(3446);
     await setupWorktree(repoRoot, branch, worktree, undefined, undefined, undefined, { keepsFile });
     writeKeep(keepsFile, 3446, worktree);
-    const log = vi.fn();
+    const events: Array<[string, string]> = [];
+    const log = (type: string, msg: string) => events.push([type, msg]);
 
     const result = await reapLaneWorktree(repoRoot, worktree, { issue: 3446, branchPrefix: 'ship-it', keepsFile, log });
 
     expect(result).toMatchObject({ outcome: 'kept-record', branchDeleted: false });
     expect(existsSync(worktree)).toBe(true);
     expect(await branchExists(repoRoot, branch)).toBe(true);
-    expect(log).toHaveBeenCalledWith('worktree-gc', expect.stringContaining('kept (budget_exceeded)'));
+    expect(events.some(([t, m]) => t === 'worktree-gc' && m.includes('kept (budget_exceeded)'))).toBe(true);
   });
 });
 
@@ -130,7 +131,8 @@ describe('kept lane branch name collision (#3651)', () => {
 
   it('renames a kept branch with a closed PR aside locally and on origin, then creates a fresh lane worktree from the base', async () => {
     const { repoRoot, origin, worktree } = await stuckBranch(true);
-    const log = vi.fn();
+    const events: Array<[string, string]> = [];
+    const log = (type: string, msg: string) => events.push([type, msg]);
     const res = await setupWorktree(repoRoot, branch, worktree, undefined, undefined, log, {
       findOpenPr: async () => ({ status: 'absent' }),
       now,
@@ -138,7 +140,7 @@ describe('kept lane branch name collision (#3651)', () => {
     expect(await git(origin, 'ls-remote', '--heads', origin, bak)).not.toBe('');
     expect(await git(origin, 'ls-remote', '--heads', origin, branch)).toBe('');
     expect(res.base).toBe('origin/main');
-    expect(log).toHaveBeenCalledWith('warn', expect.stringContaining('.bak-20261024'));
+    expect(events.some(([t, m]) => t === 'warn' && m.includes('.bak-20261024'))).toBe(true);
   });
 
   it('open PR owning a stuck lane branch continues on origin/<branch> and leaves origin untouched', async () => {
