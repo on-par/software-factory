@@ -22,6 +22,8 @@ import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
+const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
+
 const tempDirs = createTempDirs();
 afterAll(() => tempDirs.cleanup());
 
@@ -36,15 +38,7 @@ const ROUTES: RoutesConfig = { version: 1, routes: {} };
 const BUILD_MODELS: ModelsConfig = {
   ...MODELS,
   models: {
-    'stub-worker': {
-      provider: 'custom',
-      tier: 'worker',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-    },
+    'stub-worker': { provider: 'custom', tier: 'worker', ...free, contextWindow: 1000, capabilities: [], envKey: null },
   },
   tiers: { worker: ['stub-worker'] },
 };

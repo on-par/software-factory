@@ -14,6 +14,8 @@ import { parseOpenCodeJson } from './opencode.js';
 import { parsePiJson } from './pi.js';
 import type { HarnessUsage } from './index.js';
 
+const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
+
 const PARSERS: [string, (stdout: string) => HarnessUsage | undefined][] = [
   ['claude-cli', (s) => parseResultEnvelope(s).usage],
   ['codex', parseCodexUsage],
@@ -25,15 +27,7 @@ const PARSERS: [string, (stdout: string) => HarnessUsage | undefined][] = [
 const models: ModelsConfig = {
   version: 1,
   models: {
-    'stub-model': {
-      provider: 'custom',
-      tier: 'boss',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-    },
+    'stub-model': { provider: 'custom', tier: 'boss', ...free, contextWindow: 1000, capabilities: [], envKey: null },
   },
   tiers: { boss: ['stub-model'] },
   failover: {

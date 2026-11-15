@@ -17,7 +17,6 @@ const base = {
   capabilities: [],
   envKey: null,
 };
-
 const models: ModelsConfig = {
   version: 1,
   models: {

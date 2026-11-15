@@ -7,6 +7,8 @@ import { StubModelExecutor } from '../router/stub.js';
 import { buildPlanPrompt } from './plan.js';
 import { resolveReworkRoute, resolveRunnableBuildRoute, runnableBuildRoutes } from './plan-routes.js';
 
+const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
+
 const base: ModelsConfig = {
   version: 1,
   models: {},
@@ -45,8 +47,7 @@ const undeclared: ModelsConfig = {
     'claude-worker': {
       provider: 'anthropic',
       tier: 'worker',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
+      ...free,
       contextWindow: 1000,
       capabilities: ['claude'],
       envKey: null,

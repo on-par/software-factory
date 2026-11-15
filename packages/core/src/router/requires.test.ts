@@ -4,13 +4,14 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from './index.js';
 import { StubModelExecutor } from './stub.js';
 
+const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
+
 describe('ModelRouter.resolveAll requires command', () => {
   it('build_command keeps only models on declared agentic harnesses', () => {
     const base = {
       provider: 'custom' as const,
       tier: 'worker',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
+      ...free,
       contextWindow: 1000,
       capabilities: [],
       envKey: null,

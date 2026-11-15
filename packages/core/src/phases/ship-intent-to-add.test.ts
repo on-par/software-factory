@@ -26,7 +26,6 @@ const passingSummary: CheckSummary = {
   total: 1,
   results: [{ checker: 'compile', result: 'PASS', details: 'ok' }],
 };
-
 const models: ModelsConfig = {
   version: 1,
   models: {

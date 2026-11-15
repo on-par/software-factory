@@ -19,7 +19,6 @@ import {
   renderLintConfigPointer,
   renderLintRulesInForce,
 } from './build-lint-rules.js';
-
 const models: ModelsConfig = {
   version: 1,
   models: {

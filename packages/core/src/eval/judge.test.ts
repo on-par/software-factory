@@ -8,14 +8,15 @@ import type { StubModelExecutorOptions } from '../router/stub.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { extractVerdict, judgeSpec, runJudgeSamples, runJudgeSpec } from './judge.js';
 
+const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
+
 const models: ModelsConfig = {
   version: 1,
   models: {
     'stub-model': {
       provider: 'custom',
       tier: ['checker'],
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
+      ...free,
       contextWindow: 1000,
       capabilities: [],
       envKey: null,

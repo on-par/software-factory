@@ -7,7 +7,6 @@ import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { buildPhase } from './build.js';
 import { afterEach, describe, expect, it } from 'vitest';
-
 const models: ModelsConfig = {
   version: 1,
   models: {

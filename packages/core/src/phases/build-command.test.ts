@@ -11,7 +11,6 @@ import { CliModelExecutor, ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { buildPhase } from './build.js';
-
 const models: ModelsConfig = {
   version: 1,
   models: {

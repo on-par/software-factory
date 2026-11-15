@@ -20,6 +20,8 @@ import { localOnlyWorkspace } from './ports.js';
 import type { RunPolicy } from './policy.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
+const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
+
 const ISSUE = 91213;
 
 const VALID_BRIEF = `# Add a widget
@@ -69,15 +71,7 @@ describe('runIssue — workspace artifacts integration (#1213)', () => {
     const models: ModelsConfig = {
       version: 1,
       models: {
-        'stub-boss': {
-          provider: 'custom',
-          tier: 'boss',
-          costPerMtokInput: 0,
-          costPerMtokOutput: 0,
-          contextWindow: 1000,
-          capabilities: [],
-          envKey: null,
-        },
+        'stub-boss': { provider: 'custom', tier: 'boss', ...free, contextWindow: 1000, capabilities: [], envKey: null },
         'stub-worker': {
           provider: 'custom',
           tier: 'worker',

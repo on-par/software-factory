@@ -32,7 +32,6 @@ const failingSummary: CheckSummary = {
   total: 1,
   results: [{ checker: 'compile', result: 'FAIL', details: 'repair required' }],
 };
-
 const models: ModelsConfig = {
   version: 1,
   models: {

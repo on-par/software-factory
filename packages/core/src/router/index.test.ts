@@ -14,18 +14,12 @@ import { failoversFrom, ModelExecutorError, ModelRouter, ModelRouterError } from
 import { probeOllama, resetOllamaProbeCache } from './ollama-probe.js';
 import { StubModelExecutor } from './stub.js';
 
+const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
+
 const models: ModelsConfig = {
   version: 1,
   models: {
-    'stub-model': {
-      provider: 'custom',
-      tier: 'boss',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-    },
+    'stub-model': { provider: 'custom', tier: 'boss', ...free, contextWindow: 1000, capabilities: [], envKey: null },
   },
   tiers: { boss: ['stub-model'] },
   failover: {
@@ -57,15 +51,7 @@ const experimentalFirstModels: ModelsConfig = {
       envKey: null,
       experimental: true,
     },
-    'real-model': {
-      provider: 'custom',
-      tier: 'boss',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-    },
+    'real-model': { provider: 'custom', tier: 'boss', ...free, contextWindow: 1000, capabilities: [], envKey: null },
   },
   tiers: { boss: ['exp-model', 'real-model'] },
   failover: {
@@ -81,24 +67,8 @@ const experimentalFirstModels: ModelsConfig = {
 const twoModels: ModelsConfig = {
   version: 1,
   models: {
-    'model-a': {
-      provider: 'anthropic',
-      tier: 'boss',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-    },
-    'model-b': {
-      provider: 'anthropic',
-      tier: 'boss',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-    },
+    'model-a': { provider: 'anthropic', tier: 'boss', ...free, contextWindow: 1000, capabilities: [], envKey: null },
+    'model-b': { provider: 'anthropic', tier: 'boss', ...free, contextWindow: 1000, capabilities: [], envKey: null },
   },
   tiers: { boss: ['model-a', 'model-b'] },
   failover: {
@@ -870,8 +840,7 @@ describe('ModelRouter with StubModelExecutor', () => {
         'agentic-model': {
           provider: 'anthropic',
           tier: 'boss',
-          costPerMtokInput: 0,
-          costPerMtokOutput: 0,
+          ...free,
           contextWindow: 1000,
           capabilities: [],
           envKey: null,
@@ -879,8 +848,7 @@ describe('ModelRouter with StubModelExecutor', () => {
         'non-agentic-model': {
           provider: 'ollama',
           tier: 'boss',
-          costPerMtokInput: 0,
-          costPerMtokOutput: 0,
+          ...free,
           contextWindow: 1000,
           capabilities: [],
           envKey: null,
