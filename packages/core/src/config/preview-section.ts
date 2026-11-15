@@ -19,7 +19,7 @@ const insideWorktree = (path: string): boolean => {
 const unsafePathChar = (ch: string): boolean => ch === '\\' || ch <= ' ' || ch === '\u007f';
 
 const sameOriginPath = (path: string): boolean =>
-  path.startsWith('/') && path[1] !== '/' && ![...path].some(unsafePathChar);
+  path.startsWith('/') && path[1] !== '/' && !Array.from(path).some(unsafePathChar);
 
 const TRUSTED_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR'] as const;
 

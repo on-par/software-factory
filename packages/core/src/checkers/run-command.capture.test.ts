@@ -48,7 +48,7 @@ describe('runVerificationCommand capture (#3994)', () => {
   it('tags stderr lines with stream stderr and stdout lines with stream stdout', async () => {
     const records = capture();
     await inScope(() => runVerificationCommand([process.execPath, '-e', `console.log('o'); console.error('e');`], {}));
-    expect(records.map((x) => [x.stream, x.text]).sort()).toEqual([
+    expect(records.map((x) => [x.stream, x.text]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))).toEqual([
       ['stderr', 'e\n'],
       ['stdout', 'o\n'],
     ]);

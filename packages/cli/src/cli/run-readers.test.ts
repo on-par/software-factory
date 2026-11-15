@@ -58,7 +58,7 @@ describe('run readers', () => {
     expect(listed).toEqual([1, 2]);
 
     const { json } = await buildRunsJson(dir);
-    expect(json.runs.map((r) => r.issue).sort()).toEqual(listed);
+    expect(json.runs.map((r) => r.issue).sort((x, y) => x - y)).toEqual(listed);
     expect((await readRunStates(dir)).map((r) => r.issue)).toEqual(listed);
 
     const byPr = await resolveSteerRun(dir, { kind: 'pr', number: 42, raw: '#42' });

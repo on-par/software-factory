@@ -24,7 +24,7 @@ describe('defaultStartApp capture (#3994)', () => {
       return started;
     });
     expect(app.output()).toContain('boot out');
-    expect(records.map((r) => [r.stream, r.text]).sort()).toEqual([
+    expect(records.map((r) => [r.stream, r.text]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))).toEqual([
       ['stderr', 'boot err\n'],
       ['stdout', 'boot out\n'],
     ]);

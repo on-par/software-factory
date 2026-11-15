@@ -106,7 +106,7 @@ describe('runOvernightQueue', () => {
 
     const stateAfterB = readState(statePath);
     expect(stateAfterB.items.find((item) => item.issue === 1)).toEqual(item1AfterA);
-    expect(stateAfterB.items.map((item) => item.issue).sort()).toEqual([1, 2]);
+    expect(stateAfterB.items.map((item) => item.issue).sort((x, y) => x - y)).toEqual([1, 2]);
   });
 
   it('parks ambiguous items, reports them, and continues the queue', async () => {

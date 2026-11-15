@@ -56,11 +56,14 @@ export default defineConfig({
     'typescript/consistent-type-imports': ['error', { prefer: 'type-imports', fixStyle: 'separate-type-imports' }],
     'typescript/no-floating-promises': 'error',
     'typescript/return-await': 'error',
+    // typescript/no-base-to-string stays off: 16 hits across fetch-mock tests and error stringifiers, over this audit's fix budget (#4191).
     'typescript/no-base-to-string': 'off',
-    'typescript/no-misused-spread': 'off',
-    'typescript/require-array-sort-compare': 'off',
+    // #4056: audited overrides, enabled once their violations were fixed.
+    'typescript/no-misused-spread': 'error',
+    'typescript/require-array-sort-compare': 'error',
+    // typescript/unbound-method stays off: 104 hits across 20+ files, over this audit's fix budget (#4192).
     'typescript/unbound-method': 'off',
-    // Gherkin criteria carry a legitimate `then` field (contracts/gherkin.ts), not a thenable.
+    // unicorn/no-thenable stays off: the Gherkin `then` field is a serialized contract field (contracts/gherkin.ts) and renaming it changes issue-body and slice-plan formats (#4193).
     'unicorn/no-thenable': 'off',
     // Slop guards that report zero violations repo-wide. Same rule as anti-slop below: a rule
     // is only listed once the code is clean, never paired with a suppression.
@@ -85,12 +88,11 @@ export default defineConfig({
     'typescript/no-deprecated': 'error',
     'typescript/no-invalid-void-type': 'error',
     // #2844: error-handling and promise guards, enabled once their violations were fixed.
-    // typescript/prefer-promise-reject-errors stays off: tests reject with plain strings on purpose.
+    // typescript/prefer-promise-reject-errors stays off: tests reject with plain strings on purpose (#2844, #4194).
     'preserve-caught-error': 'error',
     'typescript/no-misused-promises': 'error',
-    // #2846: typescript/no-dynamic-delete stays off: its hits delete env vars and keys of persisted
-    // Record stores (breaker, lane-file-guard, baseline-cache), and a Map rewrite would change their JSON.
-    // no-useless-assignment stays off: it is a nursery rule and its hits are false positives.
+    // typescript/no-dynamic-delete stays off: deletes env vars and keys of persisted Record stores; a Map rewrite changes their JSON (#2846, #4195).
+    // no-useless-assignment stays off: 31 hits across 18 files, over this audit's fix budget (#4196).
     // Redundant or dead control flow.
     'no-else-return': 'error',
     'no-useless-return': 'error',

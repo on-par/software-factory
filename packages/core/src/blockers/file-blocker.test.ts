@@ -62,7 +62,6 @@ function makeFake(s: Setup = {}) {
     if (s.dailyThrows) throw new Error('daily boom');
     return s.daily ?? [];
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test double needs a loose type
   const octokit: any = { request, paginate, rest: { issues: { get, create } } };
   return { octokit, created, requests, gets };
 }
