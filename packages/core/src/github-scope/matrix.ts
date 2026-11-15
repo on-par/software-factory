@@ -58,3 +58,7 @@ export function permissionList(scope: PhaseGitHubScope): string {
     .map(([name, level]) => `${name}:${level}`)
     .join(', ');
 }
+
+export function repositoryName(slug: string): string {
+  return slug.split('/')[1] ?? slug;
+}

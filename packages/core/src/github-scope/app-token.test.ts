@@ -1,7 +1,7 @@
 import { createPublicKey, createVerify, generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { appInstallationSource, createAppJwt } from './app-token.js';
-import { GitHubScopeError } from './guard.js';
+import { GitHubScopeError } from './errors.js';
 import { scopeForPhase } from './matrix.js';
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', {
@@ -106,5 +106,26 @@ describe('appInstallationSource', () => {
     const source = appInstallationSource({ appId: 1, installationId: 2, privateKey, fetch: failingFetch });
     const credential = await source.lease('ship', 'o/r', scopeForPhase('ship')!);
     await expect(credential.release()).resolves.toBeUndefined();
+  });
+});
+
+describe('appInstallationSource release failure', () => {
+  it('reports a failed token revoke through onReleaseError', async () => {
+    const errors: unknown[] = [];
+    let call = 0;
+    const source = appInstallationSource({
+      appId: 1,
+      installationId: 2,
+      privateKey,
+      onReleaseError: (_phase, err) => errors.push(err),
+      fetch: (async () => {
+        call += 1;
+        if (call === 1) return new Response(JSON.stringify({ token: 'ghs_x' }), { status: 201 });
+        throw new Error('network down');
+      }) as typeof fetch,
+    });
+    const credential = await source.lease('ship', 'o/r', scopeForPhase('ship')!);
+    await credential.release();
+    expect(errors).toHaveLength(1);
   });
 });

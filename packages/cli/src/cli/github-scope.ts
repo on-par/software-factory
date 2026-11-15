@@ -42,7 +42,10 @@ export function createScopedFactoryOctokit(input: {
   options?: FactoryOctokitOptions;
 }): { octokit: Octokit; source: ResolvedGitHubCredentialSource } {
   const { repo, phase, settings, env, resolveAmbient, options } = input;
-  const source = resolveGitHubCredentialSource(settings, env, resolveAmbient);
+  const source = resolveGitHubCredentialSource(settings, env, resolveAmbient, {
+    onReleaseError: (releasedPhase) =>
+      process.stderr.write(`warn github_credentials_release_failed phase=${releasedPhase}\n`),
+  });
   if (source.source.kind === 'ambient') {
     const octokit = createFactoryOctokit(resolveAmbient(), { ...options, resolveToken: resolveAmbient });
     sources.set(octokit, source);
@@ -53,6 +56,8 @@ export function createScopedFactoryOctokit(input: {
   const holder = new PhaseCredentialHolder(createGitHubCredentialBroker({ repo, source: source.source }), {
     checkToken: resolveAmbient,
     initialPhase: phase,
+    onReleaseError: (releasedPhase) =>
+      process.stderr.write(`warn github_credentials_release_failed phase=${releasedPhase}\n`),
   });
   const octokit = installGitHubScopeGuard(createFactoryOctokit(undefined, rest), { repo, holder });
   sources.set(octokit, source);

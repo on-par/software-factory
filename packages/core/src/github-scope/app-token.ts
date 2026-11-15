@@ -1,8 +1,8 @@
 import { createSign } from 'node:crypto';
 
-import { GitHubScopeError } from './guard.js';
-import type { GitHubCredentialSource, PhaseCredential } from './broker.js';
-import { permissionList, type GitHubPhase, type PhaseGitHubScope } from './matrix.js';
+import { GitHubScopeError } from './errors.js';
+import type { GitHubCredentialSource, PhaseCredential } from './types.js';
+import { permissionList, repositoryName, type GitHubPhase, type PhaseGitHubScope } from './matrix.js';
 
 const JWT_BACKDATE_SECONDS = 60;
 const JWT_LIFETIME_SECONDS = 540;
@@ -33,6 +33,7 @@ export function appInstallationSource(opts: {
   fetch?: typeof fetch;
   now?: () => number;
   apiBase?: string;
+  onReleaseError?: (phase: GitHubPhase, err: unknown) => void;
 }): GitHubCredentialSource {
   const doFetch = opts.fetch ?? globalThis.fetch;
   const now = opts.now ?? Date.now;
@@ -40,7 +41,7 @@ export function appInstallationSource(opts: {
   return {
     kind: 'app-installation',
     async lease(phase: GitHubPhase, repo: string, scope: PhaseGitHubScope): Promise<PhaseCredential> {
-      const repoName = repo.split('/')[1] ?? repo;
+      const repoName = repositoryName(repo);
       const response = await doFetch(`${apiBase}/app/installations/${opts.installationId}/access_tokens`, {
         method: 'POST',
         headers: {
@@ -71,7 +72,7 @@ export function appInstallationSource(opts: {
           await doFetch(`${apiBase}/installation/token`, {
             method: 'DELETE',
             headers: { Authorization: `token ${token}`, Accept: API_VERSION_ACCEPT },
-          }).catch(() => undefined);
+          }).catch((err: unknown) => opts.onReleaseError?.(phase, err));
         },
       };
     },

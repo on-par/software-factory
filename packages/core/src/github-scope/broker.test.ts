@@ -6,11 +6,10 @@ import {
   fineGrainedSource,
   PhaseCredentialHolder,
   resolveGitHubCredentialSource,
-  type GitHubCredentialSource,
-  type PhaseCredential,
 } from './broker.js';
-import { GitHubScopeError } from './guard.js';
+import { GitHubScopeError } from './errors.js';
 import { scopeForPhase } from './matrix.js';
+import type { GitHubCredentialSource, PhaseCredential } from './types.js';
 
 const { privateKey } = generateKeyPairSync('rsa', {
   modulusLength: 2048,

@@ -1,7 +1,9 @@
 import { Octokit } from '@octokit/rest';
 import { describe, expect, it } from 'vitest';
-import { createGitHubCredentialBroker, PhaseCredentialHolder, type GitHubCredentialSource } from './broker.js';
-import { allowScopedMerge, GitHubScopeError, installGitHubScopeGuard, phaseHolderOf } from './guard.js';
+import { createGitHubCredentialBroker, PhaseCredentialHolder } from './broker.js';
+import { GitHubScopeError } from './errors.js';
+import { allowScopedMerge, installGitHubScopeGuard, phaseHolderOf } from './guard.js';
+import type { GitHubCredentialSource } from './types.js';
 
 const SILENT = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 

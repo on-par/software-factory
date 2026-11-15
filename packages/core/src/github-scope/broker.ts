@@ -1,25 +1,8 @@
 import type { FailurePhase } from '../types/index.js';
 import { appInstallationSource } from './app-token.js';
-import { GitHubScopeError } from './guard.js';
+import { GitHubScopeError } from './errors.js';
 import { permissionList, scopeForPhase, type GitHubPhase, type PhaseGitHubScope } from './matrix.js';
-
-export type GitHubCredentialSourceKind = 'app-installation' | 'fine-grained' | 'ambient';
-
-export type AmbientReason = 'opt-in' | 'unconfigured';
-
-export interface PhaseCredential {
-  phase: GitHubPhase;
-  kind: GitHubCredentialSourceKind;
-  token: string;
-  expiresAt?: string;
-  release(): Promise<void>;
-}
-
-export interface GitHubCredentialSource {
-  kind: GitHubCredentialSourceKind;
-  ambientReason?: AmbientReason;
-  lease(phase: GitHubPhase, repo: string, scope: PhaseGitHubScope): Promise<PhaseCredential>;
-}
+import type { AmbientReason, GitHubCredentialSource, PhaseCredential } from './types.js';
 
 export interface GitHubCredentialsSettings {
   allowAmbientToken: boolean;
@@ -106,7 +89,11 @@ export function resolveGitHubCredentialSource(
   settings: GitHubCredentialsSettings,
   env: NodeJS.ProcessEnv,
   resolveAmbient: () => string | undefined,
-  transport: { fetch?: typeof fetch; now?: () => number } = {},
+  transport: {
+    fetch?: typeof fetch;
+    now?: () => number;
+    onReleaseError?: (phase: GitHubPhase, err: unknown) => void;
+  } = {},
 ): ResolvedGitHubCredentialSource {
   if (settings.app) {
     const privateKey = env[PRIVATE_KEY_ENV]?.trim();
@@ -118,6 +105,7 @@ export function resolveGitHubCredentialSource(
         privateKey,
         fetch: transport.fetch,
         now: transport.now,
+        onReleaseError: transport.onReleaseError,
       }),
     };
   }
@@ -159,15 +147,21 @@ export class PhaseCredentialHolder {
   readonly initialPhase: HolderPhase;
   private readonly broker: GitHubCredentialBroker;
   private readonly checkTokenSource: () => string | undefined;
+  private readonly onReleaseError: ((phase: HolderPhase, err: unknown) => void) | undefined;
   private state: HolderState | undefined;
   private entering: Promise<void> | undefined;
 
   constructor(
     broker: GitHubCredentialBroker,
-    opts: { checkToken: () => string | undefined; initialPhase?: HolderPhase },
+    opts: {
+      checkToken: () => string | undefined;
+      initialPhase?: HolderPhase;
+      onReleaseError?: (phase: HolderPhase, err: unknown) => void;
+    },
   ) {
     this.broker = broker;
     this.checkTokenSource = opts.checkToken;
+    this.onReleaseError = opts.onReleaseError;
     this.initialPhase = opts.initialPhase ?? 'plan';
   }
 
@@ -184,14 +178,14 @@ export class PhaseCredentialHolder {
   }
 
   enter(phase: HolderPhase): Promise<void> {
-    const run = (this.entering ?? Promise.resolve()).catch(() => {}).then(() => this.transition(phase));
+    const run = (this.entering ?? Promise.resolve()).then(() => this.transition(phase));
     this.entering = run;
     return run;
   }
 
   private async transition(phase: HolderPhase): Promise<void> {
     this.mergeAllowed = false;
-    await this.state?.credential?.release();
+    await this.releaseQuietly(this.state);
     if (phase === 'check') {
       this.state = { phase, mode: 'passthrough' };
       return;
@@ -210,11 +204,19 @@ export class PhaseCredentialHolder {
     }
   }
 
+  private async releaseQuietly(state: HolderState | undefined): Promise<void> {
+    try {
+      await state?.credential?.release();
+    } catch (err) {
+      this.onReleaseError?.(state?.phase ?? this.initialPhase, err);
+    }
+  }
+
   async close(): Promise<void> {
-    await this.entering?.catch(() => {});
-    const credential = this.state?.credential;
+    await this.entering;
+    const closing = this.state;
     if (this.state) this.state = { ...this.state, credential: undefined };
     this.mergeAllowed = false;
-    await credential?.release();
+    await this.releaseQuietly(closing);
   }
 }

@@ -1,25 +1,8 @@
 import type { Octokit } from '@octokit/rest';
 
-import { redactGitHubCredentials } from '../utils/github-credentials.js';
+import { GitHubScopeError } from './errors.js';
 import type { PhaseCredentialHolder } from './broker.js';
 import { isMergeRequest, permissionList } from './matrix.js';
-
-export class GitHubScopeError extends Error {
-  readonly phase: string;
-  readonly method: string;
-  readonly route: string;
-  readonly fix: string;
-
-  constructor(phase: string, method: string, route: string, reason: string, fix: string) {
-    const where = method ? `GitHub call ${method} ${route} refused` : 'GitHub credential refused';
-    super(redactGitHubCredentials(`${where} in phase ${phase}: ${reason}. Fix: ${fix}`));
-    this.name = 'GitHubScopeError';
-    this.phase = phase;
-    this.method = method;
-    this.route = route;
-    this.fix = fix;
-  }
-}
 
 const holders = new WeakMap<object, PhaseCredentialHolder>();
 
@@ -32,16 +15,8 @@ export function allowScopedMerge(octokit: unknown): void {
   if (holder?.current()?.phase === 'land') holder.mergeAllowed = true;
 }
 
-interface GuardedRequest {
-  method?: string;
-  url?: string;
-  headers: Record<string, string | number | undefined>;
-  body?: unknown;
-  [param: string]: unknown;
-}
-
-function expandRoute(options: GuardedRequest): string {
-  const url = options.url ?? '';
+function expandRoute(options: Record<string, unknown>): string {
+  const url = typeof options.url === 'string' ? options.url : '';
   return url.replace(/\{(\w+)\}/g, (match, name: string) => {
     const value = options[name];
     return typeof value === 'string' || typeof value === 'number' ? String(value) : match;
@@ -53,9 +28,16 @@ function targetRepo(route: string): string | undefined {
   return match ? `${match[1]}/${match[2]}` : undefined;
 }
 
-function graphqlBody(options: GuardedRequest): unknown {
-  const nested = (options.body as { query?: unknown } | null | undefined)?.query;
-  return { query: options.query ?? nested };
+function queryOf(value: unknown): unknown {
+  return typeof value === 'object' && value !== null && 'query' in value ? value.query : undefined;
+}
+
+function graphqlBody(options: Record<string, unknown>): unknown {
+  return { query: options.query ?? queryOf(options.body) };
+}
+
+function statusOf(err: unknown): unknown {
+  return typeof err === 'object' && err !== null && 'status' in err ? err.status : undefined;
 }
 
 function isIssuesRoute(route: string): boolean {
@@ -64,7 +46,7 @@ function isIssuesRoute(route: string): boolean {
 
 function isGraphqlRead(route: string, body: unknown): boolean {
   if (!/\/graphql\/?$/.test(route)) return false;
-  const query = (body as { query?: unknown } | null | undefined)?.query;
+  const query = queryOf(body);
   return typeof query === 'string' && !/\bmutation\b/.test(query);
 }
 
@@ -78,7 +60,7 @@ export function installGitHubScopeGuard(
 ): Octokit {
   const { repo, holder } = opts;
   octokit.hook.wrap('request', async (request, rawOptions) => {
-    const options: GuardedRequest = rawOptions;
+    const options = rawOptions;
     await holder.ensureEntered();
     const state = holder.current();
     const method = (options.method ?? 'GET').toUpperCase();
@@ -135,7 +117,7 @@ export function installGitHubScopeGuard(
     try {
       return await request(rawOptions);
     } catch (err) {
-      const status = (err as { status?: unknown } | null)?.status;
+      const status = statusOf(err);
       if (status !== 401 && status !== 403) throw err;
       throw refusal(
         state.phase,
