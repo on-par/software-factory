@@ -77,12 +77,8 @@ function repoFromRemote(shell: LocalShell): string | undefined {
 function settingsFromConfig(shell: LocalShell): GitHubCredentialsSettings {
   const root = probe(shell, 'git rev-parse --show-toplevel');
   if (!root) return DEFAULT_SETTINGS;
-  try {
-    const config: FactoryConfig = loadFactoryConfigForRepo(getFactoryPaths(root).config);
-    return resolveGitHubCredentialsConfig(config);
-  } catch {
-    return DEFAULT_SETTINGS;
-  }
+  const config: FactoryConfig = loadFactoryConfigForRepo(getFactoryPaths(root).config);
+  return resolveGitHubCredentialsConfig(config);
 }
 
 export function createLocalOctokit(

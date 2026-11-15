@@ -159,10 +159,9 @@ describe('createLocalOctokit', () => {
       expect(credentialSourceOf(octokit)?.source).toMatchObject({ kind: 'ambient', ambientReason: 'opt-in' });
     });
 
-    it('falls back to default settings when the repo config is invalid', () => {
+    it('throws when the repo config is invalid instead of dropping it', () => {
       const root = repoWithConfig({ version: 2, github: { credentials: { app: { appId: -1, installationId: 1 } } } });
-      const octokit = createLocalOctokit(shellAt(root), () => AMBIENT, {}, { repo: 'acme/widgets' });
-      expect(credentialSourceOf(octokit)?.source).toMatchObject({ kind: 'ambient', ambientReason: 'unconfigured' });
+      expect(() => createLocalOctokit(shellAt(root), () => AMBIENT, {}, { repo: 'acme/widgets' })).toThrow(/Invalid/);
     });
   });
 });
