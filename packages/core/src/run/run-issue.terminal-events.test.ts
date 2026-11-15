@@ -91,14 +91,12 @@ const tmp = createTempDirs();
 const breakerDir = tmp.makeSync('run-issue-ci-rework-');
 afterAll(() => tmp.cleanup());
 
-type Log = ReturnType<RunPorts['events']>;
-
-function ports(log: Log): RunPorts {
+function ports(types: string[]): RunPorts {
   return {
     router: new ModelRouter(MODELS, ROUTES),
     octokit: {} as Octokit,
     workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
-    events: () => log,
+    events: () => (t) => types.push(t),
     breaker: new ProviderBreaker(join(breakerDir, 'breaker.json')),
     resolveConstitution: () => null,
     planPhase,
@@ -129,8 +127,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-const terminals = (log: ReturnType<typeof vi.fn<Log>>): string[] =>
-  log.mock.calls.map((c) => c[0]).filter((t) => eventTraitsFor(t).isTerminal);
+const terminals = (types: string[]): string[] => types.filter((t) => eventTraitsFor(t).isTerminal);
 
 describe('runIssue logs exactly one terminal event (#3435)', () => {
   it('build escalation (real buildPhase) logs one escalate', async () => {
@@ -153,17 +150,17 @@ describe('runIssue logs exactly one terminal event (#3435)', () => {
       };
       const routes: RoutesConfig = { version: 1, routes: { build_claude: { tier: 'worker', description: 'stub' } } };
       const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'ESCALATE: spec is ambiguous' }] } });
-      const log = vi.fn<Log>();
+      const types: string[] = [];
       vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route: 'claude' });
       const p: RunPorts = {
-        ...ports(log),
+        ...ports(types),
         router: new ModelRouter(models, routes, false, stub),
         workspace: { path: dir, dispose: async () => {} } as Workspace,
         buildPhase: realBuild,
       };
       const outcome = await runIssue(request, { ...policy, models, routes }, p);
       expect(outcome).toMatchObject({ state: 'escalated' });
-      expect(terminals(log)).toEqual(['escalate']);
+      expect(terminals(types)).toEqual(['escalate']);
     } finally {
       await tmp.cleanup();
     }
@@ -174,9 +171,9 @@ describe('runIssue logs exactly one terminal event (#3435)', () => {
       opts.log('fail', 'check stuck');
       return { ...CHECK_OK, passed: false, stuck: true, failureSignature: 's' };
     });
-    const log = vi.fn<Log>();
-    expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'parked', reason: 'escalate' });
-    expect(terminals(log)).toEqual(['escalate']);
+    const types: string[] = [];
+    expect(await runIssue(request, policy, ports(types))).toMatchObject({ state: 'parked', reason: 'escalate' });
+    expect(terminals(types)).toEqual(['escalate']);
   });
 
   it('a shipped run logs one ready', async () => {
@@ -184,8 +181,8 @@ describe('runIssue logs exactly one terminal event (#3435)', () => {
       opts.log('ready', 'PR #9 ready');
       return { ok: true, prNumber: 9, ciOutcome: 'success' };
     });
-    const log = vi.fn<Log>();
-    expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'ready' });
-    expect(terminals(log)).toEqual(['ready']);
+    const types: string[] = [];
+    expect(await runIssue(request, policy, ports(types))).toMatchObject({ state: 'ready' });
+    expect(terminals(types)).toEqual(['ready']);
   });
 });

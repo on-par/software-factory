@@ -16,6 +16,7 @@ import { createTempDirs } from '../harness/temp-dir.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
+import { recordArgs } from '../test-support/recorders.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
 const planPhase = vi.fn<typeof realPlanPhase>();
@@ -102,11 +103,12 @@ const classifier = {
 const t2 = { ...classifier, trustTier: 'T2' as const, t1SampleRate: RATE };
 
 function setup(path: string, labelError?: Error, readError?: Error) {
-  const addLabels = vi.fn(async () => {
+  const addLabels = recordArgs(async (_a: { owner: string; repo: string; issue_number: number; labels: string[] }) => {
     if (labelError) throw labelError;
     return {};
   });
-  const octokit = Object.assign({} as Octokit, { rest: { issues: { addLabels } } });
+  const shipped: Parameters<typeof realShipPhase>[0][] = [];
+  const octokit = Object.assign({} as Octokit, { rest: { issues: { addLabels: addLabels.fn } } });
   const events: { kind: string; msg: string }[] = [];
   const ports: RunPorts = {
     router: new ModelRouter(MODELS, ROUTES),
@@ -120,14 +122,14 @@ function setup(path: string, labelError?: Error, readError?: Error) {
     planPhase,
     buildPhase,
     checkPhase,
-    shipPhase,
+    shipPhase: (o) => (shipped.push(o), shipPhase(o)),
     readReviewFloorChanges: async () => {
       if (readError) throw readError;
       return [{ path, added: 1, removed: 0 }];
     },
   };
   const gated = () => events.filter((e) => e.kind === 'merge-gated');
-  return { addLabels, ports, gated, events };
+  return { labels: addLabels.calls, shipped, ports, gated, events };
 }
 
 beforeEach(() => {
@@ -141,12 +143,12 @@ describe('T2 auto-merge receipt (#1960)', () => {
   it('records a t2-auto receipt and applies no label for an eligible docs-only PR at T2', async () => {
     const t = setup('docs/guide.md');
     await runIssue(request(UNSAMPLED, t2), policy, t.ports);
-    expect(t.addLabels).not.toHaveBeenCalled();
+    expect(t.labels).toEqual([]);
     const land = t.events.filter((e) => e.kind === 'land');
     expect(land).toHaveLength(1);
     expect(land[0].msg.startsWith('t2-auto')).toBe(true);
     expect(t.gated()).toHaveLength(0);
-    expect(shipPhase.mock.calls[0][0].reviewRouting).toMatchObject({
+    expect(t.shipped[0]!.reviewRouting).toMatchObject({
       gated: false,
       receipt: 't2-auto',
       trustTier: { configured: 'T2', effective: 'T2' },
@@ -156,14 +158,18 @@ describe('T2 auto-merge receipt (#1960)', () => {
   it('holds a class C PR at T2 with no-auto-merge and no receipt', async () => {
     const t = setup('.github/workflows/ci.yml');
     await runIssue(request(UNSAMPLED, t2), policy, t.ports);
-    expect(t.addLabels).toHaveBeenCalledWith({
-      owner: 'o',
-      repo: 'r',
-      issue_number: UNSAMPLED,
-      labels: ['no-auto-merge'],
-    });
+    expect(t.labels).toEqual([
+      [
+        {
+          owner: 'o',
+          repo: 'r',
+          issue_number: UNSAMPLED,
+          labels: ['no-auto-merge'],
+        },
+      ],
+    ]);
     expect(t.gated()[0].msg).toContain('classifier:floor:C:');
-    const routing = shipPhase.mock.calls[0][0].reviewRouting;
+    const routing = t.shipped[0]!.reviewRouting;
     expect(routing?.trustTier?.effective).toBe('T2');
     expect(routing?.receipt).toBeUndefined();
   });
@@ -171,25 +177,27 @@ describe('T2 auto-merge receipt (#1960)', () => {
   it('holds a classifier-error PR at T2 with no-auto-merge and no receipt', async () => {
     const t = setup('docs/guide.md', undefined, new Error('diff failed'));
     await runIssue(request(UNSAMPLED, t2), policy, t.ports);
-    expect(t.addLabels).toHaveBeenCalledTimes(1);
+    expect(t.labels).toHaveLength(1);
+    expect(t.labels[0]![0].labels).toEqual(['no-auto-merge']);
     expect(t.gated()[0].msg).toContain('classifier:error');
-    expect(shipPhase.mock.calls[0][0].reviewRouting?.receipt).toBeUndefined();
+    expect(t.shipped[0]!.reviewRouting?.receipt).toBeUndefined();
   });
 
   it('a demoted T2 samples like T1: a sampled PR gets no-auto-merge and no receipt', async () => {
     const t = setup('docs/guide.md');
     await runIssue(request(SAMPLED, { ...t2, demotion: { reason: 'slip on #99' } }), policy, t.ports);
-    expect(t.addLabels).toHaveBeenCalledTimes(1);
+    expect(t.labels).toHaveLength(1);
+    expect(t.labels[0]![0].labels).toEqual(['no-auto-merge']);
     expect(t.gated()[0].msg.startsWith('t1-sampled')).toBe(true);
     expect(t.events.some((e) => e.kind === 'warn' && e.msg.includes('demoted to T1'))).toBe(true);
-    expect(shipPhase.mock.calls[0][0].reviewRouting?.receipt).toBeUndefined();
+    expect(t.shipped[0]!.reviewRouting?.receipt).toBeUndefined();
   });
 
   it('a demoted T2 lets an unsampled PR through with no receipt', async () => {
     const t = setup('docs/guide.md');
     await runIssue(request(UNSAMPLED, { ...t2, demotion: { reason: 'slip on #99' } }), policy, t.ports);
-    expect(t.addLabels).not.toHaveBeenCalled();
-    const routing = shipPhase.mock.calls[0][0].reviewRouting;
+    expect(t.labels).toEqual([]);
+    const routing = t.shipped[0]!.reviewRouting;
     expect(routing?.sample?.held).toBe(false);
     expect(routing?.receipt).toBeUndefined();
   });

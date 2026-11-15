@@ -15,7 +15,8 @@ import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
-import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
+import { recordArgs } from '../test-support/recorders.js';
+import { runIssue, type RunRequest } from './run-issue.js';
 
 const WORK: WorkRequest = {
   id: 'github-issue:o/r#1',
@@ -91,84 +92,48 @@ const policy: RunPolicy = {
   effective: {} as RunPolicy['effective'],
 };
 
-function portsWith(
-  planPhase: typeof realPlanPhase,
-  buildPhase: typeof realBuildPhase,
-  events: (type: string, msg: string) => void,
-): RunPorts {
-  return {
-    router: new ModelRouter(MODELS, ROUTES),
-    octokit: {} as Octokit,
-    workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
-    events: () => events,
-    breaker: new ProviderBreaker(join(breakerDir, 'breaker.json')),
-    resolveConstitution: () => null,
-    planPhase,
-    buildPhase,
-    checkPhase: vi.fn<typeof realCheckPhase>(),
-    shipPhase: vi.fn<typeof realShipPhase>(),
-  };
-}
-
 describe('runIssue unknown config keys (#3568)', () => {
-  it('logs one config_unknown_key warning naming sandbox.foo and proceeds to PLAN', async () => {
+  async function eventsFor(config: string): Promise<Array<[string, string]>> {
     const absPath = join(dirs.makeSync('unknown-keys-cfg-'), 'config.yaml');
-    writeFileSync(absPath, 'sandbox:\n  foo: 1\n');
-    const planPhase = vi
-      .fn<typeof realPlanPhase>()
-      .mockResolvedValue({ ok: true, route: 'claude', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null });
-    const buildPhase = vi
-      .fn<typeof realBuildPhase>()
-      .mockResolvedValue({ ok: false, model: 'm', route: 'claude', reason: 'no_diff' });
+    writeFileSync(absPath, config);
+    const plan = recordArgs<typeof realPlanPhase>(async (_o: Parameters<typeof realPlanPhase>[0]) => ({
+      ok: true,
+      route: 'claude',
+      specPath: '/tmp/wt/spec.md',
+      model: 'm',
+      designArtifact: null,
+    }));
     const events: Array<[string, string]> = [];
-    await runIssue(
-      { ...baseRequest, repoConfigFile: { absPath, relPath: '.factory/config.yaml' } },
-      policy,
-      portsWith(planPhase, buildPhase, (t, m) => events.push([t, m])),
-    );
+    await runIssue({ ...baseRequest, repoConfigFile: { absPath, relPath: '.factory/config.yaml' } }, policy, {
+      router: new ModelRouter(MODELS, ROUTES),
+      octokit: {} as Octokit,
+      workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
+      events: () => (t, m) => events.push([t, m]),
+      breaker: new ProviderBreaker(join(breakerDir, 'breaker.json')),
+      resolveConstitution: () => null,
+      planPhase: plan.fn,
+      buildPhase: vi
+        .fn<typeof realBuildPhase>()
+        .mockResolvedValue({ ok: false, model: 'm', route: 'claude', reason: 'no_diff' }),
+      checkPhase: vi.fn<typeof realCheckPhase>(),
+      shipPhase: vi.fn<typeof realShipPhase>(),
+    });
+    expect(plan.calls).toHaveLength(1);
+    return events;
+  }
+
+  it('logs one config_unknown_key warning naming sandbox.foo and proceeds to PLAN', async () => {
+    const events = await eventsFor('sandbox:\n  foo: 1\n');
     const warnings = events.filter(([type]) => type === 'config_unknown_key');
     expect(warnings).toHaveLength(1);
     expect(warnings[0][1]).toContain('.factory/config.yaml:2');
     expect(warnings[0][1]).toContain('sandbox.foo');
-    expect(planPhase).toHaveBeenCalledTimes(1);
   });
 
   it('logs nothing for a config of known keys', async () => {
-    const absPath = join(dirs.makeSync('unknown-keys-cfg-'), 'config.yaml');
-    writeFileSync(absPath, 'sandbox:\n  writablePaths: []\n');
-    const planPhase = vi
-      .fn<typeof realPlanPhase>()
-      .mockResolvedValue({ ok: true, route: 'claude', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null });
-    const buildPhase = vi
-      .fn<typeof realBuildPhase>()
-      .mockResolvedValue({ ok: false, model: 'm', route: 'claude', reason: 'no_diff' });
-    const events: Array<[string, string]> = [];
-    await runIssue(
-      { ...baseRequest, repoConfigFile: { absPath, relPath: '.factory/config.yaml' } },
-      policy,
-      portsWith(planPhase, buildPhase, (t, m) => events.push([t, m])),
-    );
+    const events = await eventsFor('sandbox:\n  writablePaths: []\n');
     expect(events.some(([type]) => type === 'config_unknown_key')).toBe(false);
   });
-
-  async function eventsFor(config: string): Promise<Array<[string, string]>> {
-    const absPath = join(dirs.makeSync('unknown-keys-cfg-'), 'config.yaml');
-    writeFileSync(absPath, config);
-    const planPhase = vi
-      .fn<typeof realPlanPhase>()
-      .mockResolvedValue({ ok: true, route: 'claude', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null });
-    const buildPhase = vi
-      .fn<typeof realBuildPhase>()
-      .mockResolvedValue({ ok: false, model: 'm', route: 'claude', reason: 'no_diff' });
-    const events: Array<[string, string]> = [];
-    await runIssue(
-      { ...baseRequest, repoConfigFile: { absPath, relPath: '.factory/config.yaml' } },
-      policy,
-      portsWith(planPhase, buildPhase, (t, m) => events.push([t, m])),
-    );
-    expect(planPhase).toHaveBeenCalledTimes(1);
-    return events;
-  }
 
   it('logs one config_invalid_value warning for an unknown sandbox.codexSandbox and proceeds to PLAN (#3829)', async () => {
     const events = await eventsFor('sandbox:\n  codexSandbox: read-only\n');

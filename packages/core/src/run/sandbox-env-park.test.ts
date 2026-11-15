@@ -20,6 +20,7 @@ import type { CommandResult } from '../utils/command-runner.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
+import { recordArgs } from '../test-support/recorders.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
 const tempDirs = createTempDirs();
@@ -93,8 +94,6 @@ const policy: RunPolicy = {
 const PLAN_OK: PlanResult = { ok: true, route: 'codex', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null };
 const BUILD_OK: BuildResult = { ok: true, model: 'm', route: 'codex' };
 
-type Log = ReturnType<RunPorts['events']>;
-
 async function worktreeWithVerify(): Promise<string> {
   const dir = tempDirs.makeSync('sandbox-env-park-');
   await mkdir(join(dir, 'scripts'), { recursive: true });
@@ -102,12 +101,12 @@ async function worktreeWithVerify(): Promise<string> {
   return dir;
 }
 
-function basePorts(log: Log, worktree: string): Omit<RunPorts, 'buildPhase' | 'checkPhase'> {
+function basePorts(events: [string, string][], worktree: string): Omit<RunPorts, 'buildPhase' | 'checkPhase'> {
   return {
     router: new ModelRouter(MODELS, ROUTES),
     octokit: {} as Octokit,
     workspace: { path: worktree, dispose: async () => {} } as Workspace,
-    events: () => log,
+    events: () => (k, m) => events.push([k, m]),
     breaker: new ProviderBreaker(join(tempDirs.makeSync('sandbox-env-breaker-'), 'breaker.json')),
     resolveConstitution: () => null,
     planPhase: vi.fn().mockResolvedValue(PLAN_OK),
@@ -128,9 +127,9 @@ function testsResult(over: Partial<CommandResult>): (cmd: readonly string[]) => 
   });
 }
 
-function checkPorts(log: Log, worktree: string, verify: Partial<CommandResult>) {
-  const runBaseline = vi.fn().mockResolvedValue({ baseSha: 'abc', checkers: [] });
-  const runCheckers = vi.fn(async (ctx: Parameters<typeof testsChecker>[0]): Promise<CheckSummary> => {
+function checkPorts(events: [string, string][], worktree: string, verify: Partial<CommandResult>) {
+  const runBaseline = recordArgs(async (..._a: unknown[]) => ({ baseSha: 'abc', checkers: [] }));
+  const runCheckers = recordArgs(async (ctx: Parameters<typeof testsChecker>[0]): Promise<CheckSummary> => {
     const tests = await testsChecker({ ...ctx, runCommand: testsResult(verify) });
     return { failures: 1, passes: 0, skips: 0, total: 1, results: [tests] };
   });
@@ -139,19 +138,23 @@ function checkPorts(log: Log, worktree: string, verify: Partial<CommandResult>) 
       ...o,
       worktree,
       diffBase: 'abc',
-      runCheckers: runCheckers as never,
-      runBaseline,
+      runCheckers: runCheckers.fn as never,
+      runBaseline: runBaseline.fn,
       runEvidence: vi.fn().mockResolvedValue(undefined) as never,
     });
-  const ports: RunPorts = { ...basePorts(log, worktree), buildPhase: vi.fn().mockResolvedValue(BUILD_OK), checkPhase };
-  return { ports, runBaseline, runCheckers };
+  const ports: RunPorts = {
+    ...basePorts(events, worktree),
+    buildPhase: vi.fn().mockResolvedValue(BUILD_OK),
+    checkPhase,
+  };
+  return { ports, baselineCalls: runBaseline.calls, checkerCalls: runCheckers.calls };
 }
 
 describe('runIssue — sandbox environment park (#3332)', () => {
   it('a loopback EPERM from verify.sh parks sandbox-env on the first hit with no rework (#3283, 2026-10-19)', async () => {
     const worktree = await worktreeWithVerify();
-    const log = vi.fn<Log>();
-    const { ports, runBaseline, runCheckers } = checkPorts(log, worktree, {
+    const events: [string, string][] = [];
+    const { ports, baselineCalls, checkerCalls } = checkPorts(events, worktree, {
       exitCode: 78,
       stdout: `${VERIFY_SANDBOX_ENV_MARKER}\n`,
     });
@@ -159,39 +162,40 @@ describe('runIssue — sandbox environment park (#3332)', () => {
     const outcome = await runIssue(request, policy, ports);
 
     expect(outcome).toMatchObject({ state: 'parked', reason: 'sandbox-env' });
-    expect(runBaseline).not.toHaveBeenCalled();
-    expect(runCheckers).toHaveBeenCalledTimes(1);
-    expect(log.mock.calls.some(([kind]) => kind === 'sandbox-env')).toBe(true);
+    expect(baselineCalls).toEqual([]);
+    expect(checkerCalls).toHaveLength(1);
+    expect(events.some(([k]) => k === 'sandbox-env')).toBe(true);
   });
 
   it('a BUILD ENV-ERROR line parks sandbox-env with the line in the park message and never runs CHECK', async () => {
     const worktree = await worktreeWithVerify();
-    const log = vi.fn<Log>();
+    const events: [string, string][] = [];
     const line = `ENV-ERROR: ${VERIFY_SANDBOX_ENV_MARKER}`;
     const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: `tried\n${line}` }] } });
-    const checkPhase = vi.fn();
+    const checkPhase = recordArgs(async (..._a: Parameters<NonNullable<RunPorts['checkPhase']>>): Promise<never> => {
+      throw new Error('CHECK must not run');
+    });
     const ports: RunPorts = {
-      ...basePorts(log, worktree),
+      ...basePorts(events, worktree),
       buildPhase: (o) =>
         realBuildPhase({ ...o, router: new ModelRouter(BUILD_MODELS, BUILD_ROUTES, false, stub), route: 'claude' }),
-      checkPhase,
+      checkPhase: checkPhase.fn,
     };
 
     const outcome = await runIssue(request, policy, ports);
     expect(outcome).toMatchObject({ state: 'parked', reason: 'sandbox-env' });
-    expect(checkPhase).not.toHaveBeenCalled();
-    const parked = log.mock.calls.find(([kind]) => kind === 'sandbox-env');
-    expect(parked?.[1]).toContain(line);
+    expect(checkPhase.calls).toEqual([]);
+    expect(events.find(([k]) => k === 'sandbox-env')?.[1]).toContain(line);
   });
 
   it('a tests exit 1 without the marker still goes to rework as a tests FAIL', async () => {
     const worktree = await worktreeWithVerify();
-    const log = vi.fn<Log>();
-    const { ports, runBaseline } = checkPorts(log, worktree, { exitCode: 1, stdout: 'listen EPERM' });
+    const events: [string, string][] = [];
+    const { ports, baselineCalls } = checkPorts(events, worktree, { exitCode: 1, stdout: 'listen EPERM' });
 
     const outcome = await runIssue(request, policy, ports);
 
-    expect(runBaseline).not.toHaveBeenCalled();
+    expect(baselineCalls).toEqual([]);
     expect(outcome).not.toMatchObject({ reason: 'sandbox-env' });
   });
 });
