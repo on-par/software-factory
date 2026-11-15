@@ -15,7 +15,7 @@ import type { CommandResult } from '../utils/command-runner.js';
 import type { WorkRequest } from '../work/index.js';
 import { installLaneDependencies } from './lane-install.js';
 import type { Workspace } from './ports.js';
-import { WORKER_MODELS, WORKER_ROUTES, workerPolicy as policy } from '../test-support/worker-policy.test.js';
+import { WORKER_MODELS, WORKER_ROUTES, workerPolicy as policy } from '../test-support/worker-policy.js';
 import { runIssue, type RunRequest } from './run-issue.js';
 
 const WORK: WorkRequest = {

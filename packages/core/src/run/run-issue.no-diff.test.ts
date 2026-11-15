@@ -13,7 +13,7 @@ import { ModelRouter } from '../router/index.js';
 import type { DesignArtifact } from '../types/index.js';
 import type { WorkRequest } from '../work/index.js';
 import type { Workspace } from './ports.js';
-import { WORKER_MODELS, WORKER_ROUTES, workerPolicy as policy } from '../test-support/worker-policy.test.js';
+import { WORKER_MODELS, WORKER_ROUTES, workerPolicy as policy } from '../test-support/worker-policy.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
 const WORK: WorkRequest = {
