@@ -32,7 +32,8 @@
     "slowest-tests": "tsx scripts/slowest-tests.ts",
     "test-budget": "tsx scripts/test-budget.ts",
     "regression-issue": "tsx scripts/regression-issue.ts",
-    "knip": "knip",
+    "knip": "tsx scripts/knip-baseline.ts",
+    "knip:raw": "knip",
     "duplication": "jscpd --config .jscpd.json . && tsx scripts/duplication-baseline.ts"
   },
   "engines": {
