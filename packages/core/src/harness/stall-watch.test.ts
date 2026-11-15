@@ -15,18 +15,23 @@ describe('startStallWatch', () => {
   afterEach(() => vi.useRealTimers());
 
   const watch = (probe: () => Promise<ProcessActivitySample | undefined>, stallMs = 60_000) => {
-    const kill = vi.fn(async () => undefined);
-    const onStall = vi.fn();
+    const killed: number[] = [];
+    let stalls = 0;
+    const kill = async (pgid: number) => {
+      killed.push(pgid);
+    };
+    const onStall = () => {
+      stalls++;
+    };
     const w = startStallWatch(7, { stallMs, intervalMs: 10_000, probe, now: () => Date.now(), kill, onStall });
-    return { w, kill, onStall };
+    return { w, killed, stalls: () => stalls };
   };
 
   it('kills a process group idle past the stall threshold', async () => {
-    const { kill, onStall } = watch(async () => ({ cpuSeconds: 5, tcpConnections: 0 }));
+    const { killed, stalls } = watch(async () => ({ cpuSeconds: 5, tcpConnections: 0 }));
     await vi.advanceTimersByTimeAsync(80_000);
-    expect(onStall).toHaveBeenCalledTimes(1);
-    expect(kill).toHaveBeenCalledTimes(1);
-    expect(kill).toHaveBeenCalledWith(7);
+    expect(stalls()).toBe(1);
+    expect(killed).toEqual([7]);
   });
 
   it('does not flag a group that keeps using CPU or holds an external TCP connection', async () => {
@@ -34,10 +39,10 @@ describe('startStallWatch', () => {
     const busy = watch(async () => ({ cpuSeconds: (cpu += 5), tcpConnections: 0 }));
     const net = watch(async () => ({ cpuSeconds: 5, tcpConnections: 1 }));
     await vi.advanceTimersByTimeAsync(600_000);
-    expect(busy.kill).not.toHaveBeenCalled();
-    expect(busy.onStall).not.toHaveBeenCalled();
-    expect(net.kill).not.toHaveBeenCalled();
-    expect(net.onStall).not.toHaveBeenCalled();
+    expect(busy.killed).toEqual([]);
+    expect(busy.stalls()).toBe(0);
+    expect(net.killed).toEqual([]);
+    expect(net.stalls()).toBe(0);
   });
 
   it('treats a failed probe as active', async () => {
@@ -46,36 +51,40 @@ describe('startStallWatch', () => {
       throw new Error('ps gone');
     });
     await vi.advanceTimersByTimeAsync(600_000);
-    expect(unknown.kill).not.toHaveBeenCalled();
-    expect(thrown.kill).not.toHaveBeenCalled();
+    expect(unknown.killed).toEqual([]);
+    expect(thrown.killed).toEqual([]);
   });
 
   it('noteActivity resets the idle clock', async () => {
-    const { w, kill } = watch(async () => ({ cpuSeconds: 5, tcpConnections: 0 }));
+    const { w, killed } = watch(async () => ({ cpuSeconds: 5, tcpConnections: 0 }));
     await vi.advanceTimersByTimeAsync(50_000);
     w.noteActivity();
     await vi.advanceTimersByTimeAsync(50_000);
-    expect(kill).not.toHaveBeenCalled();
+    expect(killed).toEqual([]);
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(kill).toHaveBeenCalledTimes(1);
+    expect(killed).toEqual([7]);
   });
 
   it('stop() prevents any further kill', async () => {
-    const { w, kill } = watch(async () => ({ cpuSeconds: 5, tcpConnections: 0 }));
+    const { w, killed } = watch(async () => ({ cpuSeconds: 5, tcpConnections: 0 }));
     await vi.advanceTimersByTimeAsync(30_000);
     w.stop();
     await vi.advanceTimersByTimeAsync(300_000);
-    expect(kill).not.toHaveBeenCalled();
+    expect(killed).toEqual([]);
   });
 
   it('stallMs 0 returns a no-op watch', async () => {
-    const probe = vi.fn(async () => ({ cpuSeconds: 5, tcpConnections: 0 }));
-    const { w, kill } = watch(probe, 0);
+    let probes = 0;
+    const probe = async () => {
+      probes++;
+      return { cpuSeconds: 5, tcpConnections: 0 };
+    };
+    const { w, killed } = watch(probe, 0);
     w.noteActivity();
     await vi.advanceTimersByTimeAsync(300_000);
     w.stop();
-    expect(probe).not.toHaveBeenCalled();
-    expect(kill).not.toHaveBeenCalled();
+    expect(probes).toBe(0);
+    expect(killed).toEqual([]);
   });
 });
 

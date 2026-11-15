@@ -134,7 +134,12 @@ describe('CodexCliHarness live usage', () => {
 
   it('without onUsage execFn gets no onStdout and nothing is read before exec settles', async () => {
     const { home, file } = await makeRollout();
-    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const realSetInterval = globalThis.setInterval;
+    let intervals = 0;
+    globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
+      intervals++;
+      return realSetInterval(...args);
+    }) as typeof setInterval;
     let keys: string[] = [];
     const exec = async (cmd: string, opts: any) => {
       expect('onStdout' in opts).toBe(false);
@@ -143,11 +148,16 @@ describe('CodexCliHarness live usage', () => {
       await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
       return { stdout: FINAL_STDOUT, stderr: '' };
     };
-    const result = await new CodexCliHarness(exec).run(
-      makeContractRequest({ model: 'codex-model', registry, env: { CODEX_HOME: home } }),
-    );
+    let result;
+    try {
+      result = await new CodexCliHarness(exec).run(
+        makeContractRequest({ model: 'codex-model', registry, env: { CODEX_HOME: home } }),
+      );
+    } finally {
+      globalThis.setInterval = realSetInterval;
+    }
     expect(keys).toEqual(['timeoutMs', 'maxBuffer', 'env', 'onPgid']);
-    expect(setIntervalSpy).not.toHaveBeenCalled();
+    expect(intervals).toBe(0);
     expect(result.usage).toMatchObject({ inputTokens: 100, outputTokens: 5, numTurns: 1, peakInputTokens: 100 });
   });
 
@@ -160,11 +170,14 @@ describe('CodexCliHarness live usage', () => {
       return { stdout: FINAL_STDOUT, stderr: '' };
     };
     const harness = new CodexCliHarness(exec, {}, { liveUsageIntervalMs: 5 });
-    const onUsage = vi.fn();
+    const reports: HarnessLiveUsage[] = [];
+    const onUsage = (u: HarnessLiveUsage) => {
+      reports.push(u);
+    };
     const base = { model: 'codex-model', registry, env: { CODEX_HOME: home } };
     const withLive = await harness.run(makeContractRequest({ ...base, onUsage }));
     const without = await harness.run(makeContractRequest(base));
-    expect(onUsage).not.toHaveBeenCalled();
+    expect(reports).toEqual([]);
     expect(withLive).toEqual(without);
   });
 });
@@ -179,41 +192,56 @@ describe('startCodexLiveUsage', () => {
   it('stop() ends polling and drops an in-flight read', async () => {
     vi.useFakeTimers();
     let resolveRead: (u: CodexRolloutUsage) => void = () => {};
-    const read = vi.fn(() => new Promise<CodexRolloutUsage | undefined>((r) => (resolveRead = r)));
-    const onUsage = vi.fn();
+    let reads = 0;
+    const read = () => {
+      reads++;
+      return new Promise<CodexRolloutUsage | undefined>((r) => (resolveRead = r));
+    };
+    const reports: unknown[] = [];
+    const onUsage = (u: unknown) => {
+      reports.push(u);
+    };
     const live = startCodexLiveUsage({ onUsage, intervalMs: 10, locate: async () => '/r', read });
     live.onStdout(`${THREAD_LINE}\n`);
     await vi.advanceTimersByTimeAsync(10);
-    expect(read).toHaveBeenCalledTimes(1);
+    expect(reads).toBe(1);
     live.stop();
     live.stop();
     resolveRead(usage(3));
     await vi.advanceTimersByTimeAsync(20_000);
-    expect(read).toHaveBeenCalledTimes(1);
-    expect(onUsage).not.toHaveBeenCalled();
+    expect(reads).toBe(1);
+    expect(reports).toEqual([]);
   });
 
   it('skips rejected locate/read, does not re-report an unchanged count and survives a throwing onUsage', async () => {
     vi.useFakeTimers();
-    const locate = vi.fn().mockRejectedValueOnce(new Error('no')).mockResolvedValue('/r');
-    const read = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('bad'))
-      .mockResolvedValueOnce(usage(1))
-      .mockResolvedValueOnce(usage(1))
-      .mockResolvedValueOnce(usage(2));
-    const onUsage = vi.fn(() => {
+    let locates = 0;
+    const locate = async () => {
+      locates++;
+      if (locates === 1) throw new Error('no');
+      return '/r';
+    };
+    const queue: Array<() => Promise<CodexRolloutUsage | undefined>> = [
+      () => Promise.reject(new Error('bad')),
+      () => Promise.resolve(usage(1)),
+      () => Promise.resolve(usage(1)),
+      () => Promise.resolve(usage(2)),
+    ];
+    const read = () => (queue.shift() ?? (() => Promise.resolve(undefined)))();
+    const reported: number[] = [];
+    const onUsage = (u: HarnessLiveUsage) => {
+      reported.push(u.calls);
       throw new Error('boom');
-    });
+    };
     const live = startCodexLiveUsage({ onUsage, intervalMs: 10, locate, read });
     await vi.advanceTimersByTimeAsync(50);
-    expect(onUsage).not.toHaveBeenCalled();
+    expect(reported).toEqual([]);
     live.onStdout(`not json\n${THREAD_LINE}`);
     await vi.advanceTimersByTimeAsync(10);
-    expect(locate).not.toHaveBeenCalled();
+    expect(locates).toBe(0);
     live.onStdout('\n');
     await vi.advanceTimersByTimeAsync(100);
-    expect(onUsage.mock.calls.map((c: any[]) => c[0].calls)).toEqual([1, 2]);
+    expect(reported).toEqual([1, 2]);
     live.stop();
   });
 });

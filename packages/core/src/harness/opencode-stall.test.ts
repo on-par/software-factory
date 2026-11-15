@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
 import { ModelRegistry } from '../models/index.js';
@@ -53,7 +53,10 @@ describe('OpenCodeHarness stall watch', () => {
       });
     };
     let clock = 0;
-    const onPgid = vi.fn();
+    const pgids: number[] = [];
+    const onPgid = (p: number) => {
+      pgids.push(p);
+    };
     const harness = new OpenCodeHarness(execFn, undefined, undefined, {
       stallSeconds: 60,
       intervalMs: 5,
@@ -74,7 +77,7 @@ describe('OpenCodeHarness stall watch', () => {
     expect(err.details.stalled).toBe(true);
     expect(err.message).toContain('stalled');
     expect(killed).toEqual([123]);
-    expect(onPgid).toHaveBeenCalledWith(123);
+    expect(pgids).toEqual([123]);
   });
 });
 
