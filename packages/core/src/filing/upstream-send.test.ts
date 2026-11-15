@@ -1,7 +1,7 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { CandidateIssue } from './index.js';
@@ -71,12 +71,45 @@ interface CreateArg {
   body: string;
   labels: string[];
 }
-const okClient = () => ({
-  createIssue: vi.fn(async (_a: CreateArg) => ({ number: 7 })),
-  searchIssues: vi.fn(async (_a: { owner: string; repo: string; text: string }): Promise<CandidateIssue[]> => []),
-  commentIssue: vi.fn(async (_a: { owner: string; repo: string; issue_number: number; body: string }) => {}),
-  updateIssue: vi.fn(),
-});
+interface SearchArg {
+  owner: string;
+  repo: string;
+  text: string;
+}
+interface CommentArg {
+  owner: string;
+  repo: string;
+  issue_number: number;
+  body: string;
+}
+const okClient = (
+  opts: {
+    search?: (a: SearchArg) => Promise<CandidateIssue[]>;
+    create?: (a: CreateArg) => Promise<{ number: number }>;
+    comment?: (a: CommentArg) => Promise<void>;
+  } = {},
+) => {
+  const created: CreateArg[] = [];
+  const searched: SearchArg[] = [];
+  const commented: CommentArg[] = [];
+  return {
+    created,
+    searched,
+    commented,
+    createIssue: async (a: CreateArg) => {
+      created.push(a);
+      return opts.create ? opts.create(a) : { number: 7 };
+    },
+    searchIssues: async (a: SearchArg): Promise<CandidateIssue[]> => {
+      searched.push(a);
+      return opts.search ? opts.search(a) : [];
+    },
+    commentIssue: async (a: CommentArg) => {
+      commented.push(a);
+      if (opts.comment) await opts.comment(a);
+    },
+  };
+};
 
 describe('sendUpstreamReports', () => {
   it.each([undefined, '', 'not-a-slug', 'a/b/c'])(
@@ -88,8 +121,8 @@ describe('sendUpstreamReports', () => {
         { fingerprint: 'a', outcome: 'skipped', reason: 'no-target-repo' },
         { fingerprint: 'b', outcome: 'skipped', reason: 'no-target-repo' },
       ]);
-      expect(client.createIssue).not.toHaveBeenCalled();
-      expect(client.searchIssues).not.toHaveBeenCalled();
+      expect(client.created).toEqual([]);
+      expect(client.searched).toEqual([]);
     },
   );
 
@@ -97,8 +130,8 @@ describe('sendUpstreamReports', () => {
     const client = okClient();
     const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_1')], client });
     expect(res).toEqual([{ fingerprint: 'ff_1', outcome: 'created', issueNumber: 7 }]);
-    expect(client.createIssue).toHaveBeenCalledTimes(1);
-    const arg = client.createIssue.mock.calls[0]?.[0] as CreateArg;
+    expect(client.created).toHaveLength(1);
+    const arg = client.created[0] as CreateArg;
     expect(arg.owner).toBe('acme');
     expect(arg.repo).toBe('factory');
     expect(arg.title.startsWith('[factory-report]')).toBe(true);
@@ -110,7 +143,11 @@ describe('sendUpstreamReports', () => {
 
   it('outboxes on 403 without counting against the cap', async () => {
     const err = Object.assign(new Error('Resource not accessible by integration'), { status: 403 });
-    const client = { ...okClient(), createIssue: vi.fn().mockRejectedValue(err) };
+    const client = okClient({
+      create: async () => {
+        throw err;
+      },
+    });
     const p = pending('ff_2');
     const res = await sendUpstreamReports({ ...base(), reports: [p], client });
     expect(res[0]?.outcome).toBe('outboxed');
@@ -128,7 +165,11 @@ describe('sendUpstreamReports', () => {
   });
 
   it('outboxes on a network error without status', async () => {
-    const client = { ...okClient(), createIssue: vi.fn().mockRejectedValue(new Error('ECONNRESET')) };
+    const client = okClient({
+      create: async () => {
+        throw new Error('ECONNRESET');
+      },
+    });
     const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_4')], client });
     expect(res[0]?.outcome).toBe('outboxed');
     expect(res[0]?.reason).toMatch(/^send-failed/);
@@ -141,7 +182,7 @@ describe('sendUpstreamReports', () => {
       reports: [pending('a'), pending('b')],
       client,
     });
-    expect(client.createIssue).toHaveBeenCalledTimes(1);
+    expect(client.created).toHaveLength(1);
     expect(res[1]).toMatchObject({ outcome: 'skipped', reason: 'per-run-cap' });
     await expect(readdir(outboxDir)).rejects.toThrow();
   });
@@ -152,9 +193,9 @@ describe('sendUpstreamReports', () => {
     await sendUpstreamReports({ ...base({ policy: p }), reports: [pending('a')], client });
     const second = await sendUpstreamReports({ ...base({ policy: p }), reports: [pending('b')], client });
     expect(second[0]).toMatchObject({ outcome: 'skipped', reason: 'per-day-cap' });
-    expect(client.createIssue).toHaveBeenCalledTimes(1);
+    expect(client.created).toHaveLength(1);
     await sendUpstreamReports({ ...base({ policy: p, now: day2 }), reports: [pending('c')], client });
-    expect(client.createIssue).toHaveBeenCalledTimes(2);
+    expect(client.created).toHaveLength(2);
   });
 
   it('resets filedThisRun on each call', async () => {
@@ -162,13 +203,13 @@ describe('sendUpstreamReports', () => {
     const p = { ...policy, maxPerRun: 1 };
     await sendUpstreamReports({ ...base({ policy: p }), reports: [pending('a')], client });
     await sendUpstreamReports({ ...base({ policy: p }), reports: [pending('b')], client });
-    expect(client.createIssue).toHaveBeenCalledTimes(2);
+    expect(client.created).toHaveLength(2);
   });
 
   it('sends a repeated fingerprint once', async () => {
     const client = okClient();
     const res = await sendUpstreamReports({ ...base(), reports: [pending('a'), pending('a')], client });
-    expect(client.createIssue).toHaveBeenCalledTimes(1);
+    expect(client.created).toHaveLength(1);
     expect(res[1]).toMatchObject({ outcome: 'skipped', reason: 'duplicate-in-run' });
   });
 
@@ -180,7 +221,7 @@ describe('sendUpstreamReports', () => {
       client,
     });
     expect(res.map((r) => r.reason)).toEqual(['filing-disabled', 'filing-disabled']);
-    expect(client.createIssue).not.toHaveBeenCalled();
+    expect(client.created).toEqual([]);
     await expect(readdir(outboxDir)).rejects.toThrow();
     await expect(readFile(ledgerFile, 'utf8')).rejects.toThrow();
   });
@@ -254,29 +295,24 @@ describe('writeUpstreamOutbox', () => {
     });
 
     it('comments on a matching unlabeled issue and never edits or creates', async () => {
-      const client = okClient();
-      client.searchIssues.mockResolvedValue([existing('ff_1')]);
+      const client = okClient({ search: async () => [existing('ff_1')] });
       const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_1')], client });
       expect(res).toEqual([{ fingerprint: 'ff_1', outcome: 'bumped', issueNumber: 42 }]);
-      expect(client.searchIssues).toHaveBeenCalledWith({ owner: 'acme', repo: 'factory', text: 'ff_1' });
-      expect(client.commentIssue).toHaveBeenCalledTimes(1);
-      expect(client.commentIssue.mock.calls[0]?.[0]).toMatchObject({ issue_number: 42 });
-      expect(client.createIssue).not.toHaveBeenCalled();
-      expect(client.updateIssue).not.toHaveBeenCalled();
+      expect(client.searched).toEqual([{ owner: 'acme', repo: 'factory', text: 'ff_1' }]);
+      expect(client.commented).toEqual([expect.objectContaining({ issue_number: 42 })]);
+      expect(client.created).toEqual([]);
       expect(logs.some((l) => l.type === 'upstream_report_bumped')).toBe(true);
     });
 
     it('bumps a recently closed match', async () => {
-      const client = okClient();
-      client.searchIssues.mockResolvedValue([existing('ff_1', 'closed')]);
+      const client = okClient({ search: async () => [existing('ff_1', 'closed')] });
       const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_1')], client });
       expect(res[0]).toMatchObject({ outcome: 'bumped', issueNumber: 42 });
-      expect(client.createIssue).not.toHaveBeenCalled();
+      expect(client.created).toEqual([]);
     });
 
     it('creates when the hit has the fingerprint but not the marker', async () => {
-      const client = okClient();
-      client.searchIssues.mockResolvedValue([{ number: 5, body: 'ff_1 <!-- fp:ff_1 -->', state: 'open' }]);
+      const client = okClient({ search: async () => [{ number: 5, body: 'ff_1 <!-- fp:ff_1 -->', state: 'open' }] });
       const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_1')], client });
       expect(res[0]).toMatchObject({ outcome: 'created' });
     });
@@ -284,32 +320,37 @@ describe('writeUpstreamOutbox', () => {
     it('skips search for an invalid fingerprint and creates', async () => {
       const client = okClient();
       const res = await sendUpstreamReports({ ...base(), reports: [pending('bad fp!')], client });
-      expect(client.searchIssues).not.toHaveBeenCalled();
+      expect(client.searched).toEqual([]);
       expect(res[0]).toMatchObject({ outcome: 'created' });
     });
 
     it('outboxes when search fails', async () => {
-      const client = okClient();
-      client.searchIssues.mockRejectedValue({ status: 403 });
+      const client = okClient({
+        search: async () => {
+          throw { status: 403 };
+        },
+      });
       const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_1')], client });
       expect(res[0]?.outcome).toBe('outboxed');
       expect(res[0]?.reason).toMatch(/^search-failed: forbidden \(403\)/);
-      expect(client.createIssue).not.toHaveBeenCalled();
+      expect(client.created).toEqual([]);
     });
 
     it('outboxes when the comment fails', async () => {
-      const client = okClient();
-      client.searchIssues.mockResolvedValue([existing('ff_1')]);
-      client.commentIssue.mockRejectedValue({ status: 500 });
+      const client = okClient({
+        search: async () => [existing('ff_1')],
+        comment: async () => {
+          throw { status: 500 };
+        },
+      });
       const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_1')], client });
       expect(res[0]?.outcome).toBe('outboxed');
       expect(res[0]?.reason).toMatch(/^comment-failed:/);
-      expect(client.createIssue).not.toHaveBeenCalled();
+      expect(client.created).toEqual([]);
     });
 
     it('does not consume caps on a bump', async () => {
-      const client = okClient();
-      client.searchIssues.mockImplementation(async ({ text }) => (text === 'a' ? [existing('a')] : []));
+      const client = okClient({ search: async ({ text }) => (text === 'a' ? [existing('a')] : []) });
       const res = await sendUpstreamReports({
         ...base({ policy: { ...policy, maxPerRun: 1 } }),
         reports: [pending('a'), pending('b')],

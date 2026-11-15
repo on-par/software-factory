@@ -1,6 +1,6 @@
 // src/garden/dedup.test.ts — Read-only dedup of garden clusters (#2102)
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { CandidateIssue } from '../filing/index.js';
 import { upstreamReportMarker } from '../filing/upstream.js';
@@ -31,13 +31,29 @@ const issue = (number: number, body: string, state: 'open' | 'closed' = 'open'):
   state,
 });
 
-function fakeClient(byText: Record<string, CandidateIssue[]> = {}) {
+interface SearchArg {
+  owner: string;
+  repo: string;
+  text: string;
+}
+
+function fakeClient(
+  byText: Record<string, CandidateIssue[]> = {},
+  opts: { search?: (a: SearchArg) => Promise<CandidateIssue[]> } = {},
+) {
+  const searched: SearchArg[] = [];
+  const writes: string[] = [];
   return {
-    searchIssues: vi.fn(async ({ text }: { text: string }) => byText[text] ?? []),
-    createIssue: vi.fn(),
-    updateIssue: vi.fn(),
-    commentIssue: vi.fn(),
-    listCandidateIssues: vi.fn(),
+    searched,
+    writes,
+    searchIssues: async (a: SearchArg) => {
+      searched.push(a);
+      return opts.search ? opts.search(a) : (byText[a.text] ?? []);
+    },
+    createIssue: async () => void writes.push('createIssue'),
+    updateIssue: async () => void writes.push('updateIssue'),
+    commentIssue: async () => void writes.push('commentIssue'),
+    listCandidateIssues: async () => void writes.push('listCandidateIssues'),
   };
 }
 
@@ -120,14 +136,13 @@ describe('dedupGardenClusters', () => {
     const long = cluster('x'.repeat(201));
     const client = fakeClient();
     await dedupGardenClusters([long], { client, ...target });
-    expect(client.searchIssues).toHaveBeenCalledTimes(1);
-    expect(client.searchIssues).toHaveBeenCalledWith({ ...target, text: gardenClusterFingerprint(long) });
+    expect(client.searched).toEqual([{ ...target, text: gardenClusterFingerprint(long) }]);
   });
 
   it('searches identical text once', async () => {
     const client = fakeClient();
     await dedupGardenClusters([c, { ...c }], { client, ...target });
-    expect(client.searchIssues).toHaveBeenCalledTimes(2);
+    expect(client.searched).toHaveLength(2);
   });
 
   it('is read-only, preserves order and fields, and does not mutate input', async () => {
@@ -138,43 +153,58 @@ describe('dedupGardenClusters', () => {
     expect(input).toEqual(snapshot);
     expect(out.map((x) => x.key)).toEqual(['a', 'b', 'c']);
     expect(out.map(({ tracking: _t, ...rest }) => rest)).toEqual(snapshot);
-    for (const call of client.searchIssues.mock.calls)
-      expect(Object.keys(call[0]).sort()).toEqual(['owner', 'repo', 'text']);
-    expect(client.createIssue).not.toHaveBeenCalled();
-    expect(client.updateIssue).not.toHaveBeenCalled();
-    expect(client.commentIssue).not.toHaveBeenCalled();
-    expect(client.listCandidateIssues).not.toHaveBeenCalled();
+    for (const s of client.searched) expect(Object.keys(s).sort()).toEqual(['owner', 'repo', 'text']);
+    expect(client.writes).toEqual([]);
   });
 
   it('marks every cluster tracked: unknown when the search rejects', async () => {
     const input = [cluster('a'), cluster('b', 'checker'), cluster('c', 'human')];
     const snapshot = structuredClone(input);
-    const client = fakeClient();
     const err = new Error('boom');
-    client.searchIssues.mockRejectedValue(err);
-    const onSearchError = vi.fn();
+    const client = fakeClient(
+      {},
+      {
+        search: async () => {
+          throw err;
+        },
+      },
+    );
+    const errors: unknown[] = [];
+    const onSearchError = (e: unknown) => void errors.push(e);
     const out = await dedupGardenClusters(input, { client, ...target, onSearchError });
     expect(out.map((x) => x.tracking)).toEqual(Array(3).fill({ status: 'unknown' }));
     expect(out.map(({ tracking: _t, ...rest }) => rest)).toEqual(snapshot);
     expect(input).toEqual(snapshot);
-    expect(onSearchError).toHaveBeenCalledTimes(1);
-    expect(onSearchError).toHaveBeenCalledWith(err);
+    expect(errors).toEqual([err]);
+    expect(errors[0]).toBe(err);
   });
 
   it('a network failure on a later search still marks every cluster unknown', async () => {
     const first = cluster('a');
-    const client = fakeClient();
-    client.searchIssues
-      .mockResolvedValueOnce([issue(5, gardenKeyMarker('a'))])
-      .mockResolvedValueOnce([issue(5, gardenKeyMarker('a'))])
-      .mockRejectedValue(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } }));
+    let searches = 0;
+    const client = fakeClient(
+      {},
+      {
+        search: async () => {
+          searches += 1;
+          if (searches <= 2) return [issue(5, gardenKeyMarker('a'))];
+          throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } });
+        },
+      },
+    );
     const out = await dedupGardenClusters([first, cluster('b')], { client, ...target });
     expect(out.map((x) => x.tracking)).toEqual([{ status: 'unknown' }, { status: 'unknown' }]);
   });
 
   it('works without onSearchError', async () => {
-    const client = fakeClient();
-    client.searchIssues.mockRejectedValue(new Error('boom'));
+    const client = fakeClient(
+      {},
+      {
+        search: async () => {
+          throw new Error('boom');
+        },
+      },
+    );
     const out = await dedupGardenClusters([c], { client, ...target });
     expect(out[0]?.tracking).toEqual({ status: 'unknown' });
   });
