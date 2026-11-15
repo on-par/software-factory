@@ -7,6 +7,12 @@ const lines = script.split('\n');
 const noE2eIf = /^\s*if \[ "\$NO_E2E"/;
 
 describe('scripts/verify.sh', () => {
+  it('runs the loc budget check (#4124)', () => {
+    const budget = lines.findIndex((line) => line.trim() === 'npm run loc-budget');
+    expect(budget).toBeGreaterThan(-1);
+    expect(budget).toBeGreaterThan(lines.findIndex((line) => line.trim() === 'npm run duplication'));
+  });
+
   it('runs the coverage-enforcing test command in --no-e2e mode', () => {
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
       scripts: Record<string, string>;

@@ -85,6 +85,18 @@ jobs:
       - name: Duplication
         run: npm run duplication
 
+      - name: LOC budget
+        run: npm run loc-budget
+
+      - name: LOC budget override guard
+        if: github.event_name == 'pull_request'
+        env:
+          LOC_BUDGET_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          LOC_BUDGET_PR_NUMBER: ${{ github.event.pull_request.number }}
+          LOC_BUDGET_BOT_LOGINS: ${{ vars.FACTORY_BOT_LOGINS }}
+          GH_TOKEN: ${{ github.token }}
+        run: npx tsx scripts/loc-budget.ts --base "$LOC_BUDGET_BASE_SHA" --pr "$LOC_BUDGET_PR_NUMBER"
+
       # The job token is a GitHub App installation token: REST GET /user refuses it, so this exercises the real
       # GraphQL self-identity fallback against GitHub. Read-only; the suite skips wherever the variable is unset.
       - name: App installation-token identity (live)
