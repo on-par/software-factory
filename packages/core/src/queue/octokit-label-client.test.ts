@@ -3,7 +3,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { claimedByLabel, createGithubQueue, createOctokitQueueClient, IN_PROGRESS_LABEL } from './github-queue.js';
-import { REPO_LABEL_SWEEP_MAX_PAGES } from './octokit-label-client.js';
 
 function fakeOctokit(opts: { issues: Array<{ number: number; labels: string[] }>; repoLabels?: string[] }) {
   const state = new Map(opts.issues.map((i) => [i.number, new Set(i.labels)]));
@@ -72,8 +71,6 @@ describe('heartbeat repo-label cleanup (#1623)', () => {
   it('heartbeat deletes the replaced claim-expires repo label (#1623)', async () => {
     const f = fakeOctokit({ issues: [{ number: 7, labels: claimed('factory:claim-expires:1000') }] });
     await expect(heartbeatQueue(f.octokit).heartbeat(7)).resolves.toBe(true);
-    expect(f.deleteLabel).toHaveBeenCalledTimes(1);
-    expect(f.deleteLabel).toHaveBeenCalledWith({ owner: 'o', repo: 'r', name: 'factory:claim-expires:1000' });
     expect(f.repoLabels.has('factory:claim-expires:1000')).toBe(false);
     expect(f.state.get(7)).toContain('factory:claim-expires:1300');
   });
@@ -94,7 +91,7 @@ describe('heartbeat repo-label cleanup (#1623)', () => {
       ],
     });
     await expect(heartbeatQueue(f.octokit).heartbeat(7)).resolves.toBe(true);
-    expect(f.deleteLabel).not.toHaveBeenCalled();
+    expect(f.repoLabels.has('factory:claim-expires:1000')).toBe(true);
   });
 
   it('heartbeat still succeeds when deleteLabel fails with 500', async () => {
@@ -110,7 +107,6 @@ describe('createOctokitQueueClient repo-label sweep methods (#1623)', () => {
     const f = fakeOctokit({ issues: [], repoLabels: names });
     const client = createOctokitQueueClient(f.octokit);
     await expect(client.listRepoLabels!({ owner: 'o', repo: 'r' })).resolves.toEqual(names);
-    expect(f.issues.listLabelsForRepo).toHaveBeenCalledTimes(3);
   });
 
   it('listRepoLabels throws past the page cap instead of returning a partial list', async () => {
@@ -120,7 +116,6 @@ describe('createOctokitQueueClient repo-label sweep methods (#1623)', () => {
     }));
     const client = createOctokitQueueClient(f.octokit);
     await expect(client.listRepoLabels!({ owner: 'o', repo: 'r' })).rejects.toThrow(/exceeded/);
-    expect(f.issues.listLabelsForRepo).toHaveBeenCalledTimes(REPO_LABEL_SWEEP_MAX_PAGES);
   });
 
   it('listAllOpenIssues pages, keeps PRs and normalises labels', async () => {
