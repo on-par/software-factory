@@ -1,5 +1,3 @@
-// packages/core/src/run/lane-file-guard-holder.test.ts — a claim left by a crashed run is reaped (#1618)
-
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 

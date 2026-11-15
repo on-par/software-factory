@@ -1,5 +1,3 @@
-// src/run/provider-failure-recorder.ts — Opens the provider breaker on a provider failure and announces a usage cap once (#3337).
-
 import type { ProviderCappedPayload } from '../events/kinds.js';
 import { DEFAULT_CAP_PROBE_MS, reportedCooldownMs, type ProviderBreaker } from '../router/breaker.js';
 import { redactText } from '../filing/redact.js';
@@ -12,15 +10,10 @@ export interface ProviderFailureRecorderDeps {
   breaker: ProviderBreaker;
   log: RunLogFn;
   issue: WorkKey;
-  /** Cooldown for failures that are not usage caps and report no reset time. */
   defaultCooldownMs: number;
-  /** Clock for the `at` stamp of provider_auth_rejected. Default: Date.now. */
   now?: () => number;
 }
 
-/** Builds the per-stage `onProviderFailure` callback. A usage cap is held until its reported reset (plus the buffer),
- *  or re-probed after DEFAULT_CAP_PROBE_MS when none is reported; other kinds keep the default cooldown.
- *  `provider_capped` is logged only on the closed-to-open transition. */
 export const providerFailureRecorder =
   (deps: ProviderFailureRecorderDeps) =>
   (stage: ProviderCappedPayload['stage']) =>
@@ -64,8 +57,12 @@ export const providerFailureRecorder =
       cooldownMs,
       cappedUntil ? { cappedUntil, probeDue: reportedMs === null } : undefined,
     );
-    // prettier-ignore
-    const cooldownNote = reportedMs !== null ? 'provider-reported reset time' : capped ? 'usage cap with no reported reset, re-probe after 1h' : 'default cooldown';
+    const cooldownNote =
+      reportedMs !== null
+        ? 'provider-reported reset time'
+        : capped
+          ? 'usage cap with no reported reset, re-probe after 1h'
+          : 'default cooldown';
     log(
       'provider_breaker_open',
       `breaker opened for ${provider} (${reason}) — provider skipped until cooldown ends (${cooldownNote}, ${Math.ceil(cooldownMs / 60_000)}m)`,

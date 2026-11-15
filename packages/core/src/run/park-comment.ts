@@ -1,9 +1,3 @@
-// src/run/park-comment.ts — upsert one issue comment with the park state behind a hidden factory-issue-state marker (#2314, ADR-0130);
-// also upserts the environment-release comment behind its own factory-environment-release marker (#3440)
-//
-// Every runIssue park edits one comment per issue in place (#728). Anyone can post the marker, so only a
-// marker comment written by the authenticated identity is trusted (same rule as readiness/slice-plan-github.ts).
-
 import type { Octokit } from '@octokit/rest';
 
 import type { ParkPayload } from '../events/kinds.js';
@@ -29,13 +23,10 @@ export interface ParkCommentInput {
   blockers?: readonly number[];
   autoUnparks?: number;
   status?: string;
-  /** factory:order held when the issue parked (#3554). */
   order?: number;
-  /** Design-smell finding rendered above the unblock hint (#1513). */
   designSmell?: DesignSmellFinding;
 }
 
-/** `reason` is a plain string because the parser reads untrusted text. */
 export interface ParkState {
   reason: string;
   lane?: string;
@@ -43,10 +34,8 @@ export interface ParkState {
   branch?: string;
   parkSha?: string;
   blockers: number[];
-  /** Times the blocked-park poller re-queued this issue; 0 when the line is absent or malformed. */
   autoUnparks: number;
   status?: string;
-  /** factory:order held when the issue parked (#3554). */
   order?: number;
 }
 
@@ -92,7 +81,6 @@ export function parkUnblockHint(reason: ParkReason, issue: WorkKey): string {
   return PARK_HINTS[reason].replaceAll('<n>', issue);
 }
 
-/** Structured park payload for a park event (#3511); decision is the park comment's unblock hint. */
 export function parkPayload(
   reason: ParkReason,
   issue: WorkKey,
@@ -220,7 +208,6 @@ export interface ParkCommentPatch {
   autoUnparks?: number;
 }
 
-/** Rewrites the state block (and the unblock hint on a reason change) in place; null when there is no state block. */
 export function patchParkComment(body: string, issue: WorkKey, patch: ParkCommentPatch): string | null {
   const fence = findStateFence(body);
   if (fence === null) return null;
@@ -242,7 +229,6 @@ export function patchParkComment(body: string, issue: WorkKey, patch: ParkCommen
   return out.join('\n');
 }
 
-/** Lowest-id marked comment decides; null when none, or when its state block is unreadable. */
 export function readParkState(comments: readonly ParkStateComment[], issue?: WorkKey): ParkState | null {
   const marked = comments
     .filter((c) => {
@@ -254,7 +240,6 @@ export function readParkState(comments: readonly ParkStateComment[], issue?: Wor
   return parseStateBlock(marked[0].body);
 }
 
-/** The lowest-id comment containing `marker` written by the authenticated user, or undefined. */
 export async function findOwnMarkerComment(deps: {
   octokit: Octokit;
   repo: string;
@@ -283,7 +268,6 @@ export async function findOwnMarkerComment(deps: {
   return existing;
 }
 
-/** The lowest-id park-state comment written by the authenticated user, or undefined. */
 export async function findOwnParkComment(deps: {
   octokit: Octokit;
   repo: string;
@@ -292,7 +276,6 @@ export async function findOwnParkComment(deps: {
   return findOwnMarkerComment({ ...deps, marker: issueStateMarker(deps.issue) });
 }
 
-/** Edits the authenticated user's marker comment in place, or creates it; appends `marker` to `body` when absent. */
 export async function upsertMarkerComment(deps: {
   octokit: Octokit;
   repo: string;
@@ -342,7 +325,6 @@ export async function upsertParkComment(deps: {
   return { commentId: data.id, created: true };
 }
 
-/** The one valid factory:order an issue holds, or undefined for zero, several or malformed labels. */
 async function readSingleOrderLabel(octokit: Octokit, repo: string, issue: WorkKey): Promise<number | undefined> {
   const [owner, name] = repo.split('/');
   const { data } = await octokit.rest.issues.listLabelsOnIssue({
@@ -358,7 +340,6 @@ async function readSingleOrderLabel(octokit: Octokit, repo: string, issue: WorkK
   return /^\d+$/.test(raw) && Number.isSafeInteger(n) && n > 0 ? n : undefined;
 }
 
-/** The factory:order recorded in the authenticated user's park-state comment, or undefined (#3554). */
 export async function readParkedOrder(deps: {
   octokit: Octokit;
   repo: string;
@@ -368,7 +349,6 @@ export async function readParkedOrder(deps: {
   return comment === undefined ? undefined : readParkState([comment], deps.issue)?.order;
 }
 
-/** Never throws: a GitHub or git failure comes back as `{ ok: false, error }`. */
 export async function publishParkComment(deps: {
   octokit: Octokit;
   repo: string;
@@ -401,7 +381,6 @@ export async function publishParkComment(deps: {
   }
 }
 
-/** Upserts the issue's environment-failure comment; a GitHub error goes to `warn` and never fails the run. */
 export async function postEnvironmentReleaseComment(deps: {
   octokit: Octokit;
   repo: string;

@@ -1,4 +1,3 @@
-// packages/core/src/run/review-rework.test.ts — a queued review rework runs BUILD rework on the PR branch with only that review's comments, then CHECK (#3564)
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';

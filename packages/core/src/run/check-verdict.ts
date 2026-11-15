@@ -1,4 +1,3 @@
-// packages/core/src/run/check-verdict.ts — one interpretation of a failed, non-environment CHECK (#3435).
 import { remainingShowstoppers, type CheckPhaseResult } from '../phases/check.js';
 import { maxLinesOverrideHint } from './max-lines-override.js';
 

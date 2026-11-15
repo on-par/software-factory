@@ -1,5 +1,3 @@
-// packages/core/src/run/prerequisite-restack.test.ts — cross-issue stack restack (#3916), on a real git fixture.
-
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';

@@ -128,7 +128,6 @@ function testsResult(over: Partial<CommandResult>): (cmd: readonly string[]) => 
   });
 }
 
-/** runIssue ports whose checkPhase runs the real phase over a real testsChecker fed a canned verify.sh result. */
 function checkPorts(log: Log, worktree: string, verify: Partial<CommandResult>) {
   const runBaseline = vi.fn().mockResolvedValue({ baseSha: 'abc', checkers: [] });
   const runCheckers = vi.fn(async (ctx: Parameters<typeof testsChecker>[0]): Promise<CheckSummary> => {

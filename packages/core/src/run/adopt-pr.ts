@@ -11,11 +11,6 @@ export type AdoptablePrLookup =
   | { status: 'ambiguous'; prs: Array<{ prNumber: number; branch: string }> }
   | { status: 'error'; detail: string };
 
-/**
- * Finds the issue's open same-repo factory PR by issue number on any recognized branch prefix (#2253), so a
- * requeue continues on the stranded draft even when the title or prefix drifted. Read-only (`pulls.list` only);
- * fails closed with `error` when the open PR list is longer than `maxPages` pages.
- */
 export async function findAdoptablePr(opts: {
   octokit: Pick<Octokit, 'rest'>;
   repo: string;

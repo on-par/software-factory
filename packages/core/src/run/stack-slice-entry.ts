@@ -1,4 +1,3 @@
-// packages/core/src/run/stack-slice-entry.ts — ADR-0161: stack mode builds one slice per run (#3367), on main or on its parent slice's branch.
 import { issueCommentSlicePlanStore } from '../readiness/slice-plan-store.js';
 import { parentRefForSlice, stackSliceBranch, withSliceBranchCreated } from '../readiness/slice-plan.js';
 import type { PlanResult } from '../phases/plan.js';
@@ -14,8 +13,6 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Creates slice k's branch from its parent ref and records it in the slice plan comment, before BUILD.
- *  Returns the recorded slice and the request rebound to the slice branch, or the parked outcome. */
 export async function enterStackSlice(args: {
   slice: PlanSlice;
   request: RunRequest;

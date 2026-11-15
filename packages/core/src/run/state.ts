@@ -1,10 +1,3 @@
-// src/run/state.ts — The persisted IssueRunState record (#972). One JSON file per
-// issue under getFactoryPaths(...).runs. `repo` is resolved from the run's own
-// worktree, not from dirname(file): a registry-attached repo may keep its factory
-// state root outside the checkout (#843/#894), so the state file's directory is not
-// reliably inside the repo it describes. The resolver and the remote parser are the
-// same ones FactoryEvent.repo uses (#971/#984) — one slug source for both envelopes.
-
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
@@ -13,26 +6,18 @@ import type { CheckerOutput, FailurePhase, IssueRunState, RunStatus } from '../t
 import { isNumericWorkKey, issueNumberOf, toWorkKey, workKeyFromIssue, type WorkKey } from '../work/work-key.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
 
-/** Path of one issue's persisted run state inside `runsDir`
- *  (`getFactoryPaths(repoRoot).runs`). */
+const DEFAULT_ROUTE_BEFORE_PLAN: BuildRoute = 'claude';
+
 export function runStateFile(runsDir: string, key: WorkKey): string {
   return resolve(runsDir, `issue-${key}.json`);
 }
 
-/** Persists `state` with its string `key` (#3890), filling `repo` from the run's worktree when the
- *  caller did not supply one. A numeric key also persists the numeric `issue`, so a factory binary
- *  from before #3890 (0.9.27 or earlier) on the same host still reads the record (ADR-0168: no
- *  on-disk state migrates). A non-numeric key (a Linear or Jira ticket) persists no `issue`.
- *  Returns the in-memory record (both `key` and `issue`), so a caller can see the resolved slug.
- *  An unresolvable slug omits the key rather than writing a placeholder. */
 export async function writeIssueRunState(file: string, state: IssueRunState): Promise<IssueRunState> {
   const repo = state.repo ?? resolveRepoSlug(state.worktree) ?? undefined;
   const key = state.key ?? workKeyFromIssue(state.issue);
   const { issue: _issue, key: _key, ...rest } = state;
   const legacy = isNumericWorkKey(key) ? { issue: issueNumberOf(key) } : {};
   const persisted = repo === undefined ? { ...legacy, ...rest } : { ...legacy, ...rest, repo };
-  // `repo` must be absent, not undefined, in the JSON: JSON.stringify drops undefined
-  // values, so the two shapes serialize identically — keep it that way.
 
   await mkdir(dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
@@ -41,11 +26,6 @@ export async function writeIssueRunState(file: string, state: IssueRunState): Pr
   return { ...persisted, key, issue: state.issue };
 }
 
-/** Reads one issue's persisted run state, or null when the file is missing,
- *  unreadable, or not a JSON object. Never throws. `repo` is surfaced when the record
- *  carries a non-empty string and is absent otherwise, so a record written before
- *  #972 reads back with `repo === undefined`. `key` is set from the persisted string key, or from
- *  the legacy numeric `issue` of a record written before #3890. */
 export async function readIssueRunState(file: string): Promise<IssueRunState | null> {
   let parsed: unknown;
   try {
@@ -62,9 +42,7 @@ export async function readIssueRunState(file: string): Promise<IssueRunState | n
       const key = toWorkKey(rawKey);
       record.key = key;
       if (isNumericWorkKey(key)) record.issue = issueNumberOf(key);
-    } catch {
-      // An invalid key stays absent, so the record fails isValidIssueRunState.
-    }
+    } catch {}
   } else if (Number.isSafeInteger(record.issue) && record.issue >= 0) {
     record.key = workKeyFromIssue(record.issue);
   }
@@ -76,26 +54,19 @@ export async function readIssueRunState(file: string): Promise<IssueRunState | n
 }
 
 export interface ListIssueRunsOptions {
-  /** Keep only runs whose startedAt is on or after this instant. Invalid date → RangeError. */
   since?: Date;
-  /** Run-store reader; defaults to readIssueRunState. Injected by tests. */
   readRun?: (file: string) => Promise<IssueRunState | null>;
 }
 
 export interface ListIssueRunsResult {
-  /** Valid runs, sorted by issue ascending. */
   runs: IssueRunState[];
-  /** issue-<n>.json file names that did not read as a valid run record, sorted by issue. */
   skipped: string[];
 }
 
-/** The one validity rule for a persisted run record (#3448): an object whose `key` equals the
- *  work key of the file name (#3890), with an integer `issue` and string `startedAt` and `updatedAt`. */
 export function isValidIssueRunState(state: IssueRunState | null, key: WorkKey): state is IssueRunState {
   return (
     state !== null &&
     state.key !== undefined &&
-    // A zero-padded file name (issue-007.json) still names the numeric key 7.
     (state.key === key || (isNumericWorkKey(state.key) && state.issue === Number(key))) &&
     Number.isInteger(state.issue) &&
     typeof state.startedAt === 'string' &&
@@ -103,9 +74,6 @@ export function isValidIssueRunState(state: IssueRunState | null, key: WorkKey):
   );
 }
 
-/** Reads every `issue-<n>.json` in `runsDir` — the single owner of "which runs exist" (#3448).
- *  Names that are not `issue-<n>.json` (phase snapshots, .tmp files) are ignored; names that
- *  fail isValidIssueRunState are listed in `skipped`. A missing dir is an empty result. */
 export async function listIssueRuns(runsDir: string, options: ListIssueRunsOptions = {}): Promise<ListIssueRunsResult> {
   const { since, readRun = readIssueRunState } = options;
   if (since !== undefined && Number.isNaN(since.getTime())) throw new RangeError('invalid since date');
@@ -143,7 +111,6 @@ export async function listIssueRuns(runsDir: string, options: ListIssueRunsOptio
   return { runs, skipped };
 }
 
-/** What runIssue knows at a transition (#3194). Absent fields keep the previous record's value. */
 export interface RunStateUpdate {
   status: RunStatus;
   branch?: string;
@@ -152,11 +119,9 @@ export interface RunStateUpdate {
   attempts?: number;
   prNumber?: number;
   failures?: CheckerOutput[];
-  /** Why SHIP left the PR as a draft (#3932); recorded on the PR run-state comment. */
   draftReason?: 'ci-pending' | 'requested';
 }
 
-/** Fields the CLI fixes once per run. */
 export interface IssueRunStateBase {
   issue: number;
   lane: string;
@@ -193,7 +158,6 @@ export function terminalRunStatus(outcome: RunOutcome): RunStatus {
   }
 }
 
-/** Merges `update` onto the previous in-memory record. Keys whose value is absent are omitted. */
 export function nextIssueRunState(
   prev: IssueRunState | undefined,
   base: IssueRunStateBase,
@@ -205,9 +169,7 @@ export function nextIssueRunState(
     ...base,
     branch: update.branch ?? prev?.branch ?? base.branch,
     status: update.status,
-    // IssueRunState.route is required, so before PLAN picks a route the packaged default
-    // harness is recorded. The runs row does not expose route.
-    route: update.route ?? prev?.route ?? 'claude',
+    route: update.route ?? prev?.route ?? DEFAULT_ROUTE_BEFORE_PLAN,
     model: update.model ?? prev?.model ?? '',
     attempts: update.attempts ?? prev?.attempts ?? 1,
     startedAt: base.startedAt,

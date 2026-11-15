@@ -1,5 +1,3 @@
-// packages/core/src/run/ci-rework-loop.ts — SHIP with a bounded CI rework loop (#2816)
-
 import { PREVIEW_REWORK_INSTRUCTIONS, previewReworkSummary, runPreviewCheck } from '../checkers/preview-check.js';
 import { createOctokitPreviewGitHub } from '../checkers/preview-source-octokit.js';
 import { attachVisualProof, publishVisualProof } from '../checkers/visual-proof-attach.js';
@@ -60,28 +58,17 @@ import type { RunPorts, RunRequest } from './run-issue.js';
 import type { RunPolicy } from './policy.js';
 import { shipParkReason } from './ship-park.js';
 
-/** Injectable seams for the CI rework loop; RunPorts extends this. */
 export interface CiReworkPorts {
-  /** BUILD rework worker used for CI rework rounds; defaults to check.ts's reworkWorker. */
   reworkWorker?: typeof reworkWorkerDefault;
-  /** Lists a PR's changed files for CI alert attribution; defaults to the GitHub REST lister. */
   listPrChangedFiles?: typeof listPrChangedFilesDefault;
-  /** Lists failing check names on the PR base branch's latest commit (#2817); defaults to the GitHub REST lister. */
   listBaseFailingChecks?: typeof listBaseFailingChecksDefault;
-  /** Lists open CodeQL alerts on the PR base branch for alert attribution (#3712); defaults to the GitHub REST lister. */
   listBaseCodeqlAlerts?: typeof listBaseCodeqlAlertsDefault;
-  /** Reads the worktree HEAD before a CI rework round (#2818); defaults to git rev-parse. */
   readWorktreeHead?: typeof readWorktreeHeadDefault;
-  /** Reads the diff a CI rework round produced (#2818); defaults to git diff <before> HEAD. */
   readReworkDiff?: typeof readReworkDiffDefault;
-  /** Fetches and merges origin/<PR base> into the worktree before a non-CodeQL CI rework round (#3537); no push. */
   mergeBaseIntoWorktree?: typeof mergeBaseIntoWorktreeDefault;
-  /** Downloads the failing Actions jobs' log tails for a non-CodeQL CI rework round (#3537). */
   collectFailingJobLogs?: typeof collectFailingJobLogsDefault;
-  /** Aborts when the lane loses this issue's claim lease (#3146): phase boundaries, push, PR creation and merge refuse to run. */
   claimSignal?: AbortSignal;
   loadPreviewConfig?: (worktree: string) => PreviewConfig | undefined;
-  /** Reads the trusted `visualProof` section for the SHIP visual proof gate (#2232); defaults to the repo config. */
   loadVisualProofConfig?: (worktree: string) => VisualProofConfig | undefined;
 }
 
@@ -90,7 +77,6 @@ export interface CiReworkLoopContext {
   ports: RunPorts;
   shipPhase: typeof shipPhaseDefault;
   checkPhase: typeof checkPhaseDefault;
-  /** The options the first CHECK ran with; reused verbatim for each re-CHECK. */
   checkOpts: Parameters<typeof checkPhaseDefault>[0];
   check: Awaited<ReturnType<typeof checkPhaseDefault>>;
   constitution: Constitution | null;
@@ -98,7 +84,6 @@ export interface CiReworkLoopContext {
   appBaseUrl: string | undefined;
   onPgid: (pgid: number) => void;
   runId: string;
-  /** Records a re-CHECK's summary, asserts the budget and interprets a failure like the first CHECK (#3435). */
   onRecheck: (recheck: CheckPhaseResult, round: number) => Promise<RunOutcome | undefined>;
 }
 
@@ -108,15 +93,12 @@ export interface CiReworkShipInputs {
   reviewRouting: ReviewRouting | undefined;
   pinNote: string | undefined;
   planSlice: PlanResult['slice'];
-  /** PR presentation policy, kept on every CI-rework re-entry. */
   pr?: RunPolicy['pr'];
 }
 
 export interface ShipWithCiReworkResult {
   ship: ShipResult;
-  /** Set when a re-CHECK ended the run; its terminal event is already logged. */
   outcome?: RunOutcome;
-  /** Set when the run must park: a SHIP that did not succeed, or a suppression attempt. */
   parked?: {
     reason: ParkReason;
     message: string;
@@ -127,7 +109,6 @@ export interface ShipWithCiReworkResult {
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/** Failing checks the PR caused (not failing on base) that are not CodeQL, in ship.ciFailure order. */
 function attributableNonCodeqlChecks(
   evidence: CiFailureEvidence | undefined,
   items: readonly { kind: string; ref: string; attributable: boolean }[],
@@ -145,7 +126,6 @@ const loadPreviewConfigDefault = (worktree: string): PreviewConfig | undefined =
 const loadVisualProofConfigDefault = (worktree: string): VisualProofConfig | undefined =>
   loadRepoConfig(worktree)?.visualProof;
 
-/** Screenshot routes the frozen plan's evidence plan names; a missing spec yields no routes; `error` is set when it or its design block cannot be read. */
 async function readPlanScreenshotRoutes(specPath: string | undefined): Promise<{ routes: string[]; error?: string }> {
   if (!specPath) return { routes: [] };
   try {
@@ -158,19 +138,6 @@ async function readPlanScreenshotRoutes(specPath: string | undefined): Promise<{
   }
 }
 
-/**
- * Runs SHIP. When the CI watch fails on CodeQL alerts the PR introduced (on changed files, or not open on base), feeds them to the
- * BUILD rework worker, re-runs CHECK and re-enters SHIP on the same PR, up to
- * resolveMaxCiReworkRounds() rounds — a counter separate from CHECK's own rework rounds.
- * When there are no such alerts but a non-CodeQL check fails that is not failing on the PR base (#3537),
- * each round first merges origin/<base> into the worktree (a conflict parks `conflict`) and feeds the
- * failing jobs' log tails to the worker, under the same budget and guard.
- * After each rework round the committed diff is scanned for suppression attempts (#2818); any hit,
- * or an unreadable diff, parks ci-failed before the re-CHECK, push or re-watch.
- * A check also failing on base whose log names a file the PR changed is attributable too (#3998). A baseline or
- * budget-exhausted park appends a note naming each failing check, its run link and the files and commits it flagged;
- * the park leaves the PR open.
- */
 export async function shipWithCiRework(
   ctx: CiReworkLoopContext,
   inputs: CiReworkShipInputs,
@@ -204,8 +171,6 @@ export async function shipWithCiRework(
     : undefined;
   const visualProofConfig = (ports.loadVisualProofConfig ?? loadVisualProofConfigDefault)(ports.workspace.path);
   const { routes: planRoutes, error: planRoutesError } = await readPlanScreenshotRoutes(request.specPath);
-  // No section at all stays `required`: plan screenshot entries then fail with the
-  // "no visualProof section" diagnostic. Only an explicit `mode: off` skips the gate (#4047).
   const visualProofMode = visualProofConfig?.mode ?? 'required';
   if (visualProofMode === 'off') ports.events('ship')('ship', 'visual proof is off by config (visualProof.mode: off)');
   const visualProofGate: VisualProofGate | undefined =

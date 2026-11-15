@@ -1,5 +1,3 @@
-// src/run/run-report-info.ts — what runIssue hands the local run report and benchmark artifact writers.
-
 import type { CheckSummary, FailurePhase } from '../types/index.js';
 import type { BuildRoute } from './outcome.js';
 

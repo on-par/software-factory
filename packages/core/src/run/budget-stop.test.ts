@@ -245,7 +245,6 @@ const WORKER_ROUTES: RoutesConfig = {
   },
 };
 
-/** A router whose first build call reports live usage and returns; the guard then trips. */
 function budgetRouter(): { router: ModelRouter; stub: StubModelExecutor } {
   const effect = (ctx: ModelExecutorContext) => ctx.onLiveUsage?.({ inputTokens: 10, outputTokens: 10, calls: 183 });
   const stub = new StubModelExecutor({

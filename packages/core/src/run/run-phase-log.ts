@@ -84,16 +84,15 @@ export async function writeRunPhaseLog(opts: RunPhaseLogOptions): Promise<string
   try {
     const cleanSection = redactText(stripVTControlCharacters(section(opts.result)));
     await mkdir(runDir, { recursive: true });
-    // One descriptor for the read and the rewrite, so the file can't be swapped between them.
-    const handle = await open(path, constants.O_RDWR | constants.O_CREAT, 0o600);
+    const readAndRewriteHandle = await open(path, constants.O_RDWR | constants.O_CREAT, 0o600);
     try {
       const buffer = Buffer.alloc(MAX_BYTES);
-      const { bytesRead } = await handle.read(buffer, 0, MAX_BYTES, 0);
+      const { bytesRead } = await readAndRewriteHandle.read(buffer, 0, MAX_BYTES, 0);
       const content = appendCapped(buffer.subarray(0, bytesRead).toString('utf8'), cleanSection);
-      await handle.truncate(0);
-      await handle.write(content, 0, 'utf8');
+      await readAndRewriteHandle.truncate(0);
+      await readAndRewriteHandle.write(content, 0, 'utf8');
     } finally {
-      await handle.close();
+      await readAndRewriteHandle.close();
     }
   } catch {
     opts.log('warn', `run phase log write failed for ${opts.phase}`);

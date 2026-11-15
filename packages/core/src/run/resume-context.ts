@@ -1,10 +1,3 @@
-// packages/core/src/run/resume-context.ts — the resume record runIssue keeps across an
-// environment release (#2340). When CHECK releases an issue because every failing checker also
-// fails on the base SHA, the frozen spec is still valid; this store remembers which issue body
-// it was planned from so the next claim can skip the boss PLAN call when the body is unchanged.
-// #2320 (resume at BUILD) extends this same record and store.
-// It also builds the #2583 park message for a config-caused CHECK failure.
-
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -23,28 +16,22 @@ import type { BuildRoutePin } from '../config/repo.js';
 import type { WorkKey } from '../work/work-key.js';
 
 export interface PlanReuseRecord {
-  /** issueBodyHash of the brief the frozen spec was planned from. */
   bodyHash: string;
-  /** Base SHA the CHECK environment release was decided on; absent for a rebuild (#3325). */
   baseSha?: string;
   route: BuildRoutePin;
   releasedAt: string;
 }
 
 export interface PlanReuseStore {
-  /** A PlanResult rebuilt from the frozen spec when the record matches bodyHash, else null. Never deletes. */
   load(bodyHash: string): Promise<PlanResult | null>;
   record(entry: PlanReuseRecord): Promise<void>;
-  /** Deletes the record; a missing file is not an error. */
   clear(): Promise<void>;
 }
 
-/** sha256 hex of the brief, insensitive to CRLF and outer whitespace. */
 export function issueBodyHash(brief: string): string {
   return createHash('sha256').update(brief.replace(/\r\n/g, '\n').trim()).digest('hex');
 }
 
-/** The sidecar next to the frozen spec: issue-N.md → issue-N.resume.json. */
 export function planReusePath(specPath: string): string {
   return specPath.endsWith('.md') ? `${specPath.slice(0, -3)}.resume.json` : `${specPath}.resume.json`;
 }
@@ -54,7 +41,6 @@ function isEnoent(err: unknown): boolean {
 }
 
 export function createPlanReuseStore(specPath: string): PlanReuseStore & {
-  /** Records the frozen spec for reuse so a rebuild (#3325) skips PLAN. Throws when there is no frozen spec with a route. */
   recordFrozen(brief: string): Promise<void>;
 } {
   const path = planReusePath(specPath);
@@ -103,35 +89,25 @@ export function createPlanReuseStore(specPath: string): PlanReuseStore & {
   };
 }
 
-/** Where a kept build resumes at CHECK after a config/environment release (#2564). */
 export interface CheckResumeRecord {
   issue: WorkKey;
   branch: string;
-  /** Absolute path of the kept lane worktree. */
   worktree: string;
-  /** build.diffBase from the original run (undefined when BUILD reported none). */
   diffBase?: string;
-  /** Base SHA the failing baseline ran on (EnvironmentFailure.baseSha) (#3852). */
   baseSha?: string;
   route: BuildRoutePin;
-  /** build.model of the original run, reused as CHECK's reworkModel. */
   model: string;
-  /** Whole minutes from PLAN start to BUILD end in the original run, at least 1. */
   buildMinutes: number;
-  /** What the user must fix, e.g. `.factory/constitution.md:14`. */
   fixTarget: string;
   preservedAt: string;
 }
 
 export interface CheckResumeStore {
-  /** ENOENT, malformed JSON or a wrong shape → null. */
   load(): Promise<CheckResumeRecord | null>;
   record(entry: CheckResumeRecord): Promise<void>;
-  /** Deletes the record; a missing file is not an error. */
   clear(): Promise<void>;
 }
 
-/** The sidecar next to the frozen spec: issue-N.md → issue-N.check-resume.json. */
 export function checkResumePath(specPath: string): string {
   return specPath.endsWith('.md') ? `${specPath.slice(0, -3)}.check-resume.json` : `${specPath}.check-resume.json`;
 }
@@ -159,8 +135,8 @@ export function createCheckResumeStore(specPath: string): CheckResumeStore {
         return null;
       }
       const record = stored as CheckResumeRecord;
-      // Sidecars written before ADR-0168 hold a numeric issue.
-      return typeof r.issue === 'number' ? { ...record, issue: String(r.issue) as WorkKey } : record;
+      const isLegacyNumericIssueSidecar = typeof r.issue === 'number';
+      return isLegacyNumericIssueSidecar ? { ...record, issue: String(r.issue) as WorkKey } : record;
     },
     async record(entry) {
       await mkdir(dirname(path), { recursive: true });
@@ -181,7 +157,6 @@ export function formatPreservedBuildMessage(opts: {
   return `${opts.buildMinutes} min of build preserved at ${opts.branch}; fix ${opts.fixTarget} — if the fix lands on the default branch, run factory run-issue ${opts.issue} (resume refuses once the base moves); if it was local to this machine, run factory resume ${opts.issue} --from check`;
 }
 
-/** How a kept build's branch relates to the current origin default branch (#3852). */
 export type CheckResumeBaseDrift =
   | { kind: 'current'; ref: string; sha: string }
   | { kind: 'moved'; ref: string; from: string; to: string }
@@ -191,7 +166,6 @@ function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Fetches origin and checks that the kept branch already contains origin's default branch. */
 export async function checkResumeBaseDrift(opts: {
   repoRoot: string;
   record: Pick<CheckResumeRecord, 'worktree' | 'baseSha' | 'diffBase'>;
@@ -239,7 +213,6 @@ export function formatBaseMovedRefusal(opts: {
   return `could not verify the kept build's base against origin (${drift.reason}) — nothing was resumed; retry, or run a fresh build: factory run-issue ${issue}`;
 }
 
-/** The file:line (or description) the user must fix before resuming CHECK. */
 export function preservedFixTarget(
   failure: Pick<EnvironmentFailure, 'cause' | 'failingChecks' | 'logPaths'>,
   constitution: Constitution | null,
@@ -267,7 +240,6 @@ export function preservedFixTarget(
   return failure.logPaths?.find((p) => existsSync(p)) ?? `the base (failing: ${failure.failingChecks.join(', ')})`;
 }
 
-/** Park message for a config-caused CHECK failure (#2583): file:line, the fix, and how to re-queue. */
 export function configParkMessage(opts: {
   issue: WorkKey;
   failure: Pick<EnvironmentFailure, 'cause' | 'failingChecks' | 'logPaths'>;

@@ -151,11 +151,10 @@ describe('runIssue — --no-pr', () => {
     ]);
   });
 
-  it('turns off BUILD publishing, the size gate, and the issue-body update', async () => {
+  it('turns off BUILD publishing, the size gate, and the issue-body update without the routing and prompt switch of localOnly', async () => {
     await runIssue(noPr, policy, ports(vi.fn<Log>()));
     expect(buildPhase.mock.calls[0][0]).toMatchObject({ disablePublish: true });
     expect(planPhase.mock.calls[0][0]).toMatchObject({ enforceSizeGate: false, updateIssueBodyOnEnrich: false });
-    // localOnly also switches routing and prompts; --no-pr must not.
     expect(buildPhase.mock.calls[0][0].localOnly).toBeFalsy();
   });
 

@@ -1,9 +1,3 @@
-// packages/core/src/run/ports.ts — Workspace + Environment ports (#674): names the
-// workspace-provisioning and lane-environment seams that today are satisfied only by
-// convention, and adapts the three existing workspace impls (locked CLI worktree, sim
-// throwaway workspace, local-only passthrough) plus the CLI's lease/pgid/release
-// primitives to conform. No existing caller is rewired — that is a later story.
-
 import type { EventKind } from '../events/kinds.js';
 import {
   acquirePortLease,
@@ -21,37 +15,19 @@ import { cleanupWorktree, setupWorktree } from '../utils/index.js';
 import { setupInPlaceCheckout } from '../utils/in-place.js';
 import type { LocalOnlyPolicy } from '../work/local-only.js';
 
-/** The workspace-provisioning seam runIssue needs: a working tree the pipeline
- *  phases run in (cwd), and a teardown. */
 export interface Workspace {
-  /** Absolute path of the provisioned working tree (phase cwd). */
   readonly path: string;
-  /** Tear down the working tree. Idempotent; a no-op for a caller-provided
-   *  (local-only) workspace. */
   dispose(): Promise<void>;
-  /** Set only by worktreeWorkspace when origin/<branch> pre-existed at creation (#1868). */
   readonly remoteBranch?: RemoteBranchRecord;
 }
 
-/** Optional lane environment bundling port-lease + pgid tracking + release as
- *  one invariant: a lane either holds a fully-leased, tracked environment or it
- *  has none — never a partial state. */
 export interface Environment {
-  /** The leased app port injected into build/checker child processes. */
   readonly port: number;
-  /** Env vars the lane's child processes get (PORT/FACTORY_APP_PORT/FACTORY_BASE_URL
-   *  + the headless contract), derived from the leased port. */
   env(): Record<string, string>;
-  /** Track a spawned child's process-group id in-memory AND persist it to the lease. */
   recordPgid(pgid: number): void;
-  /** Kill every tracked process group, then drop the port lease. Idempotent. */
   release(): Promise<void>;
 }
 
-/** Locked-CLI-worktree adapter: provisions via setupWorktree, tears down via
- *  cleanupWorktree. Locking stays the caller's responsibility (unchanged from the
- *  CLI today); this adapter only names the seam. setup/cleanup are injectable for
- *  tests. */
 export async function worktreeWorkspace(opts: {
   repoRoot: string;
   branch: string;
@@ -60,7 +36,6 @@ export async function worktreeWorkspace(opts: {
   log?: (type: EventKind, msg: string) => void;
   sandbox?: WorktreeSandbox;
   findOpenPr?: (branch: string) => Promise<PrLookup>;
-  /** worktree-keeps.json setup consults before replacing an existing worktree. */
   keepsFile?: string;
   setup?: typeof setupWorktree;
   cleanup?: typeof cleanupWorktree;
@@ -78,8 +53,6 @@ export async function worktreeWorkspace(opts: {
   };
 }
 
-/** In-place adapter (#3904): the current checkout IS the working tree. The factory did not
- *  create it, so dispose never tears it down. Locking stays the caller's responsibility. */
 export async function inPlaceWorkspace(opts: {
   repoRoot: string;
   branch: string;
@@ -96,22 +69,14 @@ export async function inPlaceWorkspace(opts: {
   };
 }
 
-/** Sim throwaway-workspace adapter: the sim's repoRoot IS the working tree; its
- *  dispose already removes every directory it created. */
 export function simWorkspace(sim: SimWorkspace): Workspace {
   return { path: sim.repoRoot, dispose: () => sim.dispose() };
 }
 
-/** Local-only passthrough adapter: the caller-provided workspace is used as-is and
- *  never torn down (factory did not create it). */
 export function localOnlyWorkspace(policy: LocalOnlyPolicy): Workspace {
   return { path: policy.workspace, dispose: async () => {} };
 }
 
-/** Lane-environment adapter composing exactly the primitives the CLI orchestrates
- *  inline (acquirePortLease + ProcessGroupTracker + recordLeasePgid +
- *  releasePortLease + laneEnv). Resolves to a fully-provisioned Environment, or
- *  throws — never a partial state. */
 export async function acquireLaneEnvironment(
   opts: AcquirePortLeaseOptions & { tracker?: ProcessGroupTracker; baseUrl?: string; graceMs?: number },
 ): Promise<Environment> {

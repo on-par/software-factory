@@ -108,7 +108,6 @@ describe('runIssue — check-infra park (#3371)', () => {
         ...o,
         worktree,
         runCheckers: runCheckers as never,
-        // The round-1 flake re-run (#4029) reproduces the same infra failure.
         runCommand: (async () => ({
           command: [],
           stdout: '',

@@ -1,5 +1,3 @@
-// packages/core/src/run/local-finish.ts — clean-CHECK endings for runs that never reach SHIP: local-only (#508) and --no-pr
-
 import type { CheckSummary } from '../types/index.js';
 import { upsertWorktreeKeep } from '../utils/worktree-keeps.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
@@ -9,11 +7,9 @@ export interface CleanCheck {
   route: BuildRoute;
   reworkRounds: number;
   checkSummary?: CheckSummary;
-  /** Local-only run-start HEAD (#1210); the benchmark diff is taken against it. */
   diffBase?: string;
 }
 
-/** Ends a run whose CHECK passed but must not ship. Returns undefined when the run ships as usual. */
 export async function finishWithoutShip(
   request: RunRequest,
   ports: RunPorts,
@@ -37,8 +33,6 @@ export async function finishWithoutShip(
     return { state: 'ready', route, branch, reworkRounds };
   }
   if (request.noPr) {
-    // The worktree is the run's only output: keep it out of the TTL and between-issue sweeps.
-    // A failed write only loses the GC protection; the checks still passed.
     try {
       if (request.worktreeKeepsPath) {
         upsertWorktreeKeep(request.worktreeKeepsPath, {

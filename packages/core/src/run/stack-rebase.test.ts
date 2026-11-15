@@ -1,5 +1,3 @@
-// packages/core/src/run/stack-rebase.test.ts — shared rebase --onto + atomic leased push, on a real git fixture.
-
 import { execFileSync } from 'node:child_process';
 import { readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

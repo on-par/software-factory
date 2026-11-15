@@ -1,11 +1,3 @@
-// src/run/lane-file-guard.ts — Same-file lane guard (#1515): a file-backed registry of
-// each in-flight run's PLAN-reported touched files, mirroring ProviderBreaker's
-// (router/breaker.ts) constructor(file) + read/write-tmp-and-rename shape so it works
-// across concurrent lane processes within one `factory run` invocation the same way the
-// breaker already does. Defers the second lane to claim an already-owned file (#3576: re-queues it
-// with a recorded hold, never parks it), rather than
-// letting two lanes' BUILD phases race to write conflicting diffs to the same path.
-
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
@@ -24,11 +16,9 @@ export interface LaneFileClaim {
   issue: WorkKey;
   files: string[];
   claimedAt: string;
-  /** pid of the process that registered the claim (#1618). Absent on claims written before it. */
   pid?: number;
 }
 
-/** #3576: a deferred issue waiting for `holder` to release `file`. */
 export interface LaneFileHold {
   repo: string;
   issue: WorkKey;
@@ -50,10 +40,6 @@ export interface LaneFileCollision {
   file: string;
 }
 
-/** The run's touched-files set, from the two DesignArtifact fields PLAN's own prompt
- *  requires to be real, checkout-relative paths — never the free-text `interfacesTouched`
- *  field, which PLAN can and does fill with bare symbol names. A `targetTypes` entry with
- *  `kind: 'read'` is excluded: a target a plan only reads can't produce a conflicting diff. */
 export function touchedFilesFrom(design: Pick<DesignArtifact, 'targetTypes' | 'signatures'>): string[] {
   const files = new Set<string>();
   for (const t of design.targetTypes) {
@@ -65,8 +51,6 @@ export function touchedFilesFrom(design: Pick<DesignArtifact, 'targetTypes' | 's
 
 export type LaneClaimStaleReason = 'issue-closed' | 'pr-merged' | 'pr-closed' | 'holder-not-running';
 
-/** Resolves why `claim`'s holder is finished, or undefined when it is (or may be) live. Must
- *  never throw for a lookup failure — return undefined so the claim keeps blocking. */
 export type LaneClaimStalenessProbe = (claim: LaneFileClaim) => Promise<LaneClaimStaleReason | undefined>;
 
 export interface FindCollisionOptions {
@@ -76,7 +60,6 @@ export interface FindCollisionOptions {
 
 export interface SweepStaleOptions {
   isStale: LaneClaimStalenessProbe;
-  /** Only sweep claims in this repo (owner/name). Omitted = every claim. */
   repo?: string;
   log?: (type: EventKind, msg: string) => void;
 }
@@ -93,7 +76,6 @@ function runKeyFor(repo: string, issue: WorkKey): string {
 export class LaneFileGuard {
   constructor(private file: string) {}
 
-  /** Upsert this run's claim (no-op for an empty file set — nothing to guard). */
   async register(repo: string, issue: WorkKey, files: string[]): Promise<void> {
     if (files.length === 0) return;
     const data = await this.read();
@@ -108,7 +90,6 @@ export class LaneFileGuard {
     await this.write(data);
   }
 
-  /** Removes this run's claim, if any. Safe to call on a repo+issue with no claim. */
   async release(repo: string, issue: WorkKey): Promise<void> {
     const data = await this.read();
     const key = runKeyFor(repo, issue);
@@ -117,7 +98,6 @@ export class LaneFileGuard {
     await this.write(data);
   }
 
-  /** Records that `issue` was deferred behind `collision.issue`'s claim on `collision.file` (#3576). */
   async recordHold(repo: string, issue: WorkKey, collision: LaneFileCollision): Promise<void> {
     const data = await this.read();
     data.holds[runKeyFor(repo, issue)] = {
@@ -130,8 +110,6 @@ export class LaneFileGuard {
     await this.write(data);
   }
 
-  /** The hold for `issue` while the holder's claim still lists the held file. A hold whose
-   *  holder claim is gone (released, parked, reaped) or no longer lists the file is deleted. */
   async liveHold(repo: string, issue: WorkKey): Promise<LaneFileHold | undefined> {
     const data = await this.read();
     const key = runKeyFor(repo, issue);
@@ -143,14 +121,11 @@ export class LaneFileGuard {
     return undefined;
   }
 
-  /** Every claim for `issue`, whatever its repo. Read-only — for `factory reset --dry-run`. */
   async claimsForIssue(issue: WorkKey): Promise<LaneFileClaim[]> {
     const data = await this.read();
     return Object.values(data.claims).filter((c) => c.issue === issue);
   }
 
-  /** Removes every claim for `issue`, whatever its repo. For `factory reset`, which may not
-   *  know the gh repo slug. Resolves true when any claim was removed. */
   async releaseIssue(issue: WorkKey): Promise<boolean> {
     const data = await this.read();
     let removed = false;
@@ -168,12 +143,6 @@ export class LaneFileGuard {
     return removed;
   }
 
-  /** Checks `files` against every other repo-scoped claim (the caller's own repo+issue is
-   *  excluded, so a re-check never collides with itself). Cross-repo claims never collide —
-   *  single-repo scope, by design. Returns the first colliding issue/file pair, if any.
-   *  With `opts.isStale` (#3063), an overlapping claim whose holder is provably finished is
-   *  removed (and logged as `lane_file_claim_reaped`) and the scan continues; an undefined
-   *  verdict, or a throwing probe, keeps the claim blocking. */
   async findCollision(
     repo: string,
     issue: WorkKey,
@@ -207,9 +176,6 @@ export class LaneFileGuard {
     return collision;
   }
 
-  /** Proactive stale-claim sweep (#3065): probes every claim (scoped to opts.repo when set)
-   *  and releases the ones whose holder is provably finished, logging each as
-   *  `lane_file_claim_reaped`. An undefined verdict or a throwing probe keeps the claim. */
   async sweepStale(opts: SweepStaleOptions): Promise<LaneClaimReap[]> {
     const data = await this.read();
     const stale: Array<{ key: string; claim: LaneFileClaim; reason: LaneClaimStaleReason }> = [];
@@ -227,7 +193,6 @@ export class LaneFileGuard {
     return this.reap(stale, opts.log);
   }
 
-  /** Drops probed-stale claims, skipping any whose holder re-registered since the probe. */
   private async reap(
     reaped: Array<{ key: string; claim: LaneFileClaim; reason: LaneClaimStaleReason }>,
     log: FindCollisionOptions['log'],
@@ -254,7 +219,6 @@ export class LaneFileGuard {
     try {
       const raw = await readFile(this.file, 'utf-8');
       const parsed = JSON.parse(raw) as Partial<LaneFileGuardFile>;
-      // Files written before ADR-0168 hold numeric issue/holder values; normalise so `===` matches.
       const claims = Object.fromEntries(
         Object.entries(parsed.claims ?? {}).map(([k, c]) => [k, { ...c, issue: String(c.issue) as WorkKey }]),
       );
@@ -278,9 +242,6 @@ export class LaneFileGuard {
   }
 }
 
-/** #3576: defer `issue` behind a live same-file collision. Records the hold best-effort (a
- *  failed write is logged and the run still defers), logs `issue_deferred`, and returns the
- *  released outcome — no park comment, no `factory:parked`. */
 export async function deferOnLaneCollision(
   guard: LaneFileGuard,
   request: { repo: string; issue: WorkKey; branch: string },
@@ -312,8 +273,6 @@ export async function deferOnLaneCollision(
   };
 }
 
-/** Best-effort claim release (#3067): a failing lane-files.json write is logged as
- *  `lane_file_release_failed` and the claim stays recorded; never throws. */
 export async function releaseLaneClaim(
   guard: LaneFileGuard,
   repo: string,
@@ -332,9 +291,6 @@ export async function releaseLaneClaim(
   }
 }
 
-/** GitHub-backed staleness probe (#3063). Fails safe: any lookup error, a live holder
- *  (claimLiveness says live or no-lease (#3442), an open PR, or a live recorded pid) or any lookup
- *  error returns undefined. No PR plus an absent or dead pid returns 'holder-not-running' (#1618). */
 export function createGithubLaneClaimStalenessProbe(opts: {
   octokit: Pick<Octokit, 'rest'>;
   branchPrefix?: string;
@@ -371,8 +327,6 @@ export function createGithubLaneClaimStalenessProbe(opts: {
   };
 }
 
-/** True only for a valid positive-integer pid that is alive on this host; an absent or
- *  malformed pid is never passed to process.kill (0/negatives target process groups). */
 function holderRunning(pid: unknown, isPidAlive: (pid: number) => boolean): boolean {
   return typeof pid === 'number' && Number.isInteger(pid) && pid > 0 && isPidAlive(pid);
 }

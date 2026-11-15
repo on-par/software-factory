@@ -1,5 +1,3 @@
-// packages/core/src/run/review-rework-cap.test.ts — the per-issue review-rework cap parks with one comment naming it (#3565).
-
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';

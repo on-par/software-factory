@@ -1,4 +1,3 @@
-// packages/core/src/run/feedback-github.ts — the GitHub port a feedback round reads feedback from and answers through (#3910)
 import type { Octokit } from '@octokit/rest';
 
 import { resolveSelfIdentity } from '../utils/github-identity.js';

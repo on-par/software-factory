@@ -1,6 +1,3 @@
-// packages/core/src/run/stack-engine.ts — the one stack engine for run-brief and run-issue --stack (#3798)
-
-/** What a slice run reports; a failed slice throws instead. */
 export interface SliceOutcome {
   prNumber?: number;
   branch?: string;
@@ -19,19 +16,14 @@ export interface StackSliceResult {
   title: string;
   status: 'ready' | 'failed' | 'skipped';
   prNumber?: number;
-  /** The base the slice ran on; only set when chaining. */
   base?: string;
   detail?: string;
 }
 
 export interface StackRunOptions {
-  /** Base of the first slice (and of every slice when chain is false). */
   base?: string;
-  /** true: slice k+1 bases on slice k's PR head and the stack stops at the first failure or missing PR. */
   chain: boolean;
-  /** Log prefix, e.g. 'run-brief'. */
   prefix: string;
-  /** Singular noun for the summary, e.g. 'brief' → "Briefs:" and "2/3 briefs succeeded". */
   noun: string;
   log: (level: StackLogLevel, line: string) => void;
 }
@@ -42,7 +34,6 @@ export interface StackRunResult {
   summary: string[];
 }
 
-/** The base the next stacked slice starts from: this slice's PR head branch, or why the stack stops. */
 function nextStackBase(outcome: SliceOutcome | undefined): { base: string } | { stop: string } {
   if (outcome && outcome.prNumber !== undefined && outcome.branch) return { base: outcome.branch };
   return { stop: 'opened no PR' };
@@ -65,8 +56,6 @@ function formatSummary(results: readonly StackSliceResult[], noun: string): stri
   return lines;
 }
 
-/** Runs the slices in order. When chaining, each slice bases on the previous slice's PR head and the
- *  stack stops at the first failure or missing PR, marking the rest skipped. */
 export async function runStack(plan: StackPlan, opts: StackRunOptions): Promise<StackRunResult> {
   const { chain, prefix, noun, log } = opts;
   const n = plan.length;

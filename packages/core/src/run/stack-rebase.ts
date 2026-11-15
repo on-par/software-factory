@@ -1,5 +1,3 @@
-// packages/core/src/run/stack-rebase.ts — shared rebase --onto + atomic leased push for stacked branches (ADR-0161).
-
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
@@ -7,16 +5,13 @@ import { execGit } from '../utils/git-exec.js';
 
 export interface StackRebaseLayer {
   branch: string;
-  /** The branch head the factory recorded; the push lease and rebase tip. */
   recordedHead: string;
-  /** The old base commit: commits after it are replayed. */
   upstream: string;
 }
 
 export interface StackRebaseOptions {
   repoRoot: string;
   remote: string;
-  /** Ref the first layer is replayed onto. */
   startBase: string;
   layers: StackRebaseLayer[];
 }
@@ -45,10 +40,16 @@ async function succeeds(cwd: string, ...args: string[]): Promise<boolean> {
   }
 }
 
-/** Rebases each layer bottom-up with `--onto` in a temp detached worktree, then pushes all in one leased atomic push. */
+async function conflictedFilesOrNone(cwd: string): Promise<string[]> {
+  try {
+    return (await git(cwd, 'diff', '--name-only', '--diff-filter=U')).split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 export async function rebaseAndPushStack(opts: StackRebaseOptions): Promise<StackRebaseResult> {
   const { repoRoot, remote, startBase, layers } = opts;
-  // Scratch worktree lives inside the repo's git dir, not the shared OS temp dir.
   const gitDir = resolve(repoRoot, await git(repoRoot, 'rev-parse', '--git-common-dir'));
   const tmp = await mkdtemp(join(gitDir, 'factory-restack-'));
   const newHeads: string[] = [];
@@ -64,12 +65,7 @@ export async function rebaseAndPushStack(opts: StackRebaseOptions): Promise<Stac
         await git(tmp, 'checkout', '--detach', layer.recordedHead);
         await git(tmp, 'rebase', '--onto', newBase, layer.upstream);
       } catch (err) {
-        let files: string[] = [];
-        try {
-          files = (await git(tmp, 'diff', '--name-only', '--diff-filter=U')).split('\n').filter(Boolean);
-        } catch {
-          // best effort
-        }
+        const files = await conflictedFilesOrNone(tmp);
         await succeeds(tmp, 'rebase', '--abort');
         const why = files.length > 0 ? `conflicted in: ${files.join(', ')}` : `failed: ${gitErrorDetail(err)}`;
         return { ok: false, at, phase: 'rebase', reason: `onto ${newBase} ${why}; nothing was pushed`, files };

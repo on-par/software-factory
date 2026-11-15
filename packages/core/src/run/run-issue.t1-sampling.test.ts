@@ -59,13 +59,12 @@ const policy: RunPolicy = {
 };
 
 const RATE = 0.25;
-/** First issue number whose sample value satisfies `pick`; the hash is fixed, so this is stable. */
-function issueWhere(pick: (value: number) => boolean): number {
+function firstIssueNumberWhere(pick: (value: number) => boolean): number {
   for (let n = 1; n < 1000; n++) if (pick(t1SampleValue('o/r', n))) return n;
   throw new Error('no issue number found');
 }
-const SAMPLED = issueWhere((v) => v < RATE);
-const UNSAMPLED = issueWhere((v) => v >= RATE);
+const SAMPLED = firstIssueNumberWhere((v) => v < RATE);
+const UNSAMPLED = firstIssueNumberWhere((v) => v >= RATE);
 
 function request(issue: number, prClassifier: NonNullable<RunRequest['prClassifier']>): RunRequest {
   const work: WorkRequest = {

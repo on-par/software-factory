@@ -1,5 +1,3 @@
-// packages/core/src/run/budget.ts — per-issue budget enforcement (#3316)
-
 import type { ProcessGroupTracker } from '../environment/process-groups.js';
 import type { EventKind } from '../events/kinds.js';
 import type { BudgetGuard } from '../router/budget-guard.js';
@@ -8,14 +6,11 @@ import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 
 export const BUDGET_KEEP_REASON = 'budget_exceeded';
 
-/** Spend and model call at which the budget guard stopped a live session (#3320). */
 export interface SessionBudgetStop {
   spendUsd: number;
   calls: number;
 }
 
-/** Build the live guard for BUILD/rework sessions: on the first update where committed plus running spend passes
- *  the cap it records the stop and kills the lane's process groups. No cap, no guard. */
 export function budgetGuardFor(
   policy: { budget: { perIssueCapUsd?: number } },
   ports: { getIssueSpend?: () => number },
@@ -39,8 +34,6 @@ export function budgetGuardFor(
   return { guard, stopped: () => stop };
 }
 
-/** Returns the park message when `spend` exceeds `cap`, else undefined. An over-budget park
- *  also records a keep for the worktree so GC leaves the nearly finished work alone. */
 export function enforceIssueBudget(input: {
   phase: string;
   spend: number;
@@ -50,7 +43,6 @@ export function enforceIssueBudget(input: {
   keepsFile?: string;
   log: (type: EventKind, msg: string) => void;
   now?: () => Date;
-  /** Set when the guard stopped a live session; always parks, with the during-phase message. */
   stop?: SessionBudgetStop;
 }): string | undefined {
   const { phase, spend, cap, key, worktreePath, keepsFile, log, now, stop } = input;

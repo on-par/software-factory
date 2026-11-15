@@ -11,7 +11,6 @@ export interface LaneInstallOptions {
   env: NodeJS.ProcessEnv;
   log: (type: EventKind, msg: string) => void;
   sandbox?: SandboxPolicy;
-  /** The workspace is the caller's own checkout; it must never be touched. */
   localOnly?: boolean;
   onPgid?: (pgid: number) => void;
   runCommand?: typeof runCommandDefault;
@@ -25,8 +24,6 @@ export type LaneInstallResult =
 
 const OUTPUT_TAIL_CHARS = 300;
 
-/** Runs the lockfile's frozen JS install once in a fresh lane worktree before BUILD (#3370).
- *  Never throws: a failed install is logged and BUILD goes on. */
 export async function installLaneDependencies(opts: LaneInstallOptions): Promise<LaneInstallResult> {
   const { worktree, log } = opts;
   const skip = (reason: string): LaneInstallResult => {

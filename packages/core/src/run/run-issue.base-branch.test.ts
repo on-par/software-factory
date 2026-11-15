@@ -1,5 +1,3 @@
-// packages/core/src/run/run-issue.base-branch.test.ts — parentBaseRef from --base-branch reaches CHECK and SHIP (#3764)
-
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
