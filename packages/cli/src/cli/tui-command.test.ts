@@ -8,6 +8,7 @@ import {
   h,
   installCliCommandsHarness,
   paths,
+  recordingRunTui,
   runMain,
   runMainWith,
 } from './test-support/cli-commands-harness.js';
@@ -17,17 +18,19 @@ installCliCommandsHarness();
 describe('cli commands (via main dispatch)', () => {
   describe('tui', () => {
     it('uses an injected deps.runTui instead of the real one, and the explicit argv wins over process.argv', async () => {
-      const fake = vi.fn(async () => {});
+      const seen: any[] = [];
+      const fake = async (o: any) => {
+        seen.push(o);
+      };
       process.argv = ['node', 'factory'];
       const res = await runMainWith({ runTui: fake }, 'tui');
       expect(res.exited).toBe(false);
-      expect(fake).toHaveBeenCalledTimes(1);
-      expect(fake).toHaveBeenCalledWith(
+      expect(seen).toEqual([
         expect.objectContaining({
           eventsFile: expect.stringMatching(/\.factory[\\/]state[\\/]events\.ndjson$/),
           repo: h.ghRepo,
         }),
-      );
+      ]);
       expect(h.runTuiCalls).toHaveLength(0);
     });
 
@@ -36,10 +39,17 @@ describe('cli commands (via main dispatch)', () => {
         ...h.factoryConfig,
         sandbox: { ...h.factoryConfig.sandbox, codexSandbox: 'workspace-write' },
       };
-      await runMain('tui');
-      expect(vi.mocked(coreFakes.ModelRouter).mock.results.at(-1)?.value.setCodexSandbox).toHaveBeenCalledWith(
-        'workspace-write',
-      );
+      const sandboxes: unknown[] = [];
+      function RecordingRouter(...a: any[]) {
+        const r = new (coreFakes.ModelRouter as any)(...a);
+        r.setCodexSandbox = (m: unknown) => {
+          sandboxes.push(m);
+        };
+        return r;
+      }
+      process.argv = ['node', 'factory', 'tui'];
+      await runMainWith({ ModelRouter: RecordingRouter as any, runTui: recordingRunTui }, 'tui');
+      expect(sandboxes).toContain('workspace-write');
     });
 
     it('calls runTui with the events file, detected repo, and a GitHub-backed queue reader by default', async () => {
@@ -70,13 +80,14 @@ describe('cli commands (via main dispatch)', () => {
           labels: ['factory:queued', 'factory:lane:cleanup', 'factory:order:1'],
         },
       ];
-      const listForRepo = vi.fn(async ({ labels }: any) =>
-        labels === 'factory:queued' ? { data: issues } : { data: [] },
-      );
-      h.octokit.rest.issues.listForRepo = listForRepo;
+      const requests: any[] = [];
+      h.octokit.rest.issues.listForRepo = async (req: any) => {
+        requests.push(req);
+        return req.labels === 'factory:queued' ? { data: issues } : { data: [] };
+      };
 
       await runMain('tui');
-      expect(listForRepo).not.toHaveBeenCalled();
+      expect(requests).toEqual([]);
 
       const snapshot = await h.runTuiCalls[0].queueReader!.read();
       expect(snapshot).toEqual({
@@ -85,14 +96,18 @@ describe('cli commands (via main dispatch)', () => {
           { lane: 'cleanup', issue: 12, title: 'Second in cleanup', status: 'queued' },
         ],
       });
-      expect(listForRepo).toHaveBeenCalledTimes(1);
+      expect(requests).toHaveLength(1);
+      expect(requests[0].labels).toBe('factory:queued');
     });
 
     it('--local-queue reads the queue file and its proposed count, and never calls GitHub (#1362)', async () => {
       writeFileSync(paths().queue, 'app 5\napp 6\n');
       writeFileSync(paths().queueProposed, 'app 7\n');
-      const listForRepo = vi.fn(async () => ({ data: [] }));
-      h.octokit.rest.issues.listForRepo = listForRepo;
+      const requests: unknown[] = [];
+      h.octokit.rest.issues.listForRepo = async (req: any) => {
+        requests.push(req);
+        return { data: [] };
+      };
 
       const res = await runMain('tui', '--local-queue');
       expect(res.exited).toBe(false);
@@ -106,7 +121,7 @@ describe('cli commands (via main dispatch)', () => {
         ],
         proposedCount: 1,
       });
-      expect(listForRepo).not.toHaveBeenCalled();
+      expect(requests).toEqual([]);
     });
 
     it('without a GitHub token the default reader yields the no-token message and the TUI still starts', async () => {
@@ -115,15 +130,18 @@ describe('cli commands (via main dispatch)', () => {
       h.execSyncImpl = () => {
         throw new Error('gh not authenticated');
       };
-      const listForRepo = vi.fn(async () => ({ data: [] }));
-      h.octokit.rest.issues.listForRepo = listForRepo;
+      const requests: unknown[] = [];
+      h.octokit.rest.issues.listForRepo = async (req: any) => {
+        requests.push(req);
+        return { data: [] };
+      };
 
       const res = await runMain('tui');
       expect(res.exited).toBe(false);
       const reader = h.runTuiCalls[0].queueReader!;
       expect(reader.source).toBe('GitHub');
       expect(await reader.read()).toEqual({ entries: [], error: 'no GitHub token — run `gh auth login`' });
-      expect(listForRepo).not.toHaveBeenCalled();
+      expect(requests).toEqual([]);
     });
 
     it('surfaces a GitHub lookup failure as a rejected read the TUI renders, not a crash at startup', async () => {
