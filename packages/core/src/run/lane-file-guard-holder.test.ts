@@ -5,6 +5,7 @@ import type { Octokit } from '@octokit/rest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
+import { recordArgs } from '../test-support/recorders.js';
 import { createGithubLaneClaimStalenessProbe, LaneFileGuard } from './lane-file-guard.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 
@@ -58,46 +59,46 @@ describe('LaneFileGuard holder-not-running', () => {
   });
 
   it('reaps a no-PR, not-in-progress claim with no pid field (older claim)', async () => {
-    const isPidAlive = vi.fn(() => true);
-    const { guard, events, check } = await setup(open, isPidAlive, {});
+    const probes = recordArgs((_: number) => true);
+    const { guard, events, check } = await setup(open, probes.fn, {});
     await expect(check()).resolves.toBeUndefined();
     expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(events[0][1]).toContain('holder-not-running');
-    expect(isPidAlive).not.toHaveBeenCalled();
+    expect(probes.calls).toEqual([]);
   });
 
   it.each([0, -1])('reaps a claim with malformed pid %i without probing it', async (pid) => {
-    const isPidAlive = vi.fn(() => true);
-    const { guard, events, check } = await setup(open, isPidAlive, {
+    const probes = recordArgs((_: number) => true);
+    const { guard, events, check } = await setup(open, probes.fn, {
       pid,
     });
     await expect(check()).resolves.toBeUndefined();
     expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(events[0][1]).toContain('holder-not-running');
-    expect(isPidAlive).not.toHaveBeenCalled();
+    expect(probes.calls).toEqual([]);
   });
 
   it('keeps a PR-less, not-in-progress claim whose recorded pid is alive', async () => {
-    const isPidAlive = vi.fn(() => true);
-    const { guard, events, check } = await setup(open, isPidAlive, {
+    const probes = recordArgs((_: number) => true);
+    const { guard, events, check } = await setup(open, probes.fn, {
       pid: 4242,
     });
     await expect(check()).resolves.toEqual({ issue: '1', file: 'a.swift' });
     expect(await guard.claimsForIssue(workKeyFromIssue(1))).toHaveLength(1);
-    expect(isPidAlive).toHaveBeenCalledWith(4242);
+    expect(probes.calls).toEqual([[4242]]);
     expect(events).toEqual([]);
   });
 
   it('keeps a claim with a dead pid and no PR when the holder is factory:in-progress or carries a live lease', async () => {
     const future = Math.floor(Date.now() / 1000) + 3600;
     for (const labels of [['factory:in-progress'], [`factory:claim-expires:${future}`]]) {
-      const isPidAlive = vi.fn(() => false);
-      const { guard, check } = await setup({ state: 'open', labels, title: 'Do thing' }, isPidAlive, {
+      const probes = recordArgs((_: number) => false);
+      const { guard, check } = await setup({ state: 'open', labels, title: 'Do thing' }, probes.fn, {
         pid: 4242,
       });
       await expect(check()).resolves.toEqual({ issue: '1', file: 'a.swift' });
       expect(await guard.claimsForIssue(workKeyFromIssue(1))).toHaveLength(1);
-      expect(isPidAlive).not.toHaveBeenCalled();
+      expect(probes.calls).toEqual([]);
     }
   });
 

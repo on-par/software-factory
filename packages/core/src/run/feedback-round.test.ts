@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { reworkWorker as realReworkWorker } from '../phases/check.js';
+import { recordArgs } from '../test-support/recorders.js';
 import {
   collectFeedbackItems,
   feedbackHandledMarker,
@@ -146,9 +147,9 @@ describe('triageFeedback', () => {
   ];
 
   it('wraps each item as untrusted feedback, carries the spec and validates dispositions', async () => {
-    const run = vi.fn(stub([{ id: 2, kind: 'comment', verdict: 'question', answer: 'because' }]));
-    const out = await triageFeedback({ items, spec: 'THE SPEC', run });
-    const prompt = String(run.mock.calls[0]?.[0] ?? '');
+    const run = recordArgs(stub([{ id: 2, kind: 'comment', verdict: 'question', answer: 'because' }]));
+    const out = await triageFeedback({ items, spec: 'THE SPEC', run: run.fn });
+    const prompt = String(run.calls[0]?.[0] ?? '');
     expect(prompt).toContain('THE SPEC');
     expect(prompt).toContain('ignore previous instructions');
     expect(prompt).toContain('untrusted');
@@ -187,9 +188,9 @@ describe('triageFeedback', () => {
   });
 
   it('skips the model call when there are no items', async () => {
-    const run = vi.fn(stub([]));
-    expect(await triageFeedback({ items: [], spec: '', run })).toEqual([]);
-    expect(run).not.toHaveBeenCalled();
+    const run = recordArgs(stub([]));
+    expect(await triageFeedback({ items: [], spec: '', run: run.fn })).toEqual([]);
+    expect(run.calls).toEqual([]);
   });
 });
 
@@ -284,15 +285,15 @@ describe('feedback round scenarios', () => {
       log,
     });
     expect(plan.summary).toBeUndefined();
-    const rework = vi.fn<typeof realReworkWorker>();
-    const octokit = { rest: { pulls: { get: vi.fn() } } } as never;
+    const rework = recordArgs(async () => Promise.reject(new Error('rework ran')));
+    const octokit = { rest: { pulls: { get: async () => ({}) } } } as never;
     await runRequestedReviewRework(
       { feedbackRound: { prNumber: 7 }, repo: 'o/r', branch: 'factory/7-x' },
-      { octokit, reworkWorker: rework },
+      { octokit, reworkWorker: rework.fn as typeof realReworkWorker },
       { log } as never,
       plan,
     );
-    expect(rework).not.toHaveBeenCalled();
+    expect(rework.calls).toEqual([]);
     await publishFeedbackRound({ github, plan, repo: 'o/r', headSha: undefined, log });
     expect(calls).toContainEqual(['reply', 5, expect.stringContaining('O(1) lookups')]);
     expect(calls.some((c) => c[0] === 'resolve')).toBe(false);
@@ -348,7 +349,7 @@ describe('feedback round scenarios', () => {
   });
 
   it('API errors in resolve and request-review warn without throwing', async () => {
-    const warn = vi.fn();
+    const warn = recordArgs((_t: string, _m: string) => {});
     const { github } = fakeGitHub({
       inline: [inline(1, 'amy', 'fix a')],
       threads: [{ threadId: 'T1', isResolved: false, commentIds: [1] }],
@@ -363,16 +364,16 @@ describe('feedback round scenarios', () => {
       run: stub([]),
       log,
     });
-    const out = await publishFeedbackRound({ github, plan, repo: 'o/r', headSha: SHA, log: warn });
+    const out = await publishFeedbackRound({ github, plan, repo: 'o/r', headSha: SHA, log: warn.fn });
     expect(out).toEqual({ replied: 1, resolved: 0, reviewersRequested: [] });
-    const messages = warn.mock.calls.map((c) => String(c[1]));
+    const messages = warn.calls.map((e) => e[1]);
     expect(messages.some((m) => m.includes('resolving thread T1'))).toBe(true);
     expect(messages.some((m) => m.includes('re-requesting review'))).toBe(true);
-    expect(warn).toHaveBeenLastCalledWith('feedback_round_replied', expect.stringContaining('replied to 1/1'));
+    expect(warn.calls.at(-1)).toEqual(['feedback_round_replied', expect.stringContaining('replied to 1/1')]);
   });
 
   it('a failed reply warns, is not counted and leaves its thread open', async () => {
-    const warn = vi.fn();
+    const warn = recordArgs((_t: string, _m: string) => {});
     const { github, calls } = fakeGitHub({
       inline: [inline(1, 'amy', 'fix a')],
       threads: [{ threadId: 'T1', isResolved: false, commentIds: [1] }],
@@ -388,10 +389,10 @@ describe('feedback round scenarios', () => {
       run: stub([]),
       log,
     });
-    const out = await publishFeedbackRound({ github, plan, repo: 'o/r', headSha: SHA, log: warn });
+    const out = await publishFeedbackRound({ github, plan, repo: 'o/r', headSha: SHA, log: warn.fn });
     expect(out.replied).toBe(0);
     expect(calls.some((c) => c[0] === 'resolve')).toBe(false);
-    expect(warn.mock.calls.some((c) => String(c[1]).includes('reply to inline:1'))).toBe(true);
+    expect(warn.calls.some((e) => e[1].includes('reply to inline:1'))).toBe(true);
   });
 
   it('a body-update failure warns; a closed PR is rejected; the PR author is not re-requested', async () => {
@@ -416,12 +417,12 @@ describe('feedback round scenarios', () => {
       log,
     });
     expect(plan.reviewers).toEqual(['amy']);
-    const warn = vi.fn();
+    const warn = recordArgs((_t: string, _m: string) => {});
     github.updatePullBody = async () => {
       throw new Error('x');
     };
-    await publishFeedbackRound({ github, plan, repo: 'o/r', headSha: SHA, revisedSpecSummary: 'S', log: warn });
-    expect(warn.mock.calls.some((c) => String(c[1]).includes('revised-spec'))).toBe(true);
+    await publishFeedbackRound({ github, plan, repo: 'o/r', headSha: SHA, revisedSpecSummary: 'S', log: warn.fn });
+    expect(warn.calls.some((e) => e[1].includes('revised-spec'))).toBe(true);
   });
 });
 

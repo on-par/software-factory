@@ -1,6 +1,7 @@
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
 
+import { recordArgs } from '../test-support/recorders.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 import { findOwnParkComment, issueStateMarker, upsertMarkerComment } from './park-comment.js';
 
@@ -19,18 +20,20 @@ function octokitFor(comments: { id: number; body: string; user: Author }[], toke
       : vi.fn(async () => {
           throw Object.assign(new Error('Resource not accessible by integration'), { status: 403 });
         });
-  const graphql = vi.fn(async () => ({ viewer: { login: 'factory-app[bot]', databaseId: APP_BOT } }));
+  const graphql = recordArgs(async () => ({
+    viewer: { login: 'factory-app[bot]', databaseId: APP_BOT },
+  }));
   const listComments = vi.fn(async () => ({ data: comments }));
   const createComment = vi.fn(async () => ({ data: { id: 1000 } }));
-  const updateComment = vi.fn(async () => ({ data: {} }));
+  const updateComment = recordArgs(async () => ({ data: {} }));
   const octokit = Object.assign({} as Octokit, {
-    graphql,
+    graphql: graphql.fn,
     rest: {
       users: { getAuthenticated, getByUsername: async () => ({ data: appBot }) },
-      issues: { listComments, createComment, updateComment },
+      issues: { listComments, createComment, updateComment: updateComment.fn },
     },
   });
-  return { octokit, graphql, createComment, updateComment };
+  return { octokit, graphqlCalls: graphql.calls, createComment, updateCalls: updateComment.calls };
 }
 
 describe('park comments with a GitHub App installation token', () => {
@@ -46,14 +49,14 @@ describe('park comments with a GitHub App installation token', () => {
       'app',
     );
     expect(await findOwnParkComment({ octokit: f.octokit, repo: 'o/r', issue: K7 })).toEqual({ id: 3, body: marker });
-    expect(f.graphql).toHaveBeenCalledTimes(1);
+    expect(f.graphqlCalls).toHaveLength(1);
   });
 
   it('creates a new comment instead of editing a marker comment by another bot', async () => {
     const f = octokitFor([{ id: 1, body: marker, user: otherBot }], 'app');
     const result = await upsertMarkerComment({ octokit: f.octokit, repo: 'o/r', issue: K7, marker, body: 'x' });
     expect(result).toEqual({ commentId: 1000, created: true });
-    expect(f.updateComment).not.toHaveBeenCalled();
+    expect(f.updateCalls).toEqual([]);
   });
 
   it('keeps user-token behaviour: REST identity, no GraphQL call', async () => {
@@ -65,6 +68,6 @@ describe('park comments with a GitHub App installation token', () => {
       'user',
     );
     expect(await findOwnParkComment({ octokit: f.octokit, repo: 'o/r', issue: K7 })).toEqual({ id: 2, body: marker });
-    expect(f.graphql).not.toHaveBeenCalled();
+    expect(f.graphqlCalls).toEqual([]);
   });
 });
