@@ -21,7 +21,7 @@ const label = (login: string, type = 'User'): LabelEvent => ({
 
 interface Setup {
   budget: LocBudget | string;
-  base?: LocBudget | 'missing';
+  base?: LocBudget | 'missing' | 'unreachable';
   events?: LabelEvent[] | 'throw';
   env?: NodeJS.ProcessEnv;
 }
@@ -34,6 +34,8 @@ function run(argv: string[], setup: Setup) {
     env: { GITHUB_REPOSITORY: 'o/r', ...setup.env },
     git: (args) => {
       if (args[0] === 'ls-files') return Object.keys(FILES).join('\0') + '\0';
+      if (setup.base === 'unreachable') throw new Error('bad revision');
+      if (args[0] === 'rev-parse') return 'abc';
       if (setup.base === undefined || setup.base === 'missing') throw new Error('bad object');
       return JSON.stringify(setup.base);
     },
@@ -176,6 +178,12 @@ describe('runLocBudget guard mode', () => {
     const r = run(GUARD, { budget: MATCHING, base: 'missing', events: [label('alice')] });
     expect(r.code).toBe(0);
     expect(r.out.join('\n')).toContain('raised a.source from none to 2');
+  });
+
+  it('fails instead of treating an unreachable base commit as an empty budget', () => {
+    const r = run(GUARD, { budget: MATCHING, base: 'unreachable', events: [label('alice')] });
+    expect(r.code).toBe(1);
+    expect(r.err.join('\n')).toContain('bad revision');
   });
 
   it('fails when the head budget does not match the tree', () => {

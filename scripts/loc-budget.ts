@@ -210,8 +210,10 @@ export function runLocBudget(argv: readonly string[], io: LocBudgetIo = {}): num
     head = parseLocBudget(readFile(LOC_BUDGET_FILE), 'head');
     findings = compareLocBudget(head, actual, listPackages());
     if (args) {
+      git(['rev-parse', '--verify', `${args.base}^{commit}`]);
       let baseText: string | undefined;
       try {
+        git(['cat-file', '-e', `${args.base}:${LOC_BUDGET_FILE}`]);
         baseText = git(['show', `${args.base}:${LOC_BUDGET_FILE}`]);
       } catch {
         baseText = undefined;
