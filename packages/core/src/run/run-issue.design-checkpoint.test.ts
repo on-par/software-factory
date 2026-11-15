@@ -4,7 +4,6 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import type { Octokit } from '@octokit/rest';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
-import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { buildPhase as realBuildPhase } from '../phases/build.js';
 import type { checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
@@ -12,9 +11,9 @@ import type { shipPhase as realShipPhase } from '../phases/ship.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
-import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import { issueBodyHash, type PlanReuseRecord, type PlanReuseStore } from './resume-context.js';
+import { WORKER_MODELS, WORKER_ROUTES, workerPolicy as policy } from '../test-support/worker-policy.test.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
 const WORK: WorkRequest = {
@@ -23,37 +22,6 @@ const WORK: WorkRequest = {
   title: 'Fix the thing',
   brief: 'do the thing',
   acceptanceCriteria: [],
-};
-
-const ROUTES: RoutesConfig = {
-  version: 1,
-  routes: {
-    build_claude: { tier: 'worker', description: 'stub', requires: 'claude' },
-    build_codex: { tier: 'worker', description: 'stub', requires: 'codex' },
-    build_command: { tier: 'worker', description: 'stub', requires: 'command' },
-  },
-};
-
-const MODELS: ModelsConfig = {
-  version: 1,
-  models: {
-    'my-model': {
-      provider: 'custom',
-      tier: 'worker',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-      harness: 'my-agent',
-    },
-  },
-  tiers: { worker: ['my-model'] },
-  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
-  routingRules: {},
-  harnesses: {
-    'my-agent': { command: 'my-agent {model}', prompt: 'stdin', output: 'stdout', agentic: true, usage: 'none' },
-  },
 };
 
 const dirs = createTempDirs();
@@ -75,20 +43,6 @@ const request: RunRequest = {
   failover: { enabled: false, cooldownMs: 60_000, fallbackModel: 'claude-sonnet-5' },
   efficiency: { maxReworkRounds: 1, fastPath: false },
   processGroupGraceMs: 50,
-};
-
-const policy: RunPolicy = {
-  models: MODELS,
-  routes: ROUTES,
-  sandbox: {
-    enabled: false,
-    runtime: 'auto',
-    network: { allow: [] },
-    resources: { cpuMs: 0, memMb: 0 },
-    docker: { rolloutPercent: 0 },
-  },
-  budget: {},
-  effective: {} as RunPolicy['effective'],
 };
 
 const PLAN_OK: PlanResult = {
@@ -140,21 +94,19 @@ function storeWith(load: PlanResult | null) {
 }
 
 function setup(labels: unknown[] | Error, planReuse?: PlanReuseStore) {
-  const planPhase = vi.fn<typeof realPlanPhase>().mockResolvedValue(PLAN_OK);
-  const buildPhase = vi.fn<typeof realBuildPhase>().mockResolvedValue({ ok: false } as never);
   const events: Array<[string, string]> = [];
   const planOpts: Parameters<typeof realPlanPhase>[0][] = [];
   const buildOpts: Parameters<typeof realBuildPhase>[0][] = [];
   const o = octokitWith(labels);
   const ports: RunPorts = {
-    router: new ModelRouter(MODELS, ROUTES),
+    router: new ModelRouter(WORKER_MODELS, WORKER_ROUTES),
     octokit: o.octokit,
     workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
     events: () => (t: string, m: string) => events.push([t, m]),
     breaker: new ProviderBreaker(join(breakerDir, 'breaker.json')),
     resolveConstitution: () => null,
-    planPhase: async (opts) => (planOpts.push(opts), planPhase(opts)),
-    buildPhase: async (opts) => (buildOpts.push(opts), buildPhase(opts)),
+    planPhase: async (opts) => (planOpts.push(opts), PLAN_OK),
+    buildPhase: async (opts) => (buildOpts.push(opts), { ok: false } as never),
     checkPhase: vi.fn<typeof realCheckPhase>(),
     shipPhase: vi.fn<typeof realShipPhase>(),
     planReuse,
