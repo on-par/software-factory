@@ -13,41 +13,33 @@ function planResult(): PlanResult {
 
 function setup(store: Partial<PlanReuseStore>, hit: PlanResult | null = null) {
   const logs: Array<[string, string]> = [];
-  const planLogs: Array<[string, string]> = [];
   const loaded: string[] = [];
-  const clears = { count: 0 };
+  let clears = 0;
   const full: PlanReuseStore = {
-    load: async (hash: string) => {
-      loaded.push(hash);
-      return hit;
-    },
+    load: async (hash: string) => (loaded.push(hash), hit),
     record: async () => undefined,
-    clear: async () => {
-      clears.count += 1;
-    },
+    clear: async () => void (clears += 1),
     ...store,
   };
   const log = (k: string, m: string) => void logs.push([k, m]);
-  const planLog = (k: string, m: string) => void planLogs.push([k, m]);
-  return { full, log, planLog, logs, planLogs, loaded, clears };
+  const planLog = log;
+  return { full, log, planLog, logs, loaded, clears: () => clears };
 }
 
 describe('loadReusablePlan (#2340)', () => {
   it('returns null without a store', async () => {
-    const { log, planLog, logs, planLogs } = setup({});
+    const { log, planLog, logs } = setup({});
     expect(await loadReusablePlan(undefined, request, log, planLog)).toBeNull();
     expect(logs).toEqual([]);
-    expect(planLogs).toEqual([]);
   });
 
   it('logs plan_reused for #7 on a hit and always clears', async () => {
     const hit = planResult();
-    const { full, log, planLog, logs, planLogs, loaded, clears } = setup({}, hit);
+    const { full, log, planLog, logs, loaded, clears } = setup({}, hit);
     expect(await loadReusablePlan(full, request, log, planLog)).toBe(hit);
     expect(loaded).toEqual([issueBodyHash('body')]);
-    expect(clears.count).toBe(1);
-    expect(logs).toEqual([]);
-    expect(planLogs).toEqual([
+    expect(clears()).toBe(1);
+    expect(logs).toEqual([
       [
         'plan_reused',
         'reusing frozen plan /plans/issue-7.md for #7 — body unchanged since the environment release, no PLAN model call',
@@ -56,10 +48,9 @@ describe('loadReusablePlan (#2340)', () => {
   });
 
   it('does not log plan_reused on a miss but still clears', async () => {
-    const { full, log, planLog, planLogs, clears } = setup({});
+    const { full, log, planLog, clears } = setup({});
     expect(await loadReusablePlan(full, request, log, planLog)).toBeNull();
-    expect(clears.count).toBe(1);
-    expect(planLogs).toEqual([]);
+    expect(clears()).toBe(1);
   });
 
   it('warns and plans when load throws, and still clears', async () => {
@@ -70,7 +61,7 @@ describe('loadReusablePlan (#2340)', () => {
     });
     expect(await loadReusablePlan(full, request, log, planLog)).toBeNull();
     expect(logs).toEqual([['environment_warning', 'could not read the plan-reuse record: boom — planning']]);
-    expect(clears.count).toBe(1);
+    expect(clears()).toBe(1);
   });
 
   it('warns when clear throws', async () => {

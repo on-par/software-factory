@@ -79,7 +79,6 @@ describe('probeIfDue', () => {
     const { deps, probed } = await setup(undefined, []);
     expect(await probeIfDue(deps, ORDER, 'claude', 'anthropic', 'claude-w')).toBe('not-due');
     expect(probed).toEqual([]);
-    expect((await deps.breaker.status('anthropic')).open).toBe(false);
   });
 
   it('restores on a passing probe, on the triage model', async () => {

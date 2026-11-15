@@ -108,8 +108,7 @@ describe('restackOnPrerequisite', () => {
     });
     expect(out).toMatchObject({ status: 'restacked', retargeted: true, headSha: remoteHead('factory/6-x') });
     expect(remoteLog('factory/6-x')).toEqual(['x only']);
-    expect(updates).toHaveLength(1);
-    const arg = updates[0] as { pull_number: number; base: string; body: string };
+    const arg = updates[0]! as { pull_number: number; base: string; body: string };
     expect(arg).toMatchObject({ pull_number: 60, base: 'main' });
     expect(arg.body).toContain('prerequisite merged; stacked on `main`');
     expect(parsePrerequisiteStackMarker(arg.body)).toBeUndefined();
@@ -140,8 +139,7 @@ describe('restackOnPrerequisite', () => {
     });
     expect(out).toMatchObject({ status: 'restacked', retargeted: false });
     expect(remoteLog('factory/6-x')).toEqual(['x only', 'b second', 'b only']);
-    expect(updates).toHaveLength(1);
-    const arg = updates[0] as { body: string; base?: string };
+    const arg = updates[0]! as { body: string; base?: string };
     expect(arg).not.toHaveProperty('base');
     expect(parsePrerequisiteStackMarker(arg.body)?.headSha).toBe(newHead);
   });

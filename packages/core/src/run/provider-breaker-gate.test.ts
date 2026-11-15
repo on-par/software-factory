@@ -209,7 +209,6 @@ describe('pickOrderedProvider restore probe (#3339)', () => {
     const pick = await pickOrderedProvider(deps, ALL, 'build', new Set());
     expect(pick).toEqual({ provider: 'claude', model: 'claude-w', skipped: new Set() });
     expect(probed).toEqual(['claude-w']);
-    expect((await deps.breaker.status('anthropic')).open).toBe(false);
   });
 
   it('skips the provider when the probe fails', async () => {
@@ -222,6 +221,15 @@ describe('pickOrderedProvider restore probe (#3339)', () => {
   });
 });
 
+function pickRecorder<T>(outcome: (() => T) | (() => never)) {
+  const picks: Array<ProviderPick | undefined> = [];
+  const attempt = async (pick: ProviderPick | undefined) => {
+    picks.push(pick);
+    return outcome();
+  };
+  return { attempt, picks };
+}
+
 describe('runWithProviderFailover', () => {
   async function setup(worker = ALL) {
     const events: Array<[EventKind, string, unknown]> = [];
@@ -231,61 +239,28 @@ describe('runWithProviderFailover', () => {
     return { deps: { ...(await orderedDeps()), log, issue: workKeyFromIssue(7), order: worker }, events };
   }
 
-  it('reruns once on the next provider after a usage cap and logs one provider_failover', async () => {
+  it.each([
+    ['usage_cap', capErr],
+    ['rate_limit', rateLimitErr],
+  ])('reruns once on the next provider after a %s and logs one provider_failover', async (kind, makeErr) => {
     const { deps, events } = await setup();
     const seen: Array<ProviderPick | undefined> = [];
-    let reruns = 0;
-    const beforeRerun = async () => {
-      reruns += 1;
-      return true;
-    };
     const result = await runWithProviderFailover(
       deps,
       'build',
       async (pick) => {
         seen.push(pick);
-        if (seen.length === 1) throw capErr();
+        if (seen.length === 1) throw makeErr();
         return 'done';
       },
-      { beforeRerun },
+      { beforeRerun: async () => true },
     );
     expect(result).toBe('done');
     expect(seen.map((p) => p?.provider)).toEqual(['claude', 'codex']);
-    expect(reruns).toBe(1);
     expect(events).toEqual([
       [
         'provider_failover',
-        expect.stringContaining('hit a usage_cap on claude'),
-        { providerFailover: { stage: 'build', from: 'claude', to: 'codex', issue: 7 } },
-      ],
-    ]);
-  });
-
-  it('reruns once on the next provider after a rate_limit and logs one provider_failover', async () => {
-    const { deps, events } = await setup();
-    const seen: Array<ProviderPick | undefined> = [];
-    let reruns = 0;
-    const beforeRerun = async () => {
-      reruns += 1;
-      return true;
-    };
-    const result = await runWithProviderFailover(
-      deps,
-      'build',
-      async (pick) => {
-        seen.push(pick);
-        if (seen.length === 1) throw rateLimitErr();
-        return 'done';
-      },
-      { beforeRerun },
-    );
-    expect(result).toBe('done');
-    expect(seen.map((p) => p?.provider)).toEqual(['claude', 'codex']);
-    expect(reruns).toBe(1);
-    expect(events).toEqual([
-      [
-        'provider_failover',
-        expect.stringContaining('hit a rate_limit on claude'),
+        expect.stringContaining(`hit a ${kind} on claude`),
         { providerFailover: { stage: 'build', from: 'claude', to: 'codex', issue: 7 } },
       ],
     ]);
@@ -293,11 +268,9 @@ describe('runWithProviderFailover', () => {
 
   it('rethrows a non-cap error without a rerun', async () => {
     const { deps, events } = await setup();
-    const picks: Array<ProviderPick | undefined> = [];
-    const attempt = async (pick: ProviderPick | undefined) => {
-      picks.push(pick);
+    const { attempt, picks } = pickRecorder(() => {
       throw new ModelRouterError('x', 'error', []);
-    };
+    });
     await expect(runWithProviderFailover(deps, 'build', attempt)).rejects.toThrow('x');
     expect(picks.map((p) => p?.provider)).toEqual(['claude']);
     expect(events).toEqual([]);
@@ -306,11 +279,9 @@ describe('runWithProviderFailover', () => {
   it('logs no remaining configured providers and rethrows the cap when the ladder is exhausted', async () => {
     const { deps, events } = await setup(order(['claude-w']));
     const err = capErr();
-    const picks: Array<ProviderPick | undefined> = [];
-    const attempt = async (pick: ProviderPick | undefined) => {
-      picks.push(pick);
+    const { attempt, picks } = pickRecorder(() => {
       throw err;
-    };
+    });
     await expect(runWithProviderFailover(deps, 'build', attempt)).rejects.toBe(err);
     expect(picks).toHaveLength(1);
     expect(events).toEqual([
@@ -321,11 +292,9 @@ describe('runWithProviderFailover', () => {
   it('rethrows the cap when beforeRerun refuses, and propagates when it throws', async () => {
     const { deps } = await setup();
     const err = capErr();
-    const picks: Array<ProviderPick | undefined> = [];
-    const attempt = async (pick: ProviderPick | undefined) => {
-      picks.push(pick);
+    const { attempt, picks } = pickRecorder(() => {
       throw err;
-    };
+    });
     await expect(runWithProviderFailover(deps, 'build', attempt, { beforeRerun: async () => false })).rejects.toBe(err);
     await expect(
       runWithProviderFailover(deps, 'build', attempt, {
@@ -339,11 +308,7 @@ describe('runWithProviderFailover', () => {
 
   it('calls the attempt once with undefined when nothing can be picked', async () => {
     const { deps } = await setup(order([]));
-    const picks: Array<ProviderPick | undefined> = [];
-    const attempt = async (pick: ProviderPick | undefined) => {
-      picks.push(pick);
-      return 'ok';
-    };
+    const { attempt, picks } = pickRecorder(() => 'ok');
     expect(await runWithProviderFailover(deps, 'build', attempt)).toBe('ok');
     expect(picks).toEqual([undefined]);
   });

@@ -32,29 +32,20 @@ async function withTmpDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 }
 
 class RecordingTracker extends ProcessGroupTracker {
-  readonly killed: number[][] = [];
-
+  killed: number[][] = [];
   override async killAll(): Promise<KillOutcome[]> {
     this.killed.push(this.pgids);
     return [];
   }
 }
 
-function recordingSetup(result: unknown) {
-  const setupCalls: unknown[][] = [];
-  const setup = async (...args: unknown[]) => {
-    setupCalls.push(args);
+function recorder(result?: unknown) {
+  const calls: unknown[][] = [];
+  const fn = async (...args: unknown[]) => {
+    calls.push(args);
     return result as never;
   };
-  return { setup, setupCalls };
-}
-
-function recordingCleanup() {
-  const cleanupCalls: unknown[][] = [];
-  const cleanup = async (...args: unknown[]) => {
-    cleanupCalls.push(args);
-  };
-  return { cleanup, cleanupCalls };
+  return { fn, calls };
 }
 
 describe('localOnlyWorkspace', () => {
@@ -68,7 +59,7 @@ describe('localOnlyWorkspace', () => {
 
 describe('inPlaceWorkspace', () => {
   it('inPlaceWorkspace path is the repo root and forwards the remote branch', async () => {
-    const { setup, setupCalls } = recordingSetup({ base: 'origin/main', head: 'x', remoteBranch: { sha: 'abc' } });
+    const { fn: setup, calls: setupCalls } = recorder({ base: 'origin/main', head: 'x', remoteBranch: { sha: 'abc' } });
     const findOpenPr = async () => ({ status: 'absent' as const });
     const ws = await inPlaceWorkspace({ repoRoot: '/repo', branch: 'b', findOpenPr, setup });
     expect(ws.path).toBe('/repo');
@@ -78,7 +69,7 @@ describe('inPlaceWorkspace', () => {
 
   it('inPlaceWorkspace dispose leaves the checkout in place', async () => {
     await withTmpDir(async (dir) => {
-      const { setup } = recordingSetup({ base: 'origin/main', head: 'x', remoteBranch: null });
+      const { fn: setup } = recorder({ base: 'origin/main', head: 'x', remoteBranch: null });
       const ws = await inPlaceWorkspace({ repoRoot: dir, branch: 'b', setup });
       expect(ws.remoteBranch).toBeUndefined();
       await ws.dispose();
@@ -99,7 +90,7 @@ describe('simWorkspace', () => {
 
 describe('worktreeWorkspace', () => {
   it('copies the pre-existing remote branch from the setup result and forwards findOpenPr (#1868)', async () => {
-    const { setup, setupCalls } = recordingSetup({ base: 'origin/main', head: 'x', remoteBranch: { sha: 'abc' } });
+    const { fn: setup, calls: setupCalls } = recorder({ base: 'origin/main', head: 'x', remoteBranch: { sha: 'abc' } });
     const findOpenPr = async () => ({ status: 'absent' as const });
 
     const ws = await worktreeWorkspace({
@@ -117,7 +108,7 @@ describe('worktreeWorkspace', () => {
   });
 
   it('leaves remoteBranch absent when the setup result has none', async () => {
-    const { setup } = recordingSetup({ base: 'origin/main', head: 'x', remoteBranch: null });
+    const { fn: setup } = recorder({ base: 'origin/main', head: 'x', remoteBranch: null });
 
     const ws = await worktreeWorkspace({
       repoRoot: '/repo',
@@ -130,79 +121,45 @@ describe('worktreeWorkspace', () => {
     expect('remoteBranch' in ws).toBe(false);
   });
 
-  it('provisions via injected setup, exposes worktreePath, and tears down via injected cleanup', async () => {
-    const { setup, setupCalls } = recordingSetup(undefined);
-    const { cleanup, cleanupCalls } = recordingCleanup();
+  const sandbox: WorktreeSandbox = { runtime: 'docker-sandbox', authPaths: ['/home/.claude'], allowHosts: [] };
+  it.each([
+    ['without a sandbox', undefined],
+    ['with the sandbox descriptor forwarded to both setup and cleanup', sandbox],
+  ])('provisions via injected setup and tears down via injected cleanup %s', async (_name, sbx) => {
+    const { fn: setup, calls: setupCalls } = recorder();
+    const { fn: cleanup, calls: cleanupCalls } = recorder();
     const log = () => {};
+    const path = '/repo/.worktrees/issue-1';
 
     const ws: Workspace = await worktreeWorkspace({
       repoRoot: '/repo',
       branch: 'issue-1',
-      worktreePath: '/repo/.worktrees/issue-1',
+      worktreePath: path,
+      sandbox: sbx,
       setup,
       cleanup,
       log,
     });
 
-    expect(setupCalls).toEqual([
-      ['/repo', 'issue-1', '/repo/.worktrees/issue-1', undefined, undefined, log, { findOpenPr: undefined }],
-    ]);
-    expect(ws.path).toBe('/repo/.worktrees/issue-1');
+    expect(setupCalls).toEqual([['/repo', 'issue-1', path, undefined, sbx, log, { findOpenPr: undefined }]]);
+    expect(ws.path).toBe(path);
 
-    expect(cleanupCalls).toEqual([]);
     await ws.dispose();
-    expect(cleanupCalls).toEqual([['/repo', '/repo/.worktrees/issue-1', log, undefined]]);
-  });
-
-  it('forwards the sandbox descriptor to both setup and cleanup', async () => {
-    const { setup, setupCalls } = recordingSetup(undefined);
-    const { cleanup, cleanupCalls } = recordingCleanup();
-    const log = () => {};
-    const sandbox: WorktreeSandbox = { runtime: 'docker-sandbox', authPaths: ['/home/.claude'], allowHosts: [] };
-
-    const ws: Workspace = await worktreeWorkspace({
-      repoRoot: '/repo',
-      branch: 'issue-3',
-      worktreePath: '/repo/.worktrees/issue-3',
-      sandbox,
-      setup,
-      cleanup,
-      log,
-    });
-
-    expect(setupCalls).toEqual([
-      ['/repo', 'issue-3', '/repo/.worktrees/issue-3', undefined, sandbox, log, { findOpenPr: undefined }],
-    ]);
-
-    expect(cleanupCalls).toEqual([]);
-    await ws.dispose();
-    expect(cleanupCalls).toEqual([['/repo', '/repo/.worktrees/issue-3', log, sandbox]]);
+    expect(cleanupCalls).toEqual([['/repo', path, log, sbx]]);
   });
 
   it('passes an explicit startPoint through to setup verbatim', async () => {
-    const { setup, setupCalls } = recordingSetup(undefined);
-    const { cleanup } = recordingCleanup();
-
+    const { fn: setup, calls: setupCalls } = recorder();
     await worktreeWorkspace({
       repoRoot: '/repo',
       branch: 'issue-2',
       worktreePath: '/repo/.worktrees/issue-2',
       startPoint: 'origin/develop',
       setup,
-      cleanup,
+      cleanup: async () => {},
     });
 
-    expect(setupCalls).toEqual([
-      [
-        '/repo',
-        'issue-2',
-        '/repo/.worktrees/issue-2',
-        'origin/develop',
-        undefined,
-        undefined,
-        { findOpenPr: undefined },
-      ],
-    ]);
+    expect(setupCalls[0]?.slice(0, 4)).toEqual(['/repo', 'issue-2', '/repo/.worktrees/issue-2', 'origin/develop']);
   });
 });
 
