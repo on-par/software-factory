@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Octokit } from '@octokit/rest';
 import { findAdoptablePr } from './adopt-pr.js';
+import { recordArgs } from '../test-support/recorders.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 
 const REPO = 'acme/widgets';
@@ -10,14 +11,11 @@ const pr = (number: number, ref: string, repo: string | null = REPO) => ({
 });
 
 function stub(pages: unknown[][] | Error) {
-  const requests: Record<string, unknown>[] = [];
-  const list = async (params: { page: number }) => {
-    requests.push(params);
+  const { calls: requests, fn: list } = recordArgs(async ({ page }: { page: number }) => {
     if (pages instanceof Error) throw pages;
-    return { data: pages[params.page - 1] ?? [] };
-  };
-  const octokit = { rest: { pulls: { list } } } as any;
-  return { octokit, requests };
+    return { data: pages[page - 1] ?? [] };
+  });
+  return { octokit: { rest: { pulls: { list } } } as any, requests };
 }
 
 const find = (octokit: Pick<Octokit, 'rest'>, maxPages?: number) =>
@@ -74,7 +72,7 @@ describe('findAdoptablePr', () => {
     const full = Array.from({ length: 100 }, (_, i) => pr(1000 + i, `feature/x-${i}`));
     const { octokit, requests } = stub([full, [pr(7, 'factory/2253-late')]]);
     expect(await find(octokit)).toMatchObject({ status: 'found', prNumber: 7 });
-    expect(requests.map((r) => r.page)).toEqual([1, 2]);
+    expect(requests.map(([r]) => r.page)).toEqual([1, 2]);
   });
 
   it('errors when the last allowed page is still full', async () => {
@@ -96,6 +94,6 @@ describe('findAdoptablePr', () => {
     await find(octokit);
     expect(Object.keys(octokit.rest)).toEqual(['pulls']);
     expect(Object.keys(octokit.rest.pulls)).toEqual(['list']);
-    expect(requests).toEqual([{ owner: 'acme', repo: 'widgets', state: 'open', per_page: 100, page: 1 }]);
+    expect(requests).toEqual([[{ owner: 'acme', repo: 'widgets', state: 'open', per_page: 100, page: 1 }]]);
   });
 });

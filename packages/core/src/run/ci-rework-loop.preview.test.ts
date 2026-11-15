@@ -3,11 +3,12 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { PreviewConfigSchema } from '../config/preview-section.js';
 import type { ShipResult } from '../phases/ship.js';
 import { CHECK_OK, policy, ports, readReworkDiff, request, resetCiReworkMocks, tmp } from './ci-rework-test-helpers.js';
+import { recordArgs } from '../test-support/recorders.js';
 import { runIssue, type RunPorts } from './run-issue.js';
 
 afterAll(() => tmp.cleanup());
 beforeEach(resetCiReworkMocks);
-
+type ReworkOpts = Parameters<NonNullable<RunPorts['reworkWorker']>>[0];
 describe('shipWithCiRework — preview gate (#3880)', () => {
   const PREVIEW = PreviewConfigSchema.parse({ source: { kind: 'deployment', environment: 'p/*' }, command: ['smoke'] });
   const evidence = {
@@ -25,65 +26,48 @@ describe('shipWithCiRework — preview gate (#3880)', () => {
     previewCheck: { status: 'preview-unavailable', evidence },
     headSha: 'sha',
   };
+  const failed = (why: string) => [
+    'fail',
+    `ship phase failed: preview check preview-unavailable for PR #9: ${why}`,
+    expect.anything(),
+  ];
   function rig(queued: ShipResult[], previewConfig: RunPorts['loadPreviewConfig'] = () => PREVIEW) {
-    const events: { type: string; msg: string }[] = [];
-    const ships: Parameters<NonNullable<RunPorts['shipPhase']>>[0][] = [];
-    const reworks: Parameters<NonNullable<RunPorts['reworkWorker']>>[0][] = [];
-    const results = [...queued];
-    let checks = 0;
+    const { calls: events, fn: log } = recordArgs((_type: string, _msg: string) => {});
+    const ships = recordArgs(async (_o: unknown) => (queued.length > 1 ? (queued.shift() as ShipResult) : queued[0]));
+    const reworks = recordArgs(async (_o: ReworkOpts) => ({ failovers: [], modelCompleted: true }));
+    const checks = recordArgs(async () => CHECK_OK);
     const rigged: RunPorts = {
-      ...ports((type, msg) => {
-        events.push({ type, msg });
-      }),
+      ...ports(log),
       loadPreviewConfig: previewConfig,
-      shipPhase: async (o) => {
-        ships.push(o);
-        return results.length > 1 ? (results.shift() as ShipResult) : results[0];
-      },
-      reworkWorker: async (o) => {
-        reworks.push(o);
-        return { failovers: [], modelCompleted: true };
-      },
-      checkPhase: async () => {
-        checks += 1;
-        return CHECK_OK;
-      },
+      shipPhase: ships.fn,
+      reworkWorker: reworks.fn,
+      checkPhase: checks.fn,
     };
-    return { rigged, ships, reworks, events, checks: () => checks };
+    return { rigged, ships: ships.calls, reworks: reworks.calls, events, checks: checks.calls };
   }
 
   it('passes no previewGate to SHIP when the repo has no preview config', async () => {
     const { rigged, ships } = rig([{ ok: true, prNumber: 9 }], () => undefined);
     await runIssue(request, policy, rigged);
-    expect(ships[0]).not.toHaveProperty('previewGate');
+    expect(ships[0][0]).not.toHaveProperty('previewGate');
   });
 
   it('a failed preview check runs a rework round, re-checks and re-enters SHIP', async () => {
     const { rigged, ships, reworks, events, checks } = rig([PREVIEW_FAIL, { ok: true, prNumber: 9 }]);
     expect(await runIssue(request, policy, rigged)).toMatchObject({ state: 'ready' });
-    expect(ships[0]).toHaveProperty('previewGate');
-    expect(reworks[0].extraInstructions).toContain('deployed preview failed');
-    expect(reworks[0].summary.results[0].details).toContain('Preview check: preview-unavailable');
-    expect(checks()).toBe(2);
-    expect(ships[1]).toMatchObject({ reentry: { prNumber: 9 } });
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'rework',
-        msg: 'CI rework round 1/2: preview check preview-unavailable on PR #9',
-      }),
-    );
+    expect(ships[0][0]).toHaveProperty('previewGate');
+    expect(reworks[0][0].extraInstructions).toContain('deployed preview failed');
+    expect(reworks[0][0].summary.results[0].details).toContain('Preview check: preview-unavailable');
+    expect(checks).toHaveLength(2);
+    expect(ships[1][0]).toMatchObject({ reentry: { prNumber: 9 } });
+    expect(events).toContainEqual(['rework', 'CI rework round 1/2: preview check preview-unavailable on PR #9']);
   });
 
   it('parks fail with the preview reason when the rework budget is exhausted', async () => {
     const { rigged, reworks, events } = rig([PREVIEW_FAIL]);
     expect(await runIssue(request, policy, rigged)).toMatchObject({ state: 'parked', reason: 'fail' });
     expect(reworks).toHaveLength(2);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'fail',
-        msg: 'ship phase failed: preview check preview-unavailable for PR #9: never ready — preview rework budget exhausted after 2 rounds',
-      }),
-    );
+    expect(events).toContainEqual(failed('never ready — preview rework budget exhausted after 2 rounds'));
   });
 
   it('applies the suppression guard to preview rework', async () => {
@@ -113,11 +97,6 @@ describe('shipWithCiRework — preview gate (#3880)', () => {
     expect(await runIssue(request, policy, rigged)).toMatchObject({ state: 'parked', reason: 'fail' });
     expect(reworks).toHaveLength(0);
     expect(ships).toHaveLength(1);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'fail',
-        msg: 'ship phase failed: preview check preview-unavailable for PR #9: CI pending, preview not checked',
-      }),
-    );
+    expect(events).toContainEqual(failed('CI pending, preview not checked'));
   });
 });

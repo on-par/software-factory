@@ -19,6 +19,7 @@ import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 import { workKeyFromIssue } from '../work/work-key.js';
+import { recordArgs } from '../test-support/recorders.js';
 
 const tempDirs = createTempDirs();
 afterAll(() => tempDirs.cleanup());
@@ -101,20 +102,13 @@ describe('runIssue — check-infra park (#3371)', () => {
     const worktree = tempDirs.makeSync('check-infra-park-');
     await mkdir(join(worktree, 'scripts'), { recursive: true });
     await writeFile(join(worktree, 'scripts', 'verify.sh'), '#!/usr/bin/env bash\n');
-    const events: { type: string; msg: string }[] = [];
-    const log: Log = (type, msg) => {
-      events.push({ type, msg });
-    };
-    let checkerRuns = 0;
-    const runCheckers = async () => {
-      checkerRuns += 1;
-      return ECONNRESET_SUMMARY;
-    };
+    const { calls: events, fn: log } = recordArgs((_type: string, _msg: string) => {});
+    const checkerRuns = recordArgs(async () => ECONNRESET_SUMMARY);
     const checkPhase: RunPorts['checkPhase'] = (o) =>
       realCheckPhase({
         ...o,
         worktree,
-        runCheckers: runCheckers as never,
+        runCheckers: checkerRuns.fn as never,
         runCommand: (async () => ({
           command: [],
           stdout: '',
@@ -128,11 +122,10 @@ describe('runIssue — check-infra park (#3371)', () => {
       });
 
     const outcome = await runIssue(request, policy, ports(log, worktree, checkPhase));
-
     expect(outcome).toMatchObject({ state: 'parked', reason: 'check-infra' });
-    expect(checkerRuns).toBe(2);
-    const parked = events.find((e) => e.type === 'check-infra');
-    expect(parked?.msg).toContain(checkInfraParkMessage('tests', 'read ECONNRESET'));
+    expect(checkerRuns.calls).toHaveLength(2);
+    const parked = expect.stringContaining(checkInfraParkMessage('tests', 'read ECONNRESET'));
+    expect(events).toContainEqual(['check-infra', parked, expect.anything()]);
   });
 
   it('has a park hint naming the infrastructure cause', () => {
