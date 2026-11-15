@@ -71,9 +71,10 @@ describe('upsertRiskReceipt', () => {
 function fakeOctokit(body: string | null, filenames: string[]) {
   const listFiles = vi.fn(async () => ({ data: filenames.map((filename) => ({ filename })) }));
   const get = vi.fn(async () => ({ data: { body } }));
-  const update = vi.fn(async (_args: { body: string; pull_number: number }) => ({}));
+  const updates: { body: string; pull_number: number }[] = [];
+  const update = async (args: { body: string; pull_number: number }) => ({ count: updates.push(args) });
   const octokit = { rest: { pulls: { listFiles, get, update } } } as never;
-  return { octokit, listFiles, get, update };
+  return { octokit, listFiles, get, updates };
 }
 
 describe('publishRiskReceipt', () => {
@@ -82,7 +83,7 @@ describe('publishRiskReceipt', () => {
     const legacy = `${RISK_RECEIPT_START}\n${paths.join(' ')}\n${RISK_RECEIPT_END}`;
     const f = fakeOctokit(`intro\n${legacy}\noutro`, paths);
     const result = await publishRiskReceipt({ octokit: f.octokit, owner: 'o', repo: 'r', prNumber: 5 });
-    const body = f.update.mock.calls[0][0].body;
+    const body = f.updates[0].body;
     expect(body).toContain(renderRiskReceipt(result.evaluation));
     expect(body).toContain(`**Tier: ${result.evaluation.tier}**`);
     for (const rule of result.evaluation.rules) expect(body).toContain(`\`${rule.id}\``);
@@ -92,12 +93,12 @@ describe('publishRiskReceipt', () => {
   it('writes a receipt with the tier into the PR body', async () => {
     const f = fakeOctokit('Closes #5', ['src/auth/login.ts']);
     const res = await publishRiskReceipt({ octokit: f.octokit, owner: 'o', repo: 'r', prNumber: 5 });
-    expect(f.update).toHaveBeenCalledTimes(1);
-    const arg = f.update.mock.calls[0];
-    expect(arg[0].pull_number).toBe(5);
-    expect(arg[0].body).toContain('Closes #5');
-    expect(arg[0].body).toContain('**Tier: high**');
-    expect(arg[0].body).toContain('`auth`');
+    const [arg, ...rest] = f.updates;
+    expect(rest).toEqual([]);
+    expect(arg.pull_number).toBe(5);
+    expect(arg.body).toContain('Closes #5');
+    expect(arg.body).toContain('**Tier: high**');
+    expect(arg.body).toContain('`auth`');
     expect(res.updated).toBe(true);
     expect(res.evaluation.tier).toBe('high');
   });
@@ -105,10 +106,10 @@ describe('publishRiskReceipt', () => {
   it('does not write again when the body already holds this receipt', async () => {
     const first = fakeOctokit('Closes #5', ['src/auth/login.ts']);
     await publishRiskReceipt({ octokit: first.octokit, owner: 'o', repo: 'r', prNumber: 5 });
-    const written = first.update.mock.calls[0][0].body;
+    const written = first.updates[0].body;
     const second = fakeOctokit(written, ['src/auth/login.ts']);
     const res = await publishRiskReceipt({ octokit: second.octokit, owner: 'o', repo: 'r', prNumber: 5 });
-    expect(second.update).not.toHaveBeenCalled();
+    expect(second.updates).toEqual([]);
     expect(res.updated).toBe(false);
   });
 
