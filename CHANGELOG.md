@@ -9,14 +9,15 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
-- CI and verify enforce a per-package TypeScript line budget in loc-budget.json that can only fall; raising it needs a human-applied loc-budget:override label (#4124).
 - Lint rule `anti-slop/no-comments` bans source comments except justified lint overrides and toolchain directives, with a shrink-only per-file baseline and a CI guard (#4053).
 - Lint rule `anti-slop/package-boundaries` enforces the config ← core ← cli direction, a zero-dependency config, published-name cross-package imports and the ADR-0004 `/internal` and `/testing` subpath boundaries (#4052).
 - Lint rule `anti-slop/no-call-assertions` bans call-count assertions and mock-call reads in tests, with a shrink-only per-file baseline and a CI guard (#4051).
+- CI and verify enforce a per-package TypeScript line budget in loc-budget.json that can only fall; raising it needs a human-applied loc-budget:override label (#4124).
 
 ### Changed
 
 - Direct `mkdtemp(tmpdir())` in tests is now an oxlint error (`anti-slop/no-direct-tmpdir-mkdtemp`), replacing the vitest guard, and a lefthook pre-commit hook runs `oxlint --fix` and `prettier --write` on staged files (#4050).
+- Config defaults that core repeated as inline literals (FactoryConfigSchema defaults, resolver fallbacks, the 227 usage cap and the 0.75 watchdog stopAt) are now read from `@on-par/factory-config`, which exports `defaultBudget` and `defaultSchemaFields`; effective defaults are unchanged (#3444).
 
 ### Removed
 

@@ -45,6 +45,7 @@ export interface ModelsDefaults {
 
 export type { RouteDefaults, RoutesDefaults } from './defaults-routes.js';
 export { defaultRoutesConfig } from './defaults-routes.js';
+export { defaultBudget, defaultSchemaFields } from './defaults-runtime.js';
 
 export interface FactoryDefaults {
   version: number;
