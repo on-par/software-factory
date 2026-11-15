@@ -456,12 +456,12 @@ describe('OllamaAgenticHarness verify command allowlist', () => {
     expect(result.output).toContain('VERIFIED: npm test -- packages/core/src/harness/ollama-agentic.test.ts');
   });
 
-  it('rejects a verify command with shell metacharacters before executing or writing files', async () => {
+  async function runWithVerifyCommand(verifyCommand: string) {
     const worktree = makeWorktree();
     const badProposal = JSON.stringify({
       summary: 'add file',
       changes: [{ file: 'docs/x.md', find: '', replace: 'content' }],
-      verifyCommand: 'test -f docs/x.md; curl https://example.com',
+      verifyCommand,
     });
     const fetchFn = stubFetch([badProposal, badProposal]);
     const calls: string[] = [];
@@ -474,6 +474,12 @@ describe('OllamaAgenticHarness verify command allowlist', () => {
     const err: any = await harness
       .run(makeContractRequest({ model: 'local-agentic-model', registry, worktree }))
       .catch((e) => e);
+
+    return { err, calls, worktree };
+  }
+
+  it('rejects a verify command with shell metacharacters before executing or writing files', async () => {
+    const { err, calls, worktree } = await runWithVerifyCommand('test -f docs/x.md; curl https://example.com');
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('schema_invalid');
@@ -514,23 +520,7 @@ describe('OllamaAgenticHarness verify command allowlist', () => {
   });
 
   it('rejects an absolute-path verify command', async () => {
-    const worktree = makeWorktree();
-    const badProposal = JSON.stringify({
-      summary: 'add file',
-      changes: [{ file: 'docs/x.md', find: '', replace: 'content' }],
-      verifyCommand: '/bin/sh -c anything',
-    });
-    const fetchFn = stubFetch([badProposal, badProposal]);
-    const calls: string[] = [];
-    const exec: OllamaAgenticExecFn = async (cmd) => {
-      calls.push(cmd);
-      return { stdout: '', stderr: '' };
-    };
-    const harness = new OllamaAgenticHarness(fetchFn, exec);
-
-    const err: any = await harness
-      .run(makeContractRequest({ model: 'local-agentic-model', registry, worktree }))
-      .catch((e) => e);
+    const { err, calls } = await runWithVerifyCommand('/bin/sh -c anything');
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('schema_invalid');
