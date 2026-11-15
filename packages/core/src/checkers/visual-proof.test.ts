@@ -10,7 +10,7 @@ import {
   type VisualProofRoute,
 } from './visual-proof.js';
 import { validateVisualProofManifest } from './visual-proof-manifest.js';
-import { cmdResult, noisePng } from './visual-proof-test-helpers.js';
+import { cmdResult, noisePng } from '../test-support/visual-proof-test-helpers.js';
 
 const HEAD = 'a'.repeat(40);
 const RUN = 'run-1';

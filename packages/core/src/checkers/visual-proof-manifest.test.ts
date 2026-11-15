@@ -9,7 +9,7 @@ import {
   type VisualProofRoute,
 } from './visual-proof-manifest.js';
 import { isBlankPng } from './visual-proof-png.js';
-import { noisePng, solidPng } from './visual-proof-test-helpers.js';
+import { noisePng, solidPng } from '../test-support/visual-proof-test-helpers.js';
 
 const HEAD = 'a'.repeat(40);
 const RUN = 'run-1';
