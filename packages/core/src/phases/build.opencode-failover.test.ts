@@ -3,13 +3,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { SimModelExecutor } from '../testing/sim/model.js';
 import { buildPhase } from './build.js';
+import { afterEach, describe, expect, it } from 'vitest';
 
 const tempDirs = new Set<string>();
 
@@ -72,7 +71,6 @@ describe('buildPhase opencode failover (#2885)', () => {
     };
     const stub = message ? new SimModelExecutor({ scripts }) : new StubModelExecutor({ scripts });
     const router = new ModelRouter(ocModels(tier), ocRoutes, false, stub);
-    const runSpy = vi.spyOn(router, 'run');
     const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
     const run = buildPhase({
       issue: workKeyFromIssue(2885),
@@ -88,21 +86,16 @@ describe('buildPhase opencode failover (#2885)', () => {
         logCalls.push([type, msg, x]);
       },
     });
-    return { run, stub, runSpy, logCalls };
+    return { run, stub, logCalls };
   }
 
   it('continues an opencode build on claude when every opencode worker is capped', async () => {
-    const { run, stub, runSpy, logCalls } = await setup('usage_cap', ['oc-a', 'claude-sonnet-5', 'codex-a']);
+    const { run, stub, logCalls } = await setup('usage_cap', ['oc-a', 'claude-sonnet-5', 'codex-a']);
     const result = await run;
     expect(result.ok).toBe(true);
     expect(result.route).toBe('claude');
     expect(result.failoverReason).toBe('usage_cap');
-    expect(runSpy).toHaveBeenNthCalledWith(
-      2,
-      'build_claude',
-      expect.any(String),
-      expect.objectContaining({ retryCause: 'failover', modelOverride: 'claude-sonnet-5' }),
-    );
+    expect(stub.calls.map((c) => c.task)).toContain('build_opencode');
     expect(stub.calls.at(-1)).toMatchObject({ task: 'build_claude', model: 'claude-sonnet-5' });
     expect(logCalls).toContainEqual([
       'worker_failover',
@@ -112,22 +105,22 @@ describe('buildPhase opencode failover (#2885)', () => {
   });
 
   it('continues on codex when no claude build worker resolves', async () => {
-    const { run, runSpy } = await setup('rate_limit', ['oc-a', 'codex-a']);
+    const { run, stub, logCalls } = await setup('rate_limit', ['oc-a', 'codex-a']);
     const result = await run;
     expect(result.route).toBe('codex');
-    expect(runSpy).toHaveBeenNthCalledWith(
-      2,
-      'build_codex',
-      expect.any(String),
-      expect.objectContaining({ retryCause: 'failover', modelOverride: 'codex-a' }),
-    );
+    expect(stub.calls.at(-1)).toMatchObject({ task: 'build_codex', model: 'codex-a' });
+    expect(logCalls).toContainEqual([
+      'worker_failover',
+      expect.stringMatching(/to_route=build_codex/),
+      { failoverReason: 'rate_limit' },
+    ]);
   });
 
   const resetIso = new Date(Date.now() + 3 * 3_600_000).toISOString();
   const capMessage = `monthly usage cap reached, resets at ${resetIso}`;
 
   it('fails a repo-pinned capped opencode route with the cap reason and reset time', async () => {
-    const { run, runSpy, logCalls } = await setup(
+    const { run, stub, logCalls } = await setup(
       'usage_cap',
       ['oc-a', 'claude-sonnet-5'],
       { routePinned: true },
@@ -140,7 +133,7 @@ describe('buildPhase opencode failover (#2885)', () => {
     });
     expect((error as Error).message).toContain('ADR-0092');
     expect((error as Error).message).toContain(`resets at ${resetIso}`);
-    expect(runSpy).toHaveBeenCalledTimes(1);
+    expect(stub.calls.some((c) => c.task === 'build_claude' || c.task === 'build_codex')).toBe(false);
     expect(logCalls.some(([t]) => t === 'worker_failover')).toBe(false);
   });
 
@@ -159,10 +152,10 @@ describe('buildPhase opencode failover (#2885)', () => {
   });
 
   it('does not fail over a repo-pinned opencode route', async () => {
-    const { run, runSpy, logCalls } = await setup('usage_cap', ['oc-a', 'claude-sonnet-5'], { routePinned: true });
+    const { run, stub, logCalls } = await setup('usage_cap', ['oc-a', 'claude-sonnet-5'], { routePinned: true });
     await expect(run).rejects.toMatchObject({ reason: 'usage_cap' });
-    expect(runSpy).toHaveBeenCalledTimes(1);
     expect(logCalls.some(([t]) => t === 'worker_failover')).toBe(false);
+    expect(stub.calls.map((c) => c.task)).toEqual(['build_opencode']);
   });
 
   it('does not fail over when autoFailover is disabled', async () => {

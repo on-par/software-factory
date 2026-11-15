@@ -748,8 +748,10 @@ npm run test`;
           },
         }),
       );
-      const createComment = vi.fn().mockResolvedValue({});
-      const create = vi.fn().mockResolvedValue({ data: { number: 902, id: 9902 } });
+      const posted: Array<{ body: string }> = [];
+      const filed: Array<{ title?: string }> = [];
+      const createComment = async (p: { body: string }) => posted.push(p) && {};
+      const create = async (p: { title?: string }) => filed.push(p) && { data: { number: 902, id: 9902 } };
       const events: string[] = [];
 
       const result = await planPhase({
@@ -780,7 +782,8 @@ npm run test`;
       expect(result.ok).toBe(false);
       expect(result.escalate).toContain('parked for decomposition');
       expect('decomposed' in result).toBe(false);
-      expect(create).not.toHaveBeenCalled();
+      expect(filed).toEqual([]);
+      expect(posted).toEqual([]);
       expect(stub.calls.map((call) => call.task)).not.toContain('decompose');
       expect(events).toContain('size-gate-escalated');
     });
@@ -799,9 +802,16 @@ npm run test`;
           },
         }),
       );
-      const createComment = vi.fn().mockResolvedValue({});
       const events: string[] = [];
-
+      const gh = fakeOctokit({
+        'issues.get': async () => ({
+          data: {
+            title: 'Mega slice',
+            body: '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
+          },
+        }),
+        'issues.createComment': { data: {} },
+      });
       const result = await planPhase({
         issue: workKeyFromIssue(901),
         repo: 'on-par/software-factory',
@@ -809,15 +819,7 @@ npm run test`;
         specPath,
         router,
         constitution: null,
-        octokit: fakeOctokit({
-          'issues.get': async () => ({
-            data: {
-              title: 'Mega slice',
-              body: '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
-            },
-          }),
-          'issues.createComment': createComment,
-        }).octokit,
+        octokit: gh.octokit,
         log: (type) => events.push(type),
         sizeGateMode: 'off',
       });
@@ -826,7 +828,7 @@ npm run test`;
       expect(result.escalate).toContain('parked for decomposition');
       expect(result.sliced).toBeUndefined();
       expect(stub.calls.map((call) => call.task)).not.toContain('decompose');
-      expect(createComment).not.toHaveBeenCalled();
+      expect(gh.calls.map(([k]) => k)).not.toContain('issues.createComment');
       expect(events).toContain('size-gate-escalated');
     });
 
@@ -870,9 +872,16 @@ npm run test`;
           },
         }),
       );
-      const createComment = vi.fn().mockResolvedValue({});
       const events: string[] = [];
-
+      const gh = fakeOctokit({
+        'issues.get': async () => ({
+          data: {
+            title: 'Small slice',
+            body: '## Problem statement\nSmall.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
+          },
+        }),
+        'issues.createComment': { data: {} },
+      });
       const result = await planPhase({
         issue: workKeyFromIssue(902),
         repo: 'on-par/software-factory',
@@ -880,21 +889,13 @@ npm run test`;
         specPath,
         router,
         constitution: null,
-        octokit: fakeOctokit({
-          'issues.get': async () => ({
-            data: {
-              title: 'Small slice',
-              body: '## Problem statement\nSmall.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
-            },
-          }),
-          'issues.createComment': createComment,
-        }).octokit,
+        octokit: gh.octokit,
         log: (type) => events.push(type),
       });
 
       expect(result.ok).toBe(true);
       expect(stub.calls.map((call) => call.task)).not.toContain('decompose');
-      expect(createComment).not.toHaveBeenCalled();
+      expect(gh.calls.map(([k]) => k)).not.toContain('issues.createComment');
       expect(events).not.toContain('size-gate-escalated');
     });
   });
@@ -1045,9 +1046,11 @@ npm run test`;
           },
         }),
       );
-      const createComment = vi.fn().mockResolvedValue({});
       const events: string[] = [];
-
+      const gh = fakeOctokit({
+        'issues.get': async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
+        'issues.createComment': { data: {} },
+      });
       const result = await planPhase({
         issue: workKeyFromIssue(607),
         repo: 'on-par/software-factory',
@@ -1055,10 +1058,7 @@ npm run test`;
         specPath,
         router,
         constitution: null,
-        octokit: fakeOctokit({
-          'issues.get': async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
-          'issues.createComment': createComment,
-        }).octokit,
+        octokit: gh.octokit,
         log: (type) => events.push(type),
         enforceSizeGate: false,
       });
@@ -1066,7 +1066,7 @@ npm run test`;
       expect(result.ok).toBe(true);
       expect(result.route).toBe('codex');
       expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
-      expect(createComment).not.toHaveBeenCalled();
+      expect(gh.calls.map(([k]) => k)).not.toContain('issues.createComment');
       expect(events).not.toContain('size-gate-escalated');
     });
   });
@@ -1427,9 +1427,10 @@ npm run test`;
           },
         }),
       );
-      const createComment = vi.fn().mockResolvedValue({ data: { id: 9999 } });
-      const updateComment = vi.fn().mockResolvedValue({ data: {} });
-      const create = vi.fn().mockResolvedValue({ data: { number: 701, id: 6701 } });
+      const posted: Array<{ body: string }> = [];
+      const filed: Array<{ title?: string }> = [];
+      const createComment = async (p: { body: string }) => posted.push(p) && { data: { id: 9999 } };
+      const create = async (p: { title?: string }) => filed.push(p) && { data: { number: 701, id: 6701 } };
       const update = vi.fn();
       const request = vi.fn().mockResolvedValue({ data: [] });
       const events: string[] = [];
@@ -1449,7 +1450,7 @@ npm run test`;
               }),
               listComments: async () => ({ data: opts.comments ?? [] }),
               createComment,
-              updateComment,
+              updateComment: vi.fn().mockResolvedValue({ data: {} }),
               create,
               update,
               addLabels: vi.fn().mockResolvedValue({}),
@@ -1461,37 +1462,37 @@ npm run test`;
         sizeGateMode: opts.mode ?? 'stack',
         maxSlices: opts.maxSlices,
       });
-      return { result, stub, events, createComment, create, update };
+      return { result, stub, events, posted, filed, update };
     }
 
     const planPrompt = (stub: StubModelExecutor) => stub.calls.find((call) => call.task === 'plan')?.prompt ?? '';
 
     it('AC1 (#3350): an oversized-by-count issue is not sliced before PLAN; size_hint is logged and the whole issue is planned', async () => {
-      const { result, stub, events, createComment, create } = await run({ decompose: [decompositionOf(2)] });
+      const { result, stub, events, posted, filed } = await run({ decompose: [decompositionOf(2)] });
 
       expect(result.ok).toBe(true);
       expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
-      expect(create).not.toHaveBeenCalled();
-      expect(createComment).not.toHaveBeenCalled();
+      expect(filed).toEqual([]);
+      expect(posted).toEqual([]);
       expect(events).toContain('size_hint');
       expect(events).not.toContain('size-gate-sliced');
     });
 
     it('a spike-labeled oversized factory-task issue logs no size_hint and records sizeGate passed (#748)', async () => {
-      const { result, events, create, createComment } = await run({ labels: ['spike'] });
+      const { result, events, filed, posted } = await run({ labels: ['spike'] });
 
       expect(result.ok).toBe(true);
       expect(events).not.toContain('size_hint');
-      expect(create).not.toHaveBeenCalled();
-      expect(createComment).not.toHaveBeenCalled();
+      expect(filed).toEqual([]);
+      expect(posted).toEqual([]);
     });
 
     it('stack mode does not slice from counts either (ADR-0161, #3350)', async () => {
-      const { result, events, createComment, create } = await run({ decompose: [decompositionOf(2)], mode: 'stack' });
+      const { result, events, posted, filed } = await run({ decompose: [decompositionOf(2)], mode: 'stack' });
 
       expect(result.ok).toBe(true);
-      expect(create).not.toHaveBeenCalled();
-      expect(createComment).not.toHaveBeenCalled();
+      expect(filed).toEqual([]);
+      expect(posted).toEqual([]);
       expect(events).toContain('size_hint');
     });
 
@@ -1500,7 +1501,7 @@ npm run test`;
       expect(first.result.ok).toBe(true);
       expect(first.stub.calls.map((call) => call.task)).toEqual(['plan']);
       expect(planPrompt(first.stub)).toContain('Problem for slice 1');
-      expect(first.createComment).not.toHaveBeenCalled();
+      expect(first.posted).toEqual([]);
 
       const second = await run({ comments: [{ id: 1, user: { id: BOT }, body: planComment({ merged: [1] }) }] });
       expect(second.result.ok).toBe(true);
@@ -1531,7 +1532,7 @@ npm run test`;
     });
 
     it('AC4a: more than the cap records the slice plan, files nothing and parks naming --max-slices', async () => {
-      const { result, stub, events, createComment, create } = await run({
+      const { result, stub, events, posted, filed } = await run({
         decompose: [decompositionOf(6)],
         maxSlices: 5,
         plan: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n`,
@@ -1539,9 +1540,9 @@ npm run test`;
 
       expect(result.ok).toBe(false);
       expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose']);
-      expect(create).not.toHaveBeenCalled();
-      expect(createComment).toHaveBeenCalledTimes(1);
-      const body = createComment.mock.calls[0][0].body as string;
+      expect(filed).toEqual([]);
+      expect(posted).toHaveLength(1);
+      const body = posted[0]!.body;
       expect(body).toContain('<!-- factory:slice-plan v1 -->');
       expect(body).not.toContain('## Proposed epic');
       expect(body.match(/^- \[ \] \d+\/6\./gm)).toHaveLength(6);
@@ -1552,7 +1553,7 @@ npm run test`;
     });
 
     it("escalates with the slicer's reason when the slicer cannot split the issue", async () => {
-      const { result, stub, events, createComment, create } = await run({
+      const { result, stub, events, posted, filed } = await run({
         decompose: ['not json', 'not json'],
         plan: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n`,
       });
@@ -1561,13 +1562,13 @@ npm run test`;
       expect(result.escalate).toContain('slice decomposition failed');
       expect(result.escalate).toContain('no JSON object found in the model output');
       expect(events).toContain('size-gate-escalated');
-      expect(createComment).not.toHaveBeenCalled();
-      expect(create).not.toHaveBeenCalled();
+      expect(posted).toEqual([]);
+      expect(filed).toEqual([]);
       expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose', 'decompose']);
     });
 
     it('a raised cap reuses the recorded plan without decomposing', async () => {
-      const { result, stub, createComment } = await run({
+      const { result, stub, posted } = await run({
         comments: [{ id: 1, user: { id: BOT }, body: planComment({ count: 6 }) }],
         maxSlices: 6,
       });
@@ -1575,7 +1576,7 @@ npm run test`;
       expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
       expect(planPrompt(stub)).toContain('Problem for slice 1');
       expect(result.slice?.plan.slices).toHaveLength(6);
-      expect(createComment).not.toHaveBeenCalled();
+      expect(posted).toEqual([]);
     });
 
     it('a started plan ignores the cap', async () => {
@@ -1589,7 +1590,7 @@ npm run test`;
     });
 
     it('AC4b: parks without any model call when the trusted marker comment is unreadable', async () => {
-      const { result, stub, createComment } = await run({
+      const { result, stub, posted } = await run({
         comments: [
           { id: 3, user: { id: BOT }, body: '<!-- factory:slice-plan v1 -->\n<!-- factory:slice-plan-data !!! -->' },
         ],
@@ -1598,7 +1599,7 @@ npm run test`;
       expect(result.ok).toBe(false);
       expect(result.escalate).toMatch(/unreadable/);
       expect(stub.calls).toEqual([]);
-      expect(createComment).not.toHaveBeenCalled();
+      expect(posted).toEqual([]);
     });
 
     describe('post-plan build-scope gate in slice mode (ADR-0147)', () => {
@@ -1623,9 +1624,12 @@ npm run test`;
             },
           }),
         );
-        const createComment = vi.fn().mockResolvedValue({ data: { id: 9999 } });
-        const updateComment = vi.fn().mockResolvedValue({ data: {} });
-        const create = vi.fn().mockResolvedValue({ data: { number: 701, id: 6701 } });
+        const posted: Array<{ body: string }> = [];
+        const edited: Array<{ body: string }> = [];
+        const filed: Array<{ title?: string }> = [];
+        const createComment = async (p: { body: string }) => posted.push(p) && { data: { id: 9999 } };
+        const updateComment = async (p: { body: string }) => edited.push(p) && { data: {} };
+        const create = async (p: { title?: string }) => filed.push(p) && { data: { number: 701, id: 6701 } };
         const events: string[] = [];
         const result = await planPhase({
           issue: workKeyFromIssue(607),
@@ -1657,36 +1661,36 @@ npm run test`;
           sizeGateMode: 'stack',
           maxSlices: opts.maxSlices,
         });
-        return { result, stub, events, createComment, updateComment, create };
+        return { result, stub, events, posted, edited, filed };
       }
 
       it('AC1: slices a whole issue, records one slice plan comment and ends before BUILD', async () => {
-        const { result, events, createComment, create } = await runPostPlan({
+        const { result, events, posted, filed } = await runPostPlan({
           decompose: [decompositionOf(2, ['P1'])],
         });
 
         expect(result.ok).toBe(false);
         expect(result.sliced).toEqual({ sliceCount: 2 });
-        expect(createComment).toHaveBeenCalledTimes(1);
-        expect(createComment.mock.calls[0][0].body).toContain('<!-- factory:slice-plan v1 -->');
-        expect(create).not.toHaveBeenCalled();
+        expect(posted).toHaveLength(1);
+        expect(posted[0]!.body).toContain('<!-- factory:slice-plan v1 -->');
+        expect(filed).toEqual([]);
         expect(events).toContain('size-gate-sliced');
         expect(events).not.toContain('size-gate-escalated');
         expect(result.escalate).toMatch(/sliced into 2 slice/);
       });
 
       it("escalates with the slicer's reason when the slicer cannot split a whole issue", async () => {
-        const { result, events, create } = await runPostPlan({ decompose: ['not json', 'not json'] });
+        const { result, events, filed } = await runPostPlan({ decompose: ['not json', 'not json'] });
 
         expect(result.ok).toBe(false);
         expect(result.sliced).toBeUndefined();
         expect(result.escalate).toContain('no JSON object found in the model output');
         expect(events).toContain('size-gate-escalated');
-        expect(create).not.toHaveBeenCalled();
+        expect(filed).toEqual([]);
       });
 
       it('AC2: parks a slice that is still over budget and never slices again', async () => {
-        const { result, stub, events, createComment, updateComment } = await runPostPlan({
+        const { result, stub, events, posted, edited } = await runPostPlan({
           comments: [{ id: 1, user: { id: BOT }, body: planComment() }],
         });
 
@@ -1696,13 +1700,13 @@ npm run test`;
           /slice 1\/2 of #607 exceeds the bounded-build budget .* a slice is never sliced again/,
         );
         expect(stub.calls.map((call) => call.task)).not.toContain('decompose');
-        expect(createComment).not.toHaveBeenCalled();
-        expect(updateComment).not.toHaveBeenCalled();
+        expect(posted).toEqual([]);
+        expect(edited).toEqual([]);
         expect(events).toContain('size-gate-escalated');
       });
 
       it('records the slice plan and parks (no proposal, no issues) when the decomposition is over the cap', async () => {
-        const { result, createComment, create, events } = await runPostPlan({
+        const { result, posted, filed, events } = await runPostPlan({
           decompose: [decompositionOf(6, ['P1'])],
           maxSlices: 5,
         });
@@ -1711,10 +1715,10 @@ npm run test`;
         expect(result.sliced).toBeUndefined();
         expect(result.escalate).toContain('6 slices');
         expect(result.escalate).toContain('--max-slices 6');
-        expect(create).not.toHaveBeenCalled();
-        expect(createComment).toHaveBeenCalledTimes(1);
-        expect(createComment.mock.calls[0][0].body).toContain('<!-- factory:slice-plan v1 -->');
-        expect(createComment.mock.calls[0][0].body).not.toContain('## Proposed epic');
+        expect(filed).toEqual([]);
+        expect(posted).toHaveLength(1);
+        expect(posted[0]!.body).toContain('<!-- factory:slice-plan v1 -->');
+        expect(posted[0]!.body).not.toContain('## Proposed epic');
         expect(events).toContain('size-gate-escalated');
       });
 

@@ -3,7 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { LaneLifecycleEventSchema } from '@on-par/contracts';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createLifecycleBus } from '../bus/index.js';
 import type { collectDesignDiff } from '../checkers/design-smells.js';
@@ -1531,7 +1531,8 @@ describe('buildPhase cross-harness failover', () => {
       build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
       build_claude: [{ output: 'claude output' }],
     });
-    const onQuotaExhausted = vi.fn();
+    const quota: Array<{ provider: string; reason: string }> = [];
+    const onQuotaExhausted = async (info: { provider: string; reason: string }) => void quota.push(info);
 
     const result = await buildPhase({
       issue: workKeyFromIssue(367),
@@ -1547,8 +1548,7 @@ describe('buildPhase cross-harness failover', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(onQuotaExhausted).toHaveBeenCalledTimes(1);
-    expect(onQuotaExhausted).toHaveBeenCalledWith({ provider: 'openai', reason: 'usage_cap' });
+    expect(quota).toEqual([{ provider: 'openai', reason: 'usage_cap' }]);
   });
 
   it('still completes the claude fallback when onQuotaExhausted itself throws', async () => {

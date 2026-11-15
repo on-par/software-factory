@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { LaneLifecycleEventSchema } from '@on-par/contracts';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createLifecycleBus } from '../bus/index.js';
 import type { RoutesConfig } from '../config/index.js';
@@ -1934,7 +1934,8 @@ describe('checkPhase frozen evidence plan', () => {
 
   it('evidence-plan step skips a constitution opt-out without invoking the runner', async () => {
     const { worktree, specPath } = await makeEvidencePlanWorktree(3271);
-    const runEvidence = vi.fn(async () => []);
+    let evidenceRuns = 0;
+    const runEvidence = async () => (evidenceRuns++, []);
     const check = await checkPhase({
       issue: workKeyFromIssue(3271),
       worktree,
@@ -1954,7 +1955,7 @@ describe('checkPhase frozen evidence plan', () => {
       runCheckers: async () => passingCheckers,
       runEvidence,
     });
-    expect(runEvidence).not.toHaveBeenCalled();
+    expect(evidenceRuns).toBe(0);
     expect(check.summary.results.find((result) => result.checker === 'evidence_plan')).toMatchObject({
       result: 'SKIP',
       details: 'disabled by constitution',
@@ -2014,7 +2015,8 @@ describe('checkPhase frozen evidence plan', () => {
 
   it('does not baseline or exempt an evidence failure when diffBase is set', async () => {
     const { worktree, specPath } = await makeEvidencePlanWorktree(3270);
-    const baseline = vi.fn();
+    let baselineRuns = 0;
+    const baseline = async () => Promise.reject(new Error(`no baseline ${++baselineRuns}`));
     const check = await checkPhase({
       issue: workKeyFromIssue(3270),
       worktree,
@@ -2034,7 +2036,7 @@ describe('checkPhase frozen evidence plan', () => {
           reason: 'proof failed',
         })),
     });
-    expect(baseline).not.toHaveBeenCalled();
+    expect(baselineRuns).toBe(0);
     expect(check.baseline).toBeUndefined();
     expect(check.passed).toBe(false);
   });
@@ -2575,10 +2577,16 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
     total: checkers.length,
   });
 
+  const recordRuns = () => {
+    const argvs: Array<{ argv: readonly string[]; opts: unknown }> = [];
+    const fake = async (argv: readonly string[], opts?: unknown) => argvs.push({ argv, opts }) && okResult;
+    return { argvs, fake };
+  };
+
   const run = async (
     checkers: string[],
     verdict: 'fails-on-base' | 'clean-on-base',
-    runCommand: ReturnType<typeof vi.fn>,
+    runCommand: (argv: readonly string[], opts?: unknown) => Promise<unknown>,
     extra: { maxReworkRounds?: number } = {},
   ) => {
     const worktree = await setup.worktree('check-flaky-');
@@ -2611,11 +2619,11 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
   };
 
   it('continues when the only base-red checker is flaky', async () => {
-    const fake = vi.fn(async (_argv: readonly string[]) => okResult);
+    const { argvs, fake } = recordRuns();
     const { result, logs } = await run(['tests'], 'fails-on-base', fake);
-    expect(fake).toHaveBeenCalledTimes(1);
-    expect(fake.mock.calls[0]?.[0]).toEqual(['npm', 'test', '--', '-t', 'adds', '--no-file-parallelism']);
-    expect((fake.mock.calls[0] as unknown[])[1]).toMatchObject({ timeoutMs: 600_000 });
+    expect(argvs).toHaveLength(1);
+    expect(argvs[0]!.argv).toEqual(['npm', 'test', '--', '-t', 'adds', '--no-file-parallelism']);
+    expect(argvs[0]!.opts).toMatchObject({ timeoutMs: 600_000 });
     expect(result.flakeRerun?.verdict).toBe('passed');
     expect(result.environment).toBeUndefined();
     expect(result.passed).toBe(true);
@@ -2629,9 +2637,9 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
   });
 
   it('keeps the environment release without tests when lint is also base-red', async () => {
-    const fake = vi.fn(async (_argv: readonly string[]) => okResult);
+    const { argvs, fake } = recordRuns();
     const { result } = await run(['tests', 'lint'], 'fails-on-base', fake);
-    expect(fake).toHaveBeenCalledTimes(1);
+    expect(argvs).toHaveLength(1);
     expect(result.passed).toBe(false);
     expect(result.environment?.failingChecks).toEqual(['lint']);
     expect(result.failureSignature).not.toContain('tests:');
@@ -2639,7 +2647,7 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
   });
 
   it('reports reproduced', async () => {
-    const fake = vi.fn(async () => ({ ...okResult, exitCode: 1, ok: false }));
+    const fake = async () => ({ ...okResult, exitCode: 1, ok: false });
     const { result } = await run(['tests'], 'fails-on-base', fake);
     expect(result.flakeRerun?.verdict).toBe('reproduced');
     expect(result.environment).toBeUndefined();
@@ -2648,9 +2656,9 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
   });
 
   it('reports not-run when the command throws', async () => {
-    const fake = vi.fn(async () => {
+    const fake = async () => {
       throw new Error('spawn ENOENT');
-    });
+    };
     const { result, logs } = await run(['tests'], 'fails-on-base', fake);
     expect(result.flakeRerun).toMatchObject({ verdict: 'not-run', reason: expect.stringContaining('spawn ENOENT') });
     expect(result.environment).toBeUndefined();
@@ -2659,16 +2667,16 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
   });
 
   it('skips the re-run when tests is not failing', async () => {
-    const fake = vi.fn(async () => okResult);
+    const { argvs, fake } = recordRuns();
     const { result } = await run(['lint'], 'fails-on-base', fake);
-    expect(fake).not.toHaveBeenCalled();
+    expect(argvs).toEqual([]);
     expect(result.flakeRerun).toBeUndefined();
     expect(result.environment).toBeDefined();
   });
   it('re-runs on any tests failure, whatever the base verdict (#4029)', async () => {
-    const fake = vi.fn(async () => okResult);
+    const { argvs, fake } = recordRuns();
     const { result } = await run(['tests'], 'clean-on-base', fake, { maxReworkRounds: 0 });
-    expect(fake).toHaveBeenCalledTimes(1);
+    expect(argvs).toHaveLength(1);
     expect(result.flakeRerun?.verdict).toBe('passed');
   });
 });

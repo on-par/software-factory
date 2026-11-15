@@ -1,13 +1,12 @@
-import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
-
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { workKeyFromIssue } from '../work/work-key.js';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { buildPhase } from './build.js';
+import { afterEach, describe, expect, it } from 'vitest';
 
 const models: ModelsConfig = {
   version: 1,
@@ -41,7 +40,8 @@ describe('buildPhase sandbox environment error (#3332)', () => {
     const worktree = await tempDirs.make('build-phase-test-');
     const stub = new StubModelExecutor({ scripts: { build_claude: [{ output }] } });
     const router = new ModelRouter(models, routes, false, stub);
-    const collectDiff = vi.fn();
+    let diffs = 0;
+    const collectDiff = (async () => Promise.reject(new Error(`collectDiff ran ${++diffs}`))) as never;
 
     const result = await buildPhase({
       issue: workKeyFromIssue(86),
@@ -59,6 +59,6 @@ describe('buildPhase sandbox environment error (#3332)', () => {
     expect(result).toMatchObject({ ok: false, reason: 'sandbox_env' });
     expect(result.sandboxEnv).toContain(ENV_LINE);
     expect(result.escalate).toBeUndefined();
-    expect(collectDiff).not.toHaveBeenCalled();
+    expect(diffs).toBe(0);
   });
 });

@@ -122,8 +122,10 @@ npm run test`;
       scripts: { plan: planOf(opts.yaml), decompose: [{ output: opts.decomposition ?? decomposition }] },
     });
     const router = new ModelRouter(models, routes, false, stub);
-    const createComment = vi.fn().mockResolvedValue({ data: { id: 9999 } });
-    const create = vi.fn().mockResolvedValue({ data: { number: 902, id: 9902 } });
+    const posted: Array<{ body: string }> = [];
+    const filed: Array<{ title?: string }> = [];
+    const createComment = async (p: { body: string }) => posted.push(p) && { data: { id: 9999 } };
+    const create = async (p: { title?: string }) => filed.push(p) && { data: { number: 902, id: 9902 } };
     const logs: Array<{ type: string; msg: string }> = [];
     const result = await planPhase({
       issue: workKeyFromIssue(3350),
@@ -151,11 +153,11 @@ npm run test`;
       parkOverBudget: opts.parkOverBudget,
       sizeBudget: opts.sizeBudget,
     });
-    return { result, stub, logs, createComment, create };
+    return { result, stub, logs, posted, filed };
   }
 
   it('parks an over-budget chain member without slicing or filing', async () => {
-    const { result, stub, logs, createComment, create } = await run({
+    const { result, stub, logs, posted, filed } = await run({
       yaml: designYaml(4, 4),
       mode: 'stack',
       parkOverBudget: true,
@@ -165,19 +167,19 @@ npm run test`;
     expect(result.escalate).toContain('bounded-build budget');
     expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
     expect(logs.map((l) => l.type)).toContain('size-gate-escalated');
-    expect(createComment).not.toHaveBeenCalled();
-    expect(create).not.toHaveBeenCalled();
+    expect(posted).toEqual([]);
+    expect(filed).toEqual([]);
   });
 
   it.each(['stack'] as const)(
     'does not slice a many-AC issue whose plan touches three files (%s mode)',
     async (mode) => {
-      const { result, stub, logs, createComment, create } = await run({ yaml: designYaml(3, 3), mode });
+      const { result, stub, logs, posted, filed } = await run({ yaml: designYaml(3, 3), mode });
 
       expect(result.ok).toBe(true);
       expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
-      expect(createComment).not.toHaveBeenCalled();
-      expect(create).not.toHaveBeenCalled();
+      expect(posted).toEqual([]);
+      expect(filed).toEqual([]);
       expect(logs.map((l) => l.type)).toContain('size_hint');
       expect(logs.map((l) => l.type)).not.toContain('size-gate-sliced');
     },
@@ -203,7 +205,7 @@ npm run test`;
       const story = { ...parsed.stories[0], filesLikelyTouched: ['src/a.ts', 'src/b.ts'] };
       parsed.stories = [story, { ...story, title: 'Story 2' }];
       parsed.epic.children = ['Story 1', 'Story 2'];
-      const { result, stub, logs, createComment, create } = await run({
+      const { result, stub, logs, posted, filed } = await run({
         yaml: designYaml(4, 4),
         mode,
         sizeBudget: { tokenBudget: 10, maxFiles: 12 },
@@ -212,8 +214,8 @@ npm run test`;
 
       expect(result.ok).toBe(true);
       expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose']);
-      expect(createComment).not.toHaveBeenCalled();
-      expect(create).not.toHaveBeenCalled();
+      expect(posted).toEqual([]);
+      expect(filed).toEqual([]);
       expect(result.sliced).toBeUndefined();
       expect(logs.map((l) => l.type)).toContain('size_gate_cohesive');
     },
@@ -253,7 +255,8 @@ npm run test`;
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
-      const createComment = vi.fn().mockResolvedValue({ data: { id: 9999 } });
+      const posted: Array<{ body: string }> = [];
+      const createComment = async (p: { body: string }) => posted.push(p) && { data: { id: 9999 } };
       const workSources = new WorkSourceRegistry().register({
         kind: 'local-brief',
         resolve: async () => ({
@@ -281,7 +284,7 @@ npm run test`;
         slicePlanStore: opts.store,
         sizeBudget: { tokenBudget: 1_000_000, maxFiles: 12 },
       });
-      return { result, stub, createComment, specPath, logs };
+      return { result, stub, posted, specPath, logs };
     }
 
     const memoryStore = () => {
@@ -298,14 +301,14 @@ npm run test`;
 
     it('a brief source with a slice-plan store in stack mode slices an over-budget plan and records it in the store', async () => {
       const { store, saved } = memoryStore();
-      const { result, stub, createComment } = await runBrief({ files: 13, store, mode: 'stack' });
+      const { result, stub, posted } = await runBrief({ files: 13, store, mode: 'stack' });
 
       expect(result.ok).toBe(false);
       expect(result.sliced).toEqual({ sliceCount: 2 });
       expect(stub.calls.map((c) => c.task)).toEqual(['plan', 'decompose']);
       expect(saved).toHaveLength(1);
       expect(saved[0]?.slices).toHaveLength(2);
-      expect(createComment).not.toHaveBeenCalled();
+      expect(posted).toEqual([]);
     });
 
     it('a brief source within budget in stack mode does not slice', async () => {
@@ -331,11 +334,11 @@ npm run test`;
     });
 
     it('stack mode without a store is not gated', async () => {
-      const { result, stub, createComment } = await runBrief({ files: 13, mode: 'stack' });
+      const { result, stub, posted } = await runBrief({ files: 13, mode: 'stack' });
 
       expect(result.ok).toBe(true);
       expect(stub.calls.map((c) => c.task)).toEqual(['plan']);
-      expect(createComment).not.toHaveBeenCalled();
+      expect(posted).toEqual([]);
     });
   });
 });

@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { BaselineReport } from '../checkers/baseline.js';
 import type { CheckSummary } from '../types/index.js';
@@ -50,13 +50,13 @@ async function run(
   };
   let round = 0;
   const failingSeen: string[][] = [];
-  const runBaseline = vi.fn(async (o: { baseSha: string; failing: ReadonlyArray<{ checker: string }> }) => {
+  const runBaseline = async (o: { baseSha: string; failing: ReadonlyArray<{ checker: string }> }) => {
     failingSeen.push(o.failing.map((r) => r.checker));
     return {
       baseSha: o.baseSha,
       checkers: extra.baseline ?? o.failing.map((r) => ({ checker: r.checker, verdict: 'fails-on-base' as const })),
     } as BaselineReport;
-  });
+  };
   const result = await checkPhase({
     issue: workKeyFromIssue(4029),
     worktree,
@@ -70,7 +70,7 @@ async function run(
     runBaseline: runBaseline as never,
     runCommand: (async () => reproduced) as never,
   });
-  return { result, runBaseline, failingSeen, prompts };
+  return { result, failingSeen, prompts };
 }
 
 describe('baselineCandidates (#4029)', () => {
@@ -89,10 +89,10 @@ describe('baselineCandidates (#4029)', () => {
 describe('checkPhase fixes tests forward (#4029)', () => {
   it('never runs a base baseline for the tests checker', async () => {
     const onlyTests = await run([summaryOf(['tests', 'FAIL'])], { maxReworkRounds: 0 });
-    expect(onlyTests.runBaseline).not.toHaveBeenCalled();
+    expect(onlyTests.failingSeen).toEqual([]);
 
     const both = await run([summaryOf(['tests', 'FAIL'], ['compile', 'FAIL'])], { maxReworkRounds: 0 });
-    expect(both.runBaseline).toHaveBeenCalledTimes(1);
+    expect(both.failingSeen).toHaveLength(1);
     expect(both.failingSeen[0]).toContain('compile');
     expect(both.failingSeen[0]).not.toContain('tests');
   });
