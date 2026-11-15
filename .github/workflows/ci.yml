@@ -64,6 +64,12 @@ jobs:
           CALL_ASSERTIONS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: npx tsx scripts/call-assertions-baseline-guard.ts --base "$CALL_ASSERTIONS_BASE_SHA"
 
+      - name: Comments baseline guard
+        if: github.event_name == 'pull_request'
+        env:
+          COMMENTS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: npx tsx scripts/comments-baseline-guard.ts --base "$COMMENTS_BASE_SHA"
+
       - name: Oxlint plugin version guard
         run: bash scripts/check-oxlint-plugin-version.sh
 

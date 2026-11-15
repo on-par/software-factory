@@ -42,6 +42,10 @@ The pre-commit hook (`lefthook.yml`) auto-fixes staged files with `oxlint --fix`
 
 `toHaveBeenCalled*`, `toBeCalled*`, `toHaveReturned*` and `toHaveResolved*` matchers, and reads of `fn.mock.calls|results|lastCall|instances|contexts|invocationCallOrder`, fail `npm run lint` via `anti-slop/no-call-assertions`; the fix is to assert observable behaviour (return value, resulting state, output, emitted event). To shrink `call-assertions-baseline.json`, remove assertions from a file, then lower its entry to the new count, or delete the entry at 0; lint reports a stale allowance until you do. Never add or raise an entry; the CI guard fails it. The rule cannot be disabled inline.
 
+## Comments baseline
+
+`anti-slop/no-comments` fails `npm run lint` on any comment except justified lint overrides, rule notes in `oxlint.config.ts` and toolchain directives; to lower an entry in `comments-baseline.json`, delete comments then set the entry to the new count (or delete it at 0), never add or raise one (the CI guard fails it), and the rule cannot be disabled inline.
+
 `anti-slop/package-boundaries` fails `npm run lint` on a forbidden package edge: config importing a workspace package or declaring runtime dependencies, core importing cli or tui, a relative import leaving its package, a deep import of another package's `src/`, another package's `test-support/`, or `@on-par/factory-core/internal` and `/testing` outside the places ADR-0004 allows. The fix is the one each message names (import the published name, move the code, or use the public root). The rule is never disabled inline.
 
 ## Coverage gate and ratchet

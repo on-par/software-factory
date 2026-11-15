@@ -2,6 +2,7 @@ import { eslintCompatPlugin } from "@oxlint/plugins";
 
 import { noCallAssertionsRule } from "./rules/no-call-assertions.ts";
 import { noChainedTypeAssertionsRule } from "./rules/no-chained-type-assertions.ts";
+import { noCommentsRule } from "./rules/no-comments.ts";
 import { noConditionalEmptyObjectSpreadRule } from "./rules/no-conditional-empty-object-spread.ts";
 import { noDirectTmpdirMkdtempRule } from "./rules/no-direct-tmpdir-mkdtemp.ts";
 import { noKnownValueWideningRule } from "./rules/no-known-value-widening.ts";
@@ -17,7 +18,6 @@ import { noUnknownTypeAliasesRule } from "./rules/no-unknown-type-aliases.ts";
 import { noUnsafeDictionaryTypeRule } from "./rules/no-unsafe-dictionary-type.ts";
 import { noWidenThenAssertRule } from "./rules/no-widen-then-assert.ts";
 import { packageBoundariesRule } from "./rules/package-boundaries.ts";
-import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety-comment-for-type-assertion.ts";
 
 /** Generic Oxlint rules that reject low-evidence and low-signal implementation patterns. */
 const antiSlopPlugin = eslintCompatPlugin({
@@ -25,6 +25,7 @@ const antiSlopPlugin = eslintCompatPlugin({
 	rules: {
 		"no-call-assertions": noCallAssertionsRule,
 		"no-chained-type-assertions": noChainedTypeAssertionsRule,
+		"no-comments": noCommentsRule,
 		"no-conditional-empty-object-spread": noConditionalEmptyObjectSpreadRule,
 		"no-direct-tmpdir-mkdtemp": noDirectTmpdirMkdtempRule,
 		"no-known-value-widening": noKnownValueWideningRule,
@@ -40,7 +41,6 @@ const antiSlopPlugin = eslintCompatPlugin({
 		"no-unknown-type-aliases": noUnknownTypeAliasesRule,
 		"no-widen-then-assert": noWidenThenAssertRule,
 		"package-boundaries": packageBoundariesRule,
-		"require-safety-comment-for-type-assertion": requireSafetyCommentForTypeAssertionRule,
 	},
 });
 

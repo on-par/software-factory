@@ -29,6 +29,8 @@ The factory builds itself, so a change here must keep the factory able to ship t
   rise, the same change raises the threshold.
 - No test is skipped, disabled or deleted to get green. Lint rules are not switched off inline
   to silence a finding the change introduced.
+- No new comments: `anti-slop/no-comments` allows only justified lint overrides (`-- <reason>`), rule
+  notes in `oxlint.config.ts` and toolchain directives; `comments-baseline.json` only shrinks.
 
 ### Tests
 
