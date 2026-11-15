@@ -35,6 +35,7 @@ import {
 
 import { npmCheck, resolveVerifyCommands, verifyCommandChecks, withPathResults } from './doctor-verify.js';
 import { configLintChecks, declaredHarnessChecks, linearTrackerChecks, modelsRegistryChecks } from './doctor-config.js';
+import { githubCredentialSourceCheck } from './doctor-github-credentials.js';
 import { failoverProviderChecks } from './doctor-failover-providers.js';
 import { holdDoctorConfigSources } from './doctor-config-sources.js';
 import { codexSandboxNote } from './doctor-codex-sandbox.js';
@@ -1034,6 +1035,7 @@ export async function cmdDoctor(
     } catch {
       factoryConfig = loadFactoryConfig(); // schema errors are reported by the config row (#2611)
     }
+    checks.push(githubCredentialSourceCheck(factoryConfig, process.env));
     checks.push(...(await linearTrackerChecks(resolveTrackerConfig(factoryConfig), process.env)));
     maxClockSkewMs = resolveQueueMaxClockSkewMs(factoryConfig);
     const health = await inspectPortLeases({ registryFile: paths.ports });

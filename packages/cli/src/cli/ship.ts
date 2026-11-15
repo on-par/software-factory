@@ -62,7 +62,7 @@ import {
   worktreeSandboxFor,
 } from '@on-par/factory-core/internal';
 import { baseChecksVerdict } from './base-health-ci.js';
-import { formatDeprecation } from './octokit.js';
+import { shipGitHubScope } from './ship-github-scope.js';
 import { restoredLoggingBreaker } from './provider-restored-log.js';
 import type { CliDeps, ConfigLoaderKey, CoreOpKey, GitOpKey, ShellOpKey } from './index.js';
 import { resolveRunBranch } from './run-branch.js';
@@ -172,14 +172,13 @@ async function shipIssueFrom(
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo(shell));
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
   // GitHub REST deprecations seen on this run's client become one warn event per route (#2218).
-  const octokit = (
-    deps.octokit ??
-    (() =>
-      getOctokit(shell, {
-        log: (d) =>
-          logEvent(paths.events, 'github_api_deprecated', issueNum, formatDeprecation(d), { lane: ctx?.lane }),
-      }))
-  )();
+  const scope = shipGitHubScope(deps.octokit, (o) => getOctokit(shell, o), loaders, {
+    ghRepo,
+    issueNum,
+    paths,
+    lane: ctx?.lane,
+  });
+  const { octokit } = scope;
   const slotWhere = { repoRoot, ghRepo, paths, slots: ctx?.runSlots, octokit: () => octokit };
   const [ghOwner, ghName] = ghRepo.split('/');
   const repoConfig = loaders.loadRepoConfig(repoRoot, paths.root);
@@ -431,7 +430,7 @@ async function shipIssueFrom(
     reworkHistory,
     laneFileGuard,
     laneClaimStaleness: createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: policy.effective.branchPrefix }),
-    recordPhase: phaseRecorder(paths.runs, issueNum),
+    recordPhase: scope.recordPhase(phaseRecorder(paths.runs, issueNum)),
     claimSignal: ctx?.signal,
     ...(ctx?.slicePlanStore ? { slicePlanStore: ctx.slicePlanStore } : {}),
     recordRunState: recorderFor({ lane: lane ?? '', worktree, specPath, startedAt: runStartedAt }),
@@ -488,6 +487,7 @@ async function shipIssueFrom(
       ports,
     );
   } finally {
+    await scope.close();
     if (proxied && egressProxy) {
       log('egress_summary', egressSummaryMessage(egressProxy.hosts(), proxied.allowHosts));
       await egressProxy.close();

@@ -344,7 +344,7 @@ import { applyRouterGuards, newRepoRouter } from './repo-router.js';
 import { cmdLogs } from './logs.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { selectOctokit } from './github-stub.js';
-import { createFactoryOctokit, type FactoryOctokitOptions } from './octokit.js';
+import { createFactoryOctokit, createLocalOctokit, type ScopedOctokitOptions } from './github-scope.js';
 import { runDraftCommand } from './draft-command.js';
 import { checkErrorExit, checkReportExit, createDeepModelRunner, runIssueCheck } from './ready-check.js';
 import { cmdRunBrief as cmdRunBriefWith, type RunBriefOptions } from './run-brief.js';
@@ -699,10 +699,10 @@ function resolveGitHubToken(shell: ShellOps = shellOps): string | undefined {
 /** Octokit factory for the current main() or cmdLand invocation (CliDeps.octokit); unset outside them. */
 let octokitFactory: (() => Octokit) | undefined;
 
-function getOctokit(shell: ShellOps = shellOps, options?: FactoryOctokitOptions): Octokit {
+function getOctokit(shell: ShellOps = shellOps, options?: ScopedOctokitOptions): Octokit {
   if (octokitFactory) return octokitFactory();
   const resolveToken = () => resolveGitHubToken(shell);
-  return selectOctokit(process.env, () => createFactoryOctokit(resolveToken(), { ...options, resolveToken }));
+  return selectOctokit(process.env, () => createLocalOctokit(shell, resolveToken, process.env, options));
 }
 
 export function errorDetail(err: unknown): string {
@@ -719,7 +719,7 @@ setLandRuntime(() => ({
   gitOps,
   internalOps,
   shellOps,
-  getOctokit: () => getOctokit(),
+  getOctokit: () => getOctokit(shellOps, { phase: 'land' }),
   errorDetail,
   worktreePathFor,
   LaneParkError,
@@ -2838,7 +2838,7 @@ export async function cmdLand(
     const ghRepo = await getGitHubRepo();
     const paths = getFactoryPaths(repoRoot);
     const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
-    const octokit = getOctokit();
+    const octokit = getOctokit(shellOps, { phase: 'land', repo: ghRepo });
     const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
     const skipCI = configLoaders.resolveSkipCI(factoryConfig);
 

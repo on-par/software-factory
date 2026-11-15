@@ -20,3 +20,11 @@ regexes = ['''lin_api_SECRET123''']
 [[allowlists]]
 description = "Fake PEM private-key fixture used to prove redaction before OTLP export (packages/core/src/command-output/otlp-export.test.ts); not a real credential"
 paths = ['''^packages/core/src/command-output/otlp-export\.test\.ts$''']
+
+[[allowlists]]
+description = "Fake scoped GitHub token and PEM header fixtures in the per-phase GitHub credential tests (#4120); not real credentials, and present in git history"
+paths = [
+  '''^packages/core/src/github-scope/guard\.test\.ts$''',
+  '''^packages/core/src/github-scope/app-token\.test\.ts$''',
+  '''^packages/core/src/utils/github-credentials\.test\.ts$''',
+]

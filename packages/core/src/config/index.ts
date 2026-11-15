@@ -35,6 +35,7 @@ import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS, retiredHarnessReplacement } from '../harness/catalog.js';
 import type { FailoverReason } from '../types/index.js';
 import { SandboxConfigSchema, warnCodexSandboxOnce } from './sandbox-schema.js';
+import { GitHubConfigSchema } from './github-section.js';
 import { TrackerConfigSchema } from './tracker-section.js';
 import { markSizeGateModeWarned, warnSizeGateModeOnce } from './size-gate.js';
 import { ModelEffortsSchema } from './effort.js';
@@ -401,6 +402,7 @@ export const FactoryConfigSchema = z.object({
     })
     .default({ backend: defaultSchemaFields.workspaceBackend }),
   tracker: TrackerConfigSchema.default({ kind: defaultSchemaFields.trackerKind }),
+  github: GitHubConfigSchema,
 });
 
 // ---------- Types ----------
@@ -591,6 +593,7 @@ export {
   resolveSizeGateMode,
   sizeGateDeprecationLine,
 } from './size-gate.js';
+export { resolveGitHubCredentialsConfig } from './github-section.js';
 export {
   TRACKER_KINDS,
   type TrackerKind,

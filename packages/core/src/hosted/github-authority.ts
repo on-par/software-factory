@@ -6,6 +6,7 @@
 // GitHub auth) is completely untouched when hosted exec is off.
 import { hostedExecEnabled } from '@on-par/contracts';
 
+import { repositoryName, scopeForPhase, type GitHubAppPermissions } from '../github-scope/matrix.js';
 import { redactSecrets } from '../router/failure-detail.js';
 import type { HostedClock, StoredHostedJob } from './store.js';
 
@@ -15,6 +16,8 @@ export interface MintGitHubTokenInput {
   jobId: string;
   repoSlug: string;
   requiredAuthority: string;
+  permissions: GitHubAppPermissions;
+  repositories: string[];
 }
 
 export interface MintedGitHubToken {
@@ -60,6 +63,8 @@ export async function prepareGitHubAuthority(
     jobId: job.request.jobId,
     repoSlug: job.request.repoSlug,
     requiredAuthority: job.request.requiredAuthority,
+    permissions: scopeForPhase('ship')?.permissions ?? {},
+    repositories: [repositoryName(job.request.repoSlug)],
   });
   const username = minted.username ?? 'x-access-token';
   const containerCredentialPath = options.containerCredentialPath ?? '/workspace/.git-credentials';

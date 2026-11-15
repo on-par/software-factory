@@ -338,6 +338,8 @@ const INTERNAL_API_KEYS = [
   'resolveLinearProjectForRepo', // #3918
   'probeLinearSetup',
   'resolveTrackerConfig',
+  ...'allowScopedMerge installGitHubScopeGuard phaseHolderOf PhaseCredentialHolder'.split(' '),
+  ...'createGitHubCredentialBroker resolveGitHubCredentialSource resolveGitHubCredentialsConfig'.split(' '),
   'listBlockedBy',
   'aliasDeprecatedSizeGateMode', // #3832
   'isExplicitStackMode',
@@ -603,6 +605,7 @@ const INTERNAL_API_KEYS = [
   'resolveMaxReviewReworkRuns',
   'defaultClaimantId',
   'DEFAULT_CLAIM_LEASE_MS',
+  'GitHubScopeError',
   'IN_PROGRESS_LABEL',
   'LANE_LABEL_PREFIX',
   'laneLabel',

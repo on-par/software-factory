@@ -132,6 +132,15 @@ describe('eventTraitsFor', () => {
     expect(eventTraitsFor('github_api_deprecated')).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
   });
 
+  it('classifies the GitHub credential source events', () => {
+    expect(eventTraitsFor('github_credentials')).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+    expect(eventTraitsFor('github_credentials_ambient')).toEqual({
+      severity: 'warn',
+      isPark: false,
+      isTerminal: false,
+    });
+  });
+
   it('classifies merge-gated-override as a non-park warning', () => {
     expect(eventTraitsFor('merge-gated-override')).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
   });
