@@ -85,7 +85,6 @@ describe('parseOpenCodeJson finished flag', () => {
 describe('OpenCodeHarness truncated runs', () => {
   const run = (fn: any) =>
     new OpenCodeHarness(fn).run(makeContractRequest({ model: 'opencode-model', registry, prompt: 'build it' }));
-  // Only the last step's text is returned (#2881).
   const FINAL = 'FINAL ANSWER: the build is done.';
 
   function sequenceExec(stdouts: string[]) {

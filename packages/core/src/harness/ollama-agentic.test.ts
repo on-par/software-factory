@@ -128,7 +128,7 @@ describe('CodingHarness contract: OllamaAgenticHarness', () => {
 });
 
 describe('OllamaAgenticHarness first-green fixture', () => {
-  it('applies the recorded proposal and records the expected request shape', async () => {
+  it('applies the recorded proposal and sends the patch schema as format to constrain decoding', async () => {
     const worktree = makeWorktree();
     const fetchFn = stubFetch([firstGreenProposal()]);
     const harness = new OllamaAgenticHarness(fetchFn, okExec);

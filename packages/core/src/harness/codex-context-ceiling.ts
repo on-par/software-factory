@@ -1,12 +1,10 @@
 import type { TaskType } from '../types/index.js';
 import { taskRequiresAgenticHarness } from './index.js';
 
-/** Packaged default Codex auto-compact token limit for agentic build sessions (#3326). */
 export const DEFAULT_CODEX_CONTEXT_CEILING = 120_000;
 
 export type CodexContextCeiling = { on: true; limit: number } | { on: false; why: string };
 
-/** Decides whether a Codex run gets an auto-compact limit; only agentic build tasks are eligible. */
 export function resolveCodexContextCeiling(
   task: TaskType,
   requested: number | undefined,
@@ -22,7 +20,6 @@ export function resolveCodexContextCeiling(
   return { on: true, limit: n };
 }
 
-/** Handoff instruction Codex uses instead of its built-in summary prompt when it auto-compacts. */
 export const CODEX_COMPACT_PROMPT = `You are summarizing an in-progress factory BUILD session so a fresh context can continue it.
 Write a handoff that keeps:
 - the spec path (.factory/state/plans/issue-<n>.md) and its design: block (approach, files, signatures)

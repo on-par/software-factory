@@ -1,5 +1,3 @@
-// src/harness/command.ts — generic CodingHarness for user-declared `harnesses:` entries.
-
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,12 +12,6 @@ import type { CodingHarness, HarnessFailureReason, HarnessRequest, HarnessResult
 import { HarnessError } from './index.js';
 import { failureKindFor } from './provider-failure.js';
 
-/**
- * Substitute {model}, {worktree} and {outFile} in a declared command template with
- * shell-escaped values. Single pass, so a substituted value is never re-scanned.
- * Unknown placeholders, and {outFile} without a value, stay literal. Placeholders
- * must appear unquoted in the template: this function supplies the quoting.
- */
 export function buildHarnessCommand(
   template: string,
   values: { model: string; worktree: string; outFile?: string },
@@ -34,7 +26,6 @@ function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }
 
-/** Text of the last JSON-object line on stdout that carries a message; '' when none does. */
 export function extractJsonlLastMessage(stdout: string): string {
   const lines = stdout.split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -65,7 +56,6 @@ export function extractJsonlLastMessage(stdout: string): string {
   return '';
 }
 
-/** `resetAt` ISO instant from a `(?<reset>…)` group of an errorPatterns match, when the capture parses as a date. */
 function resetAtFromMatch(match: RegExpExecArray): string | undefined {
   const captured = match.groups?.reset;
   if (!captured) return undefined;
@@ -73,13 +63,6 @@ function resetAtFromMatch(match: RegExpExecArray): string | undefined {
   return Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
 }
 
-/**
- * Failure reason (and optional reset time) selected by a declaration's `errorPatterns`, or undefined when none match.
- * Patterns are tested case-insensitively (as classifyFailure does), stderr before stdout.
- * Record form: the first matching entry in declaration order returns its key. Array form:
- * the first match is classified by classifyFailure, with 'unknown' mapped to 'error'.
- * A named `reset` group yields `resetAt` when its capture parses as a date.
- */
 export function matchErrorPatternFailure(
   patterns: HarnessDeclaration['errorPatterns'],
   stderr: string,
@@ -114,7 +97,6 @@ export function matchErrorPatternFailure(
   return undefined;
 }
 
-/** Failure reason selected by a declaration's `errorPatterns`, or undefined when none match. */
 export function matchErrorPattern(
   patterns: HarnessDeclaration['errorPatterns'],
   stderr: string,
@@ -127,10 +109,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-/**
- * Sum input_tokens/output_tokens over stdout JSON lines carrying both as finite numbers,
- * top-level or under a `usage` object. Undefined when no line qualifies; never throws.
- */
 export function parseJsonlUsage(stdout: string): HarnessUsage | undefined {
   let inputTokens = 0;
   let outputTokens = 0;
@@ -157,7 +135,6 @@ export function parseJsonlUsage(stdout: string): HarnessUsage | undefined {
   return found ? { inputTokens, outputTokens } : undefined;
 }
 
-/** Runs a user-declared agent CLI (models config `harnesses:`) with cwd = worktree. */
 export class CommandHarness implements CodingHarness {
   readonly agentic: boolean;
 
@@ -181,7 +158,6 @@ export class CommandHarness implements CodingHarness {
         worktree,
         outFile,
       });
-      // `< /dev/null` closes stdin (execDetached never closes the pipe; see opencode.ts).
       const cmd =
         this.declaration.prompt === 'arg'
           ? `${base} ${shellEscape(prompt)} < /dev/null`

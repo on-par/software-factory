@@ -1,5 +1,3 @@
-// src/harness/check.ts — run the harness contract kit against a user-declared `harnesses:` entry (#2875).
-
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,7 +14,6 @@ import { HarnessError, type HarnessRequest } from './index.js';
 export interface HarnessCheckOptions {
   id: string;
   declaration: HarnessDeclaration;
-  /** Registry model id, resolved through registry.getProviderModel by CommandHarness. */
   model: string;
   registry: ModelRegistry;
   execFn?: ExecFn;
@@ -28,7 +25,6 @@ export interface HarnessCheckResult {
   rule: string;
   fix: string;
   error?: string;
-  /** When set, the case was not run; `ok` is true so it does not fail the check. */
   skip?: string;
 }
 
@@ -92,16 +88,10 @@ function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** A fast CLI (e.g. `echo ok`) can exit before a 1ms timer fires — routinely on Linux or a busy event
- *  loop — and the run then resolves instead of timing out. Keeping the process group alive after the CLI,
- *  and killing the whole group via onPgid, makes the timeout case deterministic. A newline, not `;`,
- *  so a trailing `#` comment in the declared command cannot swallow the sleep. */
 function lingeringExec(execFn: ExecFn): ExecFn {
   return (cmd, o) => execFn(`${cmd}\nsleep 30`, o);
 }
 
-/** Runs the CLI in a fresh scratch repo and checks it left a new commit tracking HARNESS_CHECK.txt.
- *  Returns undefined on pass, an error string on failure. */
 async function checkCommitsInWorktree(
   harness: CommandHarness,
   request: Omit<Partial<HarnessRequest>, 'worktree' | 'prompt'>,
@@ -110,7 +100,6 @@ async function checkCommitsInWorktree(
   const repo = await mkdtemp(join(tmpdir(), 'factory-harness-commit-'));
   try {
     await execFn('git init -q', { cwd: repo });
-    // A local identity lets the agent commit on hosts with no global git identity (e.g. CI).
     await execFn('git config user.name "factory harness check"', { cwd: repo });
     await execFn('git config user.email "harness-check@factory.invalid"', { cwd: repo });
     await execFn('git commit -q --allow-empty -m seed', { cwd: repo });
@@ -133,7 +122,6 @@ async function checkCommitsInWorktree(
   }
 }
 
-/** Runs every contract-kit case against the declared harness; never throws for a failing case. */
 export async function runHarnessCheck(opts: HarnessCheckOptions): Promise<HarnessCheckResult[]> {
   const { id, declaration, model, registry } = opts;
   const execFn = opts.execFn ?? defaultExecFn;

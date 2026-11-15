@@ -72,7 +72,6 @@ describe('ClaudeCliHarness prompt dir cleanup', () => {
   });
 
   it('removes the prompt dir when writing the prompt fails', async () => {
-    // A non-string prompt makes the real writeFile reject after the dir exists, without module mocking.
     const exec = vi.fn(async () => ({ stdout: '', stderr: '' }));
     await expect(
       new ClaudeCliHarness(exec).run(makeContractRequest({ model: 'claude-model', registry, prompt: 42 as never })),

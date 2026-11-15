@@ -1,12 +1,8 @@
-// src/harness/opencode-version.ts — OpenCode CLI version probe and supported range (#2878, #2880).
-
 import type { ExecFn } from '../utils/exec.js';
 
 export type OpenCodeVersionProbe = () => Promise<number | undefined>;
 
-/** Versions the OpenCode adapter supports (#2880). Lower bound inclusive, upper exclusive. 2.x ships outside npm (Homebrew/installer) and is handled by the v2 flag path. */
 export const OPENCODE_SUPPORTED_RANGE = '>=1.18.0 <2.3.0';
-/** The OpenCode version docs/agents.md and the nightly job test against (#2880). */
 export const OPENCODE_PINNED_VERSION = '1.18.28';
 export const OPENCODE_PINNED_INSTALL = `npm install -g opencode-ai@${OPENCODE_PINNED_VERSION}`;
 
@@ -15,7 +11,6 @@ export type OpenCodeVersion = readonly [major: number, minor: number, patch: num
 const SUPPORTED_MIN: OpenCodeVersion = [1, 18, 0];
 const SUPPORTED_MAX_EXCLUSIVE: OpenCodeVersion = [2, 3, 0];
 
-/** First `X.Y.Z` in `opencode --version` output -> [X, Y, Z]; undefined when none. */
 export function parseOpenCodeVersion(stdout: string): OpenCodeVersion | undefined {
   const match = /(\d+)\.(\d+)\.(\d+)/.exec(stdout);
   if (!match) return undefined;
@@ -23,7 +18,6 @@ export function parseOpenCodeVersion(stdout: string): OpenCodeVersion | undefine
   return parts.every(Number.isFinite) ? parts : undefined;
 }
 
-/** First `X.Y.Z` in `opencode --version` output -> X; undefined when none. */
 export function parseOpenCodeMajor(stdout: string): number | undefined {
   return parseOpenCodeVersion(stdout)?.[0];
 }
@@ -40,7 +34,6 @@ export function isOpenCodeVersionSupported(version: OpenCodeVersion): boolean {
   return compareVersions(version, SUPPORTED_MIN) >= 0 && compareVersions(version, SUPPORTED_MAX_EXCLUSIVE) < 0;
 }
 
-/** Runs `opencode --version`; never throws (any error -> undefined). */
 export async function probeOpenCodeMajor(execFn: ExecFn): Promise<number | undefined> {
   try {
     const { stdout } = await execFn('opencode --version', { timeoutMs: 10_000 });

@@ -4,14 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export interface TempDirs {
-  /** mkdtemp under os.tmpdir() and register the dir for cleanup. */
   make(prefix: string): Promise<string>;
   makeSync(prefix: string): string;
-  /** Remove every registered dir (recursive, force, maxRetries 3). Idempotent; never throws for a missing dir. */
   cleanup(): Promise<void>;
 }
 
-/** Self-cleaning scratch dirs (#3114): call `cleanup()` from afterEach or a finally block. */
 export function createTempDirs(): TempDirs {
   const dirs: string[] = [];
   return {

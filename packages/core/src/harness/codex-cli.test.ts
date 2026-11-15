@@ -381,7 +381,6 @@ describe('CodexCliHarness failure classification', () => {
 });
 
 describe('quoteCodexFlags (CodeQL #107)', () => {
-  /** What argv the shell would actually hand to codex for the rendered flags. */
   function argvThroughShell(rendered: string, cwd: string): string[] {
     const out = execFileSync('/bin/sh', ['-c', `printf '%s\\0' ${rendered}`], { cwd, encoding: 'utf-8' });
     return out.split('\0').slice(0, -1);

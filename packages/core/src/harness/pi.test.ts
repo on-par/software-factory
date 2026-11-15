@@ -174,7 +174,7 @@ describe('PiHarness', () => {
     expect(exec.mock.calls[0][0]).toContain("--provider 'openrouter' --model 'deepseek/deepseek-v4.1-flash'");
   });
 
-  it('passes the required headless flags and splits providerModel into --provider/--model', async () => {
+  it('passes flags that skip repo context, extensions and config, and splits providerModel', async () => {
     const exec = okExec();
     const result = await new PiHarness(exec).run(req({ worktree: '/tmp/factory worktree', timeoutSeconds: 7 }));
     expect(result.output).toBe('Final answer');
@@ -213,7 +213,7 @@ describe('PiHarness', () => {
     expect(exec.mock.calls[1][0]).not.toContain('--thinking');
   });
 
-  it('drops DEEPSEEK_API_KEY from the child env', async () => {
+  it('drops DEEPSEEK_API_KEY so Pi cannot use the refused native DeepSeek provider', async () => {
     const exec = okExec();
     await new PiHarness(exec).run(req({ env: { DEEPSEEK_API_KEY: 'd', OPENROUTER_API_KEY: 'o' } }));
     const env = exec.mock.calls[0][1].env;
@@ -221,12 +221,11 @@ describe('PiHarness', () => {
     expect(env.OPENROUTER_API_KEY).toBe('o');
   });
 
-  it('still blanks a parent-env DEEPSEEK_API_KEY when request.env is undefined', async () => {
+  it('sets DEEPSEEK_API_KEY to undefined so the merge over process.env drops a parent copy', async () => {
     vi.stubEnv('DEEPSEEK_API_KEY', 'secret');
     try {
       const exec = okExec();
       await new PiHarness(exec).run(req());
-      // Present-but-undefined so the ExecFn's merge over process.env removes the parent's copy.
       expect(exec.mock.calls[0][1].env).toHaveProperty('DEEPSEEK_API_KEY', undefined);
       expect(process.env.DEEPSEEK_API_KEY).toBe('secret');
     } finally {
@@ -282,7 +281,6 @@ describe('PiHarness', () => {
     const exec = okExec();
     await new PiHarness(exec).run(req({ sandbox: sandboxPolicy }));
     const cmd: string = exec.mock.calls[0][0];
-    // The prompt path is a fresh temp file; recover it from the executed command.
     const promptPath = /([^'\s]*factory-pi-prompt-[^'\s]*\/prompt\.txt)/.exec(cmd)?.[1];
     expect(promptPath).toBeDefined();
     expect(cmd).toBe(
@@ -420,8 +418,7 @@ describe('PiHarness prompt dir cleanup', () => {
     expect(promptDirs()).toEqual([]);
   });
 
-  it('removes the prompt dir when writing the prompt fails', async () => {
-    // A non-string prompt makes the real writeFile reject after the dir exists, without module mocking.
+  it('removes the prompt dir when writeFile rejects a non-string prompt', async () => {
     const exec = vi.fn(async () => ({ stdout: '', stderr: '' }));
     await expect(new PiHarness(exec).run(req({ prompt: 42 as never }))).rejects.toThrow();
     expect(exec).not.toHaveBeenCalled();
