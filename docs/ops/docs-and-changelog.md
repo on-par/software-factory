@@ -71,6 +71,7 @@ The publish gate reads `CHANGELOG.md` at the tagged commit, so promote the chang
 3. Merge the PR.
 4. Tag a commit that contains the promoted section and push the tag:
    `git tag vX.Y.Z <sha> && git push origin vX.Y.Z`.
+   The publish workflow then creates the GitHub release; no manual `gh release create` is needed.
 
 A release job (#1974) must also promote `Unreleased` before it creates the tag, not after.
 

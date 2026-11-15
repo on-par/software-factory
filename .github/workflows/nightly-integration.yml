@@ -87,3 +87,15 @@ jobs:
             echo "::error::filing or updating the 'Nightly integration suite failing' issue also failed — see the 'File or update the failure issue' step log"
           fi
           exit 1
+
+  # #4123: npm latest and the GitHub Latest release must name the same version.
+  release-drift:
+    name: release-drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v7
+      - name: npm latest matches GitHub latest
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: bash scripts/release-drift-check.sh
