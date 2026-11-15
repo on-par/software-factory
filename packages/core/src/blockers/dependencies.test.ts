@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { addBlockedBy, listBlockedBy } from './dependencies.js';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- test double needs a loose type
 const toOctokit = (fake: any): Octokit => fake;
 
 function makeDeps(request: ReturnType<typeof vi.fn>) {

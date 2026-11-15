@@ -22,6 +22,10 @@ export const CALL_ASSERTIONS_BASELINE: Readonly<Record<string, number>> = JSON.p
   readFileSync(new URL('./call-assertions-baseline.json', import.meta.url), 'utf8'),
 );
 
+export const COMMENTS_BASELINE: Readonly<Record<string, number>> = JSON.parse(
+  readFileSync(new URL('./comments-baseline.json', import.meta.url), 'utf8'),
+);
+
 const MAX_LINES_OPTIONS = { skipBlankLines: false, skipComments: false } as const;
 
 export default defineConfig({
@@ -144,6 +148,8 @@ export default defineConfig({
     'anti-slop/no-direct-tmpdir-mkdtemp': 'error',
     // #4051: no call-count assertions or mock-call reads in tests; per-file allowances come from the baseline overrides.
     'anti-slop/no-call-assertions': 'error',
+    // #4053: comments are banned except justified lint overrides and toolchain directives; allowances come from the baseline overrides.
+    'anti-slop/no-comments': 'error',
     // #4052: package boundaries (config ← core ← cli, published-name imports, ADR-0004 subpaths).
     // scripts/eval.ts runs the stub eval with StubModelExecutor from /testing (ADR-0004: "exercise
     // the factory without real model CLIs"), so it is the one non-test file allowed to import it.
@@ -161,6 +167,10 @@ export default defineConfig({
     ...Object.entries(CALL_ASSERTIONS_BASELINE).map(([file, allowed]) => ({
       files: [file],
       rules: { 'anti-slop/no-call-assertions': ['error', { allowed }] },
+    })),
+    ...Object.entries(COMMENTS_BASELINE).map(([file, allowed]) => ({
+      files: [file.includes('/') ? file : `./${file}`],
+      rules: { 'anti-slop/no-comments': ['error', { allowed }] },
     })),
   ],
 });

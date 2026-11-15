@@ -71,6 +71,13 @@ describe('.github/workflows/ci.yml', () => {
     expect(step?.run).toContain('"$CALL_ASSERTIONS_BASE_SHA"');
   });
 
+  it('runs the comments baseline guard on pull requests in the static job (#4053)', () => {
+    const step = jobs['static']?.steps.find((s) => s.run?.includes('scripts/comments-baseline-guard.ts --base'));
+    expect(step?.if).toBe("github.event_name == 'pull_request'");
+    expect(step?.env).toEqual({ COMMENTS_BASE_SHA: '${{ github.event.pull_request.base.sha }}' });
+    expect(step?.run).toContain('"$COMMENTS_BASE_SHA"');
+  });
+
   it('runs the live App installation-token identity suite with the job token, outside coverage', () => {
     const suite = 'packages/core/src/utils/github-identity.live.test.ts';
     const step = jobs['static']?.steps.find((s) => s.run?.includes(suite));
