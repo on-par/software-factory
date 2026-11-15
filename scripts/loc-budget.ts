@@ -218,7 +218,7 @@ export function runLocBudget(argv: readonly string[], io: LocBudgetIo = {}): num
       } catch {
         baseText = undefined;
       }
-      if (baseText !== undefined) base = parseLocBudget(baseText, 'base');
+      base = baseText === undefined ? head : parseLocBudget(baseText, 'base');
     }
   } catch (err) {
     error(`loc-budget: ${err instanceof Error ? err.message : String(err)}`);

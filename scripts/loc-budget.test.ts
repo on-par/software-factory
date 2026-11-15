@@ -174,10 +174,10 @@ describe('runLocBudget guard mode', () => {
     expect(r.code).toBe(0);
   });
 
-  it('raises nothing when the base has no loc-budget.json', () => {
-    const r = run(GUARD, { budget: MATCHING, base: 'missing', events: [label('alice')] });
+  it('treats a base without loc-budget.json as the bootstrap and needs no label', () => {
+    const r = run(GUARD, { budget: MATCHING, base: 'missing', events: 'throw' });
     expect(r.code).toBe(0);
-    expect(r.out.join('\n')).toContain('raised a.source from none to 2');
+    expect(r.out.join('\n')).toContain('no raised or added entries');
   });
 
   it('fails instead of treating an unreachable base commit as an empty budget', () => {
