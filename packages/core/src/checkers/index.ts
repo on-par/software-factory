@@ -59,8 +59,6 @@ export {
   resolveLintCommands,
   resolveTestsCommand,
   VERIFY_PS1_ARGV,
-  type ChecksConfigSource,
-  type CompileCommand,
   type LintCommand,
   type TestsCommand,
 } from './resolve-commands.js';
