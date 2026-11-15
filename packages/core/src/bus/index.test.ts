@@ -1,5 +1,5 @@
 import { LaneLifecycleEventSchema } from '@on-par/contracts';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { createLifecycleBus, lifecycleBus, withLifecycle } from './index.js';
 
@@ -156,7 +156,8 @@ describe('withLifecycle', () => {
 
   it('on success: log receives phase_started then phase_completed with a non-negative durationMs', async () => {
     const bus = createLifecycleBus();
-    const log = vi.fn();
+    const logged: unknown[][] = [];
+    const log = (...args: unknown[]) => void logged.push(args);
 
     await withLifecycle(
       { ...baseCtx, bus, log },
@@ -165,17 +166,17 @@ describe('withLifecycle', () => {
       (r) => `plan complete (${r.value})`,
     );
 
-    expect(log).toHaveBeenCalledTimes(2);
-    expect(log).toHaveBeenNthCalledWith(1, 'phase_started', 'plan started');
-    expect(log).toHaveBeenNthCalledWith(2, 'phase_completed', 'plan complete (42)', {
-      durationMs: expect.any(Number),
-    });
-    expect(log.mock.calls[1][2].durationMs).toBeGreaterThanOrEqual(0);
+    expect(logged).toEqual([
+      ['phase_started', 'plan started'],
+      ['phase_completed', 'plan complete (42)', { durationMs: expect.any(Number) }],
+    ]);
+    expect((logged[1][2] as { durationMs: number }).durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it('when run() rejects: log still receives phase_completed with a durationMs, and the original error still rejects', async () => {
     const bus = createLifecycleBus();
-    const log = vi.fn();
+    const logged: unknown[][] = [];
+    const log = (...args: unknown[]) => void logged.push(args);
 
     await expect(
       withLifecycle(
@@ -187,10 +188,10 @@ describe('withLifecycle', () => {
       ),
     ).rejects.toThrow('router exhausted');
 
-    expect(log).toHaveBeenNthCalledWith(1, 'phase_started', 'plan started');
-    expect(log).toHaveBeenNthCalledWith(2, 'phase_completed', expect.stringContaining('router exhausted'), {
-      durationMs: expect.any(Number),
-    });
+    expect(logged).toEqual([
+      ['phase_started', 'plan started'],
+      ['phase_completed', expect.stringContaining('router exhausted'), { durationMs: expect.any(Number) }],
+    ]);
   });
 
   it('emits onto the process-wide lifecycleBus when no bus is given', async () => {
