@@ -22,7 +22,7 @@ import type { Octokit } from '@octokit/rest';
 import { LaneEnvironmentPauseError } from './lane-environment-pause-error.js';
 import { INVALID_BRANCH_PREFIX_MESSAGE, resolveBranchPrefixOption } from './branch-prefix.js';
 import { startupSweeps, warnQueueDiagnostics } from './queue-startup.js';
-import { autoPruneStateBackups, stateBackupGcReport, type WorktreeGcOptions } from './state-backup-gc.js';
+import { appendAutoPrune, stateBackupGcReport, type WorktreeGcOptions } from './state-backup-gc.js';
 import { proposeTriageQueue } from './triage-open-prs.js';
 import {
   makeQueuePreflightOps,
@@ -357,8 +357,6 @@ import { withShutdown } from './shutdown.js';
 import { runWorktreeKeep, runWorktreeRelease } from './worktree-keep.js';
 import { gcWorktreeSandbox, reapParkedLane, reapPrlessShip } from './worktree-reap.js';
 import { retentionBudgetPass, underSweepLocks } from './worktree-retention.js';
-import type { LaneGcDeps } from './lane-gc-deps.js';
-export type { LaneGcDeps };
 
 export type ConfigLoaderKey =
   | 'loadModelsConfig'
@@ -2203,11 +2201,21 @@ async function runAutoWorktreeGc(
       eventScope,
       `removed ${report.removed.length} stale worktree(s), kept ${report.kept}`,
     );
-    console.log(internalOps.formatGcReport(report));
-    autoPruneStateBackups(paths.root, factoryConfig, (type, msg) => logEvent(paths.events, type, eventScope, msg));
+    console.log(appendAutoPrune(internalOps.formatGcReport(report), paths, factoryConfig, eventScope));
   } catch (err: any) {
     logEvent(paths.events, 'warn', eventScope, `worktree gc failed: ${err.message}`);
   }
+}
+
+export interface LaneGcDeps {
+  loadConfig?: (configPath: string) => Pick<FactoryConfig, 'worktree' | 'sandbox' | 'run'>;
+  sweep?: typeof sweepWorktrees;
+  emitEvent?: typeof logEvent;
+  octokit?: () => NonNullable<Parameters<typeof sweepWorktrees>[1]>['octokit'];
+  /** Retention-budget pass that runs after the sweep (#3970). */
+  reclaim?: Parameters<typeof retentionBudgetPass>[0];
+  /** Issues other lanes of this run have in flight (#2964). */
+  protectedIssues?: () => ReadonlySet<number>;
 }
 
 /** Mid-run worktree GC between issues in a lane (#1757). Honors worktree.autoGcOnRun, holds
@@ -2743,8 +2751,7 @@ export async function cmdWorktreeGc(opts: WorktreeGcOptions) {
       { log, octokit, sandbox },
     );
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
-  console.log(internalOps.formatGcReport(report));
-  console.log(stateBackupGcReport(paths.root, factoryConfig, opts));
+  console.log(`${internalOps.formatGcReport(report)}\n${stateBackupGcReport(paths.root, factoryConfig, opts)}`);
 }
 
 /** `factory worktree keep <issue>` (#3318): protect the lane worktree from GC while finishing by hand. */

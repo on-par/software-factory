@@ -10,8 +10,6 @@
 // is the dependency direction (AGENTS.md), so the zod schemas in
 // packages/core/src/config/index.ts stay the single runtime shape authority.
 
-import { defaultWorktree, type WorktreeDefaults } from './worktree-defaults.js';
-
 export interface ModelDefaults {
   provider: 'anthropic' | 'openai' | 'ollama' | 'deepseek' | 'custom';
   tier: string | string[];
@@ -63,7 +61,10 @@ export interface FactoryDefaults {
   };
   pr: { footer: string };
   merge: { auto: boolean; comment: string; maxConflictRounds: number; maxLandDeferrals: number };
-  worktree: WorktreeDefaults;
+  worktree: { parent: string; comment: string; gcTtlDays: number; autoGcOnRun: boolean; retainMax: number } & Record<
+    'stateBackupKeep' | 'stateBackupMaxAgeDays',
+    number
+  >;
   byok: { enabled: boolean; comment: string };
   notifications: Record<string, boolean>;
   cost_tracking: { enabled: boolean; log_file: string; comment: string };
@@ -621,7 +622,16 @@ export const defaultFactoryConfig: FactoryDefaults = {
       'maxConflictRounds (1-10, default 2) caps how many times land merges origin/main into a PR that turned DIRTY, re-watching CI each time; when spent, the run parks as conflict. ' +
       'maxLandDeferrals (1-10, default 3) caps how many times a land starved by a moving base is deferred and retried land-only before the run parks as ci-failed.',
   },
-  worktree: defaultWorktree,
+  worktree: {
+    parent: '~/.factory/worktrees',
+    comment:
+      'Where lane worktrees are created. "~/..." or an absolute path is a shared root, namespaced as <parent>/<owner>/<repo>/. A repo-relative path is used as-is: "../" gives the old sibling layout; ".factory/worktrees" keeps them inside the repo (auto-added to .git/info/exclude) but the repo\'s own tools (jest, eslint, tsc, globbing scripts) may crawl into those nested checkouts. retainMax (default 8, 0 = no count budget) bounds how many finished or failed lane worktrees a repo keeps. Clean, fully pushed ones are evicted oldest first, and all eligible ones are evicted when the disk guard trips (#3970). stateBackupKeep (default 3) and stateBackupMaxAgeDays (default 7) bound rename-aside backup files (*.bak*, queue.bak.relaunch-*, *-relaunch.log) in the state root: the newest N of each kind and anything newer than the age are kept (#4055).',
+    gcTtlDays: 7,
+    autoGcOnRun: true,
+    retainMax: 8,
+    stateBackupKeep: 3,
+    stateBackupMaxAgeDays: 7,
+  },
   byok: {
     enabled: false,
     comment: 'When true, only use models whose API keys are present in env',

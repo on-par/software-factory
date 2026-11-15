@@ -1,5 +1,5 @@
 import type { EventKind, FactoryConfig } from '@on-par/factory-core';
-import { formatStateBackupPruneReport, pruneStateBackups } from '@on-par/factory-core/internal';
+import { formatStateBackupPruneReport, logEvent, pruneStateBackups } from '@on-par/factory-core/internal';
 import type { StateBackupPolicy, StateBackupPruneReport } from '@on-par/factory-core/internal';
 
 export function stateBackupPolicyFrom(cfg: Pick<FactoryConfig, 'worktree'>): StateBackupPolicy {
@@ -22,6 +22,16 @@ export function autoPruneStateBackups(
     emit('warn', `state backup prune failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
+}
+
+export function appendAutoPrune(
+  text: string,
+  paths: { root: string; events: string },
+  cfg: Pick<FactoryConfig, 'worktree'>,
+  scope: Parameters<typeof logEvent>[2],
+): string {
+  autoPruneStateBackups(paths.root, cfg, (type, msg) => logEvent(paths.events, type, scope, msg));
+  return text;
 }
 
 export interface WorktreeGcOptions {
