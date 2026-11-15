@@ -605,6 +605,7 @@ const INTERNAL_API_KEYS = [
   'resolveMaxReviewReworkRuns',
   'defaultClaimantId',
   'DEFAULT_CLAIM_LEASE_MS',
+  'GitHubScopeError',
   'IN_PROGRESS_LABEL',
   'LANE_LABEL_PREFIX',
   'laneLabel',
