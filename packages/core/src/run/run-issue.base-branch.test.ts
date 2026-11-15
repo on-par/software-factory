@@ -21,6 +21,8 @@ const planPhase = vi.fn<typeof realPlanPhase>();
 const buildPhase = vi.fn<typeof realBuildPhase>();
 const checkPhase = vi.fn<typeof realCheckPhase>();
 const shipPhase = vi.fn<typeof realShipPhase>();
+const shipCalls: Parameters<typeof realShipPhase>[0][] = [];
+const checkCalls: Parameters<typeof realCheckPhase>[0][] = [];
 
 const PLAN_OK: PlanResult = { ok: true, route: 'codex', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null };
 const BUILD_OK: BuildResult = { ok: true, model: 'm', route: 'codex' };
@@ -106,23 +108,24 @@ function run(overrides: Partial<RunRequest>) {
 beforeEach(() => {
   planPhase.mockReset().mockResolvedValue(PLAN_OK);
   buildPhase.mockReset().mockResolvedValue(BUILD_OK);
-  checkPhase.mockReset().mockResolvedValue(CHECK_OK);
-  shipPhase.mockReset().mockResolvedValue({ ok: true, prNumber: 7 });
+  shipCalls.length = checkCalls.length = 0;
+  checkPhase.mockReset().mockImplementation(async (opts) => (checkCalls.push(opts), CHECK_OK));
+  shipPhase.mockReset().mockImplementation(async (opts) => (shipCalls.push(opts), { ok: true, prNumber: 7 }));
 });
 
 describe('runIssue — parentBaseRef from --base-branch (#3764)', () => {
   it('passes the stripped parentBaseRef to shipPhase as baseBranch', async () => {
     await run({ parentBaseRef: 'origin/feat/x' });
-    expect(shipPhase.mock.calls[0][0].baseBranch).toBe('feat/x');
+    expect(shipCalls[0].baseBranch).toBe('feat/x');
   });
 
   it('passes parentBaseRef to checkPhase', async () => {
     await run({ parentBaseRef: 'origin/feat/x' });
-    expect(checkPhase.mock.calls[0][0].parentBaseRef).toBe('origin/feat/x');
+    expect(checkCalls[0].parentBaseRef).toBe('origin/feat/x');
   });
 
   it('omits baseBranch when parentBaseRef is unset', async () => {
     await run({});
-    expect(shipPhase.mock.calls[0][0]).not.toHaveProperty('baseBranch');
+    expect(shipCalls[0]).not.toHaveProperty('baseBranch');
   });
 });

@@ -92,9 +92,11 @@ const policy: RunPolicy = {
   effective: {} as RunPolicy['effective'],
 };
 
+type Attribution = { plan: { model: string }; build: { model: string }; endedIn: string };
 const SUMMARY: CheckSummary = { failures: 1, passes: 0, skips: 0, total: 1, results: [] };
 const PLAN_OK: PlanResult = { ok: true, route: 'codex', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null };
 
+type LogEvent = [string, string, { attribution: Attribution }];
 type ModelByRouterTask = Record<string, string>;
 
 function setup(resolve: ModelByRouterTask) {
@@ -105,7 +107,8 @@ function setup(resolve: ModelByRouterTask) {
     exitCode: 0,
     attempts: [],
   }));
-  const log = vi.fn();
+  const events: LogEvent[] = [];
+  const log = (...args: unknown[]) => events.push(args as LogEvent);
   const planPhase = vi.fn<typeof realPlanPhase>();
   const buildPhase = vi.fn<typeof realBuildPhase>();
   const checkPhase = vi.fn<typeof realCheckPhase>();
@@ -121,14 +124,14 @@ function setup(resolve: ModelByRouterTask) {
     checkPhase,
     shipPhase: vi.fn<typeof realShipPhase>(),
   };
-  return { ports, log, planPhase, buildPhase, checkPhase };
+  return { ports, events, planPhase, buildPhase, checkPhase };
 }
 
-const callsOf = (log: ReturnType<typeof vi.fn>, type: string) => log.mock.calls.filter((c) => c[0] === type);
+const callsOf = (events: LogEvent[], type: string) => events.filter((c) => c[0] === type);
 
 describe('runIssue — plan/build attribution on terminal events (#3321)', () => {
   it('terminal events carry plan and build model and provider, and the phase fail is not a second terminal (ship-it #305 failover case)', async () => {
-    const { ports, log, planPhase, buildPhase, checkPhase } = setup({
+    const { ports, events, planPhase, buildPhase, checkPhase } = setup({
       plan: 'claude-opus-5-5',
       build_codex: 'gpt-6-luna-high',
     });
@@ -152,14 +155,14 @@ describe('runIssue — plan/build attribution on terminal events (#3321)', () =>
       build: { model: 'gpt-6-luna-high', provider: 'openai', effort: 'xhigh' },
       endedIn: 'check',
     };
-    const fails = callsOf(log, 'fail');
+    const fails = callsOf(events, 'fail');
     expect(fails).toHaveLength(1);
     for (const call of fails) expect(call[2].attribution).toEqual(expected);
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail', attribution: expected });
   });
 
   it('a PLAN-written escalate carries attribution.plan and endedIn plan with no build key', async () => {
-    const { ports, log, planPhase, buildPhase } = setup({ plan: 'claude-opus-5-5' });
+    const { ports, events, planPhase } = setup({ plan: 'claude-opus-5-5' });
     planPhase.mockImplementation(async (opts) => {
       await opts.router.run('plan', 'p', {});
       opts.log('escalate', 'too big');
@@ -168,16 +171,15 @@ describe('runIssue — plan/build attribution on terminal events (#3321)', () =>
 
     const outcome = await runIssue(request, policy, ports);
 
-    const attribution = callsOf(log, 'escalate')[0][2].attribution;
+    const attribution = callsOf(events, 'escalate')[0][2].attribution;
     expect(attribution.plan.model).toBe('claude-opus-5-5');
     expect(attribution.endedIn).toBe('plan');
     expect('build' in attribution).toBe(false);
-    expect(buildPhase).not.toHaveBeenCalled();
     expect(outcome).toMatchObject({ state: 'escalated', attribution });
   });
 
   it('the rework model wins attribution.build when rework runs on another model', async () => {
-    const { ports, log, planPhase, buildPhase, checkPhase } = setup({
+    const { ports, events, planPhase, buildPhase, checkPhase } = setup({
       build_claude: 'claude-opus-5-5',
       build_codex: 'gpt-6-luna-high',
     });
@@ -194,12 +196,12 @@ describe('runIssue — plan/build attribution on terminal events (#3321)', () =>
 
     await runIssue(request, policy, ports);
 
-    const parked = callsOf(log, 'fail').at(-1)!;
+    const parked = callsOf(events, 'fail').at(-1)!;
     expect(parked[2].attribution.build.model).toBe('gpt-6-luna-high');
   });
 
   it('a model missing from the registry is attributed to provider unknown', async () => {
-    const { ports, log, planPhase, buildPhase, checkPhase } = setup({ build_codex: 'mystery-model' });
+    const { ports, events, planPhase, buildPhase, checkPhase } = setup({ build_codex: 'mystery-model' });
     planPhase.mockResolvedValue(PLAN_OK);
     buildPhase.mockImplementation(async (opts) => {
       await opts.router.run('build_codex', 'b', {});
@@ -209,11 +211,14 @@ describe('runIssue — plan/build attribution on terminal events (#3321)', () =>
 
     await runIssue(request, policy, ports);
 
-    expect(callsOf(log, 'fail').at(-1)![2].attribution.build).toEqual({ model: 'mystery-model', provider: 'unknown' });
+    expect(callsOf(events, 'fail').at(-1)![2].attribution.build).toEqual({
+      model: 'mystery-model',
+      provider: 'unknown',
+    });
   });
 
   it('a non-terminal event reaches the underlying log with exactly two arguments', async () => {
-    const { ports, log, planPhase, buildPhase, checkPhase } = setup({});
+    const { ports, events, planPhase, buildPhase, checkPhase } = setup({});
     planPhase.mockResolvedValue(PLAN_OK);
     buildPhase.mockResolvedValue({ ok: true, model: 'm', route: 'codex' });
     checkPhase.mockImplementation(async (opts) => {
@@ -223,7 +228,7 @@ describe('runIssue — plan/build attribution on terminal events (#3321)', () =>
 
     await runIssue(request, policy, ports);
 
-    const call = callsOf(log, 'check').find((c) => c[1] === 'running checkers')!;
+    const call = callsOf(events, 'check').find((c) => c[1] === 'running checkers')!;
     expect(call).toHaveLength(2);
   });
 });

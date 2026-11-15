@@ -101,41 +101,40 @@ const PLAN_PARKED: PlanResult = {
 };
 
 describe('runIssue — no pre-PLAN base health (#4029)', () => {
+  const healthChecks: unknown[] = [];
+  const red = { kind: 'red', baseSha: 'a'.repeat(40), failingChecks: ['tests'], cached: false };
+  const spy = async (...args: unknown[]) => (healthChecks.push(args), red);
   const makePorts = (extra: Partial<RunPorts> = {}) => {
-    const log = vi.fn<(type: string, msg: string) => void>();
-    const planPhase = vi.fn<typeof realPlanPhase>().mockResolvedValue(PLAN_PARKED);
+    const events: Array<[string, string]> = [];
+    const log = (type: string, msg: string) => events.push([type, msg]);
+    const plans: unknown[] = [];
+    const planPhase = vi.fn<typeof realPlanPhase>(async (opts) => (plans.push(opts), PLAN_PARKED));
     const ports: RunPorts = {
       router: new ModelRouter(MODELS, ROUTES),
       octokit: {} as Octokit,
       workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
       events: () => log,
+      planPhase,
       breaker: new ProviderBreaker(join(breakerDir, 'breaker.json')),
       resolveConstitution: () => null,
-      planPhase,
       ...extra,
     };
-    return { ports, log, planPhase };
+    return { ports, events, plans };
   };
 
   it('runs no base health check before PLAN even when a red checker is supplied', async () => {
-    const spy = vi
-      .fn()
-      .mockResolvedValue({ kind: 'red', baseSha: 'a'.repeat(40), failingChecks: ['tests'], cached: false });
-    const { ports, planPhase } = makePorts();
+    const { ports, plans } = makePorts();
     const loose = { ...ports, checkBaseHealth: spy } as RunPorts;
     await runIssue(request, policy, loose);
-    expect(spy).not.toHaveBeenCalled();
-    expect(planPhase).toHaveBeenCalledTimes(1);
+    expect(healthChecks).toEqual([]);
+    expect(plans).toHaveLength(1);
   });
 
   it('a red origin/main no longer releases the issue before PLAN', async () => {
-    const spy = vi
-      .fn()
-      .mockResolvedValue({ kind: 'red', baseSha: 'c'.repeat(40), failingChecks: ['tests'], cached: false });
-    const { ports, log } = makePorts();
+    const { ports, events } = makePorts();
     const outcome = await runIssue(request, policy, { ...ports, checkBaseHealth: spy } as RunPorts);
     expect(outcome).not.toMatchObject({ state: 'released', reason: 'environment' });
-    expect(log.mock.calls.filter((c) => c[0] === 'environment-released')).toEqual([]);
+    expect(events.filter((c) => c[0] === 'environment-released')).toEqual([]);
   });
 
   it('config preflight still parks a bad config before PLAN with no base health run', async () => {
@@ -143,8 +142,7 @@ describe('runIssue — no pre-PLAN base health (#4029)', () => {
     try {
       const path = join(dir, 'constitution.md');
       writeFileSync(path, '---\nproduct: acme\nversion: 1\ncheckers:\n  - bogus_checker\n---\nbody');
-      const spy = vi.fn();
-      const { ports, planPhase } = makePorts({
+      const { ports, plans } = makePorts({
         resolveConstitution: (): Constitution => ({
           source: 'repo',
           product: 'acme',
@@ -158,8 +156,8 @@ describe('runIssue — no pre-PLAN base health (#4029)', () => {
       });
       const outcome = await runIssue(request, policy, { ...ports, checkBaseHealth: spy } as RunPorts);
       expect(outcome).toMatchObject({ state: 'parked', reason: 'config' });
-      expect(planPhase).not.toHaveBeenCalled();
-      expect(spy).not.toHaveBeenCalled();
+      expect(plans).toEqual([]);
+      expect(healthChecks).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
