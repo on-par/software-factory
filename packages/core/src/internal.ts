@@ -19,7 +19,7 @@ export { dedupGardenClusters, filterGardenOnlyNew, markGardenTrackingUnknown } f
 // Failure fingerprint & evidence
 export type { FingerprintedFailure } from './types/index.js';
 export * from './config/provider-order-exports.js';
-export { checkInPlaceCheckout, setupInPlaceCheckout, type InPlaceCheckoutProblem } from './utils/in-place.js';
+export { checkInPlaceCheckout, setupInPlaceCheckout } from './utils/in-place.js';
 export { inPlaceWorkspace } from './run/ports.js';
 // Auto-file a fingerprinted bug (#373)
 export type { FileBugResult, FilingGitHubClient } from './filing/index.js';
@@ -191,7 +191,6 @@ export { parseRemoteSlug } from './daemon/repos-attach.js';
 // GitHub-label-backed work queue (#824)
 export type {
   EnqueueResult,
-  GithubQueue,
   QueueClaim,
   QueueClearPreview,
   QueueClearResult,
@@ -221,20 +220,12 @@ export type { QueueSnapshot } from './queue/index.js';
 export {
   createGithubQueueBackend,
   createQueueBackend,
-  UnsupportedQueueBackendError,
   type GithubQueueBackendOptions,
   type QueueBackend,
-  type QueueBackendClaim,
-  type QueueBackendOptions,
   type QueueBackendKind,
-  type QueueBackendReapRow,
 } from './queue/queue-backend.js';
-export {
-  createLinearQueueBackend,
-  resolveLinearProjectForRepo,
-  type LinearQueueBackendOptions,
-} from './queue/linear-queue-backend.js';
-export { createLinearQueueGraphqlClient, LINEAR_LEASE_ATTACHMENT_URL } from './queue/linear-queue.js';
+export { resolveLinearProjectForRepo } from './queue/linear-queue-backend.js';
+export { createLinearQueueGraphqlClient } from './queue/linear-queue.js';
 export * from './work/internal-exports.js'; // Ticket write-back (#3894)
 export { formatQueueOrderConflict, type QueueOrderConflict } from './queue/queue-order.js';
 
@@ -381,7 +372,7 @@ export {
   formatBaseMovedRefusal,
   issueBodyHash,
 } from './run/resume-context.js';
-export type { CheckResumeRecord, CheckResumeStore, PlanReuseRecord, PlanReuseStore } from './run/resume-context.js';
+export type { CheckResumeRecord } from './run/resume-context.js';
 // Pre-PLAN base health (#2339)
 export { BaselineCache } from './checkers/baseline-cache.js';
 export { runBaselineCheckers } from './checkers/baseline.js';
@@ -407,15 +398,3 @@ export { resolveTrackerConfig, type TrackerConfig } from './config/tracker-secti
 
 // Feedback round (#3910)
 export { countPendingFeedback } from './run/feedback-round-hooks.js';
-export {
-  feedbackHandledMarker,
-  feedbackReworkSummary,
-  prepareFeedbackRound,
-  publishFeedbackRound,
-  renderFeedbackReply,
-  triageFeedback,
-  type FeedbackDisposition,
-  type FeedbackItem,
-  type FeedbackRoundPlan,
-  type FeedbackRoundTarget,
-} from './run/feedback-round.js';

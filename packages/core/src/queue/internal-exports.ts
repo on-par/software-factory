@@ -9,7 +9,7 @@ export {
   pollIterateCommands,
   queueCiPendingRework,
 } from './iterate-command.js';
-export { parseReworkCommand, pollCommentRework } from './comment-rework-trigger.js';
+export { pollCommentRework } from './comment-rework-trigger.js';
 export type { ReviewReworkSource } from './review-rework-trigger.js';
 export {
   claimReviewRework,
@@ -17,7 +17,7 @@ export {
   createOctokitReviewReworkGitHub,
   pollReviewRework,
 } from './review-rework-trigger.js';
-export * from '../run/review-rework-cap.js';
+export { countReviewReworkRuns, parkAtReviewReworkCap, resolveMaxReviewReworkRuns } from '../run/review-rework-cap.js';
 export {
   DEFAULT_MAX_LAND_DEFERRALS,
   clearLandDeferred,
@@ -33,13 +33,10 @@ export {
 export {
   allProvidersDown,
   allProvidersDownReleasePayload,
-  PROVIDER_LEVEL_REASONS,
   stageBlocked,
   TIMED_BREAKER_REASONS,
 } from '../run/stage-blocked.js';
-export type { AllProvidersDownResult, ProviderDown } from '../run/stage-blocked.js';
-export type { GateStage, StageBlockedResult } from '../run/stage-blocked.js';
-export * from '../agent-memory/index.js'; // optional per-lane PLAN memory (#3624)
+export { AGENT_MEMORY_MAX_BYTES, scanAgentMemory } from '../agent-memory/index.js'; // optional per-lane PLAN memory (#3624)
 export {
   choosePrerequisiteStack,
   parsePrerequisiteStackMarker,
