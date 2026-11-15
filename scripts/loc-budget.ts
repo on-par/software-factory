@@ -211,14 +211,13 @@ export function runLocBudget(argv: readonly string[], io: LocBudgetIo = {}): num
     findings = compareLocBudget(head, actual, listPackages());
     if (args) {
       git(['rev-parse', '--verify', `${args.base}^{commit}`]);
-      let baseText: string | undefined;
+      let baseHasBudget = true;
       try {
         git(['cat-file', '-e', `${args.base}:${LOC_BUDGET_FILE}`]);
-        baseText = git(['show', `${args.base}:${LOC_BUDGET_FILE}`]);
       } catch {
-        baseText = undefined;
+        baseHasBudget = false;
       }
-      base = baseText === undefined ? head : parseLocBudget(baseText, 'base');
+      base = baseHasBudget ? parseLocBudget(git(['show', `${args.base}:${LOC_BUDGET_FILE}`]), 'base') : head;
     }
   } catch (err) {
     error(`loc-budget: ${err instanceof Error ? err.message : String(err)}`);
