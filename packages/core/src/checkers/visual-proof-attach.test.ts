@@ -52,7 +52,7 @@ function fakeOctokit(opts: { ref?: 'none' | 'exists'; readBack?: 'ok' | 'missing
     }),
   };
   const repos = {
-    getContent: vi.fn(async () => {
+    getContent: vi.fn(async (_args: { path: string }) => {
       if (opts.readBack === 'missing') throw httpError(404);
       return { data: { type: 'file', size: 4 } };
     }),
@@ -355,5 +355,116 @@ describe('assertVisualProofForHead', () => {
 
   it('passes for a factory-created success status', async () => {
     await expect(run(marked, [status('success')]).result).resolves.toBeUndefined();
+  });
+});
+
+describe('stateful visual proof (#4054)', () => {
+  const steps = [{ click: '#new' }, { fill: '#name', value: 'Demo' }, { press: 'Enter' }];
+  const statefulCapture = (clip?: { file: string; format: 'gif' | 'webm' | 'mp4'; bytes: number }) => ({
+    route: '/items',
+    state: 'item-created',
+    viewport: { width: 1280, height: 800 },
+    finalPath: '/items',
+    file: 'after.png',
+    bytes: 4,
+    before: { file: 'before.png', finalPath: '/items', bytes: 4 },
+    steps,
+    ...(clip ? { clip } : {}),
+  });
+  const statefulResult = (clip?: {
+    file: string;
+    format: 'gif' | 'webm' | 'mp4';
+    bytes: number;
+  }): VisualProofResult => ({
+    ...passResult,
+    captures: [statefulCapture(clip)],
+  });
+
+  it('uploads before, after and clip and embeds a gif or links a video', async () => {
+    for (const format of ['gif', 'webm'] as const) {
+      const { octokit } = fakeOctokit();
+      const uploaded: string[] = [];
+      const readBack: string[] = [];
+      let commits = 0;
+      octokit.rest.git.createBlob = async (args: { content: string }) => {
+        uploaded.push(args.content);
+        return { data: { sha: 'blobsha' } };
+      };
+      octokit.rest.git.createCommit = async () => {
+        commits += 1;
+        return { data: { sha: 'commitsha000000' } };
+      };
+      octokit.rest.repos.getContent = async (args: { path: string }) => {
+        readBack.push(args.path);
+        return { data: { type: 'file', size: 4 } };
+      };
+      const r = await attachVisualProof(
+        octokit,
+        target,
+        statefulResult({ file: `clip.${format}`, format, bytes: 4 }),
+        readFile,
+      );
+      expect(r.status).toBe('pass');
+      expect(uploaded).toHaveLength(3);
+      expect(readBack).toEqual([
+        expect.stringMatching(/\/0-items-item-created-1280x800\.png$/),
+        expect.stringMatching(/\/0-items-item-created-before-1280x800\.png$/),
+        expect.stringMatching(new RegExp(`/0-items-item-created-clip\\.${format}$`)),
+      ]);
+      expect(commits).toBe(1);
+      const image = r.images?.[0];
+      expect(image?.beforeUrl).toContain('before-1280x800.png?raw=true');
+      expect(image?.clipUrl).toContain(`clip.${format}?raw=true`);
+      expect(image?.clipFormat).toBe(format);
+      expect(image?.steps).toEqual(steps);
+    }
+  });
+
+  it('renders a before and after table with steps and clip', () => {
+    const image = {
+      route: '/items',
+      state: 'item-created',
+      viewport: { width: 1280, height: 800 },
+      url: 'https://x/after.png',
+      beforeUrl: 'https://x/before.png',
+      clipUrl: 'https://x/clip.gif',
+      clipFormat: 'gif' as const,
+      steps,
+    };
+    const block = renderVisualProofBlock({ ...passResult, images: [image] });
+    expect(block).toContain('| Before | After |');
+    expect(block).toContain('| --- | --- |');
+    expect(block).toContain(
+      '| ![/items item-created before](https://x/before.png) | ![/items item-created after at abcdef012345](https://x/after.png) |',
+    );
+    expect(block).toContain('Steps: 1. click "#new" · 2. fill "#name" with "Demo" · 3. press Enter');
+    expect(block).toContain('![clip](https://x/clip.gif)');
+    const video = renderVisualProofBlock({
+      ...passResult,
+      images: [{ ...image, clipUrl: 'https://x/clip.webm', clipFormat: 'webm' as const }],
+    });
+    expect(video).toContain('[▶ clip (webm)](https://x/clip.webm)');
+    expect(video).not.toContain('![clip]');
+  });
+
+  it('renders a coverage warning for uncovered UI files', () => {
+    const block = renderVisualProofBlock({ ...passResult, images: [], uncovered: ['web/a.css', 'web/b.css'] });
+    expect(block).toContain('- Coverage warning: UI files not covered by any visualProof route: web/a.css, web/b.css');
+  });
+
+  it('renders a visual proof unavailable line for every non-pass result', () => {
+    for (const status of ['fail', 'unavailable'] as const) {
+      for (const mode of ['required', 'advisory'] as const) {
+        const block = renderVisualProofBlock(
+          { status, headSha: HEAD, runId: 'run-9', captures: [], diagnostic: 'boom\nbad' },
+          mode,
+        );
+        expect(block).toContain('**Visual proof unavailable: boom bad**');
+        expect(block).toContain('- Diagnostic: boom bad');
+      }
+    }
+    const noReason = renderVisualProofBlock({ status: 'fail', headSha: HEAD, runId: 'run-9', captures: [] });
+    expect(noReason).toContain('**Visual proof unavailable: fail**');
+    expect(renderVisualProofBlock(passResult)).not.toContain('unavailable');
   });
 });

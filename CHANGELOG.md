@@ -14,6 +14,7 @@ section to `## X.Y.Z - date`. See
 - Lint rule `anti-slop/no-comments` bans source comments except justified lint overrides and toolchain directives, with a shrink-only per-file baseline and a CI guard (#4053).
 - Lint rule `anti-slop/package-boundaries` enforces the config ← core ← cli direction, a zero-dependency config, published-name cross-package imports and the ADR-0004 `/internal` and `/testing` subpath boundaries (#4052).
 - Lint rule `anti-slop/no-call-assertions` bans call-count assertions and mock-call reads in tests, with a shrink-only per-file baseline and a CI guard (#4051).
+- Visual proof: routes can declare scripted `steps` and `record: gif|video` for before/after captures and clips; capture retries (`visualProof.captureAttempts`), rejects blank images and always publishes proof or an unavailable reason (#4054).
 
 ### Deprecated
 

@@ -5,7 +5,8 @@ import type { Octokit } from '@octokit/rest';
 
 import type { VisualProofMode } from '../config/visual-proof-section.js';
 import { upsertMarkedBlock } from '../review/marked-block.js';
-import type { VisualProofResult } from './visual-proof.js';
+import { describeVisualProofStep } from './visual-proof-manifest.js';
+import type { VisualProofImage, VisualProofResult } from './visual-proof.js';
 
 export const VISUAL_PROOF_STATUS_CONTEXT = 'factory/visual-proof';
 export const VISUAL_PROOF_START = '<!-- factory:visual-proof v1 required -->';
@@ -63,16 +64,24 @@ export async function attachVisualProof(
   const dir = `visual-proof/${prNumber}/${slug(result.runId)}/${head12(result.headSha)}`;
 
   let commitSha: string;
-  let paths: string[];
+  const placed: { after: string; before?: string; clip?: string; clipFormat?: 'gif' | 'webm' | 'mp4' }[] = [];
   try {
     const blobs: { path: string; sha: string; size: number }[] = [];
-    for (const [i, c] of result.captures.entries()) {
-      const bytes = readFile(join(outDir, c.file));
+    const upload = async (file: string, name: string): Promise<string> => {
+      const bytes = readFile(join(outDir, file));
       const { data } = await git.createBlob({ owner, repo, content: bytes.toString('base64'), encoding: 'base64' });
-      const name = `${i}-${slug(c.route)}-${slug(c.state)}-${c.viewport.width}x${c.viewport.height}.png`;
-      blobs.push({ path: `${dir}/${name}`, sha: data.sha, size: bytes.length });
+      const path = `${dir}/${name}`;
+      blobs.push({ path, sha: data.sha, size: bytes.length });
+      return path;
+    };
+    for (const [i, c] of result.captures.entries()) {
+      const stem = `${i}-${slug(c.route)}-${slug(c.state)}`;
+      const size = `${c.viewport.width}x${c.viewport.height}`;
+      const after = await upload(c.file, `${stem}-${size}.png`);
+      const before = c.before ? await upload(c.before.file, `${stem}-before-${size}.png`) : undefined;
+      const clip = c.clip ? await upload(c.clip.file, `${stem}-clip.${c.clip.format}`) : undefined;
+      placed.push({ after, ...(before ? { before } : {}), ...(clip ? { clip, clipFormat: c.clip?.format } : {}) });
     }
-    paths = blobs.map((b) => b.path);
     let written: string | undefined;
     for (let attempt = 1; written === undefined; attempt++) {
       let parent: string | undefined;
@@ -105,7 +114,7 @@ export async function attachVisualProof(
     }
     commitSha = written;
     const sizes = new Map(blobs.map((b) => [b.path, b.size]));
-    for (const path of paths) {
+    for (const { path } of blobs) {
       const { data } = await octokit.rest.repos.getContent({ owner, repo, path, ref: commitSha });
       if (Array.isArray(data) || data.type !== 'file' || data.size !== sizes.get(path)) {
         return fail(result, `embedded asset unavailable: ${path} did not read back from ${commitSha.slice(0, 12)}`);
@@ -115,12 +124,19 @@ export async function attachVisualProof(
     const diagnostic = errorMessage(err).slice(0, DIAGNOSTIC_MAX);
     return fail(result, `upload failed: ${diagnostic}`);
   }
-  const images = result.captures.map((c, i) => ({
-    route: c.route,
-    state: c.state,
-    viewport: c.viewport,
-    url: `https://github.com/${owner}/${repo}/blob/${commitSha}/${paths[i]}?raw=true`,
-  }));
+  const urlFor = (path: string): string => `https://github.com/${owner}/${repo}/blob/${commitSha}/${path}?raw=true`;
+  const images: VisualProofImage[] = result.captures.map((c, i) => {
+    const at = placed[i];
+    return {
+      route: c.route,
+      state: c.state,
+      viewport: c.viewport,
+      url: urlFor(at?.after ?? ''),
+      ...(at?.before ? { beforeUrl: urlFor(at.before) } : {}),
+      ...(at?.clip ? { clipUrl: urlFor(at.clip), clipFormat: at.clipFormat } : {}),
+      ...(c.steps ? { steps: c.steps } : {}),
+    };
+  });
   return { ...result, status: 'pass', images };
 }
 
@@ -145,11 +161,32 @@ export function renderVisualProofBlock(result: VisualProofResult, mode: Publishe
     lines.push(
       `- \`${image.route}\` · state \`${image.state}\` · ${image.viewport.width}x${image.viewport.height}`,
       '',
-      `![${image.route} ${image.state} at ${short}](${image.url})`,
-      '',
     );
+    if (image.beforeUrl) {
+      lines.push(
+        '| Before | After |',
+        '| --- | --- |',
+        `| ![${image.route} ${image.state} before](${image.beforeUrl}) | ![${image.route} ${image.state} after at ${short}](${image.url}) |`,
+        '',
+      );
+    } else {
+      lines.push(`![${image.route} ${image.state} at ${short}](${image.url})`, '');
+    }
+    if (image.steps?.length) {
+      lines.push(`Steps: ${image.steps.map((st, n) => `${n + 1}. ${describeVisualProofStep(st)}`).join(' · ')}`, '');
+    }
+    if (image.clipUrl) {
+      lines.push(
+        image.clipFormat === 'gif' ? `![clip](${image.clipUrl})` : `[▶ clip (${image.clipFormat})](${image.clipUrl})`,
+        '',
+      );
+    }
+  }
+  if (result.uncovered?.length) {
+    lines.push(`- Coverage warning: UI files not covered by any visualProof route: ${result.uncovered.join(', ')}`, '');
   }
   if (result.status !== 'pass') {
+    lines.push(`**Visual proof unavailable: ${oneLine(result.diagnostic ?? result.status)}**`, '');
     if (advisory) {
       lines.push('- Advisory: `visualProof.mode` is `advisory`, so this result does not block SHIP or merge');
     }
