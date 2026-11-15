@@ -93,15 +93,19 @@ describe('setup', () => {
   });
 
   function start() {
-    const provide = vi.fn();
-    const teardown = setup({ provide });
-    const sandbox = String(provide.mock.calls[0]?.[1]);
-    return { provide, teardown, sandbox };
+    const provided = new Map<string, unknown>();
+    const teardown = setup({
+      provide: (key: string, value: unknown) => {
+        provided.set(key, value);
+      },
+    });
+    const sandbox = String(provided.get('factoryTmpSandbox'));
+    return { provided, teardown, sandbox };
   }
 
   it('teardown removes the sandbox and throws naming leaked prefixes', async () => {
-    const { provide, teardown, sandbox } = start();
-    expect(provide).toHaveBeenCalledWith('factoryTmpSandbox', sandbox);
+    const { provided, teardown, sandbox } = start();
+    expect([...provided.entries()]).toEqual([['factoryTmpSandbox', sandbox]]);
     expect(sandbox.startsWith(scratch)).toBe(true);
     expect(existsSync(sandbox)).toBe(true);
     mkdirSync(join(scratch, 'feedback-leak1'));
@@ -110,12 +114,15 @@ describe('setup', () => {
   });
 
   it('only warns when FACTORY_TMP_LEAK_GUARD=0', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnings: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((msg: unknown) => {
+      warnings.push(String(msg));
+    });
     process.env.FACTORY_TMP_LEAK_GUARD = '0';
     const { teardown } = start();
     mkdirSync(join(scratch, 'filing-leak'));
     await expect(teardown()).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('filing-'));
+    expect(warnings.join('\n')).toContain('filing-');
   });
 
   it('resolves when nothing leaked', async () => {

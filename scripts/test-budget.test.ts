@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   evaluateTestBudget,
@@ -26,9 +26,13 @@ const SEVEN: Array<[string, number]> = [
 
 function run(argv: string[], env: Record<string, string | undefined>, readFile?: (p: string) => string) {
   const lines: string[] = [];
-  const read = vi.fn(readFile ?? (() => JSON.stringify(report(SEVEN))));
+  const reads: string[] = [];
+  const read = (p: string) => {
+    reads.push(p);
+    return (readFile ?? (() => JSON.stringify(report(SEVEN))))(p);
+  };
   const code = runTestBudgetCli(argv, { readFile: read, log: (l) => lines.push(l), cwd: '/repo', env });
-  return { code, lines, read };
+  return { code, lines, reads };
 }
 
 describe('TEST_BUDGET_SECONDS', () => {
@@ -76,13 +80,13 @@ describe('isCiEnv', () => {
 
 describe('runTestBudgetCli', () => {
   it('prints PASS and returns 0 when elapsed is within budget', () => {
-    const { code, lines, read } = run(['300', 'r.json'], {});
+    const { code, lines, reads } = run(['300', 'r.json'], {});
     expect(code).toBe(0);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatch(/^test-budget: PASS/);
     expect(lines[0]).toContain('300s');
     expect(lines[0]).toContain('450s');
-    expect(read).not.toHaveBeenCalled();
+    expect(reads).toEqual([]);
   });
 
   it('prints a WARNING with the slowest files and still returns 0 when over budget', () => {

@@ -158,9 +158,5 @@
   "packages/core/src/run/run-issue.no-diff.test.ts": 2,
   "packages/core/src/run/run-issue.no-pr.test.ts": 10,
   "packages/core/src/run/run-issue.opencode-breaker.test.ts": 2,
-  "packages/core/src/run/run-issue.test.ts": 184,
-  "scripts/check-cli-json-contract.test.ts": 4,
-  "scripts/max-lines-baseline-guard.test.ts": 1,
-  "scripts/test-budget.test.ts": 1,
-  "scripts/test-tmp-sandbox.test.ts": 3
+  "packages/core/src/run/run-issue.test.ts": 184
 }

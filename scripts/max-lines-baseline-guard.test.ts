@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   diffMaxLinesBaseline,
@@ -119,10 +119,14 @@ describe('runMaxLinesBaselineGuard', () => {
   });
 
   it('passes a lower-or-remove-only diff without the label and without calling the API', () => {
-    const fetchLabelEvents = vi.fn(() => []);
+    const fetched: number[] = [];
+    const fetchLabelEvents = (): LabelEvent[] => {
+      fetched.push(1);
+      return [];
+    };
     const h = io({ base: '{"a.ts":600,"b.ts":700}', head: '{"a.ts":550}', fetchLabelEvents });
     expect(runMaxLinesBaselineGuard(ARGS, h)).toBe(0);
-    expect(fetchLabelEvents).not.toHaveBeenCalled();
+    expect(fetched).toEqual([]);
   });
 
   it('counts every entry as added when the base file is missing', () => {
