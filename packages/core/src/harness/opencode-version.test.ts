@@ -61,10 +61,7 @@ describe('parseOpenCodeMajor', () => {
 describe('probeOpenCodeMajor', () => {
   it('runs `opencode --version` and returns the parsed major', async () => {
     const cmds: string[] = [];
-    const execFn = async (cmd: string) => {
-      cmds.push(cmd);
-      return { stdout: '2.0.29\n', stderr: '' };
-    };
+    const execFn = async (cmd: string) => ({ stdout: '2.0.29\n', stderr: '', n: cmds.push(cmd) });
     await expect(probeOpenCodeMajor(execFn)).resolves.toBe(2);
     expect(cmds).toEqual(['opencode --version']);
   });

@@ -135,12 +135,10 @@ describe('CodexCliHarness live usage', () => {
   it('without onUsage execFn gets no onStdout and nothing is read before exec settles', async () => {
     const { home, file } = await makeRollout();
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
-    let keys: string[] = [];
-    let intervalsDuringExec = -1;
+    let seen: unknown;
     const exec = async (cmd: string, opts: any) => {
       expect('onStdout' in opts).toBe(false);
-      keys = Object.keys(opts);
-      intervalsDuringExec = vi.getTimerCount();
+      seen = [Object.keys(opts), vi.getTimerCount()];
       await realWriteFile(file, `${tokenEvent(100, 10, 110)}\n`);
       await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
       return { stdout: FINAL_STDOUT, stderr: '' };
@@ -148,8 +146,7 @@ describe('CodexCliHarness live usage', () => {
     const result = await new CodexCliHarness(exec).run(
       makeContractRequest({ model: 'codex-model', registry, env: { CODEX_HOME: home } }),
     );
-    expect(keys).toEqual(['timeoutMs', 'maxBuffer', 'env', 'onPgid']);
-    expect(intervalsDuringExec).toBe(0);
+    expect(seen).toEqual([['timeoutMs', 'maxBuffer', 'env', 'onPgid'], 0]);
     expect(result.usage).toMatchObject({ inputTokens: 100, outputTokens: 5, numTurns: 1, peakInputTokens: 100 });
   });
 
@@ -163,10 +160,8 @@ describe('CodexCliHarness live usage', () => {
     };
     const harness = new CodexCliHarness(exec, {}, { liveUsageIntervalMs: 5 });
     const reports: HarnessLiveUsage[] = [];
-    const onUsage = (u: HarnessLiveUsage) => {
-      reports.push(u);
-    };
     const base = { model: 'codex-model', registry, env: { CODEX_HOME: home } };
+    const onUsage = (u: HarnessLiveUsage) => reports.push(u);
     const withLive = await harness.run(makeContractRequest({ ...base, onUsage }));
     const without = await harness.run(makeContractRequest(base));
     expect(reports).toEqual([]);
@@ -185,14 +180,9 @@ describe('startCodexLiveUsage', () => {
     vi.useFakeTimers();
     let resolveRead: (u: CodexRolloutUsage) => void = () => {};
     let reads = 0;
-    const read = () => {
-      reads++;
-      return new Promise<CodexRolloutUsage | undefined>((r) => (resolveRead = r));
-    };
+    const read = () => new Promise<CodexRolloutUsage | undefined>((r) => ((resolveRead = r), reads++));
     const reports: HarnessLiveUsage[] = [];
-    const onUsage = (u: HarnessLiveUsage) => {
-      reports.push(u);
-    };
+    const onUsage = (u: HarnessLiveUsage) => reports.push(u);
     const live = startCodexLiveUsage({ onUsage, intervalMs: 10, locate: async () => '/r', read });
     live.onStdout(`${THREAD_LINE}\n`);
     await vi.advanceTimersByTimeAsync(10);
@@ -208,18 +198,9 @@ describe('startCodexLiveUsage', () => {
   it('skips rejected locate/read, does not re-report an unchanged count and survives a throwing onUsage', async () => {
     vi.useFakeTimers();
     let locates = 0;
-    const locate = async () => {
-      locates++;
-      if (locates === 1) throw new Error('no');
-      return '/r';
-    };
-    const queue: Array<() => Promise<CodexRolloutUsage>> = [
-      () => Promise.reject(new Error('bad')),
-      () => Promise.resolve(usage(1)),
-      () => Promise.resolve(usage(1)),
-      () => Promise.resolve(usage(2)),
-    ];
-    const read = async () => queue.shift()?.();
+    const locate = async () => (++locates === 1 ? Promise.reject(new Error('no')) : '/r');
+    const results = [() => Promise.reject(new Error('bad')), () => usage(1), () => usage(1), () => usage(2)];
+    const read = async () => results.shift()?.();
     const reported: number[] = [];
     const onUsage = (u: HarnessLiveUsage) => {
       reported.push(u.calls);

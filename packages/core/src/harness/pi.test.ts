@@ -58,10 +58,7 @@ const success = fixture('success.jsonl');
 const req = (overrides = {}) => makeContractRequest({ model: 'pi-model', registry, ...overrides });
 const okExec = (stdout = success) => {
   const calls: { cmd: string; opts: any }[] = [];
-  const fn = async (cmd: string, opts: any) => {
-    calls.push({ cmd, opts });
-    return { stdout, stderr: '' };
-  };
+  const fn = async (cmd: string, opts: any) => ({ stdout, stderr: '', n: calls.push({ cmd, opts }) });
   return Object.assign(fn, { calls });
 };
 
@@ -216,8 +213,7 @@ describe('PiHarness', () => {
     await new PiHarness(exec).run(req());
     const taskRegistry = new ModelRegistry({ ...modelsConfig, efforts: { 'pi-model': { triage: 'high' } } });
     await new PiHarness(exec).run(req({ registry: taskRegistry }));
-    expect(exec.calls[0].cmd).not.toContain('--thinking');
-    expect(exec.calls[1].cmd).not.toContain('--thinking');
+    expect(exec.calls.map((c) => c.cmd).join('\n')).not.toContain('--thinking');
   });
 
   it('drops DEEPSEEK_API_KEY so Pi cannot use the refused native DeepSeek provider', async () => {
@@ -426,13 +422,9 @@ describe('PiHarness prompt dir cleanup', () => {
   });
 
   it('removes the prompt dir when writeFile rejects a non-string prompt', async () => {
-    const cmds: string[] = [];
-    const exec = async (cmd: string) => {
-      cmds.push(cmd);
-      return { stdout: '', stderr: '' };
-    };
+    const exec = okExec('');
     await expect(new PiHarness(exec).run(req({ prompt: 42 as never }))).rejects.toThrow();
-    expect(cmds).toEqual([]);
+    expect(exec.calls).toEqual([]);
     expect(promptDirs()).toEqual([]);
   });
 });

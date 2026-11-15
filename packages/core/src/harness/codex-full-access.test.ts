@@ -103,10 +103,7 @@ describe('CodexCliHarness full-access config', () => {
   it('explicit workspace-write mode applies without a policy or config', async () => {
     const rec = recordingExec();
     const lines: string[] = [];
-    const log = (l: string) => {
-      lines.push(l);
-    };
-    const harness = new CodexCliHarness(rec.fn, {}, { env: {}, log });
+    const harness = new CodexCliHarness(rec.fn, {}, { env: {}, log: (l) => lines.push(l) });
 
     await harness
       .run(makeContractRequest({ model: 'codex-model', registry, codexSandbox: 'workspace-write' }))

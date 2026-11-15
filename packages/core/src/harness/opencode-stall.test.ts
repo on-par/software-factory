@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
 import { ModelRegistry } from '../models/index.js';
@@ -54,9 +54,7 @@ describe('OpenCodeHarness stall watch', () => {
     };
     let clock = 0;
     const pgids: number[] = [];
-    const onPgid = (p: number) => {
-      pgids.push(p);
-    };
+    const onPgid = (p: number) => pgids.push(p);
     const harness = new OpenCodeHarness(execFn, undefined, undefined, {
       stallSeconds: 60,
       intervalMs: 5,

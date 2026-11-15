@@ -16,21 +16,17 @@ describe('startStallWatch', () => {
 
   const watch = (probe: () => Promise<ProcessActivitySample | undefined>, stallMs = 60_000) => {
     const killed: number[] = [];
-    let stalls = 0;
-    const kill = async (pgid: number) => {
-      killed.push(pgid);
-    };
-    const onStall = () => {
-      stalls++;
-    };
+    const stalls: number[] = [];
+    const kill = async (pgid: number) => killed.push(pgid);
+    const onStall = (idleMs: number) => stalls.push(idleMs);
     const w = startStallWatch(7, { stallMs, intervalMs: 10_000, probe, now: () => Date.now(), kill, onStall });
-    return { w, killed, stalls: () => stalls };
+    return { w, killed, stalls };
   };
 
   it('kills a process group idle past the stall threshold', async () => {
     const { killed, stalls } = watch(async () => ({ cpuSeconds: 5, tcpConnections: 0 }));
     await vi.advanceTimersByTimeAsync(80_000);
-    expect(stalls()).toBe(1);
+    expect(stalls).toHaveLength(1);
     expect(killed).toEqual([7]);
   });
 
@@ -39,10 +35,7 @@ describe('startStallWatch', () => {
     const busy = watch(async () => ({ cpuSeconds: (cpu += 5), tcpConnections: 0 }));
     const net = watch(async () => ({ cpuSeconds: 5, tcpConnections: 1 }));
     await vi.advanceTimersByTimeAsync(600_000);
-    expect(busy.killed).toEqual([]);
-    expect(busy.stalls()).toBe(0);
-    expect(net.killed).toEqual([]);
-    expect(net.stalls()).toBe(0);
+    expect([busy.killed, busy.stalls, net.killed, net.stalls]).toEqual([[], [], [], []]);
   });
 
   it('treats a failed probe as active', async () => {
@@ -51,8 +44,7 @@ describe('startStallWatch', () => {
       throw new Error('ps gone');
     });
     await vi.advanceTimersByTimeAsync(600_000);
-    expect(unknown.killed).toEqual([]);
-    expect(thrown.killed).toEqual([]);
+    expect([unknown.killed, thrown.killed]).toEqual([[], []]);
   });
 
   it('noteActivity resets the idle clock', async () => {
@@ -75,10 +67,7 @@ describe('startStallWatch', () => {
 
   it('stallMs 0 returns a no-op watch', async () => {
     let probes = 0;
-    const probe = async () => {
-      probes++;
-      return { cpuSeconds: 5, tcpConnections: 0 };
-    };
+    const probe = async () => ({ cpuSeconds: 5 + probes++, tcpConnections: 0 });
     const { w, killed } = watch(probe, 0);
     w.noteActivity();
     await vi.advanceTimersByTimeAsync(300_000);

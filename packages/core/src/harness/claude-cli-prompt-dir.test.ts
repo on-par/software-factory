@@ -73,10 +73,7 @@ describe('ClaudeCliHarness prompt dir cleanup', () => {
 
   it('removes the prompt dir when writing the prompt fails', async () => {
     const executed: string[] = [];
-    const exec = async (command: string) => {
-      executed.push(command);
-      return { stdout: '', stderr: '' };
-    };
+    const exec = async (command: string) => ({ stdout: '', stderr: '', n: executed.push(command) });
     await expect(
       new ClaudeCliHarness(exec).run(makeContractRequest({ model: 'claude-model', registry, prompt: 42 as never })),
     ).rejects.toThrow();
