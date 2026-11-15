@@ -7,6 +7,7 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, vi } from 'vitest';
 
 import { type CliDeps, main, shipIssue as cliShipIssue } from '../index.js';
+import { captureConsole } from './console-capture.js';
 import { checkInPlaceCheckout, setupInPlaceCheckout } from './in-place-doubles.js';
 export { checkInPlaceCheckout, setupInPlaceCheckout };
 
@@ -80,6 +81,9 @@ export class ExitError extends Error {
     super(`process.exit(${code})`);
   }
 }
+
+const logLines: string[] = [];
+const errLines: string[] = [];
 
 let exitSpy: any;
 let logSpy: any;
@@ -348,11 +352,11 @@ async function runMainRaw(deps: CliDeps | undefined, ...args: string[]) {
 }
 
 export function logged(): string {
-  return logSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+  return logLines.join('\n');
 }
 
 export function errored(): string {
-  return errSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+  return errLines.join('\n');
 }
 
 /** Registers the per-test reset of h, fakes, temp dirs, env tracking and console/process.exit spies. */
@@ -475,8 +479,8 @@ export function installShipHarness(): void {
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
       throw new ExitError(code ?? 0);
     }) as any);
-    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    logSpy = captureConsole('log', logLines);
+    errSpy = captureConsole('error', errLines);
   });
 
   afterEach(async () => {

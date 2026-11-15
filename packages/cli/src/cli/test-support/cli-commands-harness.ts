@@ -11,6 +11,7 @@ import { afterEach, beforeEach, vi } from 'vitest';
 
 import type { DaemonCtlDeps } from '../daemon.js';
 import { type CliDeps, cmdUsage as cliCmdUsage, main, shipIssue as cliShipIssue } from '../index.js';
+import { captureConsole } from './console-capture.js';
 import {
   coreFakes,
   defaultOctokit,
@@ -27,6 +28,9 @@ import {
 } from './cli-commands-state.js';
 
 export * from './cli-commands-state.js';
+
+const logLines: string[] = [];
+const errLines: string[] = [];
 
 export let exitSpy: any;
 export let logSpy: any;
@@ -212,8 +216,8 @@ export function installCliCommandsHarness(): void {
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
       throw new ExitError(code ?? 0);
     }) as any);
-    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    logSpy = captureConsole('log', logLines);
+    errSpy = captureConsole('error', errLines);
   });
 
   afterEach(async () => {
@@ -231,8 +235,8 @@ export function installCliCommandsHarness(): void {
 }
 
 export function logged(): string {
-  return logSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+  return logLines.join('\n');
 }
 export function errored(): string {
-  return errSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+  return errLines.join('\n');
 }
