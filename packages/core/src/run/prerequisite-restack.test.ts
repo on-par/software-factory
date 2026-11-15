@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
 import type { Octokit } from '@octokit/rest';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { prerequisiteStackOrder } from '../phases/stack-order.js';
 import { parsePrerequisiteStackMarker, type PrerequisiteStackTarget } from '../queue/prerequisite-stack.js';
@@ -26,17 +26,20 @@ const tempDirs = createTempDirs();
 describe('restackOnPrerequisite', () => {
   let remote: string;
   let root: string;
-  let update: ReturnType<typeof vi.fn<(args: Record<string, unknown>) => Promise<unknown>>>;
+  let updates: Array<Record<string, unknown>>;
   let prs: Record<number, { base: string; body: string }>;
 
   const octokit = (): Octokit =>
     ({
       rest: {
         pulls: {
-          get: vi.fn(async ({ pull_number }: { pull_number: number }) => ({
+          get: async ({ pull_number }: { pull_number: number }) => ({
             data: { base: { ref: prs[pull_number]!.base }, body: prs[pull_number]!.body },
-          })),
-          update,
+          }),
+          update: async (args: Record<string, unknown>) => {
+            updates.push(args);
+            return {};
+          },
         },
       },
     }) as never;
@@ -62,7 +65,7 @@ describe('restackOnPrerequisite', () => {
     const dir = tempDirs.makeSync('prereq-restack-');
     remote = join(dir, 'remote.git');
     root = join(dir, 'root');
-    update = vi.fn(async () => ({}));
+    updates = [];
     prs = {};
     git(dir, 'init', '--bare', '-b', 'main', remote);
     git(dir, 'clone', remote, root);
@@ -105,7 +108,7 @@ describe('restackOnPrerequisite', () => {
     });
     expect(out).toMatchObject({ status: 'restacked', retargeted: true, headSha: remoteHead('factory/6-x') });
     expect(remoteLog('factory/6-x')).toEqual(['x only']);
-    const arg = update.mock.calls[0]![0] as { pull_number: number; base: string; body: string };
+    const arg = updates[0]! as { pull_number: number; base: string; body: string };
     expect(arg).toMatchObject({ pull_number: 60, base: 'main' });
     expect(arg.body).toContain('prerequisite merged; stacked on `main`');
     expect(parsePrerequisiteStackMarker(arg.body)).toBeUndefined();
@@ -136,7 +139,7 @@ describe('restackOnPrerequisite', () => {
     });
     expect(out).toMatchObject({ status: 'restacked', retargeted: false });
     expect(remoteLog('factory/6-x')).toEqual(['x only', 'b second', 'b only']);
-    const arg = update.mock.calls[0]![0] as { body: string; base?: string };
+    const arg = updates[0]! as { body: string; base?: string };
     expect(arg).not.toHaveProperty('base');
     expect(parsePrerequisiteStackMarker(arg.body)?.headSha).toBe(newHead);
   });
@@ -165,7 +168,7 @@ describe('restackOnPrerequisite', () => {
     });
     expect(out.status === 'park' && out.reason).toContain('a human may have pushed');
     expect(remoteHead('factory/6-x')).toBe(humanHead);
-    expect(update).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
   });
 
   it('parks naming the conflicting files when the rebase conflicts', async () => {

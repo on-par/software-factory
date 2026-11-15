@@ -3,10 +3,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { readPortLeases } from '../environment/index.js';
-import { ProcessGroupTracker } from '../environment/process-groups.js';
+import { ProcessGroupTracker, type KillOutcome } from '../environment/process-groups.js';
 import { createSimWorkspace } from '../testing/sim/workspace.js';
 import type { WorktreeSandbox } from '../utils/microvm.js';
 import type { LocalOnlyPolicy } from '../work/local-only.js';
@@ -31,6 +31,23 @@ async function withTmpDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   }
 }
 
+class RecordingTracker extends ProcessGroupTracker {
+  killed: number[][] = [];
+  override async killAll(): Promise<KillOutcome[]> {
+    this.killed.push(this.pgids);
+    return [];
+  }
+}
+
+function recorder(result?: unknown) {
+  const calls: unknown[][] = [];
+  const fn = async (...args: unknown[]) => {
+    calls.push(args);
+    return result as never;
+  };
+  return { fn, calls };
+}
+
 describe('localOnlyWorkspace', () => {
   it('wraps a LocalOnlyPolicy as a Workspace using the policy workspace path as-is', async () => {
     const policy: LocalOnlyPolicy = { mode: 'local-only', workspace: '/tmp/some-repo' };
@@ -42,17 +59,17 @@ describe('localOnlyWorkspace', () => {
 
 describe('inPlaceWorkspace', () => {
   it('inPlaceWorkspace path is the repo root and forwards the remote branch', async () => {
-    const setup = vi.fn().mockResolvedValue({ base: 'origin/main', head: 'x', remoteBranch: { sha: 'abc' } });
-    const findOpenPr = vi.fn();
+    const { fn: setup, calls: setupCalls } = recorder({ base: 'origin/main', head: 'x', remoteBranch: { sha: 'abc' } });
+    const findOpenPr = async () => ({ status: 'absent' as const });
     const ws = await inPlaceWorkspace({ repoRoot: '/repo', branch: 'b', findOpenPr, setup });
     expect(ws.path).toBe('/repo');
     expect(ws.remoteBranch).toEqual({ sha: 'abc' });
-    expect(setup).toHaveBeenCalledWith('/repo', 'b', undefined, { findOpenPr });
+    expect(setupCalls).toEqual([['/repo', 'b', undefined, { findOpenPr }]]);
   });
 
   it('inPlaceWorkspace dispose leaves the checkout in place', async () => {
     await withTmpDir(async (dir) => {
-      const setup = vi.fn().mockResolvedValue({ base: 'origin/main', head: 'x', remoteBranch: null });
+      const { fn: setup } = recorder({ base: 'origin/main', head: 'x', remoteBranch: null });
       const ws = await inPlaceWorkspace({ repoRoot: dir, branch: 'b', setup });
       expect(ws.remoteBranch).toBeUndefined();
       await ws.dispose();
@@ -73,8 +90,8 @@ describe('simWorkspace', () => {
 
 describe('worktreeWorkspace', () => {
   it('copies the pre-existing remote branch from the setup result and forwards findOpenPr (#1868)', async () => {
-    const setup = vi.fn().mockResolvedValue({ base: 'origin/main', head: 'x', remoteBranch: { sha: 'abc' } });
-    const findOpenPr = vi.fn();
+    const { fn: setup, calls: setupCalls } = recorder({ base: 'origin/main', head: 'x', remoteBranch: { sha: 'abc' } });
+    const findOpenPr = async () => ({ status: 'absent' as const });
 
     const ws = await worktreeWorkspace({
       repoRoot: '/repo',
@@ -83,96 +100,66 @@ describe('worktreeWorkspace', () => {
       findOpenPr,
       keepsFile: '/state/worktree-keeps.json',
       setup,
-      cleanup: vi.fn(),
+      cleanup: async () => {},
     });
 
     expect(ws.remoteBranch).toEqual({ sha: 'abc' });
-    expect(setup.mock.calls[0][6]).toEqual({ findOpenPr, keepsFile: '/state/worktree-keeps.json' });
+    expect(setupCalls[0]?.[6]).toEqual({ findOpenPr, keepsFile: '/state/worktree-keeps.json' });
   });
 
   it('leaves remoteBranch absent when the setup result has none', async () => {
-    const setup = vi.fn().mockResolvedValue({ base: 'origin/main', head: 'x', remoteBranch: null });
+    const { fn: setup } = recorder({ base: 'origin/main', head: 'x', remoteBranch: null });
 
     const ws = await worktreeWorkspace({
       repoRoot: '/repo',
       branch: 'issue-10',
       worktreePath: '/repo/.worktrees/issue-10',
       setup,
-      cleanup: vi.fn(),
+      cleanup: async () => {},
     });
 
     expect('remoteBranch' in ws).toBe(false);
   });
 
-  it('provisions via injected setup, exposes worktreePath, and tears down via injected cleanup', async () => {
-    const setup = vi.fn().mockResolvedValue(undefined);
-    const cleanup = vi.fn().mockResolvedValue(undefined);
-    const log = vi.fn();
+  const sandbox: WorktreeSandbox = { runtime: 'docker-sandbox', authPaths: ['/home/.claude'], allowHosts: [] };
+  it.each([
+    ['without a sandbox', undefined],
+    ['with the sandbox descriptor forwarded to both setup and cleanup', sandbox],
+  ])('provisions via injected setup and tears down via injected cleanup %s', async (_name, sbx) => {
+    const { fn: setup, calls: setupCalls } = recorder();
+    const { fn: cleanup, calls: cleanupCalls } = recorder();
+    const log = () => {};
+    const path = '/repo/.worktrees/issue-1';
 
     const ws: Workspace = await worktreeWorkspace({
       repoRoot: '/repo',
       branch: 'issue-1',
-      worktreePath: '/repo/.worktrees/issue-1',
+      worktreePath: path,
+      sandbox: sbx,
       setup,
       cleanup,
       log,
     });
 
-    expect(setup).toHaveBeenCalledWith('/repo', 'issue-1', '/repo/.worktrees/issue-1', undefined, undefined, log, {
-      findOpenPr: undefined,
-    });
-    expect(ws.path).toBe('/repo/.worktrees/issue-1');
+    expect(setupCalls).toEqual([['/repo', 'issue-1', path, undefined, sbx, log, { findOpenPr: undefined }]]);
+    expect(ws.path).toBe(path);
 
     await ws.dispose();
-    expect(cleanup).toHaveBeenCalledWith('/repo', '/repo/.worktrees/issue-1', log, undefined);
-  });
-
-  it('forwards the sandbox descriptor to both setup and cleanup', async () => {
-    const setup = vi.fn().mockResolvedValue(undefined);
-    const cleanup = vi.fn().mockResolvedValue(undefined);
-    const log = vi.fn();
-    const sandbox: WorktreeSandbox = { runtime: 'docker-sandbox', authPaths: ['/home/.claude'], allowHosts: [] };
-
-    const ws: Workspace = await worktreeWorkspace({
-      repoRoot: '/repo',
-      branch: 'issue-3',
-      worktreePath: '/repo/.worktrees/issue-3',
-      sandbox,
-      setup,
-      cleanup,
-      log,
-    });
-
-    expect(setup).toHaveBeenCalledWith('/repo', 'issue-3', '/repo/.worktrees/issue-3', undefined, sandbox, log, {
-      findOpenPr: undefined,
-    });
-
-    await ws.dispose();
-    expect(cleanup).toHaveBeenCalledWith('/repo', '/repo/.worktrees/issue-3', log, sandbox);
+    expect(cleanupCalls).toEqual([['/repo', path, log, sbx]]);
   });
 
   it('passes an explicit startPoint through to setup verbatim', async () => {
-    const setup = vi.fn().mockResolvedValue(undefined);
-    const cleanup = vi.fn().mockResolvedValue(undefined);
-
+    const { fn: setup, calls: setupCalls } = recorder();
     await worktreeWorkspace({
       repoRoot: '/repo',
       branch: 'issue-2',
       worktreePath: '/repo/.worktrees/issue-2',
       startPoint: 'origin/develop',
       setup,
-      cleanup,
+      cleanup: async () => {},
     });
 
-    expect(setup).toHaveBeenCalledWith(
-      '/repo',
-      'issue-2',
-      '/repo/.worktrees/issue-2',
-      'origin/develop',
-      undefined,
-      undefined,
-      { findOpenPr: undefined },
-    );
+    expect(setupCalls[0]?.slice(0, 4)).toEqual(['/repo', 'issue-2', '/repo/.worktrees/issue-2', 'origin/develop']);
   });
 });
 
@@ -181,8 +168,7 @@ describe('acquireLaneEnvironment', () => {
     await withTmpDir(async (dir) => {
       const registryFile = join(dir, 'ports.json');
       const lockDir = join(dir, 'ports.lock');
-      const tracker = new ProcessGroupTracker();
-      const killAll = vi.spyOn(tracker, 'killAll').mockResolvedValue([]);
+      const tracker = new RecordingTracker();
 
       const env: Environment = await acquireLaneEnvironment({
         registryFile,
@@ -210,7 +196,7 @@ describe('acquireLaneEnvironment', () => {
       expect(leaseAfterRecord?.pgids).toContain(1234);
 
       await env.release();
-      expect(killAll).toHaveBeenCalled();
+      expect(tracker.killed).toEqual([[1234]]);
       expect(readPortLeases(registryFile).some((l) => l.worktreeId === '/wt/lane-a')).toBe(false);
     });
   });

@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
 import type { ProviderOrder } from '../config/provider-order.js';
 import { createTempDirs } from '../harness/temp-dir.js';
@@ -41,9 +41,13 @@ async function setup(probe: (model: string) => Promise<void> = async () => {}, c
   const breaker = new ProviderBreaker(join(dir, `b-${counter}.json`), () => T_0705);
   for (const p of capped) await breaker.open(p, 'usage_cap', 30 * 60_000, { cappedUntil: CAPPED_UNTIL });
   const logs: string[] = [];
-  const spy = vi.fn(probe);
-  const deps: ProbeDeps = { router: { registryRef: registry }, breaker, probe: spy, log: (_t, m) => logs.push(m) };
-  return { deps, breaker, spy, logs };
+  const probed: string[] = [];
+  const recorded = async (m: string) => {
+    probed.push(m);
+    await probe(m);
+  };
+  const deps: ProbeDeps = { router: { registryRef: registry }, breaker, probe: recorded, log: (_t, m) => logs.push(m) };
+  return { deps, breaker, probed, logs };
 }
 
 describe('probe model and default probe', () => {
@@ -53,13 +57,15 @@ describe('probe model and default probe', () => {
   });
 
   it('routerProviderProbe runs one 60s triage prompt pinned to the model', async () => {
-    const run = vi.fn(async () => 'OK');
+    const runs: unknown[][] = [];
+    const run = async (...args: unknown[]) => {
+      runs.push(args);
+      return 'OK';
+    };
     await routerProviderProbe({ run } as never)('claude-t');
-    expect(run).toHaveBeenCalledWith('triage', PROBE_PROMPT, {
-      modelOverride: 'claude-t',
-      modelFallbacks: [],
-      timeoutSeconds: 60,
-    });
+    expect(runs).toEqual([
+      ['triage', PROBE_PROMPT, { modelOverride: 'claude-t', modelFallbacks: [], timeoutSeconds: 60 }],
+    ]);
   });
 
   it('providerProbe prefers the injected probe', () => {
@@ -70,15 +76,15 @@ describe('probe model and default probe', () => {
 
 describe('probeIfDue', () => {
   it('is not-due without a past-due cap', async () => {
-    const { deps, spy } = await setup(undefined, []);
+    const { deps, probed } = await setup(undefined, []);
     expect(await probeIfDue(deps, ORDER, 'claude', 'anthropic', 'claude-w')).toBe('not-due');
-    expect(spy).not.toHaveBeenCalled();
+    expect(probed).toEqual([]);
   });
 
   it('restores on a passing probe, on the triage model', async () => {
-    const { deps, spy, breaker, logs } = await setup();
+    const { deps, probed, breaker, logs } = await setup();
     expect(await probeIfDue(deps, ORDER, 'claude', 'anthropic', 'claude-w')).toBe('restored');
-    expect(spy).toHaveBeenCalledWith('claude-t');
+    expect(probed).toEqual(['claude-t']);
     expect((await breaker.status('anthropic')).open).toBe(false);
     expect(logs[0]).toContain('passed the restore probe');
   });
@@ -120,23 +126,22 @@ describe('probeIfDue', () => {
 
 describe('probeDueProviders', () => {
   it('stops at the first usable provider and never probes a later one', async () => {
-    const { deps, spy } = await setup(undefined, []);
+    const { deps, probed } = await setup(undefined, []);
     await deps.breaker.open('anthropic', 'rate_limit', 60_000);
     await probeDueProviders(deps, ORDER, 'build');
-    expect(spy).not.toHaveBeenCalled();
+    expect(probed).toEqual([]);
   });
 
   it('probes a due provider and stops once it is restored', async () => {
-    const { deps, spy } = await setup(undefined, ['anthropic', 'openai']);
+    const { deps, probed } = await setup(undefined, ['anthropic', 'openai']);
     await probeDueProviders(deps, ORDER, 'build');
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(probed).toEqual(['claude-t']);
   });
 
   it('continues past a still-capped provider to a due one, and skips unknown ids', async () => {
-    const { deps, spy } = await setup(undefined, ['openai']);
+    const { deps, probed } = await setup(undefined, ['openai']);
     await deps.breaker.open('anthropic', 'usage_cap', 60 * 60_000, { cappedUntil: '2026-10-20T13:00:00.000Z' });
     await probeDueProviders(deps, { ...ORDER, worker: ['nope', 'claude-w', 'codex-w'] }, 'build');
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy).toHaveBeenCalledWith('codex-w');
+    expect(probed).toEqual(['codex-w']);
   });
 });

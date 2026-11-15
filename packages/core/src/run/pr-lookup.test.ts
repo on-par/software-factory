@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { lookupOpenPrByBranch, lookupOpenPrByIssue } from './pr-lookup.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 
@@ -14,11 +14,13 @@ function pr(number: number, body: string | null, opts: { ref?: string; repo?: st
 }
 
 function stub(pages: unknown[][] | Error) {
-  const list = vi.fn(async ({ page }: { page: number }) => {
+  const requests: Array<Record<string, unknown>> = [];
+  const list = async (args: { page: number }) => {
+    requests.push(args);
     if (pages instanceof Error) throw pages;
-    return { data: pages[page - 1] ?? [] };
-  });
-  return { octokit: { rest: { pulls: { list } } } as any, list };
+    return { data: pages[args.page - 1] ?? [] };
+  };
+  return { octokit: { rest: { pulls: { list } } } as any, requests };
 }
 
 describe('lookupOpenPrByIssue', () => {
@@ -95,12 +97,12 @@ describe('lookupOpenPrByIssue', () => {
 
   it('finds a match on page 2', async () => {
     const filler = Array.from({ length: 100 }, (_, i) => pr(1000 + i, 'nothing'));
-    const { octokit, list } = stub([filler, [pr(5, 'Closes #19')]]);
+    const { octokit, requests } = stub([filler, [pr(5, 'Closes #19')]]);
     expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: workKeyFromIssue(19) })).toMatchObject({
       status: 'found',
       prNumber: 5,
     });
-    expect(list).toHaveBeenCalledTimes(2);
+    expect(requests.map((r) => r.page)).toEqual([1, 2]);
   });
 
   it('fails closed when the last allowed page is full', async () => {
@@ -115,10 +117,10 @@ describe('lookupOpenPrByIssue', () => {
 
 describe('lookupOpenPrByBranch', () => {
   it('sends the head filter and finds the same-repo PR', async () => {
-    const { octokit, list } = stub([[pr(5, null, { ref: 'factory/19-x' })]]);
+    const { octokit, requests } = stub([[pr(5, null, { ref: 'factory/19-x' })]]);
     const res = await lookupOpenPrByBranch({ octokit, repo: REPO, branch: 'factory/19-x' });
     expect(res).toMatchObject({ status: 'found', prNumber: 5 });
-    expect(list).toHaveBeenCalledWith(expect.objectContaining({ head: 'acme:factory/19-x', state: 'open' }));
+    expect(requests).toEqual([expect.objectContaining({ head: 'acme:factory/19-x', state: 'open' })]);
   });
 
   it('excludes a same-owner fork', async () => {
