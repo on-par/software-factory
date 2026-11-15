@@ -130,8 +130,7 @@ function reworkOctokit(pull: { state: string; head: { ref: string } } = { state:
       comment(3, 200, 'R-two', { line: null }),
     ]),
   });
-  octokit.rest.pulls.get = vi.fn(octokit.rest.pulls.get);
-  return { octokit: octokit as Octokit, getReview };
+  return { octokit: octokit as Octokit, getReview, getPull };
 }
 
 const buildOpts = (octokit: Octokit) => ({
@@ -323,8 +322,8 @@ describe('iterate (#3625)', () => {
   });
 
   it('wraps a PR read error as ReviewReworkError', async () => {
-    const { octokit } = reworkOctokit();
-    vi.mocked(octokit.rest.pulls.get).mockRejectedValueOnce(new Error('Not Found'));
+    const { octokit, getPull } = reworkOctokit();
+    getPull.mockRejectedValueOnce(new Error('Not Found'));
     expect(await runIssue(iterateRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
     expect(order).not.toContain('ship');
   });
@@ -396,7 +395,7 @@ describe('feedback round rework (#3910)', () => {
       ),
     ).rejects.toThrow(ReviewReworkError);
     const broken = reworkOctokit();
-    vi.mocked(broken.octokit.rest.pulls.get).mockRejectedValueOnce(new Error('Not Found'));
+    broken.getPull.mockRejectedValueOnce(new Error('Not Found'));
     await expect(
       runRequestedReviewRework(
         feedbackRequest,
