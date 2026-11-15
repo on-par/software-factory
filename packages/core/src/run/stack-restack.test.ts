@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
 import type { Octokit } from '@octokit/rest';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { renderStackOrderLine, STACK_ORDER_MARKER } from '../phases/stack-order.js';
 import { withSliceState, type SlicePlan } from '../readiness/slice-plan.js';
@@ -41,15 +41,20 @@ describe('restackAfterSquashMerge', () => {
   let root: string;
   let plan: SlicePlan;
   let slice1Head: string;
-  let update: ReturnType<typeof vi.fn<(args: Record<string, unknown>) => Promise<unknown>>>;
-  let savePlan: ReturnType<typeof vi.fn<(plan: SlicePlan) => Promise<void>>>;
+  let updates: Array<{ pull_number: number; base?: string; body?: string }>;
+  let saved: SlicePlan[];
+  let savePlan: (plan: SlicePlan) => Promise<void>;
+  const update = async (args: Record<string, unknown>) => {
+    updates.push(args as { pull_number: number; base?: string; body?: string });
+    return {};
+  };
   let baseRef: Record<number, string>;
 
   const octokit = (): Octokit => {
     const stub: Octokit = {
       rest: {
         pulls: {
-          get: vi.fn(async ({ pull_number }: { pull_number: number }) => ({
+          get: async ({ pull_number }: { pull_number: number }) => ({
             data:
               pull_number === 101
                 ? { head: { sha: slice1Head }, base: { ref: 'main' }, body: '' }
@@ -58,7 +63,7 @@ describe('restackAfterSquashMerge', () => {
                     base: { ref: baseRef[pull_number] ?? 'factory/9-slice-1' },
                     body: `## Summary\n\nx\n\n${renderStackOrderLine({ index: pull_number - 100, count: 3, base: 'factory/9-slice-1', basePr: 101 })}\n`,
                   },
-          })),
+          }),
           update,
         },
       },
@@ -86,8 +91,11 @@ describe('restackAfterSquashMerge', () => {
     dir = tempDirs.makeSync('restack-test-');
     remote = join(dir, 'remote.git');
     root = join(dir, 'root');
-    update = vi.fn(async () => ({}));
-    savePlan = vi.fn(async () => {});
+    updates = [];
+    saved = [];
+    savePlan = async (p) => {
+      saved.push(p);
+    };
     baseRef = {};
     git(dir, 'init', '--bare', '-b', 'main', remote);
     git(dir, 'clone', remote, root);
@@ -126,12 +134,11 @@ describe('restackAfterSquashMerge', () => {
     const out = await run({ plan: withSliceState(plan, 3, 'pending') });
     expect(out.status).toBe('restacked');
     expect(remoteLog('factory/9-slice-2')).toEqual(['s2 only']);
-    expect(update).toHaveBeenCalledTimes(1);
-    const arg = update.mock.calls[0]![0] as { pull_number: number; base: string; body: string };
-    expect(arg.pull_number).toBe(102);
-    expect(arg.base).toBe('main');
-    expect(arg.body).toContain('stacked on `main`');
-    expect(arg.body).toContain(STACK_ORDER_MARKER);
+    expect(out.status === 'restacked' && out.retargeted).toBe(true);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({ pull_number: 102, base: 'main' });
+    expect(updates[0]!.body).toContain('stacked on `main`');
+    expect(updates[0]!.body).toContain(STACK_ORDER_MARKER);
   });
 
   it("rebases slice 3 onto slice 2's new head and records both head SHAs", async () => {
@@ -140,9 +147,11 @@ describe('restackAfterSquashMerge', () => {
     const head2 = remoteHead('factory/9-slice-2');
     expect(git(remote, 'rev-parse', 'factory/9-slice-3^')).toBe(head2);
     expect(remoteLog('factory/9-slice-3')).toEqual(['s3 only', 's2 only']);
-    expect(update.mock.calls.filter((c) => (c[0] as { pull_number: number }).pull_number === 103)).toEqual([]);
-    const saved = savePlan.mock.calls[0]![0] as SlicePlan;
-    expect(saved.slices.map((s) => s.headSha)).toEqual([undefined, head2, remoteHead('factory/9-slice-3')]);
+    expect(updates.map((u) => u.pull_number)).not.toContain(103);
+    const heads = [undefined, head2, remoteHead('factory/9-slice-3')];
+    expect(saved).toHaveLength(1);
+    expect(saved[0]!.slices.map((s) => s.headSha)).toEqual(heads);
+    expect(out.status === 'restacked' && out.plan.slices.map((s) => s.headSha)).toEqual(heads);
   });
 
   it('still rebases with --onto when GitHub already retargeted the PR to main', async () => {
@@ -150,7 +159,7 @@ describe('restackAfterSquashMerge', () => {
     const out = await run({ plan: withSliceState(plan, 3, 'pending') });
     expect(out.status).toBe('restacked');
     expect(remoteLog('factory/9-slice-2')).toEqual(['s2 only']);
-    for (const c of update.mock.calls) expect(c[0]).not.toHaveProperty('base');
+    for (const u of updates) expect(u).not.toHaveProperty('base');
     expect(out.status === 'restacked' && out.retargeted).toBe(false);
   });
 
@@ -164,7 +173,8 @@ describe('restackAfterSquashMerge', () => {
     expect(out.status === 'park' && out.reason).toContain('slice 2');
     expect(out.status === 'park' && out.reason).toContain('#102');
     expect(remoteHead('factory/9-slice-2')).toBe(humanHead);
-    expect(update).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
+    expect(saved).toEqual([]);
   });
 
   it('parks naming the slice, its PR and the conflicting files on a rebase conflict', async () => {
@@ -213,7 +223,8 @@ describe('restackAfterSquashMerge', () => {
     const out = await run();
     expect(out).toMatchObject({ status: 'park', index: 3 });
     expect(remoteHead('factory/9-slice-2')).toBe(before2);
-    expect(update).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
+    expect(saved).toEqual([]);
   });
 
   it('returns nothing when the branch no longer holds the merged head', async () => {
@@ -256,8 +267,12 @@ describe('restackAfterSquashMerge', () => {
   });
 
   it('parks after the push when saving the plan fails', async () => {
-    savePlan.mockRejectedValueOnce(new Error('comment gone'));
-    const out = await run({ plan: withSliceState(plan, 3, 'pending') });
+    const out = await run({
+      plan: withSliceState(plan, 3, 'pending'),
+      savePlan: async () => {
+        throw new Error('comment gone');
+      },
+    });
     expect(out.status === 'park' && out.reason).toContain('comment gone');
     expect(remoteLog('factory/9-slice-2')).toEqual(['s2 only']);
   });

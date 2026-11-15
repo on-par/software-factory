@@ -372,7 +372,10 @@ describe('providerCapGate under models.providerOrder (#3340)', () => {
     };
     const probed = await mk();
     t = NOW;
-    const probe = vi.fn(async () => {});
+    const probedModels: string[] = [];
+    const probe = async (model: string) => {
+      probedModels.push(model);
+    };
     const router = {
       registryRef: {
         get: (id: string) => (id === 'claude-a' ? { provider: 'anthropic', harness: 'claude-cli' } : undefined),
@@ -380,11 +383,11 @@ describe('providerCapGate under models.providerOrder (#3340)', () => {
       resolveAll: () => [],
     } as never;
     const verdict = await providerCapGate(router, probed, request, () => {}, probe).enterPlan(undefined, () => {});
-    expect(probe).toHaveBeenCalledWith('claude-a');
+    expect(probedModels).toEqual(['claude-a']);
     expect(verdict.released).toBeUndefined();
     expect((await probed.status('anthropic')).open).toBe(false);
     const unprobed = await mk();
     await providerCapGate(router, unprobed, request, () => {}).enterPlan(undefined, () => {});
-    expect(probe).toHaveBeenCalledTimes(1);
+    expect(probedModels).toEqual(['claude-a']);
   });
 });

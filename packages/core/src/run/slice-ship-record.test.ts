@@ -1,8 +1,9 @@
 import { StorySchema } from '@on-par/contracts';
 import type { Story } from '@on-par/contracts';
 import type { Octokit } from '@octokit/rest';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
+import type { EventKind } from '../events/kinds.js';
 import type { SlicePlan } from '../readiness/slice-plan.js';
 import { parseSlicePlanComment } from '../readiness/slice-plan.js';
 import { toWorkKey, workKeyFromIssue, type WorkKey } from '../work/work-key.js';
@@ -36,23 +37,44 @@ const plan: SlicePlan = {
 };
 
 function fakeOctokit() {
+  const listed: Array<Record<string, unknown>> = [];
+  const created: Array<{ issue_number: number; body: string }> = [];
   const issues = {
-    listComments: vi.fn(async () => ({ data: [] })),
-    createComment: vi.fn(async (a: { body: string }) => ({ data: { id: 9, body: a.body } })),
+    listComments: async (a: Record<string, unknown>) => {
+      listed.push(a);
+      return { data: [] };
+    },
+    createComment: async (a: { issue_number: number; body: string }) => {
+      created.push(a);
+      return { data: { id: 9, body: a.body } };
+    },
   };
   const octokit = Object.assign({} as Octokit, {
     rest: { users: { getAuthenticated: async () => ({ data: { id: 1 } }) }, issues },
   });
-  return { octokit, issues };
+  return { octokit, listed, created };
 }
 
 const HEAD = 'a'.repeat(40);
 
 type ShipStub = { prNumber?: number; alreadyDelivered?: boolean; headSha?: string };
 
-function run(key: WorkKey, ship: ShipStub, readHeadSha = vi.fn(async () => HEAD)) {
-  const { octokit, issues } = fakeOctokit();
-  const log = vi.fn();
+function fakeLog() {
+  const logs: Array<[string, string]> = [];
+  const log = (type: EventKind, msg: string) => {
+    logs.push([type, msg]);
+  };
+  return { logs, log };
+}
+
+function run(key: WorkKey, ship: ShipStub, impl: (wt: string) => Promise<string> = async () => HEAD) {
+  const { octokit, listed, created } = fakeOctokit();
+  const { logs, log } = fakeLog();
+  const reads: string[] = [];
+  const readHeadSha = async (wt: string) => {
+    reads.push(wt);
+    return impl(wt);
+  };
   const result = recordShippedSlice({
     octokit,
     repo: 'o/r',
@@ -66,11 +88,11 @@ function run(key: WorkKey, ship: ShipStub, readHeadSha = vi.fn(async () => HEAD)
     readHeadSha,
     log,
   });
-  return { result, issues, log, readHeadSha };
+  return { result, listed, created, logs, reads };
 }
 
-function savedPlan(issues: ReturnType<typeof fakeOctokit>['issues']): SlicePlan {
-  const body = issues.createComment.mock.calls[0]![0].body;
+function savedPlan(created: Array<{ body: string }>): SlicePlan {
+  const body = created[0]!.body;
   const parsed = parseSlicePlanComment(body);
   if (parsed?.ok !== true) throw new Error('slice plan comment unreadable');
   return parsed.plan;
@@ -78,31 +100,31 @@ function savedPlan(issues: ReturnType<typeof fakeOctokit>['issues']): SlicePlan 
 
 describe('recordShippedSlice', () => {
   it('writes the slice plan comment on the numeric issue of the key', async () => {
-    const { result, issues, log } = run(workKeyFromIssue(42), { prNumber: 7 });
+    const { result, listed, created, logs } = run(workKeyFromIssue(42), { prNumber: 7 });
     expect(await result).toBeUndefined();
-    expect(issues.listComments).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: 'o', repo: 'r', issue_number: 42 }),
-    );
-    expect(issues.createComment).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 42 }));
-    expect(log).toHaveBeenCalledWith('ship', expect.stringContaining('recorded slice 1/2 as pr-open (PR #7'));
+    expect(listed).toEqual([expect.objectContaining({ owner: 'o', repo: 'r', issue_number: 42 })]);
+    expect(created.map((c) => c.issue_number)).toEqual([42]);
+    expect(logs).toContainEqual(['ship', expect.stringContaining('recorded slice 1/2 as pr-open (PR #7')]);
   });
 
   it('logs and returns undefined when the ship has no PR number', async () => {
-    const { result, issues, log } = run(workKeyFromIssue(42), {});
+    const { result, created, logs } = run(workKeyFromIssue(42), {});
     expect(await result).toBeUndefined();
-    expect(issues.createComment).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith('ship', expect.stringContaining('no PR number'));
+    expect(created).toEqual([]);
+    expect(logs).toEqual([['ship', expect.stringContaining('no PR number')]]);
   });
 
   it('returns the failure message for a non-numeric key without touching GitHub', async () => {
-    const { result, issues } = run(toWorkKey('PROJ-1'), { prNumber: 7 });
+    const { result, listed, created } = run(toWorkKey('PROJ-1'), { prNumber: 7 });
     expect(await result).toContain('recording it in the slice plan comment failed');
-    expect(issues.listComments).not.toHaveBeenCalled();
+    expect(listed).toEqual([]);
+    expect(created).toEqual([]);
   });
 
   function runWithStore(save: () => Promise<{ where: string }>) {
-    const { octokit, issues } = fakeOctokit();
-    const log = vi.fn();
+    const { octokit, created } = fakeOctokit();
+    const { logs, log } = fakeLog();
+    const saved: SlicePlan[] = [];
     const result = recordShippedSlice({
       octokit,
       repo: 'o/r',
@@ -113,20 +135,26 @@ describe('recordShippedSlice', () => {
       index: 1,
       ship: { prNumber: 7 },
       stackMode: false,
-      readHeadSha: vi.fn(async () => HEAD),
-      store: { find: vi.fn(), save },
+      readHeadSha: async () => HEAD,
+      store: {
+        find: async () => ({ status: 'not-found' }),
+        save: async (p) => {
+          saved.push(p);
+          return save();
+        },
+      },
       log,
     });
-    return { result, issues, log };
+    return { result, created, logs, saved };
   }
 
   it('saves through an injected store, leaves GitHub comments alone and logs the slice plan file', async () => {
-    const save = vi.fn(async () => ({ where: 'plan.md' }));
-    const { result, issues, log } = runWithStore(save);
+    const { result, created, logs, saved } = runWithStore(async () => ({ where: 'plan.md' }));
     expect(await result).toBeUndefined();
-    expect(save).toHaveBeenCalledWith(expect.objectContaining({ slices: expect.any(Array) }));
-    expect(issues.createComment).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith('ship', expect.stringMatching(/in the slice plan file$/));
+    expect(saved).toHaveLength(1);
+    expect(saved[0]!.slices[0]).toMatchObject({ state: 'pr-open', prNumber: 7 });
+    expect(created).toEqual([]);
+    expect(logs).toContainEqual(['ship', expect.stringMatching(/in the slice plan file$/)]);
   });
 
   it('names the slice plan file when saving to an injected store fails', async () => {
@@ -137,41 +165,40 @@ describe('recordShippedSlice', () => {
   });
 
   it('names the slice plan comment in the issue log line', async () => {
-    const { result, log } = run(workKeyFromIssue(42), { prNumber: 7 });
+    const { result, logs } = run(workKeyFromIssue(42), { prNumber: 7 });
     await result;
-    expect(log).toHaveBeenCalledWith('ship', expect.stringMatching(/in the slice plan comment$/));
+    expect(logs).toContainEqual(['ship', expect.stringMatching(/in the slice plan comment$/)]);
   });
 
   it('records the head SHA the ship reported for an opened slice', async () => {
-    const { result, issues, readHeadSha } = run(workKeyFromIssue(42), { prNumber: 7, headSha: HEAD });
+    const { result, created, reads } = run(workKeyFromIssue(42), { prNumber: 7, headSha: HEAD });
     expect(await result).toBeUndefined();
-    expect(savedPlan(issues).slices[0]!.headSha).toBe(HEAD);
-    expect(readHeadSha).not.toHaveBeenCalled();
+    expect(savedPlan(created).slices[0]!.headSha).toBe(HEAD);
+    expect(reads).toEqual([]);
   });
 
   it('falls back to the worktree HEAD when the ship reported no head SHA', async () => {
-    const readHeadSha = vi.fn(async () => 'b'.repeat(40));
-    const { result, issues } = run(workKeyFromIssue(42), { prNumber: 7 }, readHeadSha);
+    const { result, created, reads } = run(workKeyFromIssue(42), { prNumber: 7 }, async () => 'b'.repeat(40));
     expect(await result).toBeUndefined();
-    expect(savedPlan(issues).slices[0]!.headSha).toBe('b'.repeat(40));
-    expect(readHeadSha).toHaveBeenCalledWith('/wt');
+    expect(savedPlan(created).slices[0]!.headSha).toBe('b'.repeat(40));
+    expect(reads).toEqual(['/wt']);
   });
 
   it('returns a failure message and writes nothing when the head SHA cannot be read', async () => {
-    const readHeadSha = vi.fn(async () => {
+    const { result, created, listed } = run(workKeyFromIssue(42), { prNumber: 7 }, async () => {
       throw new Error('boom');
     });
-    const { result, issues } = run(workKeyFromIssue(42), { prNumber: 7 }, readHeadSha);
     expect(await result).toBe('slice 1/2 PR #7 opened but its head SHA could not be read: boom');
-    expect(issues.createComment).not.toHaveBeenCalled();
+    expect(created).toEqual([]);
+    expect(listed).toEqual([]);
   });
 
   it('records a merged slice without reading a head SHA', async () => {
-    const { result, issues, readHeadSha } = run(workKeyFromIssue(42), { prNumber: 7, alreadyDelivered: true });
+    const { result, created, reads } = run(workKeyFromIssue(42), { prNumber: 7, alreadyDelivered: true });
     expect(await result).toBeUndefined();
-    const slice = savedPlan(issues).slices[0]!;
+    const slice = savedPlan(created).slices[0]!;
     expect(slice.state).toBe('merged');
     expect(slice.headSha).toBeUndefined();
-    expect(readHeadSha).not.toHaveBeenCalled();
+    expect(reads).toEqual([]);
   });
 });
