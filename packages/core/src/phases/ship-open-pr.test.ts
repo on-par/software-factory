@@ -60,9 +60,10 @@ describe('ship on an issue with an open factory PR (#3099)', () => {
       const phaseOctokit = asPhaseOctokit(octokit);
       const events: Array<[string, string]> = [];
       const log = (type: string, msg: string) => events.push([type, msg]);
+      const planAttempts = 3;
       const stub = new StubModelExecutor({
         scripts: {
-          plan: Array.from({ length: 3 }, () => ({ output: specContentFor(issue) })),
+          plan: Array.from({ length: planAttempts }, () => ({ output: specContentFor(issue) })),
           build_claude: [
             {
               output: 'built',

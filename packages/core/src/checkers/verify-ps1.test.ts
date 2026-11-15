@@ -107,7 +107,7 @@ describe('testsChecker with scripts/verify.ps1', () => {
     expect(result).toMatchObject({ result: 'PASS', details: 'scripts/verify.ps1: OK' });
   });
 
-  it('tests checker FAILs naming pwsh when pwsh is not on PATH', async () => {
+  it('tests checker FAILs naming pwsh when pwsh is not on PATH, as command-not-found exit 127 that reads as inconclusive', async () => {
     const worktree = await makeWorktree({ 'scripts/verify.ps1': 'exit 0' });
     const { run, calls } = stubRunner({ ok: true, exitCode: 0 });
     const result = await testsChecker({
@@ -118,16 +118,6 @@ describe('testsChecker with scripts/verify.ps1', () => {
     expect(result.result).toBe('FAIL');
     expect(result.details).toContain('pwsh');
     expect(calls).toEqual([]);
-  });
-
-  it('records a missing pwsh as command-not-found exit 127, which reads as inconclusive', async () => {
-    const worktree = await makeWorktree({ 'scripts/verify.ps1': 'exit 0' });
-    const { run } = stubRunner({ ok: true, exitCode: 0 });
-    const result = await testsChecker({
-      ...makeContext(worktree),
-      env: { PATH: await makeWorktree() },
-      runCommand: run,
-    });
     expect(result.failedCommand?.exitCode).toBe(127);
     expect(inconclusiveOutputCause(result)).toBe('missing-command');
   });
