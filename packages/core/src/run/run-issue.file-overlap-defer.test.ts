@@ -4,6 +4,7 @@ import type { Octokit } from '@octokit/rest';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
+import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
@@ -13,9 +14,9 @@ import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
 import { workKeyFromIssue } from '../work/work-key.js';
+import type { RunPolicy } from './policy.js';
 import { LaneFileGuard } from './lane-file-guard.js';
 import type { Workspace } from './ports.js';
-import { WORKER_MODELS, WORKER_ROUTES, workerPolicy as policy } from '../test-support/worker-policy.test.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
 const WORK: WorkRequest = {
@@ -24,6 +25,37 @@ const WORK: WorkRequest = {
   title: 'Fix the thing',
   brief: 'do the thing',
   acceptanceCriteria: [],
+};
+
+const ROUTES: RoutesConfig = {
+  version: 1,
+  routes: {
+    build_claude: { tier: 'worker', description: 'stub', requires: 'claude' },
+    build_codex: { tier: 'worker', description: 'stub', requires: 'codex' },
+    build_command: { tier: 'worker', description: 'stub', requires: 'command' },
+  },
+};
+
+const MODELS: ModelsConfig = {
+  version: 1,
+  models: {
+    'my-model': {
+      provider: 'custom',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      harness: 'my-agent',
+    },
+  },
+  tiers: { worker: ['my-model'] },
+  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
+  routingRules: {},
+  harnesses: {
+    'my-agent': { command: 'my-agent {model}', prompt: 'stdin', output: 'stdout', agentic: true, usage: 'none' },
+  },
 };
 
 const tempDirs = createTempDirs();
@@ -47,6 +79,20 @@ const request: RunRequest = {
   processGroupGraceMs: 50,
 };
 
+const policy: RunPolicy = {
+  models: MODELS,
+  routes: ROUTES,
+  sandbox: {
+    enabled: false,
+    runtime: 'auto',
+    network: { allow: [] },
+    resources: { cpuMs: 0, memMb: 0 },
+    docker: { rolloutPercent: 0 },
+  },
+  budget: {},
+  effective: {} as RunPolicy['effective'],
+};
+
 const design: DesignArtifact = {
   restatedProblem: 'problem',
   approach: { chosen: 'chosen', rejected: [] },
@@ -61,13 +107,20 @@ const design: DesignArtifact = {
 };
 
 const posted: unknown[] = [];
-const buildOpts: Parameters<typeof realBuildPhase>[0][] = [];
-const record = async (arg: unknown) => void posted.push(arg);
-const issues = { createComment: record, updateComment: record, addLabels: async () => {}, removeLabel: async () => {} };
+const issues = {
+  createComment: async (arg: unknown) => {
+    posted.push(arg);
+  },
+  updateComment: async (arg: unknown) => {
+    posted.push(arg);
+  },
+  addLabels: async () => {},
+  removeLabel: async () => {},
+};
 
 function makePorts(overrides: Partial<RunPorts>, events: Array<[string, string]>): RunPorts {
   return {
-    router: new ModelRouter(WORKER_MODELS, WORKER_ROUTES),
+    router: new ModelRouter(MODELS, ROUTES),
     octokit: Object.assign({} as Octokit, { rest: { issues } }),
     workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
     events: () => (type, msg) => events.push([type, msg]),
@@ -80,10 +133,9 @@ function makePorts(overrides: Partial<RunPorts>, events: Array<[string, string]>
       model: 'm',
       designArtifact: design,
     } satisfies PlanResult),
-    buildPhase: async (o) => (
-      buildOpts.push(o),
-      { ok: true, model: 'my-model', route: 'command' } satisfies BuildResult
-    ),
+    buildPhase: vi
+      .fn<typeof realBuildPhase>()
+      .mockResolvedValue({ ok: true, model: 'my-model', route: 'command' } satisfies BuildResult),
     checkPhase: vi.fn<typeof realCheckPhase>().mockResolvedValue({
       passed: true,
       summary: { failures: 0, passes: 1, skips: 0, total: 1, results: [] },
@@ -101,9 +153,18 @@ describe('runIssue — same-file lane hold defers instead of parking (#3576)', (
     vi.spyOn(guard, 'findCollision').mockResolvedValue(collision);
     await guard.register('o/r', workKeyFromIssue(3232), ['src/shared.ts']);
     posted.length = 0;
-    buildOpts.length = 0;
+    const buildOpts: Parameters<typeof realBuildPhase>[0][] = [];
     const events: Array<[string, string]> = [];
-    const ports = makePorts({ laneFileGuard: guard }, events);
+    const ports = makePorts(
+      {
+        laneFileGuard: guard,
+        buildPhase: async (o) => (
+          buildOpts.push(o),
+          { ok: true, model: 'my-model', route: 'command' } satisfies BuildResult
+        ),
+      },
+      events,
+    );
     const outcome = await runIssue({ ...request, issue: 1896 }, policy, ports);
     expect(outcome).toMatchObject({ state: 'released', reason: 'file-overlap', holder: 3232, file: 'src/shared.ts' });
     expect(outcome.state).not.toBe('parked');

@@ -106,6 +106,9 @@ async function run(opts: { open: boolean; models?: Record<string, ModelDef>; req
   if (opts.open) await breaker.open('opencode-go', 'usage_cap', 30 * 60_000);
   const events: Array<[string, string]> = [];
   const buildOpts: Parameters<typeof realBuildPhase>[0][] = [];
+  const buildPhase = vi
+    .fn<typeof realBuildPhase>()
+    .mockResolvedValue({ ok: true, model: 'm', route: 'opencode' } satisfies BuildResult);
   const ports: RunPorts = {
     router: routerWith(opts.models ?? { 'oc-build': OC, 'claude-build': CLAUDE }),
     octokit: {} as Octokit,
@@ -120,7 +123,7 @@ async function run(opts: { open: boolean; models?: Record<string, ModelDef>; req
       model: 'm',
       designArtifact: null,
     } satisfies PlanResult),
-    buildPhase: async (o) => (buildOpts.push(o), { ok: true, model: 'm', route: 'opencode' } satisfies BuildResult),
+    buildPhase: async (o) => (buildOpts.push(o), buildPhase(o)),
     checkPhase: vi.fn<typeof realCheckPhase>().mockResolvedValue({
       passed: true,
       summary: { failures: 0, passes: 1, skips: 0, total: 1, results: [] },

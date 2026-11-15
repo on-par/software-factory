@@ -5,6 +5,7 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import type { Octokit } from '@octokit/rest';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
+import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { buildPhase as realBuildPhase } from '../phases/build.js';
 import type { checkPhase as realCheckPhase } from '../phases/check.js';
 import type { planPhase as realPlanPhase } from '../phases/plan.js';
@@ -14,8 +15,8 @@ import { ModelRouter } from '../router/index.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import type { WorkRequest } from '../work/index.js';
 import { installLaneDependencies } from './lane-install.js';
+import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
-import { WORKER_MODELS, WORKER_ROUTES, workerPolicy as policy } from '../test-support/worker-policy.test.js';
 import { runIssue, type RunRequest } from './run-issue.js';
 
 const WORK: WorkRequest = {
@@ -24,6 +25,37 @@ const WORK: WorkRequest = {
   title: 'Fix the thing',
   brief: 'do the thing',
   acceptanceCriteria: [],
+};
+
+const ROUTES: RoutesConfig = {
+  version: 1,
+  routes: {
+    build_claude: { tier: 'worker', description: 'stub', requires: 'claude' },
+    build_codex: { tier: 'worker', description: 'stub', requires: 'codex' },
+    build_command: { tier: 'worker', description: 'stub', requires: 'command' },
+  },
+};
+
+const MODELS: ModelsConfig = {
+  version: 1,
+  models: {
+    'my-model': {
+      provider: 'custom',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      harness: 'my-agent',
+    },
+  },
+  tiers: { worker: ['my-model'] },
+  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
+  routingRules: {},
+  harnesses: {
+    'my-agent': { command: 'my-agent {model}', prompt: 'stdin', output: 'stdout', agentic: true, usage: 'none' },
+  },
 };
 
 const dirs = createTempDirs();
@@ -45,6 +77,20 @@ const request: RunRequest = {
   failover: { enabled: false, cooldownMs: 60_000, fallbackModel: 'claude-sonnet-5' },
   efficiency: { maxReworkRounds: 1, fastPath: false },
   processGroupGraceMs: 50,
+};
+
+const policy: RunPolicy = {
+  models: MODELS,
+  routes: ROUTES,
+  sandbox: {
+    enabled: false,
+    runtime: 'auto',
+    network: { allow: [] },
+    resources: { cpuMs: 0, memMb: 0 },
+    docker: { rolloutPercent: 0 },
+  },
+  budget: {},
+  effective: {} as RunPolicy['effective'],
 };
 
 function commandResult(over: Partial<CommandResult> = {}): CommandResult {
@@ -73,7 +119,7 @@ async function harness(files: string[], installResult: CommandResult = commandRe
     .mockResolvedValue({ ok: true, route: 'claude', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null });
   const events: Array<[string, string]> = [];
   const ports = {
-    router: new ModelRouter(WORKER_MODELS, WORKER_ROUTES),
+    router: new ModelRouter(MODELS, ROUTES),
     octokit: {} as Octokit,
     workspace: { path: wt, dispose: async () => {} } as Workspace,
     events: () => (t: string, m: string) => {
