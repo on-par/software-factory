@@ -3,6 +3,7 @@ import type { FailurePhase, FactoryConfig } from '@on-par/factory-core';
 import { getFactoryPaths, loadFactoryConfigForRepo } from '@on-par/factory-core';
 import {
   createGitHubCredentialBroker,
+  GitHubScopeError,
   installGitHubScopeGuard,
   PhaseCredentialHolder,
   resolveGitHubCredentialSource,
@@ -74,9 +75,18 @@ function repoFromRemote(shell: LocalShell): string | undefined {
     .join('/');
 }
 
-function settingsFromConfig(shell: LocalShell): GitHubCredentialsSettings {
+function settingsFromConfig(shell: LocalShell, phase: string | undefined): GitHubCredentialsSettings {
   const root = probe(shell, 'git rev-parse --show-toplevel');
-  if (!root) return DEFAULT_SETTINGS;
+  if (!root) {
+    if (!phase) return DEFAULT_SETTINGS;
+    throw new GitHubScopeError(
+      phase,
+      '',
+      '',
+      'the repository root could not be resolved to read github.credentials',
+      'run from inside the git checkout or pass the credential settings explicitly',
+    );
+  }
   const config: FactoryConfig = loadFactoryConfigForRepo(getFactoryPaths(root).config);
   return resolveGitHubCredentialsConfig(config);
 }
@@ -89,13 +99,22 @@ export function createLocalOctokit(
 ): Octokit {
   const { phase, repo, settings, ...clientOptions } = options;
   const target = repo ?? (phase ? repoFromRemote(shell) : undefined);
+  if (!target && phase) {
+    throw new GitHubScopeError(
+      phase,
+      '',
+      '',
+      'the GitHub repository could not be resolved from the origin remote',
+      'set the repo explicitly or point the git origin remote at a github.com repository',
+    );
+  }
   if (!target) {
     return createFactoryOctokit(resolveAmbient(), { ...clientOptions, resolveToken: resolveAmbient });
   }
   return createScopedFactoryOctokit({
     repo: target,
     phase: phase ?? 'plan',
-    settings: settings ?? settingsFromConfig(shell),
+    settings: settings ?? settingsFromConfig(shell, phase),
     env,
     resolveAmbient,
     options: clientOptions,

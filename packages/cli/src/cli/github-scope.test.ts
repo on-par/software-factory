@@ -105,11 +105,21 @@ describe('createLocalOctokit', () => {
     expect(seen).toEqual(['token github_pat_ship_value']);
   });
 
-  it('keeps the legacy client when the remote is not a GitHub repo', () => {
-    const octokit = createLocalOctokit(shellWith('https://example.com/x.git'), () => AMBIENT, env, { phase: 'land' });
-    expect(phaseHolderOf(octokit)).toBeUndefined();
-    const noRemote = createLocalOctokit(shellWith(undefined), () => AMBIENT, env, { phase: 'land' });
-    expect(phaseHolderOf(noRemote)).toBeUndefined();
+  it('throws when a phase is requested and the remote is not a GitHub repo', () => {
+    const run = (remote: string | undefined) => () =>
+      createLocalOctokit(shellWith(remote), () => AMBIENT, env, { phase: 'land' });
+    expect(run('https://example.com/x.git')).toThrow(/origin remote/);
+    expect(run(undefined)).toThrow(/origin remote/);
+  });
+
+  it('throws when a phase is requested and the repo root cannot be resolved', () => {
+    const shell: LocalShell = {
+      execSync: (command) => {
+        if (command.includes('remote get-url')) return 'git@github.com:acme/widgets.git';
+        throw new Error('no git');
+      },
+    };
+    expect(() => createLocalOctokit(shell, () => AMBIENT, env, { phase: 'ship' })).toThrow(/repository root/);
   });
 
   it('prefers explicit repo and settings over probing', () => {
