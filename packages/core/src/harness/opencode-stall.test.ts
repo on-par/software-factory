@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { type ModelsConfig } from '../config/index.js';
+import type { ModelsConfig } from '../config/index.js';
 import { ModelRegistry } from '../models/index.js';
 import { describeFailureDetail } from '../router/failure-detail.js';
 import { makeContractRequest } from './contract.js';
