@@ -1,7 +1,5 @@
-// src/utils/ci-watch-no-ci.ts — the no-CI probe used by watchChecks (#2488)
 import type { Octokit } from '@octokit/rest';
 
-/** Commit-status count and resolved SHA for a ref, or null when it cannot be determined. */
 export async function commitStatusCount(
   octokit: Octokit,
   owner: string,
@@ -18,9 +16,6 @@ export async function commitStatusCount(
 
 const DEFAULT_NO_CI_RECENT_COMMITS = 5;
 
-/** Probes whether a repo has no CI configured: no workflow files on `ref`, and no check runs or
- *  commit statuses on its recent default-branch commits (#2488). Fails closed: only proven absence
- *  returns non-null; any error, missing field or empty history returns null. Never rejects. */
 export async function detectNoCiConfigured(
   octokit: Octokit,
   owner: string,

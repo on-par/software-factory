@@ -11,12 +11,6 @@ export interface FileLockOptions {
   onSteal?: (holderPid: number | null) => void;
 }
 
-/**
- * Serializes async work per key within this process. The next waiter proceeds
- * after the previous call settles, whether it resolves or rejects, so throwing
- * operations release the lock. Cross-process locking is intentionally out of
- * scope for the current single-process lane model.
- */
 export function withGitLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const prev = tails.get(key) ?? Promise.resolve();
   const run = prev.then(
@@ -62,13 +56,11 @@ function readHolderPid(pidPath: string): number | null {
 }
 
 interface LockObservation {
-  /** Parsed contents of the lock dir's `pid` file, or null when missing/unparseable. */
   pid: number | null;
   ino: number;
   mtimeMs: number;
 }
 
-/** One atomic-enough snapshot of who holds `lockDir`. Returns null when the dir is gone. */
 function observeLock(lockDir: string): LockObservation | null {
   try {
     const stat = statSync(lockDir);
@@ -79,17 +71,15 @@ function observeLock(lockDir: string): LockObservation | null {
   }
 }
 
-/** Suffix of the sibling directory that arbitrates a steal (see ADR-0009). */
 const STEAL_ARBITER_SUFFIX = '.steal';
 
-/**
- * Removes `lockDir` only if it is still the exact stale holder described by `observed`.
- * The check-and-remove is serialized across processes by an atomically created sibling
- * arbiter dir, so of N concurrent stealers exactly one can remove the lock. Returns true
- * when this caller removed it; false when another stealer holds the arbiter, or when the
- * lock changed identity under us (it was already stolen and re-acquired) — in both cases
- * the caller must back off and re-observe, never assume it holds the lock.
- */
+function reapArbiterOfDeadStealer(arbiterDir: string, graceMs: number): void {
+  const arbiter = observeLock(arbiterDir);
+  if (arbiter !== null && Date.now() - arbiter.mtimeMs > graceMs) {
+    rmSync(arbiterDir, { recursive: true, force: true });
+  }
+}
+
 function stealStaleLock(lockDir: string, observed: LockObservation, graceMs: number): boolean {
   const arbiterDir = `${lockDir}${STEAL_ARBITER_SUFFIX}`;
 
@@ -97,12 +87,7 @@ function stealStaleLock(lockDir: string, observed: LockObservation, graceMs: num
     mkdirSync(arbiterDir);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    // A stealer that died mid-steal would otherwise wedge this lock forever: reap the
-    // arbiter once it is older than the grace window and let the caller retry.
-    const arbiter = observeLock(arbiterDir);
-    if (arbiter !== null && Date.now() - arbiter.mtimeMs > graceMs) {
-      rmSync(arbiterDir, { recursive: true, force: true });
-    }
+    reapArbiterOfDeadStealer(arbiterDir, graceMs);
     return false;
   }
 
@@ -143,12 +128,6 @@ function sleepSync(ms: number): void {
   Atomics.wait(sleepBuf, 0, 0, ms);
 }
 
-/**
- * Synchronous sibling of withFileLock, for callers on a synchronous hot path
- * (the event logger) that cannot become async without changing their public
- * API. Mirrors the exact same mkdir+pid on-disk protocol so sync and async
- * holders of different locks coexist safely.
- */
 export function withFileLockSync<T>(lockDir: string, fn: () => T, opts: SyncFileLockOptions = {}): T {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_SYNC_TIMEOUT_MS;
   const pollMs = opts.pollMs ?? DEFAULT_SYNC_POLL_MS;
@@ -187,7 +166,7 @@ export function withFileLockSync<T>(lockDir: string, fn: () => T, opts: SyncFile
     }
 
     const observed = observeLock(lockDir);
-    if (observed === null) continue; // holder released between our mkdir and our stat
+    if (observed === null) continue;
 
     const stale = observed.pid !== null ? !isPidAlive(observed.pid) : Date.now() - observed.mtimeMs > graceMs;
 
@@ -242,7 +221,7 @@ export async function withFileLock<T>(lockDir: string, fn: () => Promise<T>, opt
     }
 
     const observed = observeLock(lockDir);
-    if (observed === null) continue; // holder released between our mkdir and our stat
+    if (observed === null) continue;
 
     const stale = observed.pid !== null ? !isPidAlive(observed.pid) : Date.now() - observed.mtimeMs > graceMs;
 

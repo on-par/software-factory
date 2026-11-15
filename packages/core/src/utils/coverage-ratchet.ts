@@ -1,5 +1,3 @@
-// src/utils/coverage-ratchet.ts — pure logic for detecting coverage-threshold drift
-
 export interface CoverageMetrics {
   lines: number;
   functions: number;

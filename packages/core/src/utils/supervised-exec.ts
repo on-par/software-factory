@@ -1,10 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { recordOwnedProcess } from '../daemon/process-ownership.js';
 
-// Keep the process-group owner alive after the shell exits: background servers
-// still belong to it until normal lane cleanup or the CLI-parent watchdog kills
-// the group. IPC reports the shell result without ending the ownership lifetime.
-const supervisor = `
+const groupOwnerOutlivingShellScript = `
 const { spawn } = require('node:child_process');
 const parent = Number(process.env.FACTORY_EXEC_PARENT);
 process.on('disconnect', () => process.kill(-process.pid, 'SIGKILL'));
@@ -24,7 +21,7 @@ export function spawnSupervisedCommand(
   cmd: string | readonly string[],
   options: { cwd?: string; env: NodeJS.ProcessEnv; ownershipFile: string },
 ): ChildProcess {
-  const child = spawn(process.execPath, ['-e', supervisor, JSON.stringify(cmd)], {
+  const child = spawn(process.execPath, ['-e', groupOwnerOutlivingShellScript, JSON.stringify(cmd)], {
     detached: true,
     shell: false,
     cwd: options.cwd,

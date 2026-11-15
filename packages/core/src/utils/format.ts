@@ -1,6 +1,3 @@
-// src/utils/format.ts — Hand-rolled ANSI formatter for the live `[factory]` log stream.
-// No new dependency: keep core's dep list (execa, @octokit/rest, gray-matter, zod) stable.
-
 import { severityOf } from '../events/kinds.js';
 import type { LogLevel } from '../types/index.js';
 
@@ -27,10 +24,6 @@ export function colorEnabled(
 
 type Category = 'phase' | 'ok' | 'warn' | 'error' | 'router' | 'other';
 
-// Rendering-only groupings: which "info"-severity kinds get the phase (▶) vs
-// ok (✓) symbol. Not part of the shared EVENT_TRAITS vocabulary (#663) — the
-// distinction is cosmetic to this console renderer, not a severity/park/lane
-// classification other consumers need.
 const PHASE_TYPES = new Set(['plan', 'build', 'check', 'ship', 'triage']);
 const OK_TYPES = new Set(['ready', 'recovered', 'pr_opened', 'approval_granted', 'run-done', 'lane-start']);
 
@@ -44,7 +37,6 @@ function categorize(type: string): Category {
   return 'other';
 }
 
-/** Maps an event `type` to its log severity, via the shared EVENT_TRAITS table (#663). */
 export function levelForType(type: string): LogLevel {
   return severityOf(type);
 }

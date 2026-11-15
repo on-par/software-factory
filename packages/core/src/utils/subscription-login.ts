@@ -1,9 +1,3 @@
-// src/utils/subscription-login.ts — refuse metered logins for failover (#3335).
-// A per-provider login check plus one filter over `models.providerOrder`. Failover runs unattended,
-// so a provider signed in with an API key (or with no detectable subscription login) is dropped from
-// every role and logged once as `provider_refused`. Nothing here ever reads a credential value into
-// a message or payload. Built on the #3214 detectors in provider-plan.ts.
-
 import {
   PROVIDER_ORDER_ROLES,
   subscriptionProviderOf,
@@ -19,22 +13,18 @@ import { detectProviderPlan, type ProviderPlanDeps } from './provider-plan.js';
 export type SubscriptionLogin = ProviderPlan;
 
 export interface SubscriptionLoginDeps extends ProviderPlanDeps {
-  /** Receives one `provider_refused` event per refused provider (once per process). */
   log?: (type: EventKind, msg: string, extra?: { providerRefused?: ProviderRefusedPayload }) => void;
-  /** Providers already logged. Default: a module-level set shared by the process. */
   logged?: Set<string>;
 }
 
 export interface RefusedProvider {
   provider: string;
   login: 'api' | 'unknown';
-  /** The dropped model ids, first seen first. */
   models: string[];
 }
 
-const loggedRefusals = new Set<string>();
+const processWideLoggedRefusals = new Set<string>();
 
-/** The login kind behind a failover provider. OpenCode Go is a subscription; its model prefix is judged by the filter. Never throws. */
 export function subscriptionLogin(
   providerId: SubscriptionProviderId,
   deps: SubscriptionLoginDeps = {},
@@ -44,9 +34,6 @@ export function subscriptionLogin(
   return 'unknown';
 }
 
-/** Drops every provider whose login is `api` or `unknown`, and any opencode model that is not `opencode-go/`,
- *  from every role. Logs `provider_refused` once per process per provider. Does not mutate `order`.
- *  A role may come back empty. */
 export function filterRefusedProviders(
   order: ProviderOrder,
   models: Record<string, ProviderModelDef>,
@@ -79,7 +66,7 @@ export function filterRefusedProviders(
     }
   }
   const refused = [...refusedBy.values()];
-  const logged = deps.logged ?? loggedRefusals;
+  const logged = deps.logged ?? processWideLoggedRefusals;
   for (const { provider, login } of refused) {
     if (logged.has(provider)) continue;
     logged.add(provider);

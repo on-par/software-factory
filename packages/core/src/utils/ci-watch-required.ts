@@ -1,4 +1,3 @@
-// src/utils/ci-watch-required.ts — required-check gate for watchChecks (#3206)
 import type { Octokit } from '@octokit/rest';
 import { classifyRequiredChecks, fetchRequiredContexts, type RequiredChecksState } from './required-checks.js';
 
@@ -10,7 +9,6 @@ interface RunLike {
 
 export type RequiredWaitingFor = Array<{ name: string; state: 'not reported yet' | 'pending' }>;
 
-/** Required contexts for a branch; any lookup failure means none (today's all-runs rule). */
 export async function resolveRequiredContexts(
   octokit: Octokit,
   owner: string,
@@ -25,8 +23,6 @@ export async function resolveRequiredContexts(
   }
 }
 
-/** Classifies the required contexts against check runs plus commit statuses. `statusFailed` is set
- *  when a required context's commit status is `failure` or `error`. */
 export async function readRequiredState(
   octokit: Octokit,
   owner: string,
@@ -51,9 +47,7 @@ export async function readRequiredState(
         conclusion: state === 'pending' ? null : state,
       });
     }
-  } catch {
-    // Check runs only for this poll; a status-only required context stays "not reported yet".
-  }
+  } catch {}
   const rs = classifyRequiredChecks(required, runLikes);
   const waitingFor: RequiredWaitingFor = [];
   for (const name of new Set(required)) {

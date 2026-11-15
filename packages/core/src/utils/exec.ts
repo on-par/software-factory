@@ -1,5 +1,3 @@
-// src/utils/exec.ts — Canonical exec seam with an explicit millisecond timeout.
-
 import { exec as execCb, spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { promisify } from 'node:util';
@@ -19,19 +17,9 @@ export type ExecFn = (
     timeoutMs?: number;
     maxBuffer?: number;
     env?: Record<string, string | undefined>;
-    /** When set, the child is spawned detached (its own process group) and
-     *  its pid is reported here so a lane can track and later kill the
-     *  whole group. */
     onPgid?: (pgid: number) => void;
-    /** Called with each decoded stdout chunk as it arrives. Honoured only on the
-     *  detached (`onPgid`) path; other paths ignore it. */
     onStdout?: (chunk: string) => void;
-    /** Grace period before SIGKILL when sweeping the group after a timeout. */
     killGraceMs?: number;
-    /** Pass the parent's GitHub credentials (GITHUB_TOKEN, GH_TOKEN, …) through
-     *  to the child. Off by default: agent CLIs and the commands they or a
-     *  repo define never see them. Set only on the factory's own gh/git calls
-     *  that need to authenticate. */
     githubAuth?: boolean;
   },
 ) => Promise<{ stdout: string; stderr: string }>;
@@ -41,21 +29,6 @@ interface ChildResult {
   stderr: string;
 }
 
-/** `node:child_process.exec`'s `detached` option is silently dropped (it
- *  forwards only a fixed allowlist of fields to `spawn`), so a detached
- *  child never leads its own process group there. This reimplements the
- *  same shell-command/timeout/maxBuffer contract directly on `spawn`, which
- *  does honor `detached`, keeping the same resolved/rejected shape
- *  `promisify(exec)` produces (`err.killed`, `err.code`, `err.signal`,
- *  `err.stdout`, `err.stderr`). Only used on the `onPgid` path.
- *
- *  Resolves on the child's own `exit`, not `close`: a command that
- *  backgrounds a grandchild (the exact case this feature exists for, e.g. a
- *  dev server) leaves that grandchild holding the inherited stdout/stderr
- *  pipes open even after the direct child exits, so `close` would never
- *  fire and the promise would hang past its own timeout. The timeout itself
- *  is managed here (not via spawn's built-in `timeout`) so it can kill the
- *  direct child and settle immediately, independent of pipe state. */
 function execDetached(
   cmd: string,
   opts: {
@@ -109,9 +82,7 @@ function execDetached(
         if (text) {
           try {
             opts.onStdout(text);
-          } catch {
-            // a throwing hook must not break the exec
-          }
+          } catch {}
         }
       }
     });
@@ -166,13 +137,11 @@ function execDetached(
   return Object.assign(promise, { child });
 }
 
-/** Injectable process seams for defaultExecFn; defaults are the real spawn and killProcessGroup. */
 export interface ExecDeps {
   spawn?: typeof spawn;
   killProcessGroup?: typeof killProcessGroup;
 }
 
-/** Builds an ExecFn over the given process seams (tests inject fakes; production uses the defaults). */
 export function createDefaultExecFn(deps: ExecDeps = {}): ExecFn {
   const spawnFn = deps.spawn ?? spawn;
   const killGroup = deps.killProcessGroup ?? killProcessGroup;
@@ -217,16 +186,4 @@ export function createDefaultExecFn(deps: ExecDeps = {}): ExecFn {
   };
 }
 
-/** Sole adapter from the factory's ms-explicit exec options onto node's
- *  child_process `timeout` option (also milliseconds). `opts.env` (e.g. a
- *  lane's leased PORT) is merged over the parent env, never replacing it.
- *  GitHub credentials are stripped from the child env unless
- *  `opts.githubAuth` is set, and a rejection has any GitHub credential
- *  masked in its message/cmd/stdout/stderr before it propagates.
- *  When `opts.onPgid` is set, the child is spawned `detached: true` (leads
- *  its own process group) and, on a timeout/signal rejection, the whole
- *  group is swept via `killProcessGroup` before the original error rethrows —
- *  this catches grandchildren node's built-in timeout can't reach. Without
- *  `onPgid`, behavior is byte-for-byte unchanged from before this option
- *  existed. */
 export const defaultExecFn: ExecFn = createDefaultExecFn();

@@ -1,5 +1,3 @@
-// src/utils/cost-log.ts — append-only cost ledger helpers, split out of utils/index.ts
-
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 

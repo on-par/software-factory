@@ -15,7 +15,6 @@ function createClock() {
   };
 }
 
-/** Runs per poll come from `runsAt(elapsedMs)`; statuses from `statusesAt`. */
 function fakeOctokit(
   clock: { now: () => number },
   runsAt: (ms: number) => any[],
