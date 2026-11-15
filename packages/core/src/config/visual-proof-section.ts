@@ -7,6 +7,34 @@ const unsafePathChar = (ch: string): boolean => ch === '\\' || ch <= ' ' || ch =
 const sameOriginPath = (path: string): boolean =>
   path.startsWith('/') && path[1] !== '/' && ![...path].some(unsafePathChar);
 
+const VisualProofStepSchema = z.union([
+  z
+    .object({
+      goto: z
+        .string()
+        .refine(sameOriginPath, 'goto must be a path on the app: one leading /, no backslashes or whitespace'),
+    })
+    .strict()
+    .describe('Navigate to a same-origin app path'),
+  z
+    .object({ click: z.string().min(1) })
+    .strict()
+    .describe('Click the element matching this selector or text'),
+  z
+    .object({ fill: z.string().min(1), value: z.string() })
+    .strict()
+    .describe('Fill the field matching this selector with a value'),
+  z
+    .object({ press: z.string().min(1) })
+    .strict()
+    .describe('Press a key such as Enter or Escape'),
+  z
+    .object({ waitFor: z.string().min(1) })
+    .strict()
+    .describe('Wait for this selector or text to appear'),
+]);
+export type VisualProofStep = z.infer<typeof VisualProofStepSchema>;
+
 const VisualProofRouteSchema = z
   .object({
     route: z
@@ -23,8 +51,20 @@ const VisualProofRouteSchema = z
       })
       .strict()
       .default({ width: 1280, height: 800 }),
+    steps: z
+      .array(VisualProofStepSchema)
+      .min(1)
+      .max(20)
+      .optional()
+      .describe(
+        'Ordered steps the capture command applies after loading the route to reach `state`; `before` is captured on load, `after` once the steps ran and `assert` passed',
+      ),
+    record: z.enum(['gif', 'video']).optional().describe('Also record a short size-capped clip of the steps'),
   })
-  .strict();
+  .strict()
+  .superRefine((route, ctx) => {
+    if (route.record && !route.steps) ctx.addIssue({ code: 'custom', path: ['record'], message: 'record needs steps' });
+  });
 
 export const VisualProofModeSchema = z
   .enum(['required', 'advisory', 'off'])
@@ -45,6 +85,13 @@ export const VisualProofConfigSchema = z
       .describe('argv run once the app is ready; writes PNGs and manifest.json to $VISUAL_PROOF_OUT_DIR'),
     maxCaptures: z.number().int().min(1).max(5).default(3),
     timeoutSeconds: z.number().int().positive().default(300),
+    captureAttempts: z
+      .number()
+      .int()
+      .min(1)
+      .max(5)
+      .default(3)
+      .describe('Attempts per SHIP before a capture failure is final; each failed attempt is logged with its reason'),
     evidenceBranch: z
       .string()
       .regex(/^[A-Za-z0-9._/-]+$/)
