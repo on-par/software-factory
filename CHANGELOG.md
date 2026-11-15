@@ -16,6 +16,7 @@ section to `## X.Y.Z - date`. See
 ### Changed
 
 - Direct `mkdtemp(tmpdir())` in tests is now an oxlint error (`anti-slop/no-direct-tmpdir-mkdtemp`), replacing the vitest guard, and a lefthook pre-commit hook runs `oxlint --fix` and `prettier --write` on staged files (#4050).
+- Config defaults that core repeated as inline literals (FactoryConfigSchema defaults, resolver fallbacks, the 227 usage cap and the 0.75 watchdog stopAt) are now read from `@on-par/factory-config`, which exports `defaultBudget` and `defaultSchemaFields`; effective defaults are unchanged (#3444).
 
 ### Removed
 
