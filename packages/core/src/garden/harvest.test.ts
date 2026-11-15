@@ -391,33 +391,28 @@ describe('garden report is read-only and handles empty input (#2088)', () => {
     };
   };
 
-  let fetchStub: ReturnType<typeof vi.fn>;
-  let spies: { mock: { calls: unknown[] } }[];
-  const boom = () => {
+  const attempts: string[] = [];
+  const boomAs = (name: string) => () => {
+    attempts.push(name);
     throw new Error('network');
   };
 
   beforeEach(() => {
-    fetchStub = vi.fn(boom);
-    vi.stubGlobal('fetch', fetchStub);
-    spies = [
-      vi.spyOn(http, 'request').mockImplementation(boom),
-      vi.spyOn(http, 'get').mockImplementation(boom),
-      vi.spyOn(https, 'request').mockImplementation(boom),
-      vi.spyOn(https, 'get').mockImplementation(boom),
-      vi.spyOn(net, 'connect').mockImplementation(boom),
-      vi.spyOn(net, 'createConnection').mockImplementation(boom),
-    ];
+    attempts.length = 0;
+    vi.stubGlobal('fetch', boomAs('fetch'));
+    vi.spyOn(http, 'request').mockImplementation(boomAs('http.request'));
+    vi.spyOn(http, 'get').mockImplementation(boomAs('http.get'));
+    vi.spyOn(https, 'request').mockImplementation(boomAs('https.request'));
+    vi.spyOn(https, 'get').mockImplementation(boomAs('https.get'));
+    vi.spyOn(net, 'connect').mockImplementation(boomAs('net.connect'));
+    vi.spyOn(net, 'createConnection').mockImplementation(boomAs('net.createConnection'));
   });
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
-  const expectNoNetwork = () => {
-    expect(fetchStub).not.toHaveBeenCalled();
-    for (const spy of spies) expect(spy.mock.calls).toHaveLength(0);
-  };
+  const expectNoNetwork = () => expect(attempts).toEqual([]);
 
   it('makes no network call on populated input', () => {
     const f = write('pop.ndjson', [

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { FactoryEvent } from '../types/index.js';
 import {
@@ -359,14 +359,29 @@ describe('detectPostMergeDefects', () => {
 });
 
 describe('fetchDefectSources', () => {
-  function client(overrides: Partial<DefectSourceClient['rest']> = {}): DefectSourceClient {
+  type Endpoint = 'listCommits' | 'listForRepo' | 'listComments';
+  function client(
+    data: { commits?: unknown[]; issues?: unknown[]; comments?: unknown[] } = {},
+  ): DefectSourceClient & { requests: Array<{ endpoint: Endpoint; params: unknown }> } {
+    const requests: Array<{ endpoint: Endpoint; params: unknown }> = [];
     return {
+      requests,
       rest: {
-        repos: { listCommits: vi.fn(async () => ({ data: [] })), ...overrides.repos },
+        repos: {
+          listCommits: async (params) => {
+            requests.push({ endpoint: 'listCommits', params });
+            return { data: data.commits ?? [] };
+          },
+        },
         issues: {
-          listForRepo: vi.fn(async () => ({ data: [] })),
-          listComments: vi.fn(async () => ({ data: [] })),
-          ...overrides.issues,
+          listForRepo: async (params) => {
+            requests.push({ endpoint: 'listForRepo', params });
+            return { data: data.issues ?? [] };
+          },
+          listComments: async (params) => {
+            requests.push({ endpoint: 'listComments', params });
+            return { data: data.comments ?? [] };
+          },
         },
       },
     };
@@ -377,35 +392,35 @@ describe('fetchDefectSources', () => {
     const result = await fetchDefectSources(c, 'o', 'r', [mergedPr({ mergedAt: NOW_OPEN })], { now: NOW_OPEN });
 
     expect(result).toEqual({ mergedPrs: [mergedPr({ mergedAt: NOW_OPEN })], commits: [], issues: [], comments: [] });
-    expect(c.rest.repos.listCommits).not.toHaveBeenCalled();
-    expect(c.rest.issues.listForRepo).not.toHaveBeenCalled();
-    expect(c.rest.issues.listComments).not.toHaveBeenCalled();
+    expect(c.requests).toEqual([]);
   });
 
   it('fetches commits, issues (with the correct since), and comments only for window-closed PRs', async () => {
-    const listCommits = vi.fn(async () => ({
-      data: [{ sha: 'abc', commit: { message: 'msg', author: { date: '2026-07-10T00:00:00.000Z' } } }],
-    }));
-    const listForRepo = vi.fn(async () => ({
-      data: [{ number: 5, title: 't', body: 'b', created_at: '2026-07-10T00:00:00.000Z', pull_request: undefined }],
-    }));
-    const listComments = vi.fn(async () => ({
-      data: [
+    const c = client({
+      commits: [{ sha: 'abc', commit: { message: 'msg', author: { date: '2026-07-10T00:00:00.000Z' } } }],
+      issues: [{ number: 5, title: 't', body: 'b', created_at: '2026-07-10T00:00:00.000Z', pull_request: undefined }],
+      comments: [
         { user: { login: 'alice', type: 'User' }, body: 'hi', created_at: '2026-07-10T00:00:00.000Z' },
         { user: { login: 'renovate[bot]' }, body: 'hi', created_at: '2026-07-10T00:00:00.000Z' },
         { user: { login: 'bot-account', type: 'Bot' }, body: 'hi', created_at: '2026-07-10T00:00:00.000Z' },
       ],
-    }));
-    const c = client({ repos: { listCommits }, issues: { listForRepo, listComments } });
+    });
 
     const merged = [mergedPr({ prNumber: 77, mergedAt: MERGED_AT })];
     const result = await fetchDefectSources(c, 'owner', 'repo', merged, { now: NOW_CLOSED });
 
-    expect(listCommits).toHaveBeenCalledWith({ owner: 'owner', repo: 'repo', per_page: 100, page: 1 });
-    expect(listForRepo).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: 'owner', repo: 'repo', since: MERGED_AT, state: 'all' }),
-    );
-    expect(listComments).toHaveBeenCalledWith({ owner: 'owner', repo: 'repo', issue_number: 77, per_page: 100 });
+    expect(c.requests).toContainEqual({
+      endpoint: 'listCommits',
+      params: { owner: 'owner', repo: 'repo', per_page: 100, page: 1 },
+    });
+    expect(c.requests).toContainEqual({
+      endpoint: 'listForRepo',
+      params: expect.objectContaining({ owner: 'owner', repo: 'repo', since: MERGED_AT, state: 'all' }),
+    });
+    expect(c.requests).toContainEqual({
+      endpoint: 'listComments',
+      params: { owner: 'owner', repo: 'repo', issue_number: 77, per_page: 100 },
+    });
 
     expect(result.commits).toEqual([{ sha: 'abc', message: 'msg', ts: '2026-07-10T00:00:00.000Z' }]);
     expect(result.issues).toEqual([
@@ -419,16 +434,11 @@ describe('fetchDefectSources', () => {
   });
 
   it('stops paging commits and issues after a short page', async () => {
-    const listCommits = vi.fn(async () => ({ data: [{ sha: 'a', commit: { message: '', author: { date: '' } } }] }));
-    const listForRepo = vi.fn(async () => ({ data: [] }));
-    const c = client({
-      repos: { listCommits },
-      issues: { listForRepo, listComments: vi.fn(async () => ({ data: [] })) },
-    });
+    const c = client({ commits: [{ sha: 'a', commit: { message: '', author: { date: '' } } }] });
 
     await fetchDefectSources(c, 'o', 'r', [mergedPr({ mergedAt: MERGED_AT })], { now: NOW_CLOSED });
 
-    expect(listCommits).toHaveBeenCalledTimes(1);
-    expect(listForRepo).toHaveBeenCalledTimes(1);
+    expect(c.requests.filter((r) => r.endpoint === 'listCommits')).toHaveLength(1);
+    expect(c.requests.filter((r) => r.endpoint === 'listForRepo')).toHaveLength(1);
   });
 });

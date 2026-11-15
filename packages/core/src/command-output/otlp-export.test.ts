@@ -10,12 +10,12 @@ const ON = { FACTORY_COMMAND_OUTPUT_EXPORT: 'otlp', OTEL_EXPORTER_OTLP_ENDPOINT:
 interface Fake {
   exporter: LogRecordExporter;
   records: ReadableLogRecord[];
-  shutdown: ReturnType<typeof vi.fn>;
+  shutdowns: () => number;
 }
 
-function fakeExporter(mode: 'ok' | 'fail' | 'hang' | 'throw' = 'ok'): Fake {
+function fakeExporter(mode: 'ok' | 'fail' | 'hang' | 'throw' = 'ok', opts?: { shutdownError?: Error }): Fake {
   const records: ReadableLogRecord[] = [];
-  const shutdown = vi.fn(async () => {});
+  const state = { shutdowns: 0 };
   const exporter: LogRecordExporter = {
     export(batch, cb) {
       if (mode === 'throw') throw new Error('exporter exploded');
@@ -24,9 +24,21 @@ function fakeExporter(mode: 'ok' | 'fail' | 'hang' | 'throw' = 'ok'): Fake {
       cb({ code: mode === 'ok' ? 0 : 1 });
     },
     forceFlush: async () => {},
-    shutdown,
+    shutdown: async () => {
+      state.shutdowns += 1;
+      if (opts?.shutdownError) throw opts.shutdownError;
+    },
   };
-  return { exporter, records, shutdown };
+  return { exporter, records, shutdowns: () => state.shutdowns };
+}
+
+function recordingCreator() {
+  const created: string[] = [];
+  const createExporter = async (p: string) => {
+    created.push(p);
+    return fakeExporter().exporter;
+  };
+  return { created, createExporter };
 }
 
 const outputBodies = (records: ReadableLogRecord[]): string[] =>
@@ -117,7 +129,7 @@ describe('resolveCommandOutputExport', () => {
 
 describe('withCommandOutputExport', () => {
   it('is disabled by default and never creates an exporter or registers a sink', async () => {
-    const createExporter = vi.fn();
+    const { created, createExporter } = recordingCreator();
     const logs: string[] = [];
     const result = await withCommandOutputExport(
       corr,
@@ -129,7 +141,7 @@ describe('withCommandOutputExport', () => {
       },
     );
     expect(result).toBeUndefined();
-    expect(createExporter).not.toHaveBeenCalled();
+    expect(created).toEqual([]);
     expect(logs).toEqual([]);
     expect(
       await withCommandOutputExport(
@@ -142,9 +154,12 @@ describe('withCommandOutputExport', () => {
   });
 
   it('OTEL_SDK_DISABLED=true vetoes an explicit opt-in with no exporter and no network', async () => {
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
-    const createExporter = vi.fn();
+    const fetched: unknown[] = [];
+    vi.stubGlobal('fetch', async (...a: unknown[]) => {
+      fetched.push(a);
+      return new Response();
+    });
+    const { created, createExporter } = recordingCreator();
     const logs: string[] = [];
     const result = await withCommandOutputExport(
       corr,
@@ -156,13 +171,13 @@ describe('withCommandOutputExport', () => {
       },
     );
     expect(result).toBeUndefined();
-    expect(createExporter).not.toHaveBeenCalled();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(created).toEqual([]);
+    expect(fetched).toEqual([]);
     expect(logs).toEqual([]);
   });
 
   it('OTEL_LOGS_EXPORTER=none vetoes an explicit opt-in', async () => {
-    const createExporter = vi.fn();
+    const { created, createExporter } = recordingCreator();
     await withCommandOutputExport(
       corr,
       () => {},
@@ -172,7 +187,7 @@ describe('withCommandOutputExport', () => {
         createExporter,
       },
     );
-    expect(createExporter).not.toHaveBeenCalled();
+    expect(created).toEqual([]);
   });
 
   it('logs command_output_export_degraded for a missing endpoint and still runs fn', async () => {
@@ -268,7 +283,7 @@ describe('withCommandOutputExport', () => {
     expect(logs).toEqual([
       { type: 'command_output_export', msg: 'command output export: 5 sent, 0 dropped, 0 failed (0 retries)' },
     ]);
-    expect(fake.shutdown).toHaveBeenCalledOnce();
+    expect(fake.shutdowns()).toBe(1);
   });
 
   it('logs command_output_export_degraded with the dropped count on queue overflow', async () => {
@@ -308,8 +323,7 @@ describe('withCommandOutputExport', () => {
   });
 
   it('swallows a throwing exporter shutdown and a throwing log', async () => {
-    const fake = fakeExporter();
-    fake.shutdown.mockRejectedValue(new Error('shutdown failed'));
+    const fake = fakeExporter('ok', { shutdownError: new Error('shutdown failed') });
     const result = await withCommandOutputExport(
       corr,
       () => {
@@ -325,7 +339,7 @@ describe('withCommandOutputExport', () => {
     const fake = fakeExporter();
     const err = new Error('fn failed');
     await expect(run(ON, () => Promise.reject(err), fake)).rejects.toBe(err);
-    expect(fake.shutdown).toHaveBeenCalledOnce();
+    expect(fake.shutdowns()).toBe(1);
   });
 
   it('falls back to plain capture when exporter setup throws', async () => {
@@ -408,7 +422,7 @@ describe('export sessions', () => {
     await done;
     expect(reports).toHaveLength(1);
     expect(fake.records.filter((r) => evt(r) === 'session.end')).toHaveLength(1);
-    expect(fake.shutdown).toHaveBeenCalledOnce();
+    expect(fake.shutdowns()).toBe(1);
     expect(logs).toHaveLength(1);
   });
 
@@ -450,7 +464,7 @@ describe('export sessions', () => {
   });
 
   it('disabled export opens no session and flushCommandOutputExports resolves empty without an exporter', async () => {
-    const createExporter = vi.fn();
+    const { created, createExporter } = recordingCreator();
     await withCommandOutputExport(
       corr,
       () => {},
@@ -459,6 +473,6 @@ describe('export sessions', () => {
       },
       { env: {}, createExporter },
     );
-    expect(createExporter).not.toHaveBeenCalled();
+    expect(created).toEqual([]);
   });
 });

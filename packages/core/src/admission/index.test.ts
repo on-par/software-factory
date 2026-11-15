@@ -178,13 +178,29 @@ describe('createFileAdmissionStateReader', () => {
   });
 });
 
+function recordingConflicts() {
+  const conflicts: Array<[number, unknown]> = [];
+  const onConflict = (n: number, v: unknown) => void conflicts.push([n, v]);
+  return { conflicts, onConflict };
+}
+
+function recordingInner<T>(verdict: T) {
+  const seen: QueueIssue[] = [];
+  const inner = async (i: QueueIssue) => {
+    seen.push(i);
+    return verdict;
+  };
+  return { seen, inner };
+}
+
 describe('withAdmissionGuard', () => {
   it('with no reader, delegates to the inner preflight unchanged', async () => {
-    const inner = vi.fn(async () => ({ kind: 'adopt' as const, branch: 'b' }));
+    const { seen, inner } = recordingInner({ kind: 'adopt' as const, branch: 'b' });
     const guard = withAdmissionGuard({ preflight: inner });
     const issue: QueueIssue = { number: 1, labels: [] };
     await expect(guard(issue)).resolves.toEqual({ kind: 'adopt', branch: 'b' });
-    expect(inner).toHaveBeenCalledWith(issue);
+    expect(seen).toEqual([issue]);
+    expect(seen[0]).toBe(issue);
   });
 
   it('with no reader and no inner preflight, defaults to build', async () => {
@@ -193,24 +209,23 @@ describe('withAdmissionGuard', () => {
   });
 
   it('a reader returning absent lets the inner preflight run', async () => {
-    const inner = vi.fn(async () => ({ kind: 'build' as const }));
+    const { seen, inner } = recordingInner({ kind: 'build' as const });
     const reader = { read: vi.fn(async () => ({ kind: 'absent' as const })) };
     const guard = withAdmissionGuard({ reader, preflight: inner });
     await expect(guard({ number: 1, labels: [] })).resolves.toEqual({ kind: 'build' });
-    expect(inner).toHaveBeenCalledTimes(1);
+    expect(seen).toHaveLength(1);
   });
 
   it('a refusing verdict defers, calls onConflict once, and never runs the inner preflight', async () => {
-    const inner = vi.fn(async () => ({ kind: 'build' as const }));
+    const { seen, inner } = recordingInner({ kind: 'build' as const });
     const reader = {
       read: vi.fn(async () => ({ kind: 'record' as const, record: { issue: 1, state: 'executing' as const } })),
     };
-    const onConflict = vi.fn();
+    const { conflicts, onConflict } = recordingConflicts();
     const guard = withAdmissionGuard({ reader, preflight: inner, onConflict });
     await expect(guard({ number: 1, labels: [] })).resolves.toEqual({ kind: 'defer' });
-    expect(inner).not.toHaveBeenCalled();
-    expect(onConflict).toHaveBeenCalledTimes(1);
-    expect(onConflict).toHaveBeenCalledWith(1, expect.objectContaining({ kind: 'refuse', state: 'executing' }));
+    expect(seen).toEqual([]);
+    expect(conflicts).toEqual([[1, expect.objectContaining({ kind: 'refuse', state: 'executing' })]]);
   });
 
   it('a reader that throws defers with an unreadable verdict', async () => {
@@ -219,10 +234,10 @@ describe('withAdmissionGuard', () => {
         throw new Error('boom');
       }),
     };
-    const onConflict = vi.fn();
+    const { conflicts, onConflict } = recordingConflicts();
     const guard = withAdmissionGuard({ reader, onConflict });
     await expect(guard({ number: 1, labels: [] })).resolves.toEqual({ kind: 'defer' });
-    expect(onConflict).toHaveBeenCalledWith(1, expect.objectContaining({ kind: 'refuse', state: 'unreadable' }));
+    expect(conflicts).toEqual([[1, expect.objectContaining({ kind: 'refuse', state: 'unreadable' })]]);
   });
 
   it('integrates with the real queue: a conflicting candidate is skipped without any label mutation', async () => {
