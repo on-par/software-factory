@@ -55,36 +55,39 @@ describe('sandbox.codexSandbox config (#3829)', () => {
   });
 
   it('keeps a valid sandbox.codexSandbox value on the loaded config (#3829)', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const lines: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((...args) => void lines.push(args.join(' ')));
     for (const value of ['danger-full-access', 'workspace-write'] as const) {
       const path = join(dir, `${value}.json`);
       await writeFile(path, JSON.stringify({ sandbox: { codexSandbox: value } }));
       expect(loadFactoryConfigForRepo(path).sandbox.codexSandbox).toBe(value);
     }
-    expect(warn).not.toHaveBeenCalled();
+    expect(lines).toEqual([]);
   });
 
   it('warns once and drops an unknown sandbox.codexSandbox value (#3829)', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const lines: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((...args) => void lines.push(args.join(' ')));
     const path = join(dir, 'config.json');
     await writeFile(path, JSON.stringify({ sandbox: { codexSandbox: 'read-only' } }));
     expect(loadFactoryConfigForRepo(path).sandbox.codexSandbox).toBeUndefined();
     expect(loadFactoryConfigForRepo(path).sandbox.codexSandbox).toBeUndefined();
-    expect(warn).toHaveBeenCalledTimes(1);
-    const message = String(warn.mock.calls[0]?.[0]);
+    expect(lines).toHaveLength(1);
+    const message = lines[0]!;
     for (const part of ['sandbox.codexSandbox', 'read-only', 'danger-full-access', 'workspace-write']) {
       expect(message).toContain(part);
     }
   });
 
   it('warns and drops a non-string or empty value (#3829)', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const lines: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((...args) => void lines.push(args.join(' ')));
     for (const [i, value] of [5, ''].entries()) {
       const path = join(dir, `bad-${i}.json`);
       await writeFile(path, JSON.stringify({ sandbox: { codexSandbox: value } }));
       expect(loadFactoryConfigForRepo(path).sandbox.codexSandbox).toBeUndefined();
     }
-    expect(warn).toHaveBeenCalledTimes(2);
+    expect(lines).toHaveLength(2);
   });
 
   it('codexSandboxValueIssue reports only an unknown present value', () => {
