@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Octokit } from '@octokit/rest';
 import { findAdoptablePr } from './adopt-pr.js';
 import { workKeyFromIssue } from '../work/work-key.js';
@@ -10,12 +10,14 @@ const pr = (number: number, ref: string, repo: string | null = REPO) => ({
 });
 
 function stub(pages: unknown[][] | Error) {
-  const list = vi.fn(async ({ page }: { page: number }) => {
+  const requests: Record<string, unknown>[] = [];
+  const list = async (params: { page: number }) => {
+    requests.push(params);
     if (pages instanceof Error) throw pages;
-    return { data: pages[page - 1] ?? [] };
-  });
+    return { data: pages[params.page - 1] ?? [] };
+  };
   const octokit = { rest: { pulls: { list } } } as any;
-  return { octokit, list };
+  return { octokit, requests };
 }
 
 const find = (octokit: Pick<Octokit, 'rest'>, maxPages?: number) =>
@@ -70,9 +72,9 @@ describe('findAdoptablePr', () => {
 
   it('finds a match on page 2', async () => {
     const full = Array.from({ length: 100 }, (_, i) => pr(1000 + i, `feature/x-${i}`));
-    const { octokit, list } = stub([full, [pr(7, 'factory/2253-late')]]);
+    const { octokit, requests } = stub([full, [pr(7, 'factory/2253-late')]]);
     expect(await find(octokit)).toMatchObject({ status: 'found', prNumber: 7 });
-    expect(list).toHaveBeenCalledTimes(2);
+    expect(requests.map((r) => r.page)).toEqual([1, 2]);
   });
 
   it('errors when the last allowed page is still full', async () => {
@@ -90,10 +92,10 @@ describe('findAdoptablePr', () => {
   });
 
   it('calls only pulls.list', async () => {
-    const { octokit, list } = stub([[pr(7, 'factory/2253-x')]]);
+    const { octokit, requests } = stub([[pr(7, 'factory/2253-x')]]);
     await find(octokit);
     expect(Object.keys(octokit.rest)).toEqual(['pulls']);
     expect(Object.keys(octokit.rest.pulls)).toEqual(['list']);
-    expect(list).toHaveBeenCalledWith({ owner: 'acme', repo: 'widgets', state: 'open', per_page: 100, page: 1 });
+    expect(requests).toEqual([{ owner: 'acme', repo: 'widgets', state: 'open', per_page: 100, page: 1 }]);
   });
 });

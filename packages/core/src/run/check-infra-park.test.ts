@@ -101,8 +101,15 @@ describe('runIssue — check-infra park (#3371)', () => {
     const worktree = tempDirs.makeSync('check-infra-park-');
     await mkdir(join(worktree, 'scripts'), { recursive: true });
     await writeFile(join(worktree, 'scripts', 'verify.sh'), '#!/usr/bin/env bash\n');
-    const log = vi.fn<Log>();
-    const runCheckers = vi.fn(async () => ECONNRESET_SUMMARY);
+    const events: { type: string; msg: string }[] = [];
+    const log: Log = (type, msg) => {
+      events.push({ type, msg });
+    };
+    let checkerRuns = 0;
+    const runCheckers = async () => {
+      checkerRuns += 1;
+      return ECONNRESET_SUMMARY;
+    };
     const checkPhase: RunPorts['checkPhase'] = (o) =>
       realCheckPhase({
         ...o,
@@ -123,9 +130,9 @@ describe('runIssue — check-infra park (#3371)', () => {
     const outcome = await runIssue(request, policy, ports(log, worktree, checkPhase));
 
     expect(outcome).toMatchObject({ state: 'parked', reason: 'check-infra' });
-    expect(runCheckers).toHaveBeenCalledTimes(2);
-    const parked = log.mock.calls.find(([kind]) => kind === 'check-infra');
-    expect(parked?.[1]).toContain(checkInfraParkMessage('tests', 'read ECONNRESET'));
+    expect(checkerRuns).toBe(2);
+    const parked = events.find((e) => e.type === 'check-infra');
+    expect(parked?.msg).toContain(checkInfraParkMessage('tests', 'read ECONNRESET'));
   });
 
   it('has a park hint naming the infrastructure cause', () => {

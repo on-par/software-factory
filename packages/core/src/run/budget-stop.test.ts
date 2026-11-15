@@ -92,7 +92,7 @@ function policy(budget: RunPolicy['budget']): RunPolicy {
   };
 }
 
-function ports(messages: string[], dispose = vi.fn(async () => {})): RunPorts {
+function ports(messages: string[], dispose: () => Promise<void> = async () => {}): RunPorts {
   return {
     router: new ModelRouter(
       {
@@ -158,7 +158,15 @@ describe.skipIf(process.platform === 'win32')('runIssue — mid-session budget s
       return { ok: false, model: 'm', route: 'codex', reason: 'budget_exceeded' };
     });
     const messages: string[] = [];
-    const dispose = vi.fn(async () => {});
+    let disposed = false;
+    const dispose = async () => {
+      disposed = true;
+    };
+    let checkRan = false;
+    vi.mocked(checkPhase).mockImplementation(async () => {
+      checkRan = true;
+      return CHECK_OK;
+    });
     const req = request();
     const outcome = await runIssue(req, policy({ perIssueCapUsd: 30 }), ports(messages, dispose));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
@@ -167,9 +175,9 @@ describe.skipIf(process.platform === 'win32')('runIssue — mid-session budget s
     );
     expect(aliveAtFirstCall).toBe(true);
     expect(await exited).toBe('SIGTERM');
-    expect(checkPhase).not.toHaveBeenCalled();
+    expect(checkRan).toBe(false);
     expect(readWorktreeKeeps(req.worktreeKeepsPath as string).map((k) => k.path)).toEqual(['/tmp/wt']);
-    expect(dispose).not.toHaveBeenCalled();
+    expect(disposed).toBe(false);
     child.kill('SIGKILL');
   });
 
@@ -282,7 +290,10 @@ describe('buildPhase — budget stop (#3320)', () => {
 describe('reworkWorker — budget stop (#3320)', () => {
   it('reports budgetStopped for a BudgetStopError and logs no rework_model_failed', async () => {
     const { router, stub } = budgetRouter();
-    const log = vi.fn();
+    const types: string[] = [];
+    const log = (t: string) => {
+      types.push(t);
+    };
     const result = await reworkWorker({
       issue: workKeyFromIssue(1),
       worktree: dirs.makeSync('wt-'),
@@ -294,7 +305,7 @@ describe('reworkWorker — budget stop (#3320)', () => {
       budgetGuard: () => true,
     });
     expect(result).toEqual({ failovers: [], modelCompleted: false, budgetStopped: true });
-    expect(log.mock.calls.map((c) => c[0])).not.toContain('rework_model_failed');
+    expect(types).not.toContain('rework_model_failed');
     expect(stub.calls).toHaveLength(1);
   });
 });
