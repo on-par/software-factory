@@ -28,9 +28,9 @@ const flush = async () => {
 describe('App idle reason and run summary (#1365)', () => {
   it('shows no active work with the GitHub-queue-empty reason when idle and the queue is empty (#1365)', async () => {
     const fake = makeFakeFollow();
-    const queueReader: QueueReader = { source: 'GitHub', read: vi.fn(async () => ({ entries: [] })) };
+    const queueReader: QueueReader = { source: 'GitHub', read: async () => ({ entries: [] }) };
     const { lastFrame } = render(<App eventsFile="ignored" follow={fake.follow} queueReader={queueReader} />);
-    await vi.waitFor(() => expect(queueReader.read).toHaveBeenCalled());
+    await vi.waitFor(() => expect(lastFrame()).toContain('no active work — GitHub queue empty'));
     await flush();
     expect(lastFrame()).toContain('no active work — GitHub queue empty');
   });
@@ -39,12 +39,12 @@ describe('App idle reason and run summary (#1365)', () => {
     const fake = makeFakeFollow();
     const queueReader: QueueReader = {
       source: 'GitHub',
-      read: vi.fn(async () => ({ entries: [{ lane: 'app', issue: 300 }] })),
+      read: async () => ({ entries: [{ lane: 'app', issue: 300 }] }),
     };
     const { lastFrame } = render(<App eventsFile="ignored" follow={fake.follow} queueReader={queueReader} />);
     fake.push(ev('plan', 'Starting plan phase', '192'));
     fake.push(ev('parked', 'parked', '192'));
-    await vi.waitFor(() => expect(queueReader.read).toHaveBeenCalled());
+    await vi.waitFor(() => expect(lastFrame()).toContain('no active work — all runs parked/finished'));
     await flush();
     const frame = lastFrame() ?? '';
     expect(frame).toContain('no active work — all runs parked/finished');
