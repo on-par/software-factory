@@ -93,12 +93,18 @@ type Log = ReturnType<RunPorts['events']>;
 
 function recordingLog() {
   const events: Array<[string, string]> = [];
-  return { events, log: ((type, msg) => void events.push([type, msg])) as Log };
+  const log: Log = (type, msg) => {
+    events.push([type, msg]);
+  };
+  return { events, log };
 }
 
 function githubOctokit() {
   const posted: unknown[] = [];
-  const createComment = async (arg: unknown) => (posted.push(arg), { data: { id: 1 } });
+  const createComment = async (arg: unknown) => {
+    posted.push(arg);
+    return { data: { id: 1 } };
+  };
   const octokit = Object.assign({} as Octokit, {
     rest: {
       users: { getAuthenticated: vi.fn(async () => ({ data: { id: 9 } })) },
@@ -108,13 +114,13 @@ function githubOctokit() {
   return { octokit, posted };
 }
 
-const rec = {
-  plan: [] as Parameters<typeof realPlanPhase>[0][],
-  build: [] as Parameters<typeof realBuildPhase>[0][],
-  ship: [] as Parameters<typeof realShipPhase>[0][],
-};
+interface Recorders {
+  plan: Parameters<typeof realPlanPhase>[0][];
+  build: Parameters<typeof realBuildPhase>[0][];
+  ship: Parameters<typeof realShipPhase>[0][];
+}
 
-function ports(log: Log, octokit: Octokit = {} as Octokit): RunPorts {
+function ports(log: Log, octokit: Octokit = {} as Octokit, rec?: Recorders): RunPorts {
   return {
     router: new ModelRouter(MODELS, ROUTES),
     octokit,
@@ -122,15 +128,14 @@ function ports(log: Log, octokit: Octokit = {} as Octokit): RunPorts {
     events: () => log,
     breaker: new ProviderBreaker(join(tmp, 'breaker.json')),
     resolveConstitution: () => null,
-    planPhase: async (o) => (rec.plan.push(o), planPhase(o)),
-    buildPhase: async (o) => (rec.build.push(o), buildPhase(o)),
+    planPhase: async (o) => (rec?.plan.push(o), planPhase(o)),
+    buildPhase: async (o) => (rec?.build.push(o), buildPhase(o)),
     checkPhase,
-    shipPhase: async (o) => (rec.ship.push(o), shipPhase(o)),
+    shipPhase: async (o) => (rec?.ship.push(o), shipPhase(o)),
   };
 }
 
 beforeEach(() => {
-  Object.values(rec).forEach((a) => (a.length = 0));
   rmSync(keepsFile, { force: true });
   vi.mocked(shipPhase)
     .mockReset()
@@ -143,7 +148,8 @@ beforeEach(() => {
 describe('runIssue — --no-pr', () => {
   it('stops after a clean CHECK: no SHIP, ready on the branch, no-pr-complete logged', async () => {
     const { events, log } = recordingLog();
-    const outcome = await runIssue(noPr, policy, ports(log));
+    const rec: Recorders = { plan: [], build: [], ship: [] };
+    const outcome = await runIssue(noPr, policy, ports(log, undefined, rec));
     expect(outcome).toMatchObject({ state: 'ready', route: 'codex', branch: request.branch, reworkRounds: 0 });
     expect(rec.ship).toEqual([]);
     const done = events.filter(([type]) => type === 'no-pr-complete');
@@ -152,7 +158,8 @@ describe('runIssue — --no-pr', () => {
   });
 
   it('a normal run still ships (control)', async () => {
-    await runIssue(request, policy, ports(recordingLog().log));
+    const rec: Recorders = { plan: [], build: [], ship: [] };
+    await runIssue(request, policy, ports(recordingLog().log, undefined, rec));
     expect(rec.ship).toHaveLength(1);
   });
 
@@ -164,7 +171,8 @@ describe('runIssue — --no-pr', () => {
   });
 
   it('turns off BUILD publishing, the size gate, and the issue-body update without the routing and prompt switch of localOnly', async () => {
-    await runIssue(noPr, policy, ports(recordingLog().log));
+    const rec: Recorders = { plan: [], build: [], ship: [] };
+    await runIssue(noPr, policy, ports(recordingLog().log, undefined, rec));
     expect(rec.build[0]).toMatchObject({ disablePublish: true });
     expect(rec.plan[0]).toMatchObject({ enforceSizeGate: false, updateIssueBodyOnEnrich: false });
     expect(rec.build[0]?.localOnly).toBeFalsy();
@@ -179,7 +187,9 @@ describe('runIssue — --no-pr', () => {
     const recorded: CheckResumeRecord[] = [];
     const checkResume: CheckResumeStore = {
       load: async () => null,
-      record: async (entry) => void recorded.push(entry),
+      record: async (entry) => {
+        recorded.push(entry);
+      },
       clear: async () => {},
     };
     const outcome = await runIssue(noPr, policy, { ...ports(recordingLog().log), checkResume });
