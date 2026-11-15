@@ -77,9 +77,20 @@ afterAll(() => tempDirs.cleanup());
 type Log = ReturnType<RunPorts['events']>;
 
 function prOctokit() {
-  const createComment = vi.fn(async (_args: { issue_number: number; body: string }) => ({ data: { id: 1 } }));
-  const update = vi.fn(async (_args: { state: string }) => ({ data: {} }));
-  const deleteRef = vi.fn();
+  const comments: { issue_number: number; body: string }[] = [];
+  const updates: { state: string }[] = [];
+  const deletedRefs: unknown[] = [];
+  const createComment = async (args: { issue_number: number; body: string }) => {
+    comments.push(args);
+    return { data: { id: 1 } };
+  };
+  const update = async (args: { state: string }) => {
+    updates.push(args);
+    return { data: {} };
+  };
+  const deleteRef = async (args: unknown) => {
+    deletedRefs.push(args);
+  };
   const octokit = Object.assign({} as Octokit, {
     graphql: vi.fn(async () => ({})),
     rest: {
@@ -89,7 +100,7 @@ function prOctokit() {
       git: { deleteRef },
     },
   });
-  return { octokit, createComment, update, deleteRef };
+  return { octokit, comments, updates, deletedRefs };
 }
 
 function ports(log: Log, octokit: Octokit): RunPorts {
@@ -123,21 +134,26 @@ beforeEach(() => {
 describe('runIssue — a park settles the run PR (#3551)', () => {
   it("a CI-failed park leaves the run's PR open and keeps the branch (#3998)", async () => {
     shipPhase.mockResolvedValue({ ok: false, prNumber: 42, reason: 'CI failed for PR #42', ciOutcome: 'failure' });
-    const { octokit, createComment, update, deleteRef } = prOctokit();
+    const { octokit, comments, updates, deletedRefs } = prOctokit();
     const outcome = await runIssue(request, policy, ports(vi.fn<Log>(), octokit));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'ci-failed', prNumber: 42 });
-    const prComments = createComment.mock.calls.filter(([args]) => args.issue_number === 42);
+    const prComments = comments.filter((c) => c.issue_number === 42);
     expect(prComments).toHaveLength(0);
-    expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ state: 'closed' }));
-    expect(deleteRef).not.toHaveBeenCalled();
+    expect(updates.some((u) => u.state === 'closed')).toBe(false);
+    expect(deletedRefs).toEqual([]);
   });
 
   it('a park before SHIP makes no pulls.update call', async () => {
     buildPhase.mockRejectedValue(new Error('build exploded'));
-    const { octokit, update } = prOctokit();
-    const outcome = await runIssue(request, policy, ports(vi.fn<Log>(), octokit));
+    const { octokit, updates } = prOctokit();
+    const shipOpts: Parameters<typeof realShipPhase>[0][] = [];
+    const base = ports(vi.fn<Log>(), octokit);
+    const outcome = await runIssue(request, policy, {
+      ...base,
+      shipPhase: async (o) => (shipOpts.push(o), shipPhase(o)),
+    });
     expect(outcome.state).toBe('parked');
-    expect(shipPhase).not.toHaveBeenCalled();
-    expect(update).not.toHaveBeenCalled();
+    expect(shipOpts).toEqual([]);
+    expect(updates).toEqual([]);
   });
 });

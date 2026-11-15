@@ -144,7 +144,10 @@ describe('run-issue --stack through the real slice gate, faking only GitHub, the
       budget: {},
       effective: {} as RunPolicy['effective'],
     };
-    const createSliceBranch = vi.fn(async (_o: { branch: string; startPoint: string }) => {});
+    const sliceBranches: { branch: string; startPoint: string }[] = [];
+    const createSliceBranch = async (o: { branch: string; startPoint: string }) => {
+      sliceBranches.push(o);
+    };
     let pr = 100;
     const shipPhase = vi.fn(async () => ({ ok: true, prNumber: ++pr }));
     let head = 0;
@@ -185,7 +188,7 @@ describe('run-issue --stack through the real slice gate, faking only GitHub, the
     expect(result.ok).toBe(true);
     const planned = executor.calls.filter((c) => c.task === 'plan').map((c) => /Problem (\d)/.exec(c.prompt)?.[1]);
     expect(planned).toEqual(['1', '2', '3']);
-    expect(createSliceBranch.mock.calls.map((c) => [c[0].branch, c[0].startPoint])).toEqual([
+    expect(sliceBranches.map((c) => [c.branch, c.startPoint])).toEqual([
       [branch(1), 'origin/main'],
       [branch(2), branch(1)],
       [branch(3), branch(2)],

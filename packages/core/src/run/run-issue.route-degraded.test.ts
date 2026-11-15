@@ -111,15 +111,19 @@ async function run(opts: { openDuringPlan: boolean }) {
   const breaker = new ProviderBreaker(join(dir, `breaker-${counter}.json`));
   const events: Array<[string, string]> = [];
   let specAtBuild: string | undefined;
-  const planPhase = vi.fn<typeof realPlanPhase>().mockImplementation(async () => {
+  const planOpts: Parameters<typeof realPlanPhase>[0][] = [];
+  const planPhase: typeof realPlanPhase = async (o) => {
+    planOpts.push(o);
     await writeSpec(spec, { body: '# Spec\n', data: { route: 'codex' } });
     if (opts.openDuringPlan) await breaker.open('openai', 'usage_cap', 30 * 60_000);
     return { ok: true, route: 'codex', specPath: spec, model: 'm', designArtifact: null } satisfies PlanResult;
-  });
-  const buildPhase = vi.fn<typeof realBuildPhase>().mockImplementation(async (o) => {
+  };
+  const buildOpts: Parameters<typeof realBuildPhase>[0][] = [];
+  const buildPhase: typeof realBuildPhase = async (o) => {
+    buildOpts.push(o);
     specAtBuild = readFileSync(spec, 'utf8');
     return { ok: true, model: 'm', route: o.route } satisfies BuildResult;
-  });
+  };
   const ports: RunPorts = {
     router: routerWith({ 'codex-build': CODEX, 'claude-build': CLAUDE }),
     octokit: {} as Octokit,
@@ -137,14 +141,14 @@ async function run(opts: { openDuringPlan: boolean }) {
     shipPhase: vi.fn<typeof realShipPhase>().mockResolvedValue({ ok: true, prNumber: 42 } satisfies ShipResult),
   };
   await runIssue({ ...request, specPath: spec }, policy, ports);
-  return { events, planPhase, buildPhase, spec, specAtBuild, call: buildPhase.mock.calls[0]?.[0] };
+  return { events, planOpts, buildOpts, spec, specAtBuild, call: buildOpts[0] };
 }
 
 describe('runIssue — route stays truthful when the codex breaker opens mid-lane (#664)', () => {
   it('passes the same RouteCapabilities to planPhase and buildPhase when the breaker state does not change', async () => {
-    const { planPhase, call, events } = await run({ openDuringPlan: false });
+    const { planOpts, call, events } = await run({ openDuringPlan: false });
     expect(call?.route).toBe('codex');
-    expect(call?.routeCapabilities).toBe(planPhase.mock.calls[0]?.[0].routeCapabilities);
+    expect(call?.routeCapabilities).toBe(planOpts[0]?.routeCapabilities);
     expect(events.filter(([t]) => t === 'route-degraded')).toHaveLength(0);
   });
 
