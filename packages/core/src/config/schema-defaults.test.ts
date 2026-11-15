@@ -77,6 +77,8 @@ describe('FactoryConfigSchema defaults', () => {
     expect(c.merge.maxConflictRounds).toBe(d.merge.maxConflictRounds);
     expect(c.merge.maxLandDeferrals).toBe(d.merge.maxLandDeferrals);
     expect(c.worktree.retainMax).toBe(d.worktree.retainMax);
+    expect(c.worktree.stateBackupKeep).toBe(3);
+    expect(c.worktree.stateBackupMaxAgeDays).toBe(7);
     expect(c.ci.skip).toBe(d.ci.skip);
     expect(c.ci.comment).toBe(defaultSchemaFields.ciComment);
     expect(c.build.contextCeiling).toStrictEqual(d.build.contextCeiling);

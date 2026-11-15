@@ -22,6 +22,7 @@ import type { Octokit } from '@octokit/rest';
 import { LaneEnvironmentPauseError } from './lane-environment-pause-error.js';
 import { INVALID_BRANCH_PREFIX_MESSAGE, resolveBranchPrefixOption } from './branch-prefix.js';
 import { startupSweeps, warnQueueDiagnostics } from './queue-startup.js';
+import { appendAutoPrune, stateBackupGcReport, type WorktreeGcOptions } from './state-backup-gc.js';
 import { proposeTriageQueue } from './triage-open-prs.js';
 import {
   makeQueuePreflightOps,
@@ -2200,7 +2201,7 @@ async function runAutoWorktreeGc(
       eventScope,
       `removed ${report.removed.length} stale worktree(s), kept ${report.kept}`,
     );
-    console.log(internalOps.formatGcReport(report));
+    console.log(appendAutoPrune(internalOps.formatGcReport(report), paths, factoryConfig, eventScope));
   } catch (err: any) {
     logEvent(paths.events, 'warn', eventScope, `worktree gc failed: ${err.message}`);
   }
@@ -2730,7 +2731,7 @@ export async function reapPrlessShipWorktree(
   ]);
 }
 
-export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; branchPrefix?: string }) {
+export async function cmdWorktreeGc(opts: WorktreeGcOptions) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
@@ -2750,7 +2751,7 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; 
       { log, octokit, sandbox },
     );
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
-  console.log(internalOps.formatGcReport(report));
+  console.log(`${internalOps.formatGcReport(report)}\n${stateBackupGcReport(paths.root, factoryConfig, opts)}`);
 }
 
 /** `factory worktree keep <issue>` (#3318): protect the lane worktree from GC while finishing by hand. */

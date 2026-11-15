@@ -318,6 +318,8 @@ const INTERNAL_API_KEYS = [
   'readHostBuildSlots',
   'reclaimRetainedWorktrees',
   'resolveRetentionPolicy',
+  'formatStateBackupPruneReport',
+  'pruneStateBackups',
   'MAX_REWORK_ROUNDS',
   'killTrackedProcessGroups',
   'loadPrRunState',

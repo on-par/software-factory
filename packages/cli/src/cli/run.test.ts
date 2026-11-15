@@ -66,7 +66,7 @@ describe('cli', () => {
     it('runs worktree gc before lanes when worktree.autoGcOnRun is true', async () => {
       h.factoryConfig = {
         merge: { auto: false, comment: '' },
-        worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true },
+        worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true, stateBackupKeep: 3, stateBackupMaxAgeDays: 7 },
       };
       writeFileSync(paths().queue, '# header\napp 1\n');
       const res = await runMain('run', '--local-queue');
@@ -81,7 +81,7 @@ describe('cli', () => {
     it('does not run worktree gc when worktree.autoGcOnRun is false', async () => {
       h.factoryConfig = {
         merge: { auto: false, comment: '' },
-        worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: false },
+        worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: false, stateBackupKeep: 3, stateBackupMaxAgeDays: 7 },
       };
       writeFileSync(paths().queue, '# header\napp 1\n');
       const res = await runMain('run', '--local-queue');
@@ -92,7 +92,7 @@ describe('cli', () => {
     it('proceeds with the run even when worktree gc rejects', async () => {
       h.factoryConfig = {
         merge: { auto: false, comment: '' },
-        worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true },
+        worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true, stateBackupKeep: 3, stateBackupMaxAgeDays: 7 },
       };
       ops.sweepWorktrees.mockRejectedValueOnce(new Error('gc boom'));
       writeFileSync(paths().queue, '# header\napp 1\n');

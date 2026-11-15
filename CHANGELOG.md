@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- `factory worktree gc` and the pre-run auto GC prune old `*.bak*`, `queue.bak.relaunch-*` and `*-relaunch.log` files in the state root, keeping the newest `worktree.stateBackupKeep` per kind and anything newer than `worktree.stateBackupMaxAgeDays` (#4055).
 - `npm run knip` now reports unused exports of `@on-par/factory-core`'s entry points and test-only code (`knip --production`) against a shrink-only `knip-baseline.json` (#4126).
 - `npm run duplication` runs jscpd in verify and CI `static` against a shrink-only `duplication-baseline.json` (#4125).
 - Lint rule `anti-slop/no-comments` bans source comments except justified lint overrides and toolchain directives, with a shrink-only per-file baseline and a CI guard (#4053).
