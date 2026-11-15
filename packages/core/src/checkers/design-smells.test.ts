@@ -939,7 +939,7 @@ describe('designSmellsChecker', () => {
     expect(result.details).toContain('diff was truncated');
   });
   it(
-    'designSmellsChecker prompts with DIFF BASE = captured SHA and hides nested cache churn (DIFF_EXCLUDES ":!**/" pathspecs need a directory component)',
+    'designSmellsChecker prompts with DIFF BASE = captured SHA and hides nested cache churn (DIFF_EXCLUDES ":!**/" pathspecs need a directory component; root-level cache files are a separate pre-existing gap)',
     { timeout: 120_000 },
     async () => {
       const { worktree, baseSha } = await makeRemoteLessGitRepo();
