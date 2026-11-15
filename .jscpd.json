@@ -1,0 +1,22 @@
+{
+  "format": ["typescript", "tsx"],
+  "minTokens": 50,
+  "minLines": 5,
+  "reporters": ["json"],
+  "output": ".tmp/jscpd",
+  "gitignore": true,
+  "silent": true,
+  "absolute": false,
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/coverage/**",
+    "tools/**",
+    ".tmp/**",
+    ".factory/**",
+    "vitest-blob/**",
+    "reports/**",
+    ".stryker-tmp/**",
+    "**/*.d.ts"
+  ]
+}
