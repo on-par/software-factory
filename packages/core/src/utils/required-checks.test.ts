@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   classifyHeadChecks,
@@ -10,7 +10,6 @@ import {
   fetchRequiredChecksVerdict,
   fetchRequiredContexts,
   warnNoBranchProtectionOnce,
-  type PushWorkflowFailure,
 } from './required-checks.js';
 
 const run = (name: string, status: string | null, conclusion: string | null) => ({ name, status, conclusion });
@@ -101,36 +100,31 @@ describe('fetchRequiredChecksVerdict', () => {
     protection?: unknown;
     rules?: unknown;
     runs?: Array<ReturnType<typeof run> & { check_suite?: { id: number } | null }>;
-    workflowRuns?:
-      | Array<{
-          check_suite_id?: number;
-          name?: string | null;
-          status?: string;
-          conclusion?: string | null;
-        }>
-      | Error;
+    workflowRuns?: Array<Record<string, unknown>> | Error;
   }) {
     const settle = (v: unknown) => async () => {
       if (v instanceof Error) throw v;
       return { data: v };
     };
-    const listForRef = async (params: unknown) => {
-      const expected = { owner: 'o', repo: 'r', ref: args.sha, per_page: 100, filter: 'latest' };
-      return { data: { check_runs: isDeepStrictEqual(params, expected) ? (opts.runs ?? []) : [] } };
-    };
-    const listWorkflowRunsForRepo = async (params: { head_sha?: string; event?: string }) => {
-      if (opts.workflowRuns instanceof Error) throw opts.workflowRuns;
-      const matches = params.head_sha === args.sha && params.event === 'push';
-      return { data: { workflow_runs: matches ? (opts.workflowRuns ?? []) : [] } };
-    };
     const octokit = {
       rest: {
         repos: {
-          getStatusChecksProtection: vi.fn(settle(opts.protection ?? httpError(404))),
-          getBranchRules: vi.fn(settle(opts.rules ?? httpError(404))),
+          getStatusChecksProtection: settle(opts.protection ?? httpError(404)),
+          getBranchRules: settle(opts.rules ?? httpError(404)),
         },
-        checks: { listForRef },
-        actions: { listWorkflowRunsForRepo },
+        checks: {
+          listForRef: async (params: unknown) => {
+            const expected = { owner: 'o', repo: 'r', ref: args.sha, per_page: 100, filter: 'latest' };
+            return { data: { check_runs: isDeepStrictEqual(params, expected) ? (opts.runs ?? []) : [] } };
+          },
+        },
+        actions: {
+          listWorkflowRunsForRepo: async (p: { head_sha?: string; event?: string }) => {
+            if (opts.workflowRuns instanceof Error) throw opts.workflowRuns;
+            const matches = p.head_sha === args.sha && p.event === 'push';
+            return { data: { workflow_runs: matches ? (opts.workflowRuns ?? []) : [] } };
+          },
+        },
       },
     } as never;
     return { octokit };
@@ -236,7 +230,7 @@ describe('fetchRequiredChecksVerdict', () => {
         runs: [inSuite('drift', 'success', 1), inSuite('ios', 'success', 1), inSuite('release', 'failure', 2)],
         workflowRuns: [done('CI', 1, 'success'), done('Release', 2, 'failure')],
       });
-      const failures: PushWorkflowFailure[] = [];
+      const failures: unknown[] = [];
       const verdict = await fetchRequiredChecksVerdict(octokit, args, {
         pushFallback: true,
         onPushWorkflowFailed: (f) => failures.push(f),
@@ -266,7 +260,7 @@ describe('fetchRequiredChecksVerdict', () => {
         runs: [inSuite('ci', 'success', 1), inSuite('release', 'failure', 2)],
         workflowRuns: [done('CI', 1, 'success'), done('Release', 2, 'failure')],
       });
-      const failures: PushWorkflowFailure[] = [];
+      const failures: unknown[] = [];
       const verdict = await fetchRequiredChecksVerdict(octokit, args, {
         pushFallback: true,
         onPushWorkflowFailed: (f) => failures.push(f),
@@ -297,7 +291,7 @@ describe('fetchRequiredChecksVerdict', () => {
           done('Deploy', 5, 'timed_out'),
         ],
       });
-      const failures: PushWorkflowFailure[] = [];
+      const failures: unknown[] = [];
       const verdict = await fetchRequiredChecksVerdict(octokit, args, {
         pushFallback: true,
         onPushWorkflowFailed: (f) => failures.push(f),
@@ -458,9 +452,7 @@ describe('classifyHeadChecks and warnNoBranchProtectionOnce (#3208)', () => {
     });
 
     const warnings: string[] = [];
-    const warn = (m: string) => {
-      warnings.push(m);
-    };
+    const warn = (m: string) => void warnings.push(m);
     expect(warnNoBranchProtectionOnce('acme/once', 'main', warn)).toBe(true);
     expect(warnNoBranchProtectionOnce('acme/once', 'main', warn)).toBe(false);
     expect(warnNoBranchProtectionOnce('acme/other', 'main', warn)).toBe(true);

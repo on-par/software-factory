@@ -65,9 +65,7 @@ describe('withRunLock / readRunLockHolder', () => {
     writeFileSync(join(lockDir, 'pid'), '4321');
     writeFileSync(join(lockDir, 'meta.json'), JSON.stringify({ command: 'factory run', host: 'other-host' }));
     let ran = false;
-    const fn = async () => {
-      ran = true;
-    };
+    const fn = async () => void (ran = true);
 
     let rejection: unknown;
     try {

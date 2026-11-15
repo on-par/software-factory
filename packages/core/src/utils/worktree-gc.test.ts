@@ -959,9 +959,12 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   ) {
     const pullsParams: unknown[] = [];
     const issueParams: unknown[] = [];
-    const pullsList = async (params: unknown) => (pullsParams.push(params), result());
-    const issuesGet = async (params: unknown) => (issueParams.push(params), issueResult());
-    const octokit = asSweepOctokit({ rest: { pulls: { list: pullsList }, issues: { get: issuesGet } } });
+    const octokit = asSweepOctokit({
+      rest: {
+        pulls: { list: async (p: unknown) => (pullsParams.push(p), result()) },
+        issues: { get: async (p: unknown) => (issueParams.push(p), issueResult()) },
+      },
+    });
     return { octokit, pullsParams, issueParams };
   }
 
@@ -1384,15 +1387,11 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       }
       return { stdout: '' };
     };
-    const sbxExec = async (cmd: string) => {
-      order.push(`sbx:${cmd}`);
-      return { stdout: '', stderr: '' };
-    };
     const sandbox = {
       runtime: 'docker-sandbox' as const,
       authPaths: [],
       allowHosts: [],
-      exec: sbxExec,
+      exec: async (cmd: string) => (order.push(`sbx:${cmd}`), { stdout: '', stderr: '' }),
       isAvailable: () => true,
     };
 

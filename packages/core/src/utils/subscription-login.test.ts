@@ -23,19 +23,17 @@ const chatgptAuth = { tokens: { refresh_token: 'rt' } };
 
 function harness(env: NodeJS.ProcessEnv, failExec: readonly string[] = []) {
   const execs: string[] = [];
-  const exec = (file: string) => {
-    execs.push(file);
-    if (failExec.includes(file)) throw new Error('not signed in');
-  };
   const logs: Array<{ type: string; msg: string; extra?: unknown }> = [];
-  const log = (type: string, msg: string, extra?: unknown) => logs.push({ type, msg, extra });
   const deps: SubscriptionLoginDeps = {
     env,
     platform: 'darwin',
-    exec,
+    exec: (file: string) => {
+      execs.push(file);
+      if (failExec.includes(file)) throw new Error('not signed in');
+    },
     fileExists: () => true,
     now: () => NOW,
-    log,
+    log: (type: string, msg: string, extra?: unknown) => void logs.push({ type, msg, extra }),
     logged: new Set(),
   };
   return { execs, logs, deps };

@@ -14,16 +14,12 @@ describe('worktree-keeps store', () => {
     return join(dir, 'state', 'worktree-keeps.json');
   };
   afterEach(() => tmp.cleanup());
-  const recorder = () => {
-    const logs: Array<[string, string]> = [];
-    const log = (level: string, msg: string) => logs.push([level, msg]);
-    return { logs, log };
-  };
   const keep = (issue: number, reason = 'budget_exceeded') => ({ issue, path: `/wt/${issue}`, reason, since: 'now' });
 
   it('reads a missing file as empty with no log', () => {
     const file = setup();
-    const { logs, log } = recorder();
+    const logs: string[][] = [];
+    const log = (...args: string[]) => void logs.push(args);
     expect(readWorktreeKeeps(file, log)).toEqual([]);
     expect(logs).toEqual([]);
   });
@@ -54,7 +50,8 @@ describe('worktree-keeps store', () => {
     const file = setup();
     upsertWorktreeKeep(file, keep(1));
     writeFileSync(file, content);
-    const { logs, log } = recorder();
+    const logs: string[][] = [];
+    const log = (...args: string[]) => void logs.push(args);
     expect(readWorktreeKeeps(file, log)).toEqual([]);
     expect(logs.map(([level]) => level)).toEqual(['warn']);
   });
