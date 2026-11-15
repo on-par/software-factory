@@ -93,6 +93,9 @@ const policy: RunPolicy = {
 describe('runIssue — command build route (#2872)', () => {
   it('a build pin on a declared agentic harness runs BUILD on the command route without model_override_ignored', async () => {
     const events: Array<[string, string]> = [];
+    const planOpts: Parameters<typeof realPlanPhase>[0][] = [];
+    const buildOpts: Parameters<typeof realBuildPhase>[0][] = [];
+    const checkOpts: Parameters<typeof realCheckPhase>[0][] = [];
     const planPhase = vi.fn<typeof realPlanPhase>().mockResolvedValue({
       ok: true,
       route: 'claude',
@@ -116,22 +119,23 @@ describe('runIssue — command build route (#2872)', () => {
       events: () => (type: string, msg: string) => events.push([type, msg]),
       breaker: new ProviderBreaker(join(breakerDir, 'breaker.json')),
       resolveConstitution: () => null,
-      planPhase,
-      buildPhase,
-      checkPhase,
+      planPhase: async (o) => (planOpts.push(o), planPhase(o)),
+      buildPhase: async (o) => (buildOpts.push(o), buildPhase(o)),
+      checkPhase: async (o) => (checkOpts.push(o), checkPhase(o)),
       shipPhase,
     };
 
     await runIssue(request, policy, ports);
 
-    expect(planPhase.mock.calls[0][0].preferredRoute).toBe('command');
-    expect(buildPhase.mock.calls[0][0]).toMatchObject({
+    expect(planOpts).toHaveLength(1);
+    expect(planOpts[0]?.preferredRoute).toBe('command');
+    expect(buildOpts[0]).toMatchObject({
       route: 'command',
       modelOverride: 'my-model',
       pinnedModel: true,
     });
     expect(events.some(([t]) => t === 'model_override_ignored')).toBe(false);
-    expect(checkPhase.mock.calls[0][0].reworkRoute).toBe('command');
-    expect(checkPhase.mock.calls[0][0].reworkModel).toBe('my-model');
+    expect(checkOpts[0]?.reworkRoute).toBe('command');
+    expect(checkOpts[0]?.reworkModel).toBe('my-model');
   });
 });
