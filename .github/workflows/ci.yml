@@ -277,6 +277,10 @@ jobs:
         run: bash scripts/publish-workspaces.test.sh
       - name: publish-release unit test
         run: bash scripts/publish-release.test.sh
+      - name: github-release unit test
+        run: bash scripts/github-release.test.sh
+      - name: release-drift-check unit test
+        run: bash scripts/release-drift-check.test.sh
       - name: set-release-version unit test
         run: bash scripts/set-release-version.test.sh
       - name: Install actionlint

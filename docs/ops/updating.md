@@ -140,10 +140,14 @@ git pull && npm ci && npm run build
 
 ## Release notes: CLI JSON contract
 
-When cutting a stable `vX.Y.Z` release, generate the client-facing contract section and paste it into the GitHub Release body:
+For every stable `vX.Y.Z` tag, the `release` job of `publish.yml` builds the GitHub release body automatically (`scripts/github-release.sh`): the `CHANGELOG.md` section, the client-facing contract notes from `scripts/cli-json-contract-notes.ts`, and a compare link. It marks the release Latest only for the highest stable version, and re-running for the same tag updates it. `-next.N` tags get no release.
 
-```sh
+`scripts/release-drift-check.sh` fails when npm `latest` and the GitHub latest release differ. It runs at the end of the `release` job and in the nightly integration workflow.
+
+To preview the contract section locally:
+
+```bash
 npx tsx scripts/cli-json-contract-notes.ts --from <previous vX.Y.Z tag> --to vX.Y.Z
 ```
 
-It diffs the committed `packages/cli/schemas/*.schema.json` between the two refs. Breaking commands (schemaVersion bumped) are listed first, then added fields, then new commands; with no differences it prints "No CLI JSON contract changes". The CI gate (`scripts/check-cli-json-contract.ts`) enforces the schemaVersion bumps. Release bodies are not automated yet: `publish.yml` does not write them, so the releaser pastes this by hand.
+It diffs the committed `packages/cli/schemas/*.schema.json` between the two refs. Breaking commands (schemaVersion bumped) are listed first, then added fields, then new commands; with no differences it prints "No CLI JSON contract changes". The CI gate (`scripts/check-cli-json-contract.ts`) enforces the schemaVersion bumps.

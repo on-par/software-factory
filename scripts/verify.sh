@@ -91,6 +91,8 @@ bash scripts/cli-help-baseline.test.sh
 bash scripts/adapter-smoke.test.sh
 bash scripts/publish-workspaces.test.sh
 bash scripts/publish-release.test.sh
+bash scripts/github-release.test.sh
+bash scripts/release-drift-check.test.sh
 bash scripts/set-release-version.test.sh
 bash scripts/verify-env-probe.test.sh
 bash scripts/launchd/install-sweep-plist.test.sh
