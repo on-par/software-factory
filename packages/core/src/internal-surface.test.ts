@@ -7,7 +7,6 @@ import * as internalApi from './internal.js';
 const SRC_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SRC_DIR, '../../..');
 const INTERNAL_ENTRY = join(SRC_DIR, 'internal.ts');
-const ALLOWLIST_FILE = join(SRC_DIR, 'internal-surface-allowlist.json');
 const INTERNAL_SPECIFIER = '@on-par/factory-core/internal';
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', '.factory', '.git', 'build', 'out']);
 const SOURCE_EXT = /\.(?:ts|tsx|mts|cts|js|mjs)$/;
@@ -129,29 +128,14 @@ function collectConsumerImports(repoRoot: string): Set<string> {
 
 interface SurfaceDiff {
   extra: string[];
-  staleImported: string[];
-  staleMissing: string[];
-  duplicates: string[];
+  missing: string[];
 }
 
-function diffSurface(input: {
-  exported: ReadonlySet<string>;
-  imported: ReadonlySet<string>;
-  allowlist: readonly string[];
-}): SurfaceDiff {
-  const { exported, imported, allowlist } = input;
-  const listed = new Set(allowlist);
-  const seen = new Set<string>();
-  const duplicates = new Set<string>();
-  for (const name of allowlist) {
-    if (seen.has(name)) duplicates.add(name);
-    seen.add(name);
-  }
+function diffSurface(input: { exported: ReadonlySet<string>; imported: ReadonlySet<string> }): SurfaceDiff {
+  const { exported, imported } = input;
   return {
-    extra: [...exported].filter((n) => !imported.has(n) && !listed.has(n)).sort(),
-    staleImported: [...listed].filter((n) => imported.has(n)).sort(),
-    staleMissing: [...listed].filter((n) => !exported.has(n)).sort(),
-    duplicates: [...duplicates].sort(),
+    extra: [...exported].filter((n) => !imported.has(n)).sort(),
+    missing: [...imported].filter((n) => !exported.has(n)).sort(),
   };
 }
 
@@ -192,31 +176,18 @@ import { other } from '@on-par/factory-core';
     expect(() => collectInternalExports('/x/internal.ts', (f) => files.get(f))).toThrow(/cannot resolve re-export/);
   });
 
-  it('names an export that is neither imported nor allowlisted', () => {
-    const diff = diffSurface({
-      exported: new Set(['a', 'b', 'c']),
-      imported: new Set(['a']),
-      allowlist: ['b'],
-    });
-    expect(diff.extra).toEqual(['c']);
+  it('names an export that no consumer imports', () => {
+    const diff = diffSurface({ exported: new Set(['a', 'b']), imported: new Set(['a']) });
+    expect(diff.extra).toEqual(['b']);
   });
 
-  it('names an allowlist entry that a consumer now imports', () => {
-    const diff = diffSurface({
-      exported: new Set(['a']),
-      imported: new Set(['a']),
-      allowlist: ['a'],
-    });
-    expect(diff.staleImported).toEqual(['a']);
+  it('names a consumer import that internal.ts does not export', () => {
+    const diff = diffSurface({ exported: new Set(['a']), imported: new Set(['a', 'z']) });
+    expect(diff.missing).toEqual(['z']);
   });
 
-  it('names an allowlist entry that internal.ts no longer exports', () => {
-    const diff = diffSurface({
-      exported: new Set(['a']),
-      imported: new Set(['a']),
-      allowlist: ['gone'],
-    });
-    expect(diff.staleMissing).toEqual(['gone']);
+  it('the frozen allowlist file is gone', () => {
+    expect(existsSync(join(SRC_DIR, 'internal-surface-allowlist.json'))).toBe(false);
   });
 
   it('the consumer scan finds names imported by cli, tui, grade and scripts', () => {
@@ -232,27 +203,15 @@ import { other } from '@on-par/factory-core';
     expect(missing, `export names the parser missed: ${missing.join(', ')}`).toEqual([]);
   });
 
-  it('the allowlist is sorted and has no duplicates', () => {
-    const json: string[] = JSON.parse(readFileSync(ALLOWLIST_FILE, 'utf8'));
-    expect(json).toEqual([...new Set(json)].sort());
-  });
-
-  it('internal.ts exports exactly the consumer-imported names plus the frozen allowlist', () => {
-    const allowlist: string[] = JSON.parse(readFileSync(ALLOWLIST_FILE, 'utf8'));
+  it('internal.ts exports exactly the consumer-imported names', () => {
     const diff = diffSurface({
       exported: collectInternalExports(INTERNAL_ENTRY),
       imported: collectConsumerImports(REPO_ROOT),
-      allowlist,
     });
+    expect(diff.extra, 'internal.ts exports names no consumer imports; import them or remove the export').toEqual([]);
     expect(
-      diff.extra,
-      'internal.ts exports names no consumer imports; import them or remove the export (or, for a deliberate addition, add to internal-surface-allowlist.json)',
+      diff.missing,
+      'consumers import names internal.ts does not export; export them or remove the import',
     ).toEqual([]);
-    expect(
-      diff.staleImported,
-      'allowlist entries now imported by a consumer — remove them from internal-surface-allowlist.json',
-    ).toEqual([]);
-    expect(diff.staleMissing, 'allowlist entries internal.ts no longer exports — remove them').toEqual([]);
-    expect(diff.duplicates, 'allowlist has duplicate entries').toEqual([]);
   });
 });

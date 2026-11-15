@@ -297,7 +297,7 @@ const POLICY =
     ' ',
   ); // #2215, #3449, #3454, #3958
 const PO2 = 'OPENCODE_GO_DEFAULT_MODEL filterRefusedProviders sweepOrphanDrafts'.split(' '); // #3335, #1623
-const GATE = ['allProvidersDown', 'stageBlocked', 'PROVIDER_LEVEL_REASONS', 'TIMED_BREAKER_REASONS']; // #3226
+const GATE = ['allProvidersDown', 'stageBlocked', 'TIMED_BREAKER_REASONS']; // #3226
 const OTLP_SESSION = 'flushCommandOutputExports withCommandOutputExport runVerificationCommand'.split(' '); // #3996
 const EXTRA_INTERNAL_KEYS = [
   ...OTLP_SESSION,
@@ -314,12 +314,9 @@ const EXTRA_INTERNAL_KEYS = [
   ...LAND_DEFERRED_INTERNAL_KEYS,
 ];
 const INTERNAL_API_KEYS = [
-  'listFactoryWorktrees',
   'readHostBuildSlots',
   'reclaimRetainedWorktrees',
   'resolveRetentionPolicy',
-  'retentionCandidateOf',
-  'selectRetentionEvictions',
   'MAX_REWORK_ROUNDS',
   'killTrackedProcessGroups',
   'loadPrRunState',
@@ -330,13 +327,10 @@ const INTERNAL_API_KEYS = [
   'loadPrFrozenSpec', // #4025
   'savePrFrozenSpec',
   'issueBodyHash',
-  'UnsupportedQueueBackendError', // #3890
   ...'assertVisualProofForHead VisualProofMissingError'.split(' '), // #2232
   'createGithubQueueBackend', // #3890
   'createQueueBackend', // #3890
   'LINEAR_API_KEY_ENV',
-  'LINEAR_LEASE_ATTACHMENT_URL', // #3918
-  'createLinearQueueBackend', // #3918
   'createLinearQueueGraphqlClient', // #3918
   'resolveLinearProjectForRepo', // #3918
   'probeLinearSetup',
@@ -344,8 +338,7 @@ const INTERNAL_API_KEYS = [
   'listBlockedBy',
   'aliasDeprecatedSizeGateMode', // #3832
   'isExplicitStackMode',
-  ...'AGENT_MEMORY_DIR AGENT_MEMORY_MAX_BYTES agentMemoryPath readAgentMemory'.split(' '), // #3624
-  ...'renderAgentMemory scanAgentMemory loadAgentMemoryCtx'.split(' '),
+  ...'AGENT_MEMORY_MAX_BYTES scanAgentMemory'.split(' '), // #3624
   ...'resolveCompileCommand resolveLintCommands resolveTestsCommand resolveWorkspaceTestRunners'.split(' '), // #3473, #1590, #3913
   ...'describeChecksProbe holdRunConfigSnapshot'.split(' '), // #3600
   ...'describeConfigSources lastRunConfigLadder resolveConstitutionOverride'.split(' '), // #3906
@@ -411,8 +404,7 @@ const INTERNAL_API_KEYS = [
   'fileSlicePlanStore',
   'findSlicePlanComment',
   'publishParkComment',
-  ...'countPendingFeedback feedbackHandledMarker feedbackReworkSummary'.split(' '), // #3910
-  ...'prepareFeedbackRound publishFeedbackRound renderFeedbackReply triageFeedback'.split(' '),
+  'countPendingFeedback', // #3910
   'recordSliceMerged',
   'renderSlicePlanComment',
   'resolveStateRoot',
@@ -457,7 +449,6 @@ const INTERNAL_API_KEYS = [
   'resolveReviewFloorRules',
   'resolveTrustTier',
   // PR classifier shadow verdict (#1725)
-  'parseReworkCommand',
   'pollCommentRework',
   // PR classifier backtest (#1728)
   'backtestFileName',
@@ -607,7 +598,6 @@ const INTERNAL_API_KEYS = [
   'countReviewReworkRuns',
   'parkAtReviewReworkCap',
   'resolveMaxReviewReworkRuns',
-  'reviewReworkCapMessage',
   'defaultClaimantId',
   'DEFAULT_CLAIM_LEASE_MS',
   'IN_PROGRESS_LABEL',
@@ -640,13 +630,7 @@ const INTERNAL_API_KEYS = [
   'findUnmergedGreenPrs',
   // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
   'wrapCommandInSandbox', // Linear write-back (#3894)
-  'closesTrailer',
-  'createLinearTicketWriteback',
-  'isTicketKey',
-  'mirrorSlicePlanToTicket',
-  'postTicketComment',
   'ticketKeyOf',
-  'ticketTrackerOf',
 ];
 describe('public API surface (ADR-0004)', () => {
   it('root export exposes exactly the documented public API', () => {

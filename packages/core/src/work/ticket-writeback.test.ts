@@ -4,23 +4,15 @@ import type { SlicePlanStore } from '../readiness/slice-plan-store.js';
 import type { SlicePlan } from '../readiness/slice-plan.js';
 import {
   closesTrailer,
-  createLinearTicketWriteback,
   mirrorSlicePlanToTicket,
   postTicketComment,
   ticketKeyOf,
   ticketTrackerOf,
-  type LinearTicketClient,
   type TicketWriteback,
 } from './ticket-writeback.js';
 import { isTicketKey, toWorkKey } from './work-key.js';
 
 const ON12 = toWorkKey('ON-12');
-
-function client(issue: { id: string; labels: Array<{ name: string }> } | null) {
-  const addComment = vi.fn(async (_id: string, _body: string) => {});
-  const findIssue = vi.fn(async (_key: string) => issue);
-  return { addComment, findIssue, client: Object.assign({} as LinearTicketClient, { addComment, findIssue }) };
-}
 
 describe('closesTrailer', () => {
   it.each([
@@ -51,34 +43,6 @@ describe('isTicketKey', () => {
   it('keeps numbers and upper-case keys and drops pseudo ids', () => {
     for (const ok of ['123', 'ON-12', 'AB2-7']) expect(isTicketKey(ok)).toBe(true);
     for (const bad of ['-', 'all', 'issue-12', 'lane-x', 'on-12', 'ON-0', 'ON-']) expect(isTicketKey(bad)).toBe(false);
-  });
-});
-
-describe('createLinearTicketWriteback', () => {
-  it('comment looks up the issue id and strips HTML comment markers', async () => {
-    const c = client({ id: 'uuid-1', labels: [] });
-    await createLinearTicketWriteback(c.client).comment(ON12, '<!-- marker v1 -->\nbody <!-- x -->text\n');
-    expect(c.findIssue).toHaveBeenCalledWith('ON-12');
-    expect(c.addComment).toHaveBeenCalledWith('uuid-1', 'body text');
-  });
-
-  it('comment leaves no comment opener behind from nested or unterminated markers', async () => {
-    const c = client({ id: 'uuid-1', labels: [] });
-    await createLinearTicketWriteback(c.client).comment(ON12, 'keep <!<!-- a -->-- b --> me <!-- unterminated');
-    const [, posted] = c.addComment.mock.calls[0] ?? [];
-    expect(posted).not.toContain('<!--');
-    expect(posted).toBe('keep  me');
-  });
-
-  it('labels returns the label names', async () => {
-    const c = client({ id: 'u', labels: [{ name: 'no-auto-merge' }, { name: 'lane' }] });
-    await expect(createLinearTicketWriteback(c.client).labels(ON12)).resolves.toEqual(['no-auto-merge', 'lane']);
-  });
-
-  it('throws when the issue is not found', async () => {
-    const wb = createLinearTicketWriteback(client(null).client);
-    await expect(wb.comment(ON12, 'x')).rejects.toThrow('Linear issue ON-12 not found');
-    await expect(wb.labels(ON12)).rejects.toThrow('Linear issue ON-12 not found');
   });
 });
 
