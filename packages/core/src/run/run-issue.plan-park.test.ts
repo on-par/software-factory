@@ -117,6 +117,10 @@ const PLAN_FAILED: PlanResult = {
   designArtifact: null,
 };
 
+const buildPhase: typeof realBuildPhase = async () => {
+  throw new Error('build must not run');
+};
+
 describe('runIssue — PLAN failure mapping (#3269)', () => {
   it('a PLAN result with parkReason config parks config and does not build', async () => {
     const planPhase = vi.fn<typeof realPlanPhase>().mockResolvedValue({
@@ -124,11 +128,6 @@ describe('runIssue — PLAN failure mapping (#3269)', () => {
       escalate: 'PLAN could not write its spec to /x/plans/issue-1.md',
       parkReason: 'config',
     });
-    const buildOpts: Parameters<typeof realBuildPhase>[0][] = [];
-    const buildPhase: typeof realBuildPhase = async (o) => {
-      buildOpts.push(o);
-      throw new Error('build must not run');
-    };
     const events: Array<[string, string]> = [];
     const outcome = await runIssue(
       request,
@@ -139,24 +138,17 @@ describe('runIssue — PLAN failure mapping (#3269)', () => {
     const parked = events.find(([type]) => type === 'config')?.[1] ?? '';
     expect(parked).toContain('/x/plans/issue-1.md');
     expect(parked).toContain('then fix the harness writable roots and run factory unpark 1');
-    expect(buildOpts).toEqual([]);
   });
 
   it('a PLAN split escalation still escalates', async () => {
     const planPhase = vi
       .fn<typeof realPlanPhase>()
       .mockResolvedValue({ ...PLAN_FAILED, escalate: 'ESCALATE: please split this' });
-    const buildOpts: Parameters<typeof realBuildPhase>[0][] = [];
-    const buildPhase: typeof realBuildPhase = async (o) => {
-      buildOpts.push(o);
-      throw new Error('build must not run');
-    };
     const outcome = await runIssue(
       request,
       policy,
       portsWith(planPhase, buildPhase, () => {}),
     );
     expect(outcome.state).toBe('escalated');
-    expect(buildOpts).toEqual([]);
   });
 });

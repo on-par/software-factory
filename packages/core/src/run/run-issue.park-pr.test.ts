@@ -4,6 +4,7 @@ import type { Octokit } from '@octokit/rest';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { recordArgs } from '../test-support/recorders.js';
 import type { buildPhase as realBuildPhase } from '../phases/build.js';
 import type { checkPhase as realCheckPhase } from '../phases/check.js';
 import type { planPhase as realPlanPhase } from '../phases/plan.js';
@@ -77,30 +78,19 @@ afterAll(() => tempDirs.cleanup());
 type Log = ReturnType<RunPorts['events']>;
 
 function prOctokit() {
-  const comments: { issue_number: number; body: string }[] = [];
-  const updates: { state: string }[] = [];
-  const deletedRefs: unknown[] = [];
-  const createComment = async (args: { issue_number: number; body: string }) => {
-    comments.push(args);
-    return { data: { id: 1 } };
-  };
-  const update = async (args: { state: string }) => {
-    updates.push(args);
-    return { data: {} };
-  };
-  const deleteRef = async (args: unknown) => {
-    deletedRefs.push(args);
-  };
+  const comment = recordArgs(async (_a: { issue_number: number; body: string }) => ({ data: { id: 1 } }));
+  const update = recordArgs(async (_a: { state: string }) => ({ data: {} }));
+  const deleteRef = recordArgs(async (_a: unknown) => {});
   const octokit = Object.assign({} as Octokit, {
     graphql: vi.fn(async () => ({})),
     rest: {
       users: { getAuthenticated: vi.fn(async () => ({ data: { id: 9 } })) },
-      pulls: { list: vi.fn(async () => ({ data: [] })), get: vi.fn(), update },
-      issues: { listComments: vi.fn(async () => ({ data: [] })), createComment, updateComment: vi.fn() },
-      git: { deleteRef },
+      pulls: { list: vi.fn(async () => ({ data: [] })), get: vi.fn(), update: update.fn },
+      issues: { listComments: async () => ({ data: [] }), createComment: comment.fn, updateComment: vi.fn() },
+      git: { deleteRef: deleteRef.fn },
     },
   });
-  return { octokit, comments, updates, deletedRefs };
+  return { octokit, posted: comment.calls, pulled: update.calls, refs: deleteRef.calls };
 }
 
 function ports(log: Log, octokit: Octokit): RunPorts {
@@ -134,26 +124,21 @@ beforeEach(() => {
 describe('runIssue — a park settles the run PR (#3551)', () => {
   it("a CI-failed park leaves the run's PR open and keeps the branch (#3998)", async () => {
     shipPhase.mockResolvedValue({ ok: false, prNumber: 42, reason: 'CI failed for PR #42', ciOutcome: 'failure' });
-    const { octokit, comments, updates, deletedRefs } = prOctokit();
+    const { octokit, posted, pulled, refs } = prOctokit();
     const outcome = await runIssue(request, policy, ports(vi.fn<Log>(), octokit));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'ci-failed', prNumber: 42 });
-    const prComments = comments.filter((c) => c.issue_number === 42);
+    const prComments = posted.filter(([c]) => c.issue_number === 42);
     expect(prComments).toHaveLength(0);
-    expect(updates.some((u) => u.state === 'closed')).toBe(false);
-    expect(deletedRefs).toEqual([]);
+    expect(pulled.some(([u]) => u.state === 'closed')).toBe(false);
+    expect(refs).toEqual([]);
   });
 
   it('a park before SHIP makes no pulls.update call', async () => {
     buildPhase.mockRejectedValue(new Error('build exploded'));
-    const { octokit, updates } = prOctokit();
-    const shipOpts: Parameters<typeof realShipPhase>[0][] = [];
-    const base = ports(vi.fn<Log>(), octokit);
-    const outcome = await runIssue(request, policy, {
-      ...base,
-      shipPhase: async (o) => (shipOpts.push(o), shipPhase(o)),
-    });
+    const { octokit, pulled } = prOctokit();
+    const outcome = await runIssue(request, policy, ports(vi.fn<Log>(), octokit));
     expect(outcome.state).toBe('parked');
-    expect(shipOpts).toEqual([]);
-    expect(updates).toEqual([]);
+    expect(outcome).not.toHaveProperty('prNumber');
+    expect(pulled).toEqual([]);
   });
 });

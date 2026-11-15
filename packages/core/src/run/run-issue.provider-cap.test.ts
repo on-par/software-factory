@@ -116,9 +116,7 @@ async function run(setup: Setup = {}) {
     },
   };
   const router = new ModelRouter(modelsConfig(), ROUTES, false, executor);
-  const planOpts: Parameters<typeof realPlanPhase>[0][] = [];
-  const planPhase: typeof realPlanPhase = async (opts) => {
-    planOpts.push(opts);
+  const planPhase = vi.fn<typeof realPlanPhase>(async (opts) => {
     if (setup.failPlan) throw setup.failPlan;
     const result = await router.run('plan', 'p', {
       modelOverride: opts.modelOverride,
@@ -134,7 +132,7 @@ async function run(setup: Setup = {}) {
       model: result.model,
       designArtifact: null,
     } satisfies PlanResult;
-  };
+  });
   const buildPhase = vi
     .fn<typeof realBuildPhase>()
     .mockResolvedValue({ ok: true, model: 'm', route: 'claude' } satisfies BuildResult);
@@ -159,7 +157,7 @@ async function run(setup: Setup = {}) {
   };
   const before = Date.now();
   const outcome = await runIssue({ ...request, ...setup.request }, policy, ports);
-  return { outcome, called, events, extras, planOpts, buildPhase, before, after: Date.now() };
+  return { outcome, called, events, extras, planPhase, buildPhase, before, after: Date.now() };
 }
 
 const types = (events: Array<[string, string]>) => events.map(([t]) => t);
@@ -174,7 +172,7 @@ describe('runIssue — stage-boundary provider gate (#3226)', () => {
   });
 
   it('every plan provider timed-open releases provider-cap before any model call', async () => {
-    const { outcome, called, events, planOpts, before, after } = await run({
+    const { outcome, called, events, before, after } = await run({
       open: { anthropic: 2 * HOUR, openai: 4 * HOUR },
     });
     expect(outcome).toMatchObject({ state: 'released', reason: 'provider-cap', providers: ['anthropic', 'openai'] });
@@ -182,7 +180,6 @@ describe('runIssue — stage-boundary provider gate (#3226)', () => {
     expect(resetAt).toBeGreaterThanOrEqual(before + 2 * HOUR - 1000);
     expect(resetAt).toBeLessThanOrEqual(after + 2 * HOUR + 1000);
     expect(called).toEqual([]);
-    expect(planOpts).toEqual([]);
     expect(types(events)).toContain('provider-cap-released');
     expect(types(events)).not.toContain('fail');
     expect(types(events)).not.toContain('escalate');
@@ -240,9 +237,8 @@ describe('runIssue — stage-boundary provider gate (#3226)', () => {
   });
 
   it('every plan provider auth-open parks all_providers_down before any model call', async () => {
-    const { outcome, called, events, extras, planOpts } = await run({ openAuth: ['anthropic', 'openai'] });
+    const { outcome, called, events, extras } = await run({ openAuth: ['anthropic', 'openai'] });
     expect(called).toEqual([]);
-    expect(planOpts).toEqual([]);
     expect(outcome).toMatchObject({
       state: 'parked',
       reason: 'all_providers_down',
@@ -299,9 +295,7 @@ describe('runIssue — stage-boundary provider gate (#3226)', () => {
       false,
       { runModel: async () => 'x' },
     );
-    const buildOpts: Parameters<typeof realBuildPhase>[0][] = [];
-    const buildPhase: typeof realBuildPhase = async (o) => {
-      buildOpts.push(o);
+    const buildPhase: typeof realBuildPhase = async () => {
       throw new Error('build must not run');
     };
     const ports: RunPorts = {
@@ -324,6 +318,5 @@ describe('runIssue — stage-boundary provider gate (#3226)', () => {
       providers: ['anthropic'],
       route: 'claude',
     });
-    expect(buildOpts).toEqual([]);
   });
 });

@@ -11,6 +11,7 @@ import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { ShipResult, shipPhase as realShipPhase } from '../phases/ship.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
+import { recordArgs } from '../test-support/recorders.js';
 import type { CheckSummary } from '../types/index.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
@@ -113,17 +114,14 @@ beforeEach(() => {
   shipPhase.mockReset().mockResolvedValue(SHIP_OK);
 });
 
-type StateUpdate = Parameters<NonNullable<RunPorts['recordRunState']>>[0];
+const recordState = () => recordArgs<NonNullable<RunPorts['recordRunState']>>(async () => {});
 
 describe('runIssue — #3194: persisted run state', () => {
   it('calls recordRunState with planning, building, checking, shipping, then ready with the PR number', async () => {
-    const stateUpdates: StateUpdate[] = [];
-    const recordRunState = async (u: StateUpdate) => {
-      stateUpdates.push(u);
-    };
+    const { calls: stateUpdates, fn: recordRunState } = recordState();
     const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ recordRunState }));
     expect(outcome.state).toBe('ready');
-    const updates = stateUpdates;
+    const updates = stateUpdates.map(([u]) => u);
     expect(updates.map((u) => u.status)).toEqual(['planning', 'building', 'checking', 'shipping', 'ready']);
     expect(updates.at(-1)).toMatchObject({ prNumber: (outcome as { prNumber?: number }).prNumber });
     for (const u of updates.slice(1)) expect(u.branch).toBe(baseRequest().branch);
@@ -136,12 +134,9 @@ describe('runIssue — #3194: persisted run state', () => {
       reworkRounds: 1,
       failureSignature: 'sig-1',
     });
-    const stateUpdates: StateUpdate[] = [];
-    const recordRunState = async (u: StateUpdate) => {
-      stateUpdates.push(u);
-    };
+    const { calls: stateUpdates, fn: recordRunState } = recordState();
     await runIssue(baseRequest(), basePolicy(), basePorts({ recordRunState }));
-    const last = stateUpdates.at(-1);
+    const last = stateUpdates.at(-1)?.[0];
     expect(last?.status).toBe('parked');
     expect(last?.failures).toEqual([{ checker: 'tests', result: 'FAIL', details: 'nope' }]);
   });

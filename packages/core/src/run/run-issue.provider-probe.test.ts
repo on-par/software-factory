@@ -9,6 +9,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { ProviderOrder } from '../config/provider-order.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { buildPhase as realBuildPhase } from '../phases/build.js';
+import { recordArgs } from '../test-support/recorders.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { ShipResult, shipPhase as realShipPhase } from '../phases/ship.js';
@@ -154,9 +155,7 @@ async function run(setup: Setup) {
     stageSkip = providers;
     original(providers);
   };
-  const planOpts: Parameters<typeof realPlanPhase>[0][] = [];
-  const planPhase: typeof realPlanPhase = async (opts) => {
-    planOpts.push(opts);
+  const { calls: planned, fn: planPhase } = recordArgs<typeof realPlanPhase>(async (opts) => {
     return {
       ok: true,
       route: 'claude',
@@ -164,23 +163,17 @@ async function run(setup: Setup) {
       model: opts.modelOverride ?? 'm',
       designArtifact: null,
     } satisfies PlanResult;
-  };
-  const buildOpts: Parameters<typeof realBuildPhase>[0][] = [];
-  const buildPhase: typeof realBuildPhase = async (opts) => {
-    buildOpts.push(opts);
+  });
+  const { calls: built, fn: buildPhase } = recordArgs<typeof realBuildPhase>(async (opts) => {
     t = T_0705;
     return { ok: true, model: opts.modelOverride ?? 'm', route: opts.route };
-  };
+  });
   let checkSkip: ReadonlySet<string> | undefined;
   const checkPhase = vi.fn<typeof realCheckPhase>(async () => {
     checkSkip = stageSkip;
     return CHECK_OK;
   });
-  const probed: string[] = [];
-  const probeProvider: ProviderProbe = async (m) => {
-    probed.push(m);
-    return setup.probe(m);
-  };
+  const { calls: probed, fn: probeProvider } = recordArgs(setup.probe);
   const ports: RunPorts = {
     router,
     octokit: {} as Octokit,
@@ -204,8 +197,8 @@ async function run(setup: Setup) {
     events,
     restored,
     probed,
-    planOpts,
-    buildOpts,
+    planned,
+    built,
     breaker,
     entry,
     checkSkip: () => checkSkip,
@@ -216,8 +209,8 @@ describe('runIssue — restore probe at the phase boundary (#3339)', () => {
   it('a capped preferred provider is probed after its reset and the next phase goes back to it (2026-10-20)', async () => {
     const r = await run({ probe: async () => {} });
     expect(r.outcome.state).toBe('ready');
-    expect(r.buildOpts[0]?.route).toBe('codex');
-    expect(r.probed).toEqual(['claude-worker']);
+    expect(r.built[0]?.[0].route).toBe('codex');
+    expect(r.probed).toEqual([['claude-worker']]);
     expect(r.restored).toEqual([{ provider: 'anthropic', at: '2026-10-20T12:05:00.000Z', cause: 'probe' }]);
     expect(r.checkSkip()?.has('anthropic') ?? false).toBe(false);
     expect((await r.breaker.status('anthropic')).open).toBe(false);
@@ -252,7 +245,7 @@ describe('runIssue — restore probe at the phase boundary (#3339)', () => {
   it("PLAN's boundary probes before the cap gate", async () => {
     const r = await run({ startAt: T_0705, probe: async () => {} });
     expect(r.probed).toHaveLength(1);
-    expect(r.planOpts[0]?.modelOverride).toBe('claude-boss');
+    expect(r.planned[0]?.[0].modelOverride).toBe('claude-boss');
     expect(r.restored.map((x) => x.cause)).toEqual(['probe']);
   });
 });
