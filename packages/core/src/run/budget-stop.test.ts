@@ -8,8 +8,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { type BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
-import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
-import { reworkWorker } from '../phases/check.js';
+import { type CheckPhaseResult, type checkPhase as realCheckPhase, reworkWorker } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { ShipResult, shipPhase as realShipPhase } from '../phases/ship.js';
 import { createTempDirs } from '../harness/temp-dir.js';
@@ -22,6 +21,7 @@ import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
+import { recordArgs } from '../test-support/recorders.js';
 
 const planPhase = vi.fn<typeof realPlanPhase>();
 const buildPhase = vi.fn<typeof realBuildPhase>();
@@ -92,7 +92,7 @@ function policy(budget: RunPolicy['budget']): RunPolicy {
   };
 }
 
-function ports(messages: string[], dispose = vi.fn(async () => {})): RunPorts {
+function ports(messages: string[], dispose: () => Promise<void> = async () => {}): RunPorts {
   return {
     router: new ModelRouter(
       {
@@ -158,18 +158,20 @@ describe.skipIf(process.platform === 'win32')('runIssue — mid-session budget s
       return { ok: false, model: 'm', route: 'codex', reason: 'budget_exceeded' };
     });
     const messages: string[] = [];
-    const dispose = vi.fn(async () => {});
+    const disposals = recordArgs(async () => {});
+    const checks = recordArgs(async () => CHECK_OK);
+    vi.mocked(checkPhase).mockImplementation(checks.fn);
     const req = request();
-    const outcome = await runIssue(req, policy({ perIssueCapUsd: 30 }), ports(messages, dispose));
+    const outcome = await runIssue(req, policy({ perIssueCapUsd: 30 }), ports(messages, disposals.fn));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
     expect(messages.join('\n')).toContain(
       'per-issue budget exceeded during BUILD: $30.21 > $30.00 (stopped at model call 183)',
     );
     expect(aliveAtFirstCall).toBe(true);
     expect(await exited).toBe('SIGTERM');
-    expect(checkPhase).not.toHaveBeenCalled();
+    expect(checks.calls).toEqual([]);
     expect(readWorktreeKeeps(req.worktreeKeepsPath as string).map((k) => k.path)).toEqual(['/tmp/wt']);
-    expect(dispose).not.toHaveBeenCalled();
+    expect(disposals.calls).toEqual([]);
     child.kill('SIGKILL');
   });
 
@@ -282,7 +284,7 @@ describe('buildPhase — budget stop (#3320)', () => {
 describe('reworkWorker — budget stop (#3320)', () => {
   it('reports budgetStopped for a BudgetStopError and logs no rework_model_failed', async () => {
     const { router, stub } = budgetRouter();
-    const log = vi.fn();
+    const { calls, fn: log } = recordArgs((_type: string, _msg: string) => {});
     const result = await reworkWorker({
       issue: workKeyFromIssue(1),
       worktree: dirs.makeSync('wt-'),
@@ -294,7 +296,7 @@ describe('reworkWorker — budget stop (#3320)', () => {
       budgetGuard: () => true,
     });
     expect(result).toEqual({ failovers: [], modelCompleted: false, budgetStopped: true });
-    expect(log.mock.calls.map((c) => c[0])).not.toContain('rework_model_failed');
+    expect(calls.map(([type]) => type)).not.toContain('rework_model_failed');
     expect(stub.calls).toHaveLength(1);
   });
 });
