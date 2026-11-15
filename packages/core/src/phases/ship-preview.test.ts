@@ -7,6 +7,7 @@ import type { PreviewCheckResult } from '../checkers/preview-check.js';
 import { PREVIEW_RECEIPT_START } from '../checkers/preview-receipt.js';
 import { createFakeGitHub, githubError } from '../fakes/fake-github.js';
 import { createTempDirs } from '../harness/temp-dir.js';
+import { recorder } from '../test-support/recording-fakes.test.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 import type { PreviewGate } from './ship-preview.js';
 import { shipPhase } from './ship.js';
@@ -108,20 +109,11 @@ const green: CheckRun[] = [{ name: 'build', status: 'completed', conclusion: 'su
 const red: CheckRun[] = [{ name: 'build', status: 'completed', conclusion: 'failure' }];
 const pending: CheckRun[] = [{ name: 'build', status: 'in_progress', conclusion: null }];
 
-function recordingGate(): { gate: PreviewGate; gateInputs: Array<Parameters<PreviewGate>[0]> } {
-  const gateInputs: Array<Parameters<PreviewGate>[0]> = [];
-  const gate: PreviewGate = async (input) => {
-    gateInputs.push(input);
-    return result('pass');
-  };
-  return { gate, gateInputs };
-}
-
 describe('shipPhase preview gate (#3880)', () => {
   it('runs the preview gate only after a green CI watch and logs both timings', async () => {
-    const { gate, gateInputs } = recordingGate();
+    const gate = recorder(async (_input: unknown) => result('pass'));
     const { result: r, logs } = await ship(green, gate);
-    expect(gateInputs).toEqual([{ prNumber: 123, headSha: SHA }]);
+    expect(gate.calls).toEqual([[{ prNumber: 123, headSha: SHA }]]);
     expect(r).toMatchObject({ ok: true, prNumber: 123, previewCheck: { status: 'pass' } });
     expect(logs).toContainEqual([
       'ship',
@@ -150,17 +142,17 @@ describe('shipPhase preview gate (#3880)', () => {
   });
 
   it('does not call the preview gate when CI fails and returns ok false', async () => {
-    const { gate, gateInputs } = recordingGate();
+    const gate = recorder(async (_input: unknown) => result('pass'));
     const { result: r } = await ship(red, gate);
-    expect(gateInputs).toEqual([]);
+    expect(gate.calls).toEqual([]);
     expect(r).toMatchObject({ ok: false, ciOutcome: 'failure' });
     expect(r.previewCheck).toBeUndefined();
   });
 
   it('fails closed as preview-unavailable while CI is still pending, leaving the PR a draft', async () => {
-    const { gate, gateInputs } = recordingGate();
+    const gate = recorder(async (_input: unknown) => result('pass'));
     const { result: r, graphqlCalls } = await ship(pending, gate);
-    expect(gateInputs).toEqual([]);
+    expect(gate.calls).toEqual([]);
     expect(graphqlCalls).toEqual([]);
     expect(r).toMatchObject({
       ok: false,
@@ -172,12 +164,12 @@ describe('shipPhase preview gate (#3880)', () => {
   });
 
   it('fails closed as CI pending when the CI watch itself throws, so the preview never stands in for CI', async () => {
-    const { gate, gateInputs } = recordingGate();
+    const gate = recorder(async (_input: unknown) => result('pass'));
     const ciWatch = async () => {
       throw new Error('GitHub 502');
     };
     const { result: r, graphqlCalls, logs } = await ship(green, gate, { ciWatch });
-    expect(gateInputs).toEqual([]);
+    expect(gate.calls).toEqual([]);
     expect(graphqlCalls).toEqual([]);
     expect(logs).toContainEqual(['warn', 'CI watch for PR #123 failed: GitHub 502; treating CI as pending']);
     expect(r).toMatchObject({

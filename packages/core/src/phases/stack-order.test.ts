@@ -2,6 +2,7 @@ import type { Octokit } from '@octokit/rest';
 import { describe, expect, it } from 'vitest';
 
 import type { SlicePlan } from '../readiness/slice-plan.js';
+import { recorder } from '../test-support/recording-fakes.test.js';
 import {
   prerequisiteStackOrder,
   renderPrerequisiteStackLine,
@@ -82,68 +83,46 @@ describe('replaceStackOrderLine', () => {
 });
 
 describe('updateParentStackOrder', () => {
-  const make = (getFails = false) => {
-    const gets: unknown[] = [];
-    const updates: Array<{ pull_number: number; body: string }> = [];
-    const get = async (params: unknown) => {
-      gets.push(params);
-      if (getFails) throw new Error('nope');
-      return { data: { body: '## Summary\nHi.' } };
-    };
-    const update = async (params: { pull_number: number; body: string }) => {
-      updates.push(params);
-      return {};
-    };
+  const make = (get = recorder(async () => ({ data: { body: '## Summary\nHi.' } }))) => {
+    const update = recorder(async (_a: { pull_number: number; body: string }) => ({}));
     const octokit: Octokit = { rest: { pulls: { get, update } } } as never;
-    return { octokit, gets, updates };
-  };
-  const recordingLog = () => {
-    const logged: Array<[string, string]> = [];
-    return { logged, log: (type: string, msg: string): void => void logged.push([type, msg]) };
+    return { octokit, get, update };
   };
 
   it('is a no-op for slice 1 or an unrecorded parent PR', async () => {
-    const { octokit, gets } = make();
-    const { log } = recordingLog();
+    const { octokit, get } = make();
+    const log = recorder();
     await updateParentStackOrder({ octokit, repo: 'o/r', plan: plan([41]), index: 1, prNumber: 50, log });
     await updateParentStackOrder({ octokit, repo: 'o/r', plan: plan(), index: 2, prNumber: 50, log });
-    expect(gets).toEqual([]);
+    expect(get.calls).toEqual([]);
   });
 
   it('does not rewrite a merged parent PR (#3367)', async () => {
-    const { octokit, gets, updates } = make();
+    const { octokit, get, update } = make();
     const merged = plan([41]);
     const p = { ...merged, slices: merged.slices.map((x) => (x.index === 1 ? { ...x, state: 'merged' as const } : x)) };
-    await updateParentStackOrder({ octokit, repo: 'o/r', plan: p, index: 2, prNumber: 50, log: () => undefined });
-    expect(gets).toEqual([]);
-    expect(updates).toEqual([]);
+    await updateParentStackOrder({ octokit, repo: 'o/r', plan: p, index: 2, prNumber: 50, log: recorder() });
+    expect(get.calls).toEqual([]);
+    expect(update.calls).toEqual([]);
   });
 
   it("rewrites the parent PR's body to name the new PR as next", async () => {
-    const { octokit, updates } = make();
-    await updateParentStackOrder({
-      octokit,
-      repo: 'o/r',
-      plan: plan([41]),
-      index: 2,
-      prNumber: 50,
-      log: () => undefined,
-    });
-    const arg = updates[0]!;
+    const { octokit, update } = make();
+    await updateParentStackOrder({ octokit, repo: 'o/r', plan: plan([41]), index: 2, prNumber: 50, log: recorder() });
+    const [[arg]] = update.calls;
     expect(arg.pull_number).toBe(41);
     expect(arg.body).toContain('slice 1/3');
     expect(arg.body).toContain('next: slice 2 #50');
   });
 
   it('logs and does not throw when pulls.get rejects', async () => {
-    const { octokit } = make(true);
-    const { log, logged } = recordingLog();
+    const { octokit } = make(recorder(async () => Promise.reject(new Error('nope'))));
+    const log = recorder<[string, string]>();
     await updateParentStackOrder({ octokit, repo: 'o/r', plan: plan([41]), index: 2, prNumber: 50, log });
-    expect(
-      logged.some(
-        ([type, msg]) => type === 'ship' && msg.includes('could not update the stack order on slice 1 PR #41'),
-      ),
-    ).toBe(true);
+    expect(log.calls).toContainEqual([
+      'ship',
+      expect.stringContaining('could not update the stack order on slice 1 PR #41'),
+    ]);
   });
 });
 

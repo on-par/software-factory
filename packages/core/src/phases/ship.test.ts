@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createLifecycleBus } from '../bus/index.js';
 import { fakeOctokit } from '../test-support/index.js';
+import { recorder } from '../test-support/recording-fakes.test.js';
 import { findMergedPR, findOpenPR, shipPhase } from './ship.js';
 
 interface ShipOctokitOptions {
@@ -1430,11 +1431,7 @@ describe('shipPhase approval gate', () => {
       return { stdout: '' };
     };
     const checkSummary = { failures: 0, passes: 3, skips: 0, total: 3, results: [] };
-    const gateArgs: unknown[] = [];
-    const approvalGate = async (request: unknown) => {
-      gateArgs.push(request);
-      return { id: 'a1', approved: true, respondedAt: new Date().toISOString() };
-    };
+    const approvalGate = recorder(async () => ({ id: 'a1', approved: true, respondedAt: new Date().toISOString() }));
 
     const result = await shipPhase({
       issue: workKeyFromIssue(23),
@@ -1451,13 +1448,9 @@ describe('shipPhase approval gate', () => {
 
     expect(result.ok).toBe(true);
     expect(calls.filter((c) => c[0] === 'pulls.create')).toHaveLength(1);
-    expect(gateArgs).toHaveLength(1);
-    expect(gateArgs[0]).toMatchObject({
-      issue: 23,
-      branch: 'ship-it/23-self-heal',
-      worktree: '/repo-factory-23',
-      checkSummary,
-    });
+    expect(approvalGate.calls).toMatchObject([
+      [{ issue: 23, branch: 'ship-it/23-self-heal', worktree: '/repo-factory-23', checkSummary }],
+    ]);
     expect(diffStatCalls).toHaveLength(1);
     const shipIdx = logs.findIndex(([type]) => type === 'ship');
     const requestedIdx = logs.findIndex(([type]) => type === 'approval_requested');

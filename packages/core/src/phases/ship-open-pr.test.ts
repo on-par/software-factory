@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { asPhaseOctokit, createSimOctokit } from '../fakes/octokit.js';
+import { recorder } from '../test-support/recording-fakes.test.js';
 import {
   commitAll,
   makeStubModelsConfig,
@@ -140,16 +141,8 @@ describe('openOrFindPr trailers and references (#3894)', () => {
   const LINEAR = { key: toWorkKey('ON-12'), title: 'Add X' };
 
   async function open(extra: Partial<ShipPhaseOptions>, ticket: typeof LINEAR | undefined) {
-    const created: Array<{ title: string; body: string }> = [];
-    const create = async (args: { title: string; body: string }) => {
-      created.push(args);
-      return { data: { number: 5 } };
-    };
-    const reads: unknown[] = [];
-    const get = async (params: unknown) => {
-      reads.push(params);
-      return { data: { title: 'GitHub title' } };
-    };
+    const create = recorder(async (_args: { title: string; body: string }) => ({ data: { number: 5 } }));
+    const get = recorder(async () => ({ data: { title: 'GitHub title' } }));
     const octokit = Object.assign({} as Octokit, { rest: { pulls: { create }, issues: { get } } });
     const opts = {
       issue: workKeyFromIssue(123),
@@ -171,7 +164,7 @@ describe('openOrFindPr trailers and references (#3894)', () => {
       walkthrough: { walkthrough: async () => undefined, counts: async () => 'unavailable' as const },
     });
     expect(result).toEqual({ prNumber: 5 });
-    return { args: created[0], reads };
+    return { args: create.calls[0][0], reads: get.calls };
   }
 
   it('a Linear run on its final slice opens a PR with Fixes ON-12 and no Closes #', async () => {
