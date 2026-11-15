@@ -154,7 +154,7 @@ function runWindow(
 ): { first?: string; last?: string; count: number } {
   const mine = events.filter((e) => e.issue === String(issue) && (e.repo === undefined || e.repo === slug));
   if (mine.length === 0) return { count: 0 };
-  const stamps = mine.map((e) => e.ts).sort();
+  const stamps = mine.map((e) => e.ts).sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
   return { first: stamps[0], last: stamps[stamps.length - 1], count: mine.length };
 }
 

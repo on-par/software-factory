@@ -69,7 +69,7 @@ export function baseHealthRepairDeprecation(env: NodeJS.ProcessEnv): string | un
 const FORBIDDEN_CHARS = /[\s~^:?*[\\]/;
 
 function hasControlChar(raw: string): boolean {
-  return [...raw].some((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f);
+  return Array.from(raw).some((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f);
 }
 
 /** Returns `raw` when it is usable as a git branch name, undefined otherwise. No trimming, no `origin/` stripping. */

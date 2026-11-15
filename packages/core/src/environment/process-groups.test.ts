@@ -277,7 +277,7 @@ describe('ProcessGroupTracker', () => {
     const tracker = new ProcessGroupTracker();
     tracker.track(1);
     tracker.track(2);
-    expect(tracker.pgids.sort()).toEqual([1, 2]);
+    expect(tracker.pgids.sort((x, y) => x - y)).toEqual([1, 2]);
     tracker.untrack(1);
     expect(tracker.pgids).toEqual([2]);
   });

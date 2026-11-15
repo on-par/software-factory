@@ -67,7 +67,7 @@ describe('acquirePortLease', () => {
 
       const registry = JSON.parse(await readFile(registryFile, 'utf-8'));
       expect(registry.leases).toHaveLength(2);
-      expect(registry.leases.map((l: { port: number }) => l.port).sort()).toEqual([a.port, b.port].sort());
+      expect(registry.leases.map((l: { port: number }) => l.port)).toEqual(expect.arrayContaining([a.port, b.port]));
     });
   });
 
