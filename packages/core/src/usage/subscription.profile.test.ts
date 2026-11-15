@@ -23,7 +23,7 @@ describe('readClaudeAccessToken default readers', () => {
 
   beforeEach(() => {
     execCalls = [];
-    respond = async () => undefined as never;
+    respond = async () => ({ stdout: '' });
     profileDir = mkdtempSync(join(tmpdir(), 'factory-claude-profile-'));
   });
 
