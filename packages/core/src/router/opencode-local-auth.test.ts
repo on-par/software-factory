@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { HarnessError } from '../harness/index.js';
 import { ModelRouter } from './index.js';
-import { recordArgs } from '../test-support/record-args.js';
+import { recordArgs } from '../test-support/recorders.js';
 
 const models: ModelsConfig = {
   version: 1,

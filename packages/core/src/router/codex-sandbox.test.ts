@@ -5,7 +5,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { CodingHarness, HarnessRequest } from '../harness/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { CliModelExecutor, type ModelExecutorContext, ModelRouter } from './index.js';
-import { recordArgs } from '../test-support/record-args.js';
+import { recordArgs } from '../test-support/recorders.js';
 
 const fakeGitExec: ExecFn = async () => ({ stdout: '', stderr: '' });
 
@@ -80,9 +80,7 @@ describe('ModelRouter codex sandbox threading (#3830)', () => {
     router.setCodexSandbox('danger-full-access');
     await router.run('plan', 'do it');
     expect(reqs).toHaveLength(1);
-    const [req] = reqs[0]!;
-    expect(req.codexSandbox).toBe('danger-full-access');
-    expect(req.codexFullAccessTasks).toEqual(['build_codex']);
+    expect(reqs[0]![0]).toMatchObject({ codexSandbox: 'danger-full-access', codexFullAccessTasks: ['build_codex'] });
   });
 
   it('leaves codexSandbox undefined when the setter is never called or is reset', async () => {

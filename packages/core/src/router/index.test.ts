@@ -13,7 +13,7 @@ import type { ExecFn, FetchFn, ModelExecutorContext } from './index.js';
 import { failoversFrom, ModelExecutorError, ModelRouter, ModelRouterError } from './index.js';
 import { probeOllama, resetOllamaProbeCache } from './ollama-probe.js';
 import { StubModelExecutor } from './stub.js';
-import { recordArgs } from '../test-support/record-args.js';
+import { recordArgs } from '../test-support/recorders.js';
 
 const models: ModelsConfig = {
   version: 1,

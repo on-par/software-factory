@@ -6,7 +6,7 @@ import type { HarnessLiveUsage, HarnessRequest } from '../harness/index.js';
 import { BudgetStopError, isBudgetStopError, watchBudget } from './budget-guard.js';
 import { CliModelExecutor, type ModelExecutor, ModelRouter } from './index.js';
 import { ModelRegistry } from '../models/index.js';
-import { recordArgs } from '../test-support/record-args.js';
+import { recordArgs } from '../test-support/recorders.js';
 
 const def = (provider: 'anthropic' | 'openai') => ({
   provider,
@@ -40,8 +40,7 @@ const live = (over: Partial<HarnessLiveUsage> = {}): HarnessLiveUsage => ({
 
 describe('watchBudget', () => {
   it('prices cumulative usage with the registry rates and records a stop only when the guard returns true', () => {
-    const answers = [false, true];
-    const { calls: seen, fn: guard } = recordArgs(() => answers.shift()!);
+    const { calls: seen, fn: guard } = recordArgs((): boolean => seen.length > 1);
     const watch = watchBudget(registry, 'model-a', guard);
     watch.onLiveUsage(live({ calls: 1 }));
     expect(seen.at(-1)).toEqual([3, 1]);
@@ -96,12 +95,10 @@ describe('ModelRouter budget guard', () => {
   };
 
   it('a budget-stopped attempt records a cost row for the partial session and throws BudgetStopError without retry, failover or worktree reset', async () => {
-    const { calls: seen, fn: runModel } = recordArgs(
-      async (_m: string, _p: string, ctx: Parameters<ModelExecutor['runModel']>[2]) => {
-        ctx.onLiveUsage?.(live({ inputTokens: 5000, outputTokens: 200, calls: 183 }));
-        throw new Error('killed');
-      },
-    );
+    const { calls: seen, fn: runModel } = recordArgs(async (...[, , ctx]: Parameters<ModelExecutor['runModel']>) => {
+      ctx.onLiveUsage?.(live({ inputTokens: 5000, outputTokens: 200, calls: 183 }));
+      throw new Error('killed');
+    });
     const { router, rows, gitCalls } = setup({ runModel });
     const { calls: infos, fn: onProviderFailure } = recordArgs(() => {});
     const err = await router.run('build_claude', 'go', { budgetGuard: () => true, onProviderFailure }).then(

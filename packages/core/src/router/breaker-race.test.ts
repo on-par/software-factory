@@ -8,7 +8,7 @@ import { createTempDirs } from '../harness/temp-dir.js';
 import { pickOrderedProvider } from '../run/provider-breaker-gate.js';
 
 import { ProviderBreaker } from './breaker.js';
-import { recordArgs } from '../test-support/record-args.js';
+import { recordArgs } from '../test-support/recorders.js';
 
 const tempDirs = createTempDirs();
 afterEach(() => tempDirs.cleanup());

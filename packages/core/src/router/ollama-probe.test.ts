@@ -2,33 +2,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FetchFn } from './index.js';
 import { claimOllamaSkipNotice, ollamaEndpoint, probeOllama, resetOllamaProbeCache } from './ollama-probe.js';
-import { recordArgs } from '../test-support/record-args.js';
+import { recordArgs } from '../test-support/recorders.js';
 
 const EP = 'http://127.0.0.1:11434';
-const response = (ok: boolean, status: number) => ({
-  ok,
-  status,
-  statusText: '',
-  text: async () => '',
-  json: async () => ({}),
-});
-const okFetch = () => {
-  const { calls, fn } = recordArgs(async (_url: string, _init?: RequestInit) => response(true, 200));
-  return { fetchFn: fn, calls };
-};
+const res = (ok: boolean, s: number) => ({ ok, status: s, statusText: '', text: async () => '', json: async () => 0 });
+const okFetch = () => recordArgs(async (_url: string, _init?: RequestInit) => res(true, 200));
 
 describe('probeOllama', () => {
   beforeEach(resetOllamaProbeCache);
 
   it('is reachable on a 200 and GETs /api/version', async () => {
-    const { fetchFn, calls } = okFetch();
+    const { fn: fetchFn, calls } = okFetch();
     expect(await probeOllama(fetchFn, EP)).toEqual({ reachable: true, endpoint: EP });
     expect(calls[0]![0]).toBe(`${EP}/api/version`);
     expect(calls[0]![1]?.method).toBe('GET');
   });
 
   it('is unreachable on non-2xx', async () => {
-    const fetchFn = vi.fn<FetchFn>(async () => response(false, 503));
+    const fetchFn = vi.fn<FetchFn>(async () => res(false, 503));
     expect(await probeOllama(fetchFn, EP)).toEqual({ reachable: false, endpoint: EP, reason: 'HTTP 503' });
   });
 
@@ -56,7 +47,7 @@ describe('probeOllama', () => {
   });
 
   it('shares one in-flight probe across concurrent callers and caches per endpoint', async () => {
-    const { fetchFn, calls } = okFetch();
+    const { fn: fetchFn, calls } = okFetch();
     await Promise.all([probeOllama(fetchFn, EP), probeOllama(fetchFn, EP)]);
     await probeOllama(fetchFn, EP);
     expect(calls).toHaveLength(1);

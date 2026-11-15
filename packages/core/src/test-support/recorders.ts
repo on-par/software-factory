@@ -3,11 +3,11 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { CheckerContext } from '../checkers/index.js';
 
-export interface LoggedEvent {
-  type: string;
-  msg: string;
-  data?: { durationMs?: number };
-}
+export type LoggedEvent = { type: string; msg: string; data?: { durationMs?: number } };
+export const recordArgs = <A extends unknown[], R>(impl: (...args: A) => R) => {
+  const calls: A[] = [];
+  return { calls, fn: (...args: A): R => impl(...(calls.push(args), args)) };
+};
 
 export function recordingLog(events: LoggedEvent[]): NonNullable<CheckerContext['log']> {
   return (type, msg, data) => {
