@@ -355,8 +355,6 @@ const INTERNAL_API_KEYS = [
   ...'BaselineCache resolveBaselineCacheTtlHours buildTierEvidence formatTierEvidence'.split(' '), // #3540, #1957
   ...'openCodeVersion allProvidersDownReleasePayload'.split(' '), // #3340
   'fetchRequiredChecksVerdict', // #3186 CI lookup for a timed-out compile; base health (#2339) follows
-  'BASE_HEALTH_CHECKERS',
-  'checkBaseHealth',
   'checkResumeBaseDrift',
   'checkInPlaceCheckout',
   'setupInPlaceCheckout',
@@ -402,9 +400,6 @@ const INTERNAL_API_KEYS = [
   // Readiness deep check (#1732)
   'buildDecompositionPrompt',
   'parseDecompositionOutput',
-  // Command-run summary (#3328)
-  'summarizeCommandRun',
-  'parseCommandCounts',
   ...'lookupOpenPrByIssue lookupOpenPrByBranch'.split(' '), // open-PR lookup (#3439)
   ...'findDeclaredPrerequisites createOctokitBlockedParkStore pollBlockedParks'.split(' '), // blockers (#2316)
   ...Object.keys(await import('./queue/unpark.js')), // unpark (#2318)
@@ -426,25 +421,7 @@ const INTERNAL_API_KEYS = [
   'formatWorktreeLocation',
   'laneWorktreePath',
   'resolveWorktreeRoot',
-  // Review verdict (#1679)
-  'computeReviewVerdict',
-  'DETERMINISTIC_CHECKERS',
-  // Review floor (#1721)
-  'computeReviewFloor',
-  'DEFAULT_REVIEW_FLOOR_RULES',
-  // Review fork-PR containment gate (#1684)
-  'isCrossRepoPullRequest',
-  'isForkPullRequest',
-  'resolveReviewContainment',
-  'REVIEW_CONTAINED_FLAG_HELP',
-  'REVIEW_CONTAINMENT_REFUSED_EXIT_CODE',
-  'runContainmentGatedReview',
-  'pullRequestHeadRef',
-  'runContainedReview',
-  // Cross-repo PR references + review constitution (#1673)
-  'DEFAULT_REVIEW_CONSTITUTION',
   // Default code constitution + checker list (#2387)
-  'DEFAULT_CODE_CONSTITUTION',
   'describeConstitutionSource',
   'listBuiltInCheckers',
   'findUnknownConstitutionCheckers',
@@ -456,13 +433,6 @@ const INTERNAL_API_KEYS = [
   'findCodexSandboxWarnings',
   'findSizeGateModeWarnings',
   'findUnknownConfigKeyWarnings',
-  'formatUnknownCheckerMessage',
-  'describePullRequestAccessError',
-  'describeReviewConstitutionSource',
-  'formatPullRequestReference',
-  'parsePullRequestReference',
-  'resolvePullRequestReference',
-  'REVIEW_ACCESS_ERROR_EXIT_CODE',
   // Local queue reprioritization audit records (#869)
   // Failure fingerprint & evidence
   // Auto-file a fingerprinted bug (#373)
@@ -481,42 +451,29 @@ const INTERNAL_API_KEYS = [
   'resolvePrClassifierPolicy',
   'resolveReviewFloorRules',
   'resolveTrustTier',
-  // PR classifier shadow verdict (#1725)
-  'buildClassifierPrompt',
-  'changedPathsFromDiff',
-  'CLASSIFIER_PROMPT_VERSION',
-  'classifierPolicyVersion',
-  'classifyPrShadow',
-  'parseClassifierOutput',
   'parseReworkCommand',
   'pollCommentRework',
-  'toClassificationRecord',
   // PR classifier backtest (#1728)
   'backtestFileName',
-  'buildBacktestRecord',
   'parseBacktestLabels',
   'runClassifierBacktest',
   'selectBacktestPrs',
   // PR classifier routing (#1724)
   'classifiedRecords',
-  'classifierGateReason',
-  'parseNumstat',
-  'readReviewFloorChanges',
-  'resolveReviewRouting',
   'resolveBranchPrefix',
   'resolveEffectiveConfig',
   'resolveExperimental',
   'resolveLocalOnly',
-  ...'resolveHostMaxBuilds resolveQueueClaimSettleMs resolveLaneDiscoveryIntervalMs evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL DEFAULT_MAX_CLOCK_SKEW_MS measureGithubClockSkew resolveQueueMaxClockSkewMs'.split(
+  ...'resolveHostMaxBuilds resolveQueueClaimSettleMs resolveLaneDiscoveryIntervalMs evaluateRisk decideRiskMerge RISK_HIGH_LABEL DEFAULT_MAX_CLOCK_SKEW_MS measureGithubClockSkew resolveQueueMaxClockSkewMs'.split(
     ' ',
   ), // #3380, #3381, #3149
-  ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles publishRiskReceipt renderRiskReceipt'.split(' '), // #3386
+  ...'listPrChangedFiles publishRiskReceipt'.split(' '), // #3386
   ...'choosePrerequisiteStack parsePrerequisiteStackMarker renderPrerequisiteStackMarker resolveQueueStackOnOpenPrerequisite restackOnPrerequisite'.split(
     ' ',
   ), // #3916
   'runBaselineCheckers', // #3851
   'renderPreviewReceipt',
-  ...'upsertRiskReceipt riskPolicyConfigFile loadRiskPolicy formatRiskPolicy'.split(' '), // #3387
+  ...'riskPolicyConfigFile loadRiskPolicy formatRiskPolicy'.split(' '), // #3387
   ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad resolveBaseHealthChecks'.split(' '), // #3048, #3290
   ...'hostBuildSlotsDir listHostSlots syncLandBranch listIssueRuns'.split(' '), // syncLandBranch: #1886; run readers: #3448
   ...'createRunSlotGate withRunAndHostBuildSlot formatDiskHold'.split(' '), // #3049, #2284
@@ -525,8 +482,6 @@ const INTERNAL_API_KEYS = [
   'createOctokitCollaboratorPermissionClient',
   ...'isOwnComment resolveSelfIdentity'.split(' '), // own GitHub identity, incl. App installation tokens (ADR-0176)
   ...'renderConfigExample resolveT1SampleRate'.split(' '),
-  'resolveEvidenceAllowlist',
-  'runEvidencePlan',
   // Design artifact (#422)
   // Concrete coding harnesses
   'classifyFailure',

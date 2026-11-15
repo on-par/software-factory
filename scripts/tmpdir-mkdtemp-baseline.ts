@@ -50,7 +50,6 @@ export const TMPDIR_MKDTEMP_BASELINE: Readonly<Record<string, number>> = {
   'packages/cli/src/cli/triage-open-prs.test.ts': 2,
   'packages/cli/src/cli/update-state.test.ts': 1,
   'packages/core/src/approvals/index.test.ts': 1,
-  'packages/core/src/checkers/base-health.test.ts': 3,
   'packages/core/src/checkers/baseline-cache.test.ts': 1,
   'packages/core/src/checkers/baseline.test.ts': 9,
   'packages/core/src/checkers/design-smells.test.ts': 1,

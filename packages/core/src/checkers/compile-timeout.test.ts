@@ -1,11 +1,10 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { CommandResult } from '../utils/command-runner.js';
-import { checkBaseHealth, type BaseHealthOptions } from './base-health.js';
 import { compileChecker, resolveCompileCommand, type CheckerContext } from './index.js';
 
 const tmp = createTempDirs();
@@ -77,56 +76,6 @@ describe('compileChecker timeout (#3185)', () => {
     await compileChecker(ctxFor(worktree, run, { compileTimeoutSeconds: 600 }));
     expect(run.mock.calls[0][0]).toEqual(['cargo', 'build']);
     expect(run.mock.calls[0][1].timeoutMs).toBe(600_000);
-  });
-});
-
-describe('checkBaseHealth compile timeout (#3185)', () => {
-  function cmd(stdout: string): CommandResult {
-    return { command: [], stdout, stderr: '', exitCode: 0, killed: false, timedOut: false, ok: true };
-  }
-
-  /** Runs the real compileChecker on base against the fake 3s build. */
-  async function baseCompile(compileTimeoutSeconds: number) {
-    const fixture = await makeWorktree({ 'package.json': BUILD_PKG });
-    const run = slowRunner();
-    let compile: Awaited<ReturnType<typeof compileChecker>> | undefined;
-    const baselineDeps = {
-      runCommand: vi.fn(async () => cmd('')),
-      runCheckers: (async (ctx: CheckerContext) => {
-        compile = await compileChecker({ ...ctx, worktree: fixture, runCommand: run as never });
-        return { failures: 0, passes: 1, skips: 0, total: 1, results: [compile] };
-      }) as never,
-      makeTempDir: () => mkdtemp(join(fixture, 'p-')),
-    };
-    const o: BaseHealthOptions = {
-      worktree: '/tmp/wt',
-      constitution: null,
-      router: {} as never,
-      env: {},
-      log: vi.fn(),
-      compileTimeoutSeconds,
-      deps: {
-        memo: new Map(),
-        runCommand: vi.fn(async () => cmd(`${'a'.repeat(40)}\n`)),
-        baselineDeps,
-      },
-    };
-    const res = await checkBaseHealth(o);
-    return { res, compile, timeoutMs: run.mock.calls[0]?.[1].timeoutMs };
-  }
-
-  it('runs the base build with compileTimeoutSeconds 10 and is green', async () => {
-    const { res, compile, timeoutMs } = await baseCompile(10);
-    expect(timeoutMs).toBe(10_000);
-    expect(compile?.result).toBe('PASS');
-    expect(res.kind).toBe('green');
-  });
-
-  it('a 1s compile timeout against the 3s build fails compile on base', async () => {
-    const { compile, timeoutMs } = await baseCompile(1);
-    expect(timeoutMs).toBe(1000);
-    expect(compile?.result).toBe('FAIL');
-    expect(compile?.details).toContain('FACTORY_COMPILE_TIMEOUT');
   });
 });
 

@@ -40,7 +40,6 @@
   "packages/core/src/readiness/decompose.ts": 697,
   "packages/core/src/reports/benchmark-artifacts.test.ts": 604,
   "packages/core/src/reports/evidence-pack.test.ts": 540,
-  "packages/core/src/review/contained.test.ts": 538,
   "packages/core/src/router/cli-executor.test.ts": 1564,
   "packages/core/src/router/index.test.ts": 1848,
   "packages/core/src/router/index.ts": 1125,

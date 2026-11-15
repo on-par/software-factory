@@ -71,8 +71,6 @@ export {
 } from './config/repo-config-file.js';
 export type { RepoConfigYamlMigration } from './config/repo-config-file.js';
 export { renderConfigExample } from './config/example.js';
-export { resolveEvidenceAllowlist, type EvidenceAllowlist } from './checkers/evidence-allowlist.js';
-export { runEvidencePlan, type EvidencePlanResult, type EvidenceRunnerContext } from './checkers/evidence-plan.js';
 // Concrete coding harnesses
 export { classifyFailure } from './harness/classify.js';
 export { type HarnessCheckResult, runHarnessCheck } from './harness/check.js';
@@ -280,101 +278,28 @@ export { readStackSliceGate } from './phases/stack-approval.js';
 export type { StackPullReviews } from './phases/stack-approval.js';
 export { createShipExecutor } from './daemon/ship-executor.js';
 
-// Review verdict (#1679)
-export type {
-  AcceptanceCriterionFinding,
-  ReviewContextLevel,
-  ReviewVerdict,
-  ReviewVerdictInput,
-  ReviewVerdictResult,
-} from './review/verdict.js';
-export { computeReviewVerdict, DETERMINISTIC_CHECKERS } from './review/verdict.js';
-
-// Review floor (#1721)
-export type {
-  ReviewClass,
-  ReviewFloorFiredRule,
-  ReviewFloorInput,
-  ReviewFloorPathChange,
-  ReviewFloorPathRule,
-  ReviewFloorResult,
-  ReviewFloorRuleSet,
-} from './review/floor.js';
-export { computeReviewFloor, DEFAULT_REVIEW_FLOOR_RULES } from './review/floor.js';
-export * from './review/risk.js'; // Risk tier (#3380, #3381)
-export * from './review/risk-receipt.js'; // Risk receipt (#3386)
+export type { ReviewFloorRuleSet } from './review/floor.js';
+export { decideRiskMerge, evaluateRisk, RISK_HIGH_LABEL, type RiskEvaluation } from './review/risk.js'; // Risk tier (#3380, #3381)
+export {
+  formatRiskPolicy,
+  loadRiskPolicy,
+  publishRiskReceipt,
+  riskPolicyConfigFile,
+  type RiskPolicy,
+} from './review/risk-receipt.js'; // Risk receipt (#3386)
 export { renderPreviewReceipt } from './checkers/preview-receipt.js';
 export { parkPayload, parkUnblockHint, publishParkComment, readParkedOrder } from './run/park-comment.js';
 export { listPrChangedFiles } from './run/ci-rework.js';
-// PR classifier shadow verdict (#1725)
-export type { PrClassificationRecord, PrClassifierClaim, PrShadowInput, PrShadowVerdict } from './review/classifier.js';
-export {
-  buildClassifierPrompt,
-  changedPathsFromDiff,
-  CLASSIFIER_PROMPT_VERSION,
-  classifierPolicyVersion,
-  classifyPrShadow,
-  parseClassifierOutput,
-  toClassificationRecord,
-} from './review/classifier.js';
-
 // PR classifier backtest (#1728)
-export type {
-  BacktestHandLabel,
-  BacktestOutcomeLabel,
-  BacktestPorts,
-  BacktestRecord,
-  BacktestResult,
-} from './review/backtest.js';
+export type { BacktestHandLabel } from './review/backtest.js';
 export {
   backtestFileName,
   classifiedRecords,
-  buildBacktestRecord,
   parseBacktestLabels,
   runClassifierBacktest,
   selectBacktestPrs,
 } from './review/backtest.js';
-
-// PR classifier routing (#1724)
-export type { ReviewRouting } from './review/routing.js';
-export { classifierGateReason, parseNumstat, readReviewFloorChanges, resolveReviewRouting } from './review/routing.js';
-
-// Review fork-PR containment gate (#1684)
-export type {
-  ContainmentGatedReviewDeps,
-  ReviewContainmentDecision,
-  ReviewContainmentOptions,
-  ReviewPullRequestRepos,
-} from './review/containment.js';
-
-// Contained fork-PR review (#1685)
-export type { ContainedReviewDeps, ContainedReviewResult, ReviewInterruptSource } from './review/contained.js';
-export { pullRequestHeadRef, runContainedReview } from './review/contained.js';
-export {
-  isCrossRepoPullRequest,
-  isForkPullRequest,
-  resolveReviewContainment,
-  REVIEW_CONTAINED_FLAG_HELP,
-  REVIEW_CONTAINMENT_REFUSED_EXIT_CODE,
-  runContainmentGatedReview,
-} from './review/containment.js';
-
-// Cross-repo PR references + review constitution (#1673)
-export type { PullRequestReference, PullRequestReferenceParse, ResolvedPullRequest } from './review/pr-reference.js';
-export {
-  describePullRequestAccessError,
-  formatPullRequestReference,
-  parsePullRequestReference,
-  resolvePullRequestReference,
-  REVIEW_ACCESS_ERROR_EXIT_CODE,
-} from './review/pr-reference.js';
-export type { ReviewConstitution, ReviewConstitutionSource } from './constitutions/index.js';
-export {
-  DEFAULT_CODE_CONSTITUTION,
-  DEFAULT_REVIEW_CONSTITUTION,
-  describeConstitutionSource,
-  describeReviewConstitutionSource,
-} from './constitutions/index.js';
+export { describeConstitutionSource } from './constitutions/index.js';
 export * from './checkers/internal-exports.js';
 export { isTemplateToken } from './config/template-tokens.js';
 export {
@@ -385,8 +310,7 @@ export {
 } from './config/config-lint.js';
 export { findConfigSchemaErrors } from './config/config-schema-lint.js';
 export type { ConfigLintInput } from './config/config-lint.js';
-export { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './checkers/constitution-preflight.js';
-export type { UnknownConstitutionChecker } from './checkers/constitution-preflight.js';
+export { findUnknownConstitutionCheckers } from './checkers/constitution-preflight.js';
 // Readiness deep check (#1732)
 export { buildDecompositionPrompt, parseDecompositionOutput } from './readiness/decompose.js';
 export {
@@ -459,9 +383,8 @@ export type { CheckResumeRecord, CheckResumeStore, PlanReuseRecord, PlanReuseSto
 // Pre-PLAN base health (#2339)
 export { BaselineCache } from './checkers/baseline-cache.js';
 export { runBaselineCheckers } from './checkers/baseline.js';
-export { BASE_HEALTH_CHECKERS, checkBaseHealth, describeBaseHealthEvidence } from './checkers/base-health.js';
-export { fetchRequiredChecksVerdict } from './checkers/base-health.js';
-export type { BaseHealthOptions, BaseHealthResult, RequiredChecksVerdict } from './checkers/base-health.js';
+export { describeBaseHealthEvidence, fetchRequiredChecksVerdict } from './checkers/base-health.js';
+export type { RequiredChecksVerdict } from './checkers/base-health.js';
 // Codex ChatGPT session freshness for doctor (#2509)
 export { codexChatgptSessionState } from './utils/codex-config.js';
 // Last run-time local_auth failure per agent, read by doctor (#2733)

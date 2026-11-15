@@ -4,12 +4,7 @@ import { join } from 'node:path';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  ConstitutionLoader,
-  DEFAULT_REPO_CONSTITUTION_PATH,
-  DEFAULT_REVIEW_CONSTITUTION,
-  describeReviewConstitutionSource,
-} from './index.js';
+import { ConstitutionLoader, DEFAULT_REPO_CONSTITUTION_PATH, DEFAULT_REVIEW_CONSTITUTION } from './index.js';
 
 const BUNDLED = `---
 product: acme-app
@@ -86,17 +81,5 @@ describe('ConstitutionLoader.resolveForReview (#1673)', () => {
     expect(r.constitution.checkers).toEqual(['compile', 'tests', 'lint']);
     expect(r.constitution.checkers.some((c) => c.startsWith('custom_'))).toBe(false);
     expect(r.constitution.body.trim()).not.toBe('');
-  });
-
-  it('describes each source', () => {
-    expect(describeReviewConstitutionSource({ kind: 'repo-constitution', path: '.factory/constitution.md' })).toContain(
-      '.factory/constitution.md',
-    );
-    expect(
-      describeReviewConstitutionSource({ kind: 'instruction-files', files: ['CLAUDE.md', 'AGENTS.md'] }),
-    ).toContain('CLAUDE.md, AGENTS.md');
-    expect(describeReviewConstitutionSource({ kind: 'default', product: DEFAULT_REVIEW_CONSTITUTION })).toContain(
-      'built-in default review constitution',
-    );
   });
 });
