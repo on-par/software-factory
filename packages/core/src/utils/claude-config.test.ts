@@ -105,7 +105,7 @@ describe('hasClaudeLoginEvidence', () => {
     ).toBe(false);
   });
 
-  it('uses only env, keychain-entry and file-existence evidence and never runs claude', () => {
+  it('checks keychain-entry existence without reading the secret (no -w), uses only env and file evidence, and never runs claude', () => {
     const exec = vi.fn();
     expect(hasClaudeLoginEvidence({ env: {}, platform: 'darwin', exec, fileExists: () => false })).toBe(true);
     expect(exec).toHaveBeenCalledTimes(1);

@@ -58,12 +58,10 @@ export interface BaselineOptions {
   onCacheInvalidated?: (checker: string, reason: string) => void;
 }
 
-const CHECKERS_GRADING_THE_CHANGE_DIFF_EMPTY_ON_BASE = new Set([WORKER_OUTPUT_CHECKER, DESIGN_SMELLS_CHECKER]);
+const DIFF_SCOPED = new Set([WORKER_OUTPUT_CHECKER, DESIGN_SMELLS_CHECKER]);
 
 function notRunnableReason(name: string): string | null {
-  if (CHECKERS_GRADING_THE_CHANGE_DIFF_EMPTY_ON_BASE.has(name)) {
-    return 'graded against the change diff, not runnable on base';
-  }
+  if (DIFF_SCOPED.has(name)) return 'graded against the change diff, not runnable on base';
   if (name.startsWith('custom_')) return 'agent checker graded against the spec, not run on base';
   return null;
 }
@@ -71,7 +69,7 @@ function notRunnableReason(name: string): string | null {
 const PYTEST_SHORT_SUMMARY_NODE_ID = /\bFAILED\s+(\S+::\S+)/;
 const VITEST_JEST_FAIL_MARKER = /(?:\bFAIL|[×✕●])\s+(.+)/;
 const TAP_NOT_OK = /\bnot ok \d+\s*-\s*(.+)/i;
-const DOTNET_TESTING_PLATFORM_FAILED_WITH_DURATION = /\bfailed\s+(\S+)\s+\(\d/;
+const DOTNET_TESTING_PLATFORM_FAILED = /\bfailed\s+(\S+)\s+\(\d/;
 
 export function extractFailingTestNames(details: string): string[] {
   const names = details
@@ -81,7 +79,7 @@ export function extractFailingTestNames(details: string): string[] {
         line.match(PYTEST_SHORT_SUMMARY_NODE_ID)?.[1] ??
         line.match(VITEST_JEST_FAIL_MARKER)?.[1] ??
         line.match(TAP_NOT_OK)?.[1] ??
-        line.match(DOTNET_TESTING_PLATFORM_FAILED_WITH_DURATION)?.[1] ??
+        line.match(DOTNET_TESTING_PLATFORM_FAILED)?.[1] ??
         [],
     )
     .map((identifier) => identifier.trim())
@@ -208,8 +206,7 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
     const install = dependencyInstallCommand(baseWorktree);
     if (install !== null) {
       const r = await run(install, { cwd: baseWorktree, env: ctx.env, timeoutMs: DEPENDENCY_INSTALL_TIMEOUT_MS });
-      const installFailureSaysNothingAboutBaseCode = r.exitCode !== 0;
-      if (installFailureSaysNothingAboutBaseCode) {
+      if (r.exitCode !== 0) {
         return {
           baseSha,
           checkers: markCached(compareBaseline(failing, cachedOutputs), cachedNames),
@@ -240,7 +237,7 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
       error: `baseline run failed: ${(e?.message ?? String(e)).slice(0, 300)}`,
     };
   } finally {
-    await removeOwnBaseWorktreeBestEffort(run, laneWorktree, parent, baseWorktree);
+    await removeBaseWorktree(run, laneWorktree, parent, baseWorktree);
   }
 }
 
@@ -254,21 +251,17 @@ function markCached(
   return comparisons;
 }
 
-async function removeOwnBaseWorktreeBestEffort(
+async function removeBaseWorktree(
   run: typeof runCommand,
   laneWorktree: string,
   parent: string,
   baseWorktree: string,
 ): Promise<void> {
-  await removeBaseWorktreeOrDeleteAndPrune(run, laneWorktree, baseWorktree).catch(() => {});
+  await forceRemoveWorktree(run, laneWorktree, baseWorktree).catch(() => {});
   await rm(parent, { recursive: true, force: true }).catch(() => {});
 }
 
-async function removeBaseWorktreeOrDeleteAndPrune(
-  run: typeof runCommand,
-  laneWorktree: string,
-  baseWorktree: string,
-): Promise<void> {
+async function forceRemoveWorktree(run: typeof runCommand, laneWorktree: string, baseWorktree: string): Promise<void> {
   const r = await run(['git', 'worktree', 'remove', '--force', baseWorktree], {
     cwd: laneWorktree,
     timeoutMs: GIT_COMMAND_TIMEOUT_MS,

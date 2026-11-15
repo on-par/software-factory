@@ -5,7 +5,7 @@ export type InconclusiveCause = 'timeout' | 'environment' | 'missing-command' | 
 
 const SHELL_NOT_EXECUTABLE_EXIT = 126;
 const SHELL_COMMAND_NOT_FOUND_EXIT = 127;
-const NO_EXIT_CODE_KILLED_BY_SIGNAL_OR_SPAWN_FAILED = -1;
+const NO_EXIT_CODE = -1;
 
 export function inconclusiveCause(fail: {
   timedOut?: boolean;
@@ -17,7 +17,7 @@ export function inconclusiveCause(fail: {
   if (fail.exitCode === VERIFY_SANDBOX_ENV_EXIT) return 'environment';
   if (fail.exitCode === SHELL_NOT_EXECUTABLE_EXIT || fail.exitCode === SHELL_COMMAND_NOT_FOUND_EXIT)
     return 'missing-command';
-  if (fail.exitCode === NO_EXIT_CODE_KILLED_BY_SIGNAL_OR_SPAWN_FAILED) return 'killed';
+  if (fail.exitCode === NO_EXIT_CODE) return 'killed';
   return undefined;
 }
 

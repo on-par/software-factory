@@ -37,13 +37,7 @@ export interface WorktreeProbe {
   lintConfig: LintConfigProbe | null;
 }
 
-const LEGACY_ESLINTRC_IS_PARSED_AS_YAML_A_JSON_SUPERSET: LintConfigFormat = 'yaml';
-
-const LINT_CONFIG_CANDIDATES_IN_PRECEDENCE_ORDER: ReadonlyArray<{
-  path: string;
-  linter: LintConfigLinter;
-  format: LintConfigFormat;
-}> = [
+const LINT_CONFIG_CANDIDATES: ReadonlyArray<{ path: string; linter: LintConfigLinter; format: LintConfigFormat }> = [
   { path: 'oxlint.config.ts', linter: 'oxlint', format: 'executable' },
   { path: 'oxlint.config.mts', linter: 'oxlint', format: 'executable' },
   { path: 'oxlint.config.cts', linter: 'oxlint', format: 'executable' },
@@ -62,7 +56,7 @@ const LINT_CONFIG_CANDIDATES_IN_PRECEDENCE_ORDER: ReadonlyArray<{
   { path: '.eslintrc.yaml', linter: 'eslint', format: 'yaml' },
   { path: '.eslintrc.yml', linter: 'eslint', format: 'yaml' },
   { path: '.eslintrc.json', linter: 'eslint', format: 'json' },
-  { path: '.eslintrc', linter: 'eslint', format: LEGACY_ESLINTRC_IS_PARSED_AS_YAML_A_JSON_SUPERSET },
+  { path: '.eslintrc', linter: 'eslint', format: 'yaml' },
   { path: 'biome.json', linter: 'biome', format: 'json' },
   { path: 'biome.jsonc', linter: 'biome', format: 'json' },
 ];
@@ -117,7 +111,7 @@ export async function probeWorktree(worktree: string): Promise<WorktreeProbe> {
 }
 
 export async function detectLintConfig(worktree: string): Promise<LintConfigProbe | null> {
-  for (const c of LINT_CONFIG_CANDIDATES_IN_PRECEDENCE_ORDER) {
+  for (const c of LINT_CONFIG_CANDIDATES) {
     if (await fileExists(join(worktree, c.path))) {
       return { linter: c.linter, configPath: c.path, format: c.format, executable: c.format === 'executable' };
     }

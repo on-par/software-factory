@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { CommandResult } from '../utils/command-runner.js';
+import { inconclusiveOutputCause } from './inconclusive.js';
 import { type CheckerContext, resolveTestsCommand, testsChecker } from './index.js';
 
 const tempDirs = createTempDirs();
@@ -106,7 +107,7 @@ describe('testsChecker with scripts/verify.ps1', () => {
     expect(result).toMatchObject({ result: 'PASS', details: 'scripts/verify.ps1: OK' });
   });
 
-  it('tests checker FAILs naming pwsh when pwsh is not on PATH', async () => {
+  it('tests checker FAILs naming pwsh when pwsh is not on PATH, as command-not-found exit 127 that reads as inconclusive', async () => {
     const worktree = await makeWorktree({ 'scripts/verify.ps1': 'exit 0' });
     const { run, calls } = stubRunner({ ok: true, exitCode: 0 });
     const result = await testsChecker({
@@ -117,5 +118,7 @@ describe('testsChecker with scripts/verify.ps1', () => {
     expect(result.result).toBe('FAIL');
     expect(result.details).toContain('pwsh');
     expect(calls).toEqual([]);
+    expect(result.failedCommand?.exitCode).toBe(127);
+    expect(inconclusiveOutputCause(result)).toBe('missing-command');
   });
 });

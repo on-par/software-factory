@@ -31,10 +31,10 @@ export async function recordShippedSlice(opts: RecordShippedSliceOptions): Promi
     return undefined;
   }
   const state = ship.alreadyDelivered ? 'merged' : 'pr-open';
-  let factoryPushedHeadSha: string | undefined;
+  let headSha: string | undefined;
   if (state === 'pr-open') {
     try {
-      factoryPushedHeadSha = ship.headSha ?? (await (readHeadSha ?? readWorktreeHead)(worktree));
+      headSha = ship.headSha ?? (await (readHeadSha ?? readWorktreeHead)(worktree));
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       return `slice ${index}/${count} PR #${ship.prNumber} opened but its head SHA could not be read: ${reason}`;
@@ -43,7 +43,7 @@ export async function recordShippedSlice(opts: RecordShippedSliceOptions): Promi
   const where = store ? 'slice plan file' : 'slice plan comment';
   try {
     await (store ?? issueCommentSlicePlanStore({ octokit, repo, issue: issueNumberOf(key) })).save(
-      withSliceState(plan, index, state, ship.prNumber, branch, factoryPushedHeadSha),
+      withSliceState(plan, index, state, ship.prNumber, branch, headSha),
     );
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);

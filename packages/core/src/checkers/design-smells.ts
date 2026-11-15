@@ -157,15 +157,14 @@ export async function collectDesignDiff(
   }
 
   if (text === '') {
-    const excludedPaths = await collectPathsHiddenByExcludes(worktree, baseRef, run);
-    const onlyGeneratedOrCacheChurnChanged = excludedPaths.length > 0;
-    if (onlyGeneratedOrCacheChurnChanged) return { text, baseRef, truncated, excludedPaths };
+    const excludedPaths = await collectRawChangedPaths(worktree, baseRef, run);
+    if (excludedPaths.length > 0) return { text, baseRef, truncated, excludedPaths };
   }
 
   return { text, baseRef, truncated };
 }
 
-async function collectPathsHiddenByExcludes(worktree: string, baseRef: string, run: DiffRunner): Promise<string[]> {
+async function collectRawChangedPaths(worktree: string, baseRef: string, run: DiffRunner): Promise<string[]> {
   const committed = await run(['git', 'diff', '--name-only', `${baseRef}...HEAD`], worktree);
   const uncommitted = await run(['git', 'diff', '--name-only', 'HEAD'], worktree);
 
@@ -193,8 +192,7 @@ function collectCheckerDiff(
   ctx: CheckerContext,
   collectDiff: typeof collectDesignDiff = collectDesignDiff,
 ): Promise<CollectedDiff> {
-  const runnerLeftUndefinedSoOneArgStubsTypecheck = undefined;
-  return collectDiff(ctx.worktree, runnerLeftUndefinedSoOneArgStubsTypecheck, {
+  return collectDiff(ctx.worktree, undefined, {
     fallbackBaseRef: ctx.diffBase,
     baseRefOverride: ctx.parentBaseRef,
   });

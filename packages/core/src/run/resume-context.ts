@@ -135,8 +135,7 @@ export function createCheckResumeStore(specPath: string): CheckResumeStore {
         return null;
       }
       const record = stored as CheckResumeRecord;
-      const isLegacyNumericIssueSidecar = typeof r.issue === 'number';
-      return isLegacyNumericIssueSidecar ? { ...record, issue: String(r.issue) as WorkKey } : record;
+      return typeof r.issue === 'number' ? { ...record, issue: String(r.issue) as WorkKey } : record;
     },
     async record(entry) {
       await mkdir(dirname(path), { recursive: true });

@@ -16,8 +16,7 @@ export function renderCiFailureNote(evidence: CiFailureEvidence | undefined): st
     const log = evidence.jobLogs?.find((l) => l.name === check.name);
     if (log) {
       lines.push(safe(`  flagged files: ${list(log.files)}`));
-      const hexValidatedCommitsNeverRedacted = list(log.commits);
-      lines.push(`  flagged commits: ${hexValidatedCommitsNeverRedacted}`);
+      lines.push(`  flagged commits: ${list(log.commits)}`);
     }
   }
   if (evidence.errors && evidence.errors.length > 0)
