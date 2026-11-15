@@ -1,5 +1,3 @@
-// src/phases/plan-steps.ts — PLAN prompt step 4 variants and the step 8 outline block, split out of plan.ts to stay under the max-lines ceiling (#3373)
-
 export const RIGHT_SIZE_STEP = `4. RIGHT-SIZE THE SLICE. A single BUILD pass must be bounded: aim for roughly
    5-15 minutes of agent work, a handful of files, at most ~6 target types /
    ~8 signatures / ~10 call edges in the design block. If the issue genuinely
@@ -22,7 +20,6 @@ export const RIGHT_SIZE_STEP_STACK = RIGHT_SIZE_STEP_GATE_PASSED.replace(
   "Size is the factory's call",
 );
 
-// Vertical-slice outline (#3622): prompt step 8 and its design-block template.
 export const OUTLINE_STEP = `8. VERTICAL-SLICE OUTLINE. Break the work into an ordered outline of at least one vertical
    slice. Each step ends in one testable result and names:
    - result: the one observable, testable outcome of the step.

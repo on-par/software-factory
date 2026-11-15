@@ -110,9 +110,6 @@ describe('pipeline injection integration', () => {
         expect(branch, `branch name leaked canary "${canary}"`).not.toContain(canary);
       }
 
-      // SHIP opens a PR — it never attempts a merge (the fake Octokit exposes
-      // no pulls.merge/merge method; the 'graphql' call name itself doesn't
-      // match /merge/i even though its ready-flip mutation body does).
       expect(calls.some(([name]) => /merge/i.test(name))).toBe(false);
 
       if (fixture.name === 'issue-body-exfil-ssh-key.md') {

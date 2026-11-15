@@ -1,6 +1,3 @@
-// OpenCode-only end to end: a fake `opencode` CLI drives PLAN, BUILD, CHECK (with one rework round) and
-// SHIP through the real ModelRouter and CliModelExecutor, on a machine where only opencode can run and FACTORY_EXPERIMENTAL is unset.
-// A fake `claude` on PATH records any invocation so the test proves it is never spawned (#2635).
 import { exec as execCb } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -60,10 +57,6 @@ function opencodeOnlyModels(): ModelsConfig {
   };
 }
 
-// Fake opencode: answers PLAN with a spec that asks for the claude route, makes the first BUILD
-// leave a failing verify script and the rework fix it, and answers anything else with PASS.
-// Only `opencode run` (cwd = worktree) touches files. The harness's `opencode --version` probe runs
-// with the test's cwd, the real repo: treating it as a BUILD committed a stub scripts/verify.sh there.
 const FAKE_OPENCODE = `#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
@@ -156,12 +149,10 @@ describe('OpenCode-only pipeline with a fake opencode CLI (#2635)', () => {
       const log = (type: string, msg: string) => events.push([type, msg]);
 
       const router = new ModelRouter(opencodeOnlyModels(), loadRoutesConfig());
-      // OpenCode-only machine: opencode is the only runnable CLI.
       router.skipMissingHarnessClis((cmd) => cmd === 'opencode');
       const costs: string[] = [];
       router.setCostSink((e) => costs.push(e.model));
 
-      // opencode runs with cwd = worktree, so it must exist before PLAN (the real loop leases it first).
       await setupWorktree(repoRoot, branch, worktree);
       const plan = await planPhase({
         issue: workKeyFromIssue(issue),
@@ -224,7 +215,6 @@ describe('OpenCode-only pipeline with a fake opencode CLI (#2635)', () => {
       expect(spawned).not.toContain('claude');
       expect(existsSync(join(worktree, 'feature.txt'))).toBe(true);
 
-      // No attempt is ever made on a Claude model (#2635).
       expect(events.some(([type, msg]) => type === 'router' && msg.includes('Trying fake-opencode'))).toBe(true);
       expect(events.filter(([, msg]) => msg.includes('Trying fake-claude'))).toEqual([]);
       expect(events.filter(([type, msg]) => type === 'failover' && msg.includes('fake-claude'))).toEqual([]);

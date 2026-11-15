@@ -1,5 +1,3 @@
-// packages/core/src/phases/ship-approval.ts — SHIP approval gate request
-
 import type { ApprovalGate } from '../approvals/index.js';
 import type { CheckSummary } from '../types/index.js';
 import { issueNumberOf, type WorkKey } from '../work/work-key.js';
@@ -19,9 +17,6 @@ export async function requestShipApproval(ctx: {
   log: ShipPhaseOptions['log'];
 }): Promise<ShipResult | undefined> {
   const { approvalGate, issue, branch, worktree, base, run, checkSummary, log } = ctx;
-  // Log a 'ship'-typed event before anything else so the TUI's activePhase
-  // advances to SHIP first — otherwise a denial reports failedPhase as
-  // whichever phase (CHECK/BUILD) last logged, which is misleading.
   log('ship', `Starting ship phase for ${branch}`);
   const diffStat = await computeDiffStat(run, worktree, base);
   log(

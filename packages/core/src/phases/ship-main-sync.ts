@@ -1,19 +1,7 @@
-// packages/core/src/phases/ship-main-sync.ts — merge origin/main into the branch before SHIP pushes it
-//
-// A lane builds from the main it started on; sibling PRs that merge meanwhile (each adding a
-// CHANGELOG bullet) leave the new PR conflicting. GitHub runs no pull_request CI on a conflicting PR,
-// so SHIP's CI watch timed out and stranded a draft. Syncing first, with land's CHANGELOG and ADR
-// index auto-resolution, opens the PR mergeable so CI runs.
-
 import { syncLandBranch, type LandSyncOptions, type LandSyncResult } from '../land/sync.js';
 import type { CommandRunner } from './ship-git.js';
 import type { ShipPhaseOptions } from './ship-options.js';
 
-/**
- * Merges origin/main into `branch` in `worktree` and returns the SHA CHECK ran on (HEAD before the
- * merge), for the evidence pack. A sync that cannot finish is aborted, logged, and the branch ships
- * unsynced, exactly as it would have without this step.
- */
 export async function syncShipBranchWithMain(ctx: {
   run: CommandRunner;
   worktree: string;

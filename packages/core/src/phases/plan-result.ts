@@ -8,14 +8,8 @@ export interface PlanResult {
   specPath: string;
   model: string;
   escalate?: string;
-  /** Set when the planner could not write its spec (#3269): `ok` is false and the caller parks `config`. */
   parkReason?: 'config';
   designArtifact: DesignArtifact | null;
-  /** Set only by the post-plan build-scope gate in sizeGate.mode 'slice' (ADR-0147) when the whole
-   *  issue was sliced and its slice plan comment recorded. `ok` stays false: this run ends before
-   *  BUILD, and the next run plans the current slice from the comment. */
   sliced?: { sliceCount: number };
-  /** Set on an ok result when PLAN planned one slice of a sliced issue (ADR-0147). SHIP titles the PR
-   *  from it, and runIssue records the PR in the slice plan comment. */
   slice?: { plan: SlicePlan; index: number };
 }

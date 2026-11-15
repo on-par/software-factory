@@ -956,7 +956,6 @@ npm run test`;
       ],
     });
 
-    // #3350: counts never split; an over-budget design artifact (14 changed files > 12) does, post-plan.
     const megaPlan = () => [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }];
 
     it('scores the size gate on the factory:enriched sections of an already-enriched body (5 -> 8 ACs) (#2660)', async () => {
@@ -1382,7 +1381,6 @@ npm run test`;
       });
     };
 
-    // A plan comment as the factory would have written it; `inScope` lets a test make slice 1 oversized.
     const planComment = (opts: { merged?: number[]; inScope?: string[]; count?: number } = {}) => {
       const count = opts.count ?? 2;
       const stories = Array.from({ length: count }, (_, i) => storyJson(i + 1));
@@ -1414,7 +1412,6 @@ npm run test`;
       maxSlices?: number;
       mode?: 'off' | 'stack';
       comments?: { id: number; user: { id: number }; body: string }[];
-      /** PLAN output; default is a small design. megaPlan trips the post-plan gate (14 changed files > 12). */
       plan?: string;
       labels?: string[];
     }) {

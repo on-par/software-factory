@@ -1,5 +1,3 @@
-// src/phases/ship-walkthrough.ts — best-effort large-PR walkthrough for SHIP (#3623)
-
 import type { EventKind } from '../events/kinds.js';
 import {
   meetsWalkthroughThreshold,
@@ -17,13 +15,10 @@ import { readSpecBody } from './ship-spec.js';
 export interface WalkthroughShipOpts {
   specPath?: string;
   checkSummary?: CheckSummary;
-  /** pr.walkthrough thresholds (#3623); undefined uses the defaults. */
   walkthrough?: Partial<WalkthroughThresholds>;
-  /** The PR's base branch; the size threshold diffs against it, so a stacked PR counts only its own changes. */
   base: string;
 }
 
-/** Memoise the PR-base diff for both the walkthrough and the PR proof. */
 export function lazyWalkthrough(
   run: CommandRunner,
   worktree: string,
@@ -63,29 +58,31 @@ export function lazyWalkthrough(
   };
 }
 
-function destination(input: string): string {
-  let path = input;
-  // Git quotes unusual paths using C escapes, including octal UTF-8 bytes.
-  if (path.startsWith('"') && path.endsWith('"')) {
-    const bytes: number[] = [];
-    const raw = path.slice(1, -1);
-    for (let i = 0; i < raw.length; i++) {
-      if (raw[i] !== '\\') {
-        bytes.push(...Buffer.from(raw[i]));
-        continue;
-      }
-      const octal = /^[0-7]{1,3}/.exec(raw.slice(i + 1))?.[0];
-      if (octal) {
-        bytes.push(Number.parseInt(octal, 8));
-        i += octal.length;
-        continue;
-      }
-      const escapes: Record<string, string> = { t: '\t', n: '\n', r: '\r', '"': '"', '\\': '\\' };
-      bytes.push(...Buffer.from(escapes[raw[++i]] ?? raw[i]));
+function unquoteGitCEscapedPath(path: string): string {
+  if (!(path.startsWith('"') && path.endsWith('"'))) return path;
+  const bytes: number[] = [];
+  const raw = path.slice(1, -1);
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] !== '\\') {
+      bytes.push(...Buffer.from(raw[i]));
+      continue;
     }
-    path = Buffer.from(bytes).toString('utf8');
+    const octalUtf8Byte = /^[0-7]{1,3}/.exec(raw.slice(i + 1))?.[0];
+    if (octalUtf8Byte) {
+      bytes.push(Number.parseInt(octalUtf8Byte, 8));
+      i += octalUtf8Byte.length;
+      continue;
+    }
+    const escapes: Record<string, string> = { t: '\t', n: '\n', r: '\r', '"': '"', '\\': '\\' };
+    bytes.push(...Buffer.from(escapes[raw[++i]] ?? raw[i]));
   }
-  return path.replace(/\{[^{}]* => ([^{}]*)\}/g, '$1').replace(/^.* => /, '');
+  return Buffer.from(bytes).toString('utf8');
+}
+
+function destination(input: string): string {
+  return unquoteGitCEscapedPath(input)
+    .replace(/\{[^{}]* => ([^{}]*)\}/g, '$1')
+    .replace(/^.* => /, '');
 }
 
 function typescriptCounts(files: ReturnType<typeof parseNumstat>): { net: number; nonTest: number } {

@@ -1,5 +1,3 @@
-// packages/core/src/phases/ship-git-detail.ts — command runner type and push-failure description for SHIP
-
 import { shellEscape } from '../utils/index.js';
 
 export type CommandRunner = (
@@ -7,10 +5,8 @@ export type CommandRunner = (
   options?: { cwd?: string; timeout?: number },
 ) => Promise<{ stdout: string }>;
 
-/** Why a `git push` was refused, as far as git's own stderr says (#733). */
 export type PushFailureKind = 'non-fast-forward' | 'network' | 'unknown';
 
-/** Bound on the failure text copied into one NDJSON event row. */
 const MAX_PUSH_ERROR_DETAIL = 400;
 
 const NON_FAST_FORWARD_MARKERS = [
@@ -38,12 +34,6 @@ function classifyPushFailure(text: string): PushFailureKind {
   return 'unknown';
 }
 
-/**
- * The real reason a push failed, from git's own stderr when the runner exposes it
- * (node's promisified `exec` rejection carries `stderr`), else the Error message, else the
- * value's string form. Flattened to one line and bounded so a single event row stays
- * greppable in `.factory/events.ndjson`.
- */
 export function describePushFailure(err: unknown): { kind: PushFailureKind; detail: string } {
   const raw = (err as { stderr?: unknown } | null | undefined)?.stderr;
   const stderr = typeof raw === 'string' ? raw : '';
@@ -52,10 +42,8 @@ export function describePushFailure(err: unknown): { kind: PushFailureKind; deta
   return { kind: classifyPushFailure(detail), detail: detail || 'no error output' };
 }
 
-/** Bound on the ls-remote failure text copied into one NDJSON event row (#735). */
 const MAX_REMOTE_HEAD_DETAIL = 200;
 
-/** Prefer stderr, then stdout, before the error fallback; keep details flattened and bounded. */
 export function shortDetail(err: unknown): string {
   const output = err as { stderr?: unknown; stdout?: unknown } | null | undefined;
   const rawStderr = output?.stderr;
@@ -66,10 +54,16 @@ export function shortDetail(err: unknown): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, MAX_REMOTE_HEAD_DETAIL) || 'no error output';
 }
 
-/** Whether origin's head is an ancestor of local HEAD, i.e. a plain push is a fast-forward (#1815). */
 export type RemoteAncestry = { status: 'ancestor' } | { status: 'diverged' } | { status: 'unreadable'; detail: string };
 
-const MISSING_OBJECT_MARKERS = ['not a valid object name', 'not a valid commit', 'bad object', 'unknown revision'];
+const GIT_NOT_AN_ANCESTOR_EXIT_CODE = 1;
+
+const REMOTE_COMMIT_MISSING_LOCALLY_MARKERS = [
+  'not a valid object name',
+  'not a valid commit',
+  'bad object',
+  'unknown revision',
+];
 
 export async function checkRemoteIsAncestor(
   run: CommandRunner,
@@ -81,11 +75,11 @@ export async function checkRemoteIsAncestor(
     await run(`git merge-base --is-ancestor ${shellEscape(remoteSha)} ${shellEscape(localSha)}`, { cwd: worktree });
     return { status: 'ancestor' };
   } catch (err) {
-    // Exit 1 is git's documented "not an ancestor"; other non-zero statuses are errors.
-    if ((err as { code?: unknown } | null)?.code === 1) return { status: 'diverged' };
+    if ((err as { code?: unknown } | null)?.code === GIT_NOT_AN_ANCESTOR_EXIT_CODE) return { status: 'diverged' };
     const detail = shortDetail(err);
-    // A remote commit absent from the local object store cannot be contained in local HEAD.
-    if (MISSING_OBJECT_MARKERS.some((marker) => detail.toLowerCase().includes(marker))) return { status: 'diverged' };
+    if (REMOTE_COMMIT_MISSING_LOCALLY_MARKERS.some((marker) => detail.toLowerCase().includes(marker))) {
+      return { status: 'diverged' };
+    }
     return { status: 'unreadable', detail };
   }
 }

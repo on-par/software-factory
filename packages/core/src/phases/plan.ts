@@ -1,5 +1,3 @@
-// src/phases/plan.ts — PLAN phase: boss model reads issue, explores repo, freezes spec, picks route
-
 import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -82,11 +80,6 @@ export { classifyEscalation };
 export { buildDesignArtifactRetryPrompt, MAX_DESIGN_ARTIFACT_RETRIES };
 export { type BuildRouteName, defaultBuildRoute, resolveRunnableBuildRoute, runnableBuildRoutes };
 
-/**
- * REST API version pinned on the readiness-enrichment issues.update call (#2385). GitHub serves 2022-11-28 when no
- * header is sent; it is deprecated (sunset 2028-03-10). Scoped to this call because 2026-03-10 has breaking changes
- * on other endpoints (e.g. merge_commit_sha, singular assignee).
- */
 const GITHUB_ISSUE_UPDATE_API_VERSION = '2026-03-10';
 
 export interface PlanPromptOpts {
@@ -96,14 +89,10 @@ export interface PlanPromptOpts {
   specPath: string;
   constitutionCtx: string;
   adrCtx?: string;
-  /** Rendered "## Lane memory" section (#3624); empty or absent = no lane memory. */
   agentMemoryCtx?: string;
-  /** Build routes with at least one runnable model on this machine. Empty or omitted = the CLI routes; command only when listed. */
   runnableRoutes?: readonly BuildRouteName[];
-  /** Pre-flight size-gate verdict (#3275). passed && enforced drops step 4's size ESCALATE. */
   sizeGate?: { passed: boolean; reason?: string; enforced: boolean };
   stackSizeGate?: boolean;
-  /** Rendered "## Previous attempt" note (#3373); empty or absent = first run. */
   previousAttempt?: string;
 }
 
@@ -291,7 +280,6 @@ export async function planPhase(opts: Parameters<typeof planPhaseImpl>[0]): Prom
 }
 
 async function planPhaseImpl(opts: {
-  /** Rendered "## Previous attempt" note (#3373); empty or absent = first run. */
   previousAttempt?: string;
   issue: WorkKey;
   repo: string;
@@ -316,7 +304,6 @@ async function planPhaseImpl(opts: {
   timeoutSeconds?: number;
   modelOverride?: string;
   modelFallbacks?: string[];
-  /** Providers whose breaker is open at the stage boundary (#3226). */
   skipProviders?: ReadonlySet<string>;
   onProviderFailure?: (info: ProviderFailureInfo) => void | Promise<void>;
   branch?: string;
@@ -324,39 +311,22 @@ async function planPhaseImpl(opts: {
   drainSteering?: () => ConsumedSteering;
   maxReplans?: number;
   routeCapabilities?: RouteCapabilities;
-  /** Input source to resolve before PLAN. Defaults to this run's GitHub issue. */
   workSource?: { kind: WorkRequestSourceKind; params: unknown };
-  /** Source registry. Defaults to the built-in registry (GitHub issue adapter only). */
   workSources?: WorkSourceRegistry;
-  /** Enrich incomplete GitHub factory-task issues before calling the boss PLAN task. */
   enforceReadiness?: boolean;
-  /** Skip the model PLAN call only for a complete, explicitly bounded issue. */
   fastPath?: boolean;
-  /** Park oversized factory-task issues (sizeOk: false) instead of proceeding. Default true. */
   enforceSizeGate?: boolean;
-  /** sizeGate.mode. 'stack' (ADR-0161) records a slice plan and plans the lowest pending slice, or an explicit `sliceIndex`. Ignored when enforceSizeGate is false. */
   sizeGateMode?: SizeGateMode;
   parkOverBudget?: boolean;
-  /** Slice-plan store for a non-issue source in stack mode (#3813); issue sources default to the issue comment. */
   slicePlanStore?: SlicePlanStore;
-  /** Slice cap for sizeGate.mode 'stack' (ADR-0156, ADR-0161); default DEFAULT_MAX_SLICES. */
   maxSlices?: number;
-  /** sizeGate.tokenBudget / maxFiles (#3350); default DEFAULT_TOKEN_BUDGET / DEFAULT_MAX_FILES. */
   sizeBudget?: SizeBudget;
-  /** ADR-0161 stack mode: plan this 1-based slice of the trusted slice plan. Default: the lowest pending slice. Ignored outside stack mode. */
   sliceIndex?: number;
-  /** Stop PLAN before BUILD when a worse/unknown behaviorDelta row is not in openQuestions (#1819). Default false = log only. */
   blockUnresolvedRegressions?: boolean;
-  /** readiness.updateIssueBody resolved (#2385); false = enrich in memory only, never write the issue body. Default true. */
   updateIssueBodyOnEnrich?: boolean;
-  /** Local-only mode: force the route to codex so builds use a local harness. */
   localOnly?: boolean;
-  /** Repo config pins the build route (`.factory/config.json` → `route`). Forced
-   *  after plan so the spec frontmatter stays the frozen truth. */
   preferredRoute?: BuildRoutePin;
-  /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
   laneId?: string;
-  /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
   bus?: LifecycleBus;
   onWorkerResult?: (result: RouterResult) => Promise<void>;
 }): Promise<PlanResult> {
@@ -410,7 +380,7 @@ async function planPhaseImpl(opts: {
     const params = source.params as GithubIssueParams;
     const [owner, name] = params.repo.split('/');
     const updateIssueBody = opts.updateIssueBodyOnEnrich ?? true;
-    const maxEnrichmentAttempts = 2; // one initial call + one retry with the missing headings named (#816)
+    const maxEnrichmentAttempts = 2;
     log('readiness_enrichment_started', `enriching incomplete factory-task issue #${params.issue}`);
     try {
       let previous: ReadinessEnrichmentRetryContext | null = null;
@@ -489,7 +459,6 @@ async function planPhaseImpl(opts: {
     }
   }
 
-  // ADR-0161: stack mode records a slice plan and may plan an explicit slice.
   const sizeBudget = opts.sizeBudget ?? { tokenBudget: DEFAULT_TOKEN_BUDGET, maxFiles: DEFAULT_MAX_FILES };
   const stackMode = opts.sizeGateMode === 'stack';
   const sliceGateOn = source.kind === GITHUB_ISSUE_SOURCE || (stackMode && opts.slicePlanStore !== undefined);
@@ -516,7 +485,6 @@ async function planPhaseImpl(opts: {
       ...sliceDeps,
       title: issueTitle,
       body: issueBody,
-      // #3350: issue prose never slices; only an existing trusted slice plan selects a slice here.
       oversized: false,
       ...(opts.sliceIndex !== undefined ? { sliceIndex: opts.sliceIndex } : {}),
     });
@@ -538,7 +506,6 @@ async function planPhaseImpl(opts: {
     }
     if (gate.kind === 'slice') {
       const { plan, slice } = gate;
-      // A brief's slice number is a stand-in run number (#3813): keep it out of the body and label.
       const parentIssue = source.kind === GITHUB_ISSUE_SOURCE ? sliceIssue : undefined;
       issueTitle = `${issueTitle} — slice ${slice.index}/${plan.slices.length}: ${slice.title}`;
       issueBody = renderChildIssueBody(slice.story, parentIssue);
@@ -590,8 +557,6 @@ async function planPhaseImpl(opts: {
         }
       : undefined;
 
-  // The fast path emits a compact Codex spec, so it is only valid when the route may be codex:
-  // a pinned claude/opencode build route (#1367) must go through model PLAN like any other issue.
   const fastPathRouteOk = !opts.preferredRoute || opts.preferredRoute === 'codex';
   if (
     opts.fastPath &&
@@ -630,7 +595,8 @@ async function planPhaseImpl(opts: {
   const adrReader = createFsReader({
     root: worktree,
     onDegrade: (event) => {
-      if (event.reason === 'not-found') return; // a repo with no docs/adr is normal
+      const repoHasNoAdrDir = event.reason === 'not-found';
+      if (repoHasNoAdrDir) return;
       log('adr_read_degraded', `adr read degraded: ${event.operation} ${event.path} (${event.reason})`);
     },
   });
@@ -714,7 +680,6 @@ async function planPhaseImpl(opts: {
       const denied = specWriteDeniedResult(result, specPath, failureRoute, log);
       if (denied) return denied;
 
-      // Check for escalation
       if (isEscalation(result.output)) {
         const escalateLine = escalationLine(result.output);
         const escalateKind = classifyEscalation(escalateLine);
@@ -734,13 +699,11 @@ async function planPhaseImpl(opts: {
         };
       }
 
-      // Check spec file was created. If the model is chat-only, the output is the
-      // spec content; if it has file tools, it may have written specPath directly.
-      if (!existsSync(specPath)) {
+      const plannerWroteNoSpecFile = !existsSync(specPath);
+      if (plannerWroteNoSpecFile) {
         await writeSpec(specPath, { body: result.output });
       }
 
-      // Read route from spec frontmatter (single normalization site: parseSpec)
       parsed = await readSpec(specPath);
       designParse = parseDesignArtifact(parsed.data);
       if (
@@ -758,7 +721,6 @@ async function planPhaseImpl(opts: {
       }
       break;
     }
-    // Re-read after the PLAN call: a CLI that failed sign-in during PLAN is no longer runnable (#2495).
     const runnableNow = runnableBuildRoutes(router);
     const route = await settlePlanRoute({
       parsedRoute: parsed.route,
@@ -810,7 +772,6 @@ async function planPhaseImpl(opts: {
         log('design_open_questions', `plan has ${designArtifact.openQuestions.length} open question(s): ${truncated}`);
       }
 
-      // Build-scope gate (#3350): park or slice plans that exceed the bounded BUILD budget.
       const overBudget = planOverBudget(estimatePlanSize(designArtifact, { worktree }), sizeBudget);
       if (enforceSizeGate && sliceGateOn && overBudget !== null) {
         const scope = overBudget;
@@ -827,7 +788,6 @@ async function planPhaseImpl(opts: {
           log('size-gate-escalated', fileReason);
           return park(fileReason);
         }
-        // ADR-0147: in stack mode the post-plan gate slices a whole issue; a slice is never sliced again.
         if (stackMode) {
           const outcome = await stackSlice(scope, `plan scope exceeds the bounded-build budget: ${scope}`, fileReason);
           if (outcome)
@@ -905,7 +865,7 @@ async function planPhaseImpl(opts: {
       replans++;
       steering = redirect;
       log('plan_redirect', describeSteering(redirect));
-      continue; // re-plan with the redirect applied to the prompt
+      continue;
     }
 
     const reason = response.reason ?? 'plan rejected by operator';

@@ -1,4 +1,3 @@
-// packages/core/src/phases/ship.base-branch.test.ts — the PR opens against baseBranch when set (#3764)
 import { describe, expect, it } from 'vitest';
 
 import { workKeyFromIssue } from '../work/work-key.js';

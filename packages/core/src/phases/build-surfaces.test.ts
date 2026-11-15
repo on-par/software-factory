@@ -108,12 +108,11 @@ describe('BUILD prompt lint surfaces (#2830)', () => {
 
   it('drift guard: BUILD renders exactly the argv lintChecker runs', async () => {
     const worktree = await fixture({ 'package.json': lintPkg, 'tsconfig.json': '{}' });
-    // Fake npm/npx record their argv instead of running, so the real lintChecker argv is observable.
-    const bin = await mkdtemp(join(tmpdir(), 'build-surfaces-bin-'));
-    tempDirs.add(bin);
-    const log = join(bin, 'argv.log');
+    const argvRecordingShimsBin = await mkdtemp(join(tmpdir(), 'build-surfaces-bin-'));
+    tempDirs.add(argvRecordingShimsBin);
+    const log = join(argvRecordingShimsBin, 'argv.log');
     for (const tool of ['npm', 'npx']) {
-      const shim = join(bin, tool);
+      const shim = join(argvRecordingShimsBin, tool);
       await writeFile(shim, `#!/bin/sh\necho "${tool} $*" >> "${log}"\n`);
       await chmod(shim, 0o755);
     }
@@ -121,7 +120,7 @@ describe('BUILD prompt lint surfaces (#2830)', () => {
       worktree,
       specPath: join(worktree, 'x.md'),
       constitutionBody: '',
-      env: { PATH: `${bin}:${process.env.PATH ?? ''}` },
+      env: { PATH: `${argvRecordingShimsBin}:${process.env.PATH ?? ''}` },
     });
     const checkerCmds = (await readFile(log, 'utf8')).trim().split('\n');
     const prompt = await runPrompt(worktree);

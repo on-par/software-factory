@@ -172,8 +172,7 @@ describe('buildPhase command route (#2872)', () => {
       memMb: 4096,
     };
     const calls: string[] = [];
-    // Records the wrapped command but never runs it: only the commit is real.
-    const stubExec = async (cmd: string, opts: { cwd?: string }) => {
+    const recordCommandAndCommitFeature = async (cmd: string, opts: { cwd?: string }) => {
       calls.push(cmd);
       const cwd = opts.cwd ?? worktree;
       await writeFile(join(cwd, 'feature.txt'), 'feature\n');
@@ -189,7 +188,7 @@ describe('buildPhase command route (#2872)', () => {
       specPath: join(worktree, 'issue-3064.md'),
       branch: 'ship-it/3064-declared',
       route: 'command',
-      router: new ModelRouter(models, routes, false, new CliModelExecutor(stubExec)),
+      router: new ModelRouter(models, routes, false, new CliModelExecutor(recordCommandAndCommitFeature)),
       constitution: null,
       log: () => {},
       modelOverride: 'my-model',

@@ -45,7 +45,6 @@ describe('ship on an issue with an open factory PR (#3099)', () => {
       const worktree = kit.trackWorktree(repoRoot, issue);
       const specPath = await kit.makeSpecPath(issue);
 
-      // An earlier run's PR branch: a commit on origin/<branch> that main does not have.
       await writeFile(join(repoRoot, 'earlier.txt'), 'earlier run\n');
       await commitAll(repoRoot, 'feat: earlier run');
       await exec(`git -C '${repoRoot}' push origin HEAD:refs/heads/'${branch}'`);
@@ -61,10 +60,12 @@ describe('ship on an issue with an open factory PR (#3099)', () => {
       const phaseOctokit = asPhaseOctokit(octokit);
       const events: Array<[string, string]> = [];
       const log = (type: string, msg: string) => events.push([type, msg]);
+      const planAttemptsIncludingDesignBlockReprompts = 3;
       const stub = new StubModelExecutor({
         scripts: {
-          // PLAN re-prompts for a missing design block, so script every attempt.
-          plan: Array.from({ length: 3 }, () => ({ output: specContentFor(issue) })),
+          plan: Array.from({ length: planAttemptsIncludingDesignBlockReprompts }, () => ({
+            output: specContentFor(issue),
+          })),
           build_claude: [
             {
               output: 'built',
@@ -82,7 +83,6 @@ describe('ship on an issue with an open factory PR (#3099)', () => {
         findOpenPr: (br) => findOpenPR(phaseOctokit, owner, repoName, br),
       });
 
-      // The decision is made before any model call.
       expect(stub.calls).toHaveLength(0);
       expect(result.base).toBe(`origin/${branch}`);
       expect(result.remoteBranch).toEqual({ sha: prSha, prNumber: 2 });

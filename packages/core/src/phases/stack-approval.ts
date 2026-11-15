@@ -1,23 +1,14 @@
-// src/phases/stack-approval.ts — ADR-0161 stack mode: read whether the top built slice PR is approved or merged (#3366).
-
 import type { SlicePlan } from '../readiness/slice-plan.js';
 
-/** One PR review, reduced to what the approval gate reads. */
 export interface StackSliceReview {
-  /** GitHub user id of the reviewer; null when the account is gone. */
   reviewerId: number | null;
-  /** GitHub review state: APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED or PENDING. */
   state: string;
-  /** Commit the review was submitted on; null when GitHub omits it. */
   commitId: string | null;
 }
 
 export interface StackPullReviews {
-  /** Current head SHA of the PR. */
   headSha: string;
-  /** GitHub user id of the factory's own identity, when known; its reviews never count. */
   selfId: number | undefined;
-  /** Reviews in the chronological order GitHub returns them. */
   reviews: StackSliceReview[];
 }
 
@@ -30,7 +21,6 @@ export type StackSliceGate =
   | { status: 'merged' | 'approved' | 'waiting' | 'changes-requested'; index: number; prNumber: number }
   | { status: 'none' };
 
-/** Latest decisive review per non-self reviewer; CHANGES_REQUESTED blocks, APPROVED counts only on the head SHA. */
 export function readReviewApproval(pull: StackPullReviews): 'approved' | 'waiting' | 'changes-requested' {
   const standing = new Map<number, StackSliceReview>();
   for (const review of pull.reviews) {
@@ -46,7 +36,6 @@ export function readReviewApproval(pull: StackPullReviews): 'approved' | 'waitin
   return 'waiting';
 }
 
-/** Gate of the top built slice (highest `pr-open` or `merged`). Reader errors propagate to the caller. */
 export async function readStackSliceGate(plan: SlicePlan, reader: StackSliceGateReader): Promise<StackSliceGate> {
   const n = plan.slices.length;
   const built = plan.slices.filter((s) => s.state === 'pr-open' || s.state === 'merged');
@@ -62,7 +51,6 @@ export async function readStackSliceGate(plan: SlicePlan, reader: StackSliceGate
   if (top.state === 'merged') return { status: 'merged', index: top.index, prNumber };
   const state = await reader.getPullState(prNumber);
   if (state === 'merged') return { status: 'merged', index: top.index, prNumber };
-  // A closed PR cannot be built on. The bottom-up walk parks it once it becomes the lowest open layer.
   if (state === 'closed') return { status: 'waiting', index: top.index, prNumber };
   const status = readReviewApproval(await reader.getPullReviews(prNumber));
   return { status, index: top.index, prNumber };

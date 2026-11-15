@@ -1,17 +1,11 @@
-// packages/core/src/phases/ship-git-remote.ts — remote-head verification and verified push for SHIP
-
 import { shellEscape } from '../utils/index.js';
 import { type CommandRunner, describePushFailure, type PushFailureKind, shortDetail } from './ship-git-detail.js';
 
-/** The result of comparing the pushed branch's remote head against local HEAD (#735). */
 type RemoteHeadCheck =
   | { status: 'match'; localSha: string; remoteSha: string }
   | { status: 'mismatch'; localSha: string; remoteSha: string }
   | { status: 'unreadable'; localSha?: string; remoteSha?: string; detail: string };
 
-/** The SHA on the `refs/heads/<branch>` line of `git ls-remote` output. `--heads origin <branch>`
- *  is a suffix pattern, so it can list more than one ref — match the ref name exactly rather than
- *  trusting the first line. */
 function parseRemoteHeadSha(stdout: string, branch: string): string | undefined {
   for (const line of stdout.split('\n')) {
     const [sha, ref] = line.trim().split(/\s+/);
@@ -20,7 +14,6 @@ function parseRemoteHeadSha(stdout: string, branch: string): string | undefined 
   return undefined;
 }
 
-/** origin/<branch>'s current SHA, `null` when the branch is absent, or the failure detail (#1869). */
 export async function readRemoteBranchSha(
   run: CommandRunner,
   worktree: string,
@@ -34,11 +27,6 @@ export async function readRemoteBranchSha(
   }
 }
 
-/**
- * A zero-exit push is not proof the remote branch actually carries this run's commits — a
- * concurrent push or an update that silently applied nothing leaves the remote head elsewhere,
- * and a PR opened against it would advertise work that is not there (#735).
- */
 export async function verifyRemoteHead(run: CommandRunner, worktree: string, branch: string): Promise<RemoteHeadCheck> {
   let localSha: string | undefined;
   try {
@@ -64,7 +52,6 @@ export async function verifyRemoteHead(run: CommandRunner, worktree: string, bra
     : { status: 'mismatch', localSha, remoteSha };
 }
 
-/** Outcome of one push followed by a remote-head check, the single verified push site for SHIP (#734/#735/#1813). */
 export type VerifiedPush =
   | { status: 'pushed'; localSha: string; remoteSha: string }
   | { status: 'push-failed'; kind: PushFailureKind; detail: string }

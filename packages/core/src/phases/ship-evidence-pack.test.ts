@@ -27,7 +27,6 @@ function createOctokit() {
 
 const STUB_HEAD_SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
 
-/** stdout for the remote-head verification commands SHIP runs before opening a PR (#735). */
 function remoteHeadStub(command: string): { stdout: string } | undefined {
   if (command === 'git rev-parse HEAD') return { stdout: `${STUB_HEAD_SHA}\n` };
   const match = /^git ls-remote --heads origin '(.+)'$/.exec(command);

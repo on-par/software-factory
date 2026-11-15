@@ -1,5 +1,3 @@
-// packages/core/src/phases/ship-finish.ts — SHIP preview gate, ready flip and final result
-
 import type { PreviewCheckResult } from '../checkers/preview-check.js';
 import type { VisualProofResult } from '../checkers/visual-proof.js';
 import { publishPreviewReceipt } from '../checkers/preview-receipt.js';
@@ -56,7 +54,6 @@ export async function finishShip(ctx: {
     visualProof = await runVisualProofGate(opts.visualProofGate, { prNumber, headSha: sha }, { log, ciPending });
     const nonPass = visualProof.status !== 'pass' && visualProof.status !== 'not-required';
     if (nonPass && opts.visualProofMode === 'advisory') {
-      // Advisory mode (#4047): the block and status already say so; never fail SHIP or park.
       log('warn', `${visualProofFailureReason(prNumber, visualProof)} (advisory: not blocking SHIP)`);
     } else if (nonPass) {
       return {
@@ -77,8 +74,6 @@ export async function finishShip(ctx: {
     return { ok: false, prNumber, reason, ciPending: true, draft: true, ...(headSha ? { headSha } : {}) };
   }
 
-  // Mark ready for review (if draft). REST pulls.update ignores `draft`;
-  // undrafting requires the markPullRequestReadyForReview GraphQL mutation.
   if (opts.draft || ciPending) {
     try {
       const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });

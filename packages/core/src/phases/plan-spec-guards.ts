@@ -10,7 +10,6 @@ import { invalidPlanReason, specHasImplementation } from './plan-spec-validity.j
 const SPEC_WRITE_DENIAL =
   /sandbox denied|operation not permitted|\bEACCES\b|\bEPERM\b|outside the writable|read-only file system/i;
 
-/** True when a planner output reports that writing specPath was denied (#3269). Needs both the path and a denial phrase. */
 export function specWriteDenied(output: string, specPath: string): boolean {
   if (!SPEC_WRITE_DENIAL.test(output)) return false;
   const names = [specPath, dirname(specPath), `plans/${basename(specPath)}`];
@@ -29,13 +28,10 @@ export function blockedNoChangeSpecReason(body: string): string | null {
   return 'PLAN returned a blocked/no-change note instead of a frozen spec';
 }
 
-/** Why a spec with no valid design artifact can't go to BUILD: a blocked/no-change note, or no
- *  Files / approach section to build from (#3270). Null when BUILD can proceed without the design. */
 export function noBuildReason(body: string, errors: readonly string[], attempts: number): string | null {
   return blockedNoChangeSpecReason(body) ?? (specHasImplementation(body) ? null : invalidPlanReason(errors, attempts));
 }
 
-/** Parks `config` when the planner's output reports a denied spec write and no spec file exists (#3269). */
 export function specWriteDeniedResult(
   result: { output: string; model: string },
   specPath: string,

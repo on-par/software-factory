@@ -1,6 +1,3 @@
-// Real-CLI full loop (#2649): PLAN, BUILD, CHECK and SHIP through the real Codex, OpenCode or Pi CLI in a throwaway repo,
-// with only GitHub faked. Runs nightly via scripts/real-cli-smoke.sh when FACTORY_REAL_CLI=<codex|opencode|pi>;
-// vitest.config.ts keeps it out of every other run.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
