@@ -49,8 +49,14 @@ function result(over: Partial<CommandResult>): CommandResult {
 
 describe('appSmokeChecker', () => {
   it('app_smoke fails when the built app never becomes ready on the lane port', async () => {
-    const killGroup = vi.fn(async () => {});
-    const onPgid = vi.fn();
+    const killed: number[] = [];
+    const killGroup = async (pgid: number) => {
+      killed.push(pgid);
+    };
+    const pgids: number[] = [];
+    const onPgid = (pgid: number) => {
+      pgids.push(pgid);
+    };
     const out = await appSmokeChecker(ctxOf({ onPgid }), {
       startApp: fakeApp(1),
       probeReady: async () => null,
@@ -59,8 +65,8 @@ describe('appSmokeChecker', () => {
     expect(out.result).toBe('FAIL');
     expect(out.details).toContain('start exited (code 1)');
     expect(out.details).toContain('boom');
-    expect(killGroup).toHaveBeenCalledWith(4242);
-    expect(onPgid).toHaveBeenCalledWith(4242);
+    expect(killed).toEqual([4242]);
+    expect(pgids).toEqual([4242]);
   });
 
   it('starts the app from the env allow-list: no host secret, lane PORT and HOST kept (#1590)', async () => {
@@ -83,7 +89,10 @@ describe('appSmokeChecker', () => {
 
   it('fails with "not ready after Ns" when nothing answers below 500', async () => {
     let t = 0;
-    const killGroup = vi.fn(async () => {});
+    const killed: number[] = [];
+    const killGroup = async (pgid: number) => {
+      killed.push(pgid);
+    };
     const out = await appSmokeChecker(ctxOf(), {
       startApp: fakeApp(null),
       probeReady: async () => 503,
@@ -95,7 +104,7 @@ describe('appSmokeChecker', () => {
     });
     expect(out.result).toBe('FAIL');
     expect(out.details).toContain('not ready after 5s');
-    expect(killGroup).toHaveBeenCalledWith(4242);
+    expect(killed).toEqual([4242]);
   });
 
   it('app_smoke fails with smoke exit code and writes both command logs', async () => {
@@ -111,18 +120,24 @@ describe('appSmokeChecker', () => {
   });
 
   it('passes and kills the group when smoke succeeds', async () => {
-    const killGroup = vi.fn(async () => {});
+    const killed: number[] = [];
+    const killGroup = async (pgid: number) => {
+      killed.push(pgid);
+    };
     const out = await appSmokeChecker(ctxOf({ runCommand: async () => result({}) }), {
       startApp: fakeApp(null),
       probeReady: async () => 404,
       killGroup,
     });
     expect(out.result).toBe('PASS');
-    expect(killGroup).toHaveBeenCalledWith(4242);
+    expect(killed).toEqual([4242]);
   });
 
   it('still kills the group when the probe throws', async () => {
-    const killGroup = vi.fn(async () => {});
+    const killed: number[] = [];
+    const killGroup = async (pgid: number) => {
+      killed.push(pgid);
+    };
     await expect(
       appSmokeChecker(ctxOf(), {
         startApp: fakeApp(null),
@@ -132,11 +147,16 @@ describe('appSmokeChecker', () => {
         killGroup,
       }),
     ).rejects.toThrow('probe blew up');
-    expect(killGroup).toHaveBeenCalledWith(4242);
+    expect(killed).toEqual([4242]);
   });
 
   it('skips without starting the app when qa or the lane port is missing', async () => {
-    const startApp = vi.fn(fakeApp(null));
+    const started: (readonly string[])[] = [];
+    const app = fakeApp(null);
+    const startApp: AppSmokeDeps['startApp'] = (argv, o) => {
+      started.push(argv);
+      return app(argv, o);
+    };
     const deps: Partial<AppSmokeDeps> = { startApp };
     const noQa = await appSmokeChecker(ctxOf({ qa: null }), deps);
     const noSmoke = await appSmokeChecker(ctxOf({ qa: qa({ smoke: undefined }) }), deps);
@@ -150,7 +170,7 @@ describe('appSmokeChecker', () => {
       expect(o.result).toBe('SKIP');
       expect(o.details.startsWith('unavailable')).toBe(true);
     }
-    expect(startApp).not.toHaveBeenCalled();
+    expect(started).toEqual([]);
   });
 
   it('fails closed on an invalid .factory/config.json', async () => {

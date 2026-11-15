@@ -32,13 +32,12 @@ describe('runBaselineCheckers bypassCache (#3287)', () => {
     const cache = new BaselineCache(join(dir, 'baseline-cache.json'));
     const stale: CheckerOutput = { checker: 'tests', result: 'FAIL', details: 'stale' };
     await cache.set(SHA, hashBaselineEnv(env), hashBaselineCheckerConfig(null), [stale]);
-    const runCheckers = vi.fn(async () => ({
-      failures: 0,
-      passes: 1,
-      skips: 0,
-      total: 1,
-      results: [{ checker: 'tests', result: 'PASS' as const, details: 'fresh' }],
-    }));
+    const ran: string[][] = [];
+    const fresh = { checker: 'tests', result: 'PASS' as const, details: 'fresh' };
+    const runCheckers = async (...args: unknown[]) => {
+      ran.push(args[4] as string[]);
+      return { failures: 0, passes: 1, skips: 0, total: 1, results: [fresh] };
+    };
     const report = await runBaselineCheckers({
       baseSha: SHA,
       laneWorktree: dir,
@@ -54,7 +53,7 @@ describe('runBaselineCheckers bypassCache (#3287)', () => {
         makeTempDir: () => mkdtemp(join(dir, 'p-')),
       },
     });
-    expect(runCheckers).toHaveBeenCalledTimes(1);
+    expect(ran).toEqual([['tests']]);
     expect(report.checkers).toEqual([{ checker: 'tests', verdict: 'clean-on-base', baseResult: 'PASS' }]);
     const stored = await cache.get(SHA, hashBaselineEnv(env), hashBaselineCheckerConfig(null), 'tests');
     expect(stored?.details).toBe('fresh');
