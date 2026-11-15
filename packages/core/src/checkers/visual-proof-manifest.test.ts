@@ -176,6 +176,12 @@ describe('validateVisualProofManifest with steps (#4054)', () => {
     expect(diagnosticOf(check(manifest(), [plain]))).toContain('unexpected before/clip for a route without steps');
   });
 
+  it('reports the underlying read error when a declared clip file cannot be read', () => {
+    const route = statefulRoute({ record: 'gif' });
+    const declared = manifest([capture({ clip: { file: 'clip.bin', format: 'gif' } })]);
+    expect(diagnosticOf(check(declared, [route]))).toContain('clip clip.bin could not be read: ENOENT');
+  });
+
   it('rejects a clip over the size cap or with the wrong format', () => {
     const route = statefulRoute({ record: 'gif' });
     const withClip = (format: string) => manifest([capture({ clip: { file: 'clip.bin', format } })]);

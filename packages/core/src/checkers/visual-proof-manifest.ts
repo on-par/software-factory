@@ -27,6 +27,10 @@ export interface VisualProofCapture {
   clip?: { file: string; format: 'gif' | 'webm' | 'mp4'; bytes: number };
 }
 
+function readError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export const MAX_CLIP_BYTES = 10 * 1024 * 1024;
 const MIN_PNG_BYTES = 2048;
 const MAX_PNG_BYTES = 5 * 1024 * 1024;
@@ -134,8 +138,8 @@ export function validateVisualProofManifest(
     let bytes: Buffer;
     try {
       bytes = readFile(full.value);
-    } catch {
-      return { ok: false, diagnostic: `${label} image ${file} could not be read` };
+    } catch (err) {
+      return { ok: false, diagnostic: `${label} image ${file} could not be read: ${readError(err)}` };
     }
     if (!bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
       return { ok: false, diagnostic: `${label} image ${file} is not a PNG` };
@@ -160,8 +164,8 @@ export function validateVisualProofManifest(
     let bytes: Buffer;
     try {
       bytes = readFile(full.value);
-    } catch {
-      return { ok: false, diagnostic: `${label} clip missing` };
+    } catch (err) {
+      return { ok: false, diagnostic: `${label} clip ${clip.file} could not be read: ${readError(err)}` };
     }
     if (!clipMatchesFormat(bytes, clip.format, wanted)) {
       return { ok: false, diagnostic: `${label} clip is not a ${wanted}` };
