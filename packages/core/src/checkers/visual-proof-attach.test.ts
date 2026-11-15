@@ -259,7 +259,7 @@ describe('renderVisualProofBlock and publishVisualProof', () => {
     expect(block).toContain('- Diagnostic: capture exited 1');
   });
 
-  it('stamps success with an advisory description for an advisory non-pass (#4047)', async () => {
+  it('stamps success with an advisory description for an advisory non-pass, so required-check readers never see red nor wait forever on an unreported status (#4047)', async () => {
     const { octokit, repos, pulls } = fakeOctokit();
     await publishVisualProof(octokit, target, failed, 'advisory');
     expect(pulls.update.mock.calls[0]?.[0].body).toContain(VISUAL_PROOF_ADVISORY_START);
@@ -272,7 +272,7 @@ describe('renderVisualProofBlock and publishVisualProof', () => {
     );
   });
 
-  it('replaces a required block with the advisory one in place, and back (#4047)', async () => {
+  it('replaces a required block with the advisory one in place, and back, so switching modes never leaves two blocks (#4047)', async () => {
     const required = `Intro\n\n${renderVisualProofBlock(failed)}\n\nOutro`;
     const { octokit, pulls } = fakeOctokit();
     pulls.get.mockResolvedValueOnce({ data: { body: required } });
@@ -321,7 +321,7 @@ describe('assertVisualProofForHead', () => {
     creator: { id },
   });
 
-  it('returns without a lookup when the body has no marker', async () => {
+  it('returns without a lookup when the body has no marker, since land enforces proof only under the required marker', async () => {
     const { repos, result } = run('plain', []);
     await expect(result).resolves.toBeUndefined();
     await expect(run(null, []).result).resolves.toBeUndefined();

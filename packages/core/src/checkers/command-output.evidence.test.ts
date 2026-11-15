@@ -1,7 +1,3 @@
-// src/checkers/command-output.evidence.test.ts — test console noise never stands in for the failure (#4018, #4011).
-// Shapes follow a real `bash scripts/verify.sh --no-e2e` run under vitest's default + json reporters: each test's own
-// console output is a `stderr | file > test` block (ended by a blank line) on stderr, the FAIL details close stderr,
-// and the steps after vitest (slowest-tests, test-budget, eval, script tests) print to stdout.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -44,7 +40,7 @@ function result(stdout: string, stderr: string): CommandResult {
   };
 }
 
-describe('stripTestConsoleBlocks', () => {
+describe('stripTestConsoleBlocks: what a test printed, passing or not, is never the failure report (#4018, #4011)', () => {
   it('drops each `stdout | ` / `stderr | ` block through its blank line and keeps everything else', () => {
     const text = `${V1_WARNING}${DEPRECATION}kept line\n${V1_WARNING}\n FAIL  a.test.ts > x\n`;
     expect(stripTestConsoleBlocks(text)).toBe('kept line\n\n FAIL  a.test.ts > x\n');
@@ -55,7 +51,7 @@ describe('stripTestConsoleBlocks', () => {
   });
 });
 
-describe('describeTestFailure evidence (#4018)', () => {
+describe('describeTestFailure evidence on a real verify.sh shape: test console blocks and FAIL details on stderr, later steps on stdout (#4018)', () => {
   it('a real vitest failure quotes the failing test and its assertion, not the stderr of passing tests', () => {
     const stdout = [
       ' ❯ src/math.test.ts (2 tests | 1 failed) 12ms',
@@ -112,7 +108,7 @@ describe('describeTestFailure evidence (#4018)', () => {
   });
 });
 
-describe('combinedOutputTail', () => {
+describe('combinedOutputTail: a multi-step script stops at its failing step, so that step printed last on either stream', () => {
   it('keeps both streams in arrival order and only the last maxChars', () => {
     const tail = combinedOutputTail(12);
     tail.onOutput('stdout', Buffer.from('aaaaaaaaaa\n'));

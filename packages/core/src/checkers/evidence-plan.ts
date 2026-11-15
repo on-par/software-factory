@@ -23,7 +23,6 @@ export interface EvidencePlanResult {
   headRun?: EvidenceTestRun;
   baseRun?: EvidenceTestRun;
   baseSha?: string;
-  /** set by verifyFailToPass when base and head failed identically (#3749); triage classes it infra */
   sharedFailure?: string;
 }
 
@@ -87,7 +86,6 @@ function actualOutput(output: string): string {
   return output.length <= 600 ? output : `…[truncated]${output.slice(-600)}`;
 }
 
-/** SKIP reason for evidence text the shell-free tokenizer rejects, distinct from a command missing from the allowlist (#3600). */
 const UNSUPPORTED_SHELL_SYNTAX =
   'unsupported shell syntax (evidence runs one shell-free command: no pipes, redirects, ;, &, $, backticks, globs or VAR= prefixes)';
 

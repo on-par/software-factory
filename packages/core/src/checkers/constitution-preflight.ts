@@ -1,12 +1,7 @@
-// packages/core/src/checkers/constitution-preflight.ts — pure pre-PLAN validation of the
-// constitution `checkers:` names (#2585). CHECK fails closed on unknown names; this catches them
-// before any model call and locates the offending line in the constitution file.
-
 import { STANDARD_CHECKER_NAMES } from './index.js';
 
 export interface UnknownConstitutionChecker {
   name: string;
-  /** 1-based line in the constitution file, when the raw text was available and the name was found. */
   line?: number;
 }
 
@@ -21,7 +16,6 @@ function cleanItem(text: string): string {
   return t;
 }
 
-/** Candidate (name, 1-based line) pairs from the frontmatter `checkers:` list. */
 function listCheckerLines(raw: string): Array<{ name: string; line: number }> {
   const lines = raw.split(/\r?\n/);
   if (lines[0]?.trim() !== '---') return [];

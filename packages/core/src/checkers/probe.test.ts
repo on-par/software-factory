@@ -1,5 +1,3 @@
-// src/checkers/probe.test.ts — Once-per-round worktree probing shared by the CHECK phase and checkers
-
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
@@ -150,7 +148,7 @@ describe('detectPythonTestSurface', () => {
     expect(await detectPythonTestSurface(worktree)).toEqual({ present: false, sources: [] });
   });
 
-  it('detects pytest.ini by existence alone', async () => {
+  it('detects pytest.ini by existence alone, since pytest treats the file itself as its config declaration', async () => {
     const worktree = await makeWorktree({ 'pytest.ini': '[pytest]\n' });
 
     expect(await detectPythonTestSurface(worktree)).toEqual({ present: true, sources: ['pytest.ini'] });
@@ -213,7 +211,7 @@ describe('detectPythonTestSurface', () => {
     expect(await detectPythonTestSurface(worktree)).toEqual({ present: false, sources: [] });
   });
 
-  it('skips generated and venv directories when walking tests/', async () => {
+  it('skips generated and venv directories when walking tests/, since a test_*.py inside a venv is vendored, not a repo test', async () => {
     const worktree = await makeWorktree({
       'tests/__pycache__/test_cached.py': 'def test_x(): pass\n',
       'tests/.venv/test_vendored.py': 'def test_y(): pass\n',
@@ -236,7 +234,7 @@ describe('countPlaceholderLinks', () => {
 });
 
 describe('findHtmlFiles', () => {
-  it('returns sorted relative paths, skipping generated-output directories', async () => {
+  it('returns sorted relative paths, skipping generated-output directories whose HTML (like a coverage report embedding href="#" source) would be false placeholder-link positives', async () => {
     const worktree = await makeWorktree({
       'z.html': '<main>z</main>',
       'a/nested.html': '<main>nested</main>',
@@ -310,7 +308,7 @@ describe('detectLintConfig', () => {
     expect(await detectLintConfig(await makeWorktree(fixture.files))).toBeNull();
   });
 
-  it('never evaluates an executable config', async () => {
+  it('never evaluates an executable config, since loading a TS/JS config runs its code', async () => {
     const g = globalThis as Record<string, unknown>;
     const cjs =
       "globalThis.__lintConfigEvaluated = true; require('node:fs').writeFileSync(require('node:path').join(__dirname, 'EVALUATED'), 'x'); throw new Error('evaluated');\n";
@@ -339,7 +337,7 @@ describe('detectLintConfig', () => {
     expect(await detectLintConfig(join(tmpdir(), 'checker-probe-test-does-not-exist'))).toBeNull();
   });
 
-  it('prefers oxlint over eslint when both exist', async () => {
+  it('prefers oxlint over eslint when both exist, because candidate order is precedence order', async () => {
     const worktree = await makeWorktree({ '.oxlintrc.json': '{}', 'eslint.config.js': 'export default [];\n' });
     expect((await detectLintConfig(worktree))?.linter).toBe('oxlint');
   });

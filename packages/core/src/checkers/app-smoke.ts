@@ -1,5 +1,3 @@
-// src/checkers/app-smoke.ts — opt-in CHECK checker: boots the built app on the lane port and runs the repo's smoke command (#3253).
-
 import { spawn } from 'node:child_process';
 
 import { openCommandCapture } from '../command-output/capture.js';
@@ -26,7 +24,6 @@ const DEFAULT_SMOKE_TIMEOUT_SECONDS = 300;
 export interface StartedApp {
   pid?: number;
   exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
-  /** Combined stdout and stderr, kept to the last ~64 KB. */
   output: () => string;
 }
 

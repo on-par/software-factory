@@ -1,5 +1,3 @@
-// src/checkers/design-floor.test.ts — design critic skips a review floor class A diff (#3374).
-
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
@@ -58,7 +56,7 @@ async function runWith(numstat: string | null, extra: Partial<CheckerContext> = 
 }
 
 describe('designSmellsChecker review floor skip', () => {
-  it('skips the design critic on a docs-only diff (review floor A, T22)', async () => {
+  it('skips the design critic on a docs-only diff, which has no program design to critique (review floor A, T22)', async () => {
     const { result, calls } = await runWith('1\t1\tdocs/guide.md\n');
     expect(result.result).toBe('SKIP');
     expect(result.details).toContain('review floor A');
@@ -97,7 +95,7 @@ describe('designSmellsChecker review floor skip', () => {
 });
 
 describe('designFloorSkip', () => {
-  it('returns null when the runner throws', async () => {
+  it('returns null so the critic still runs (fail closed) when the runner throws', async () => {
     const run: DiffRunner = async () => {
       throw new Error('boom');
     };

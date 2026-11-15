@@ -53,7 +53,7 @@ function laneAndMainBothAddingChangelogBullets(): { lane: string; checked: strin
   return { lane, checked: git(lane, 'rev-parse', 'HEAD') };
 }
 
-describe('syncShipBranchWithMain', () => {
+describe('syncShipBranchWithMain merges origin/main before SHIP pushes, because GitHub runs no pull_request CI on a PR left conflicting by sibling merges, so syncing first opens it mergeable and CI runs', () => {
   it('merges origin/main into a branch whose only conflict is CHANGELOG Unreleased, keeping both bullets', async () => {
     const { lane, checked } = laneAndMainBothAddingChangelogBullets();
     const log = vi.fn();

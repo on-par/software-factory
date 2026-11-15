@@ -5,7 +5,7 @@ import { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './
 
 const fixture = '---\nproduct: acme\nversion: 1\ncheckers:\n  - <checker-name>\n  - compile\n---\nbody';
 
-describe('findUnknownConstitutionCheckers', () => {
+describe('findUnknownConstitutionCheckers catches names CHECK would fail closed on, before any model call', () => {
   it('accepts built-ins, custom_*, and empty lists', () => {
     expect(findUnknownConstitutionCheckers([...STANDARD_CHECKER_NAMES, 'custom_foo', 'custom_'])).toEqual([]);
     expect(findUnknownConstitutionCheckers([])).toEqual([]);

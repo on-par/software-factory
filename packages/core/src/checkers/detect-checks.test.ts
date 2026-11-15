@@ -106,7 +106,7 @@ describe('detectCheckHeuristics', () => {
     expect((await detectCheckHeuristics(repo({ 'README.md': 'hi' }))).ambiguities).toEqual(['no test command found']);
   });
 
-  it('a README command that runs a repo script is documented, and differing from the guess is ambiguous', async () => {
+  it('a README command that runs a repo script is documented, differing from the guess is ambiguous, and the documented command wins in the heuristic proposal', async () => {
     const dir = repo({
       'App.sln': '',
       '.githooks/run-tests.ps1': '',
@@ -140,7 +140,7 @@ describe('detectCheckHeuristics', () => {
 });
 
 describe('detection agent prompt and reply', () => {
-  it('inlines the docs, CI workflows and scripts', async () => {
+  it('inlines the docs, CI workflows and scripts so the agent call needs no tools', async () => {
     const dir = repo({
       'README.md': 'readme text',
       'CONTRIBUTING.md': 'contributing text',

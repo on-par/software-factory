@@ -3,8 +3,7 @@ import type { CheckerOutput, CheckSummary } from '../types/index.js';
 export type InfraKind = 'timeout' | 'network' | 'missing-tool' | 'evidence-env';
 export type CheckFailureTriage = { class: 'code' } | { class: 'infra'; kind: InfraKind; line: string };
 
-// ECONNREFUSED and EPIPE are excluded on purpose: a refused local port is often the lane's own app failing to start.
-const NETWORK_PATTERNS: RegExp[] = [
+const NETWORK_PATTERNS_SKIP_ECONNREFUSED_EPIPE_AS_OFTEN_THE_LANES_OWN_APP_NOT_STARTING: RegExp[] = [
   /\bECONNRESET\b/,
   /\bETIMEDOUT\b/,
   /\bEAI_AGAIN\b/,
@@ -17,8 +16,6 @@ const NETWORK_PATTERNS: RegExp[] = [
 const MISSING_TOOL_PATTERN = /command not found/;
 const MAX_LINE = 300;
 
-/** Classify one checker result as infrastructure or code (#3371). `Cannot find module` stays code: it is an undeclared dependency.
- * An evidence_plan FAIL whose every failed entry failed identically on base and head is an environment fault (#3749). */
 export function triageCheckFailure(result: CheckerOutput): CheckFailureTriage {
   if (result.result !== 'FAIL') return { class: 'code' };
   if (result.checker === 'evidence_plan') {
@@ -33,7 +30,9 @@ export function triageCheckFailure(result: CheckerOutput): CheckFailureTriage {
     const first = lines.map((l) => l.trim()).find((l) => l !== '');
     return { class: 'infra', kind: 'timeout', line: (first ?? 'timed out').slice(0, MAX_LINE) };
   }
-  const network = lines.find((l) => NETWORK_PATTERNS.some((p) => p.test(l)));
+  const network = lines.find((l) =>
+    NETWORK_PATTERNS_SKIP_ECONNREFUSED_EPIPE_AS_OFTEN_THE_LANES_OWN_APP_NOT_STARTING.some((p) => p.test(l)),
+  );
   if (network !== undefined) return { class: 'infra', kind: 'network', line: network.trim().slice(0, MAX_LINE) };
   const missing = lines.find((l) => MISSING_TOOL_PATTERN.test(l));
   if (missing !== undefined) return { class: 'infra', kind: 'missing-tool', line: missing.trim().slice(0, MAX_LINE) };

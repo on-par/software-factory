@@ -1,5 +1,3 @@
-// src/checkers/command-output.test.ts — summarizeCommandRun and parseCommandCounts
-
 import { describe, expect, it } from 'vitest';
 
 import type { CommandResult } from '../utils/command-runner.js';

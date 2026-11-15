@@ -1,5 +1,3 @@
-// src/checkers/baseline.ts — re-run round-1 failing checkers on the base SHA in a temporary worktree (#1925)
-
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,85 +19,69 @@ export type BaselineVerdict = 'clean-on-base' | 'fails-on-base' | 'not-run';
 export interface BaselineCheckerComparison {
   checker: string;
   verdict: BaselineVerdict;
-  /** The checker's result on the base SHA; absent when it was not run there. */
   baseResult?: CheckResult;
-  /** The base result ended by timeout (#3186): inconclusive. */
   baseTimedOut?: true;
-  /** The base FAIL's details (bounded by the checker); base health quotes them as evidence. */
   baseDetails?: string;
-  /** The base FAIL's command, exit code and timeout, when the checker recorded them. */
   baseCommand?: CheckerOutput['failedCommand'];
-  /** The base checker crashed before a verdict (CheckerOutput.checkerError). */
   baseCheckerError?: true;
-  /** Failing tests named by both the head and base output; present only when both name tests. */
   sharedFailingTests?: string[];
-  /** Failing tests named by the head output but not the base output; present only when both name tests. */
   newFailingTests?: string[];
-  /** Why the checker was not run on base (verdict 'not-run'). */
   reason?: string;
-  /** True when the base result came from the baseline cache (#1926). */
   cached?: boolean;
 }
 
 export interface BaselineReport {
   baseSha: string;
   checkers: BaselineCheckerComparison[];
-  /** Set when the base worktree could not be created or the base run threw. */
   error?: string;
-  /** A fresh local base run FAILed while GitHub CI on baseSha is green (#3851). */
   confirmedLocally?: true;
 }
 
 export interface BaselineDeps {
   runCommand?: typeof runCommand;
   runCheckers?: typeof runAllCheckers;
-  /** Creates the empty parent directory for the temporary worktree. */
   makeTempDir?: () => Promise<string>;
 }
 
 export interface BaselineOptions {
   baseSha: string;
-  /** The issue's worktree; git commands run here, its files are never changed. */
   laneWorktree: string;
-  /** Round-1 checker outputs (only FAIL entries are considered). */
   failing: readonly CheckerOutput[];
-  /** The round's checker context; its env (laneEnv) is reused unchanged. */
   ctx: CheckerContext;
   router: ModelRouter;
   constitution: Constitution | null;
   customCheckerTimeoutSeconds?: number;
   deps?: BaselineDeps;
-  /** Baseline result cache (#1926); when absent every runnable checker runs on base. */
   cache?: BaselineCache;
-  /** Skip cache reads; fresh results are still written (#3287). */
   bypassCache?: boolean;
-  /** GitHub CI verdict for the base SHA (#3540); a cached non-timeout FAIL on a green SHA is dropped and re-run. */
   requiredChecksVerdict?: (sha: string) => Promise<RequiredChecksVerdict>;
-  /** Called once per cache entry dropped because CI disagrees (#3540). */
   onCacheInvalidated?: (checker: string, reason: string) => void;
 }
 
-/** Checkers that grade the change diff, which is empty at the base SHA. */
-const DIFF_SCOPED = new Set([WORKER_OUTPUT_CHECKER, DESIGN_SMELLS_CHECKER]);
+const CHECKERS_GRADING_THE_CHANGE_DIFF_EMPTY_ON_BASE = new Set([WORKER_OUTPUT_CHECKER, DESIGN_SMELLS_CHECKER]);
 
 function notRunnableReason(name: string): string | null {
-  if (DIFF_SCOPED.has(name)) return 'graded against the change diff, not runnable on base';
+  if (CHECKERS_GRADING_THE_CHANGE_DIFF_EMPTY_ON_BASE.has(name)) {
+    return 'graded against the change diff, not runnable on base';
+  }
   if (name.startsWith('custom_')) return 'agent checker graded against the spec, not run on base';
   return null;
 }
 
-/** Failing test names in checker output, deduped in first-seen order. */
+const PYTEST_SHORT_SUMMARY_NODE_ID = /\bFAILED\s+(\S+::\S+)/;
+const VITEST_JEST_FAIL_MARKER = /(?:\bFAIL|[×✕●])\s+(.+)/;
+const TAP_NOT_OK = /\bnot ok \d+\s*-\s*(.+)/i;
+const DOTNET_TESTING_PLATFORM_FAILED_WITH_DURATION = /\bfailed\s+(\S+)\s+\(\d/;
+
 export function extractFailingTestNames(details: string): string[] {
   const names = details
     .split(/\r?\n/)
     .flatMap(
       (line) =>
-        // pytest short summary: "FAILED tests/x.py::test_a - AssertionError" → the node id
-        line.match(/\bFAILED\s+(\S+::\S+)/)?.[1] ??
-        line.match(/(?:\bFAIL|[×✕●])\s+(.+)/)?.[1] ??
-        line.match(/\bnot ok \d+\s*-\s*(.+)/i)?.[1] ??
-        // .NET Microsoft.Testing.Platform: "failed Namespace.Class.Test (46ms)"
-        line.match(/\bfailed\s+(\S+)\s+\(\d/)?.[1] ??
+        line.match(PYTEST_SHORT_SUMMARY_NODE_ID)?.[1] ??
+        line.match(VITEST_JEST_FAIL_MARKER)?.[1] ??
+        line.match(TAP_NOT_OK)?.[1] ??
+        line.match(DOTNET_TESTING_PLATFORM_FAILED_WITH_DURATION)?.[1] ??
         [],
     )
     .map((identifier) => identifier.trim())
@@ -185,7 +167,7 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
     try {
       hit = bypassCache === true ? undefined : await cache?.get(baseSha, envHash, configHash, name);
     } catch {
-      hit = undefined; // a cache read error is a miss
+      hit = undefined;
     }
     if (hit?.result === 'FAIL' && hit.timedOut !== true && lookupCi) {
       const verdict = await lookupCi();
@@ -226,8 +208,8 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
     const install = dependencyInstallCommand(baseWorktree);
     if (install !== null) {
       const r = await run(install, { cwd: baseWorktree, env: ctx.env, timeoutMs: DEPENDENCY_INSTALL_TIMEOUT_MS });
-      // An install failure says nothing about the base's code: report an error (base health skips) and cache nothing.
-      if (r.exitCode !== 0) {
+      const installFailureSaysNothingAboutBaseCode = r.exitCode !== 0;
+      if (installFailureSaysNothingAboutBaseCode) {
         return {
           baseSha,
           checkers: markCached(compareBaseline(failing, cachedOutputs), cachedNames),
@@ -258,7 +240,7 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
       error: `baseline run failed: ${(e?.message ?? String(e)).slice(0, 300)}`,
     };
   } finally {
-    await removeBaseWorktree(run, laneWorktree, parent, baseWorktree);
+    await removeOwnBaseWorktreeBestEffort(run, laneWorktree, parent, baseWorktree);
   }
 }
 
@@ -272,25 +254,27 @@ function markCached(
   return comparisons;
 }
 
-/** Removes only our worktree; never throws. */
-async function removeBaseWorktree(
+async function removeOwnBaseWorktreeBestEffort(
   run: typeof runCommand,
   laneWorktree: string,
   parent: string,
   baseWorktree: string,
 ): Promise<void> {
-  try {
-    const r = await run(['git', 'worktree', 'remove', '--force', baseWorktree], {
-      cwd: laneWorktree,
-      timeoutMs: GIT_COMMAND_TIMEOUT_MS,
-    });
-    if (r.exitCode !== 0) {
-      await rm(baseWorktree, { recursive: true, force: true });
-      await run(['git', 'worktree', 'prune'], { cwd: laneWorktree, timeoutMs: GIT_COMMAND_TIMEOUT_MS });
-    }
-  } catch {
-    // cleanup is best-effort
-  } finally {
-    await rm(parent, { recursive: true, force: true }).catch(() => {});
+  await removeBaseWorktreeOrDeleteAndPrune(run, laneWorktree, baseWorktree).catch(() => {});
+  await rm(parent, { recursive: true, force: true }).catch(() => {});
+}
+
+async function removeBaseWorktreeOrDeleteAndPrune(
+  run: typeof runCommand,
+  laneWorktree: string,
+  baseWorktree: string,
+): Promise<void> {
+  const r = await run(['git', 'worktree', 'remove', '--force', baseWorktree], {
+    cwd: laneWorktree,
+    timeoutMs: GIT_COMMAND_TIMEOUT_MS,
+  });
+  if (r.exitCode !== 0) {
+    await rm(baseWorktree, { recursive: true, force: true });
+    await run(['git', 'worktree', 'prune'], { cwd: laneWorktree, timeoutMs: GIT_COMMAND_TIMEOUT_MS });
   }
 }

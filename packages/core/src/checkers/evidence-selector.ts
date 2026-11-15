@@ -89,7 +89,6 @@ function runnerFromWords(words: readonly string[]): EvidenceTestRunner | null {
   return RUNNERS.find((runner) => runner === name) ?? null;
 }
 
-/** The test runner a package.json script body invokes, or null when it is not a recognised runner. */
 export function runnerFromScript(body: string): EvidenceTestRunner | null {
   const words = tokenizeEvidenceCommand(body);
   return words ? runnerFromWords(words) : null;
