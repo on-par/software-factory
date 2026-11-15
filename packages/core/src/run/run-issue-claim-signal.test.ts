@@ -21,6 +21,9 @@ const planPhase = vi.fn<typeof realPlanPhase>();
 const buildPhase = vi.fn<typeof realBuildPhase>();
 const checkPhase = vi.fn<typeof realCheckPhase>();
 const shipPhase = vi.fn<typeof realShipPhase>();
+const shipCalls: Parameters<typeof realShipPhase>[0][] = [];
+const events: unknown[][] = [];
+const log: ReturnType<RunPorts['events']> = (...args) => events.push(args);
 
 const PLAN_OK: PlanResult = { ok: true, route: 'codex', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null };
 const BUILD_OK: BuildResult = { ok: true, model: 'm', route: 'codex' };
@@ -105,9 +108,10 @@ function ports(log: Log, octokit: Octokit = {} as Octokit): RunPorts {
 
 beforeEach(() => {
   rmSync(keepsFile, { force: true });
+  shipCalls.length = events.length = 0;
   vi.mocked(shipPhase)
     .mockReset()
-    .mockResolvedValue({ ok: true, prNumber: 42 } satisfies ShipResult);
+    .mockImplementation(async (opts) => (shipCalls.push(opts), { ok: true, prNumber: 42 } satisfies ShipResult));
   vi.mocked(planPhase).mockReset().mockResolvedValue(PLAN_OK);
   vi.mocked(buildPhase).mockReset().mockResolvedValue(BUILD_OK);
   vi.mocked(checkPhase).mockReset().mockResolvedValue(CHECK_OK);
@@ -121,18 +125,17 @@ describe('runIssue — claimSignal (#3146)', () => {
       controller.abort(lost);
       return BUILD_OK;
     });
-    const log = vi.fn<Log>();
     await expect(runIssue(request, policy, { ...ports(log), claimSignal: controller.signal })).rejects.toBe(lost);
-    expect(shipPhase).not.toHaveBeenCalled();
-    expect(log.mock.calls.some(([type]) => type === 'parked' || type === 'escalate')).toBe(false);
+    expect(shipCalls).toEqual([]);
+    expect(events.some(([type]) => type === 'parked' || type === 'escalate')).toBe(false);
   });
 
   it('a signal that never aborts leaves the run unchanged', async () => {
     const controller = new AbortController();
-    const outcome = await runIssue(request, policy, { ...ports(vi.fn<Log>()), claimSignal: controller.signal });
+    const outcome = await runIssue(request, policy, { ...ports(log), claimSignal: controller.signal });
     expect(outcome).toMatchObject({ state: 'ready' });
-    expect(shipPhase).toHaveBeenCalledTimes(1);
-    expect(shipPhase.mock.calls[0][0].run).toBeTypeOf('function');
+    expect(shipCalls).toHaveLength(1);
+    expect(shipCalls[0].run).toBeTypeOf('function');
   });
 
   it('an abort during the first shipPhase rethrows even when ship reports ok:false', async () => {
@@ -142,13 +145,11 @@ describe('runIssue — claimSignal (#3146)', () => {
       controller.abort(lost);
       return { ok: false, reason: 'push refused' } as ShipResult;
     });
-    await expect(runIssue(request, policy, { ...ports(vi.fn<Log>()), claimSignal: controller.signal })).rejects.toBe(
-      lost,
-    );
+    await expect(runIssue(request, policy, { ...ports(log), claimSignal: controller.signal })).rejects.toBe(lost);
   });
 
   it('without a claimSignal shipPhase gets no guarded runner', async () => {
-    await runIssue(request, policy, ports(vi.fn<Log>()));
-    expect(shipPhase.mock.calls[0][0]).not.toHaveProperty('run');
+    await runIssue(request, policy, ports(log));
+    expect(shipCalls[0]).not.toHaveProperty('run');
   });
 });

@@ -103,19 +103,25 @@ const briefRequest: RunRequest = {
 };
 const parkingPolicy: RunPolicy = { ...policy, budget: { perIssueCapUsd: 1 } };
 
+const events: Parameters<Log>[] = [];
+const log: Log = (...args) => events.push(args);
+
 function githubOctokit(reject?: Error) {
-  const fail = reject ? async () => Promise.reject(reject) : undefined;
-  const createComment = vi.fn(fail ?? (async (_args?: { body: string }) => ({ data: { id: 1 } })));
-  const listComments = vi.fn(fail ?? (async () => ({ data: [] })));
-  const updateComment = vi.fn();
-  const getAuthenticated = vi.fn(async () => ({ data: { id: 9 } }));
+  const apiCalls: string[] = [];
+  const bodies: string[] = [];
+  const call = async <T>(name: string, value: T) => (apiCalls.push(name), reject ? Promise.reject(reject) : value);
+  const createComment = async (args: { body: string }) =>
+    call('createComment', { data: { id: 1 } }).then((made) => (bodies.push(args.body), made));
+  const listComments = async () => call('listComments', { data: [] });
+  const updateComment = async () => call('updateComment', undefined);
+  const getAuthenticated = async () => ({ data: { id: 9 } });
   const octokit = Object.assign({} as Octokit, {
     rest: {
       users: { getAuthenticated },
       issues: { listComments, createComment, updateComment },
     },
   });
-  return { octokit, createComment, listComments, updateComment, getAuthenticated };
+  return { octokit, apiCalls, bodies };
 }
 
 function ports(log: Log, octokit: Octokit = {} as Octokit): RunPorts {
@@ -135,6 +141,7 @@ function ports(log: Log, octokit: Octokit = {} as Octokit): RunPorts {
 
 beforeEach(() => {
   rmSync(keepsFile, { force: true });
+  events.length = 0;
   vi.mocked(shipPhase)
     .mockReset()
     .mockResolvedValue({ ok: true, prNumber: 42 } satisfies ShipResult);
@@ -145,35 +152,29 @@ beforeEach(() => {
 
 describe('runIssue — park of a local-brief run', () => {
   it('a parked local-brief run makes no GitHub park-comment call', async () => {
-    const { octokit, createComment, listComments, updateComment } = githubOctokit();
-    const log = vi.fn<Log>();
+    const { octokit, apiCalls } = githubOctokit();
     const parking: RunPorts = { ...ports(log, octokit), getIssueSpend: () => 2 };
     const outcome = await runIssue(briefRequest, parkingPolicy, parking);
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
-    expect(createComment).not.toHaveBeenCalled();
-    expect(listComments).not.toHaveBeenCalled();
-    expect(updateComment).not.toHaveBeenCalled();
-    expect(log.mock.calls.some(([type, msg]) => type === 'fail' && /budget|cap/i.test(msg))).toBe(true);
+    expect(apiCalls).toEqual([]);
+    expect(events.some(([type, msg]) => type === 'fail' && /budget|cap/i.test(msg))).toBe(true);
   });
 
   it('a parked local-brief run logs no park-comment warning', async () => {
     const { octokit } = githubOctokit(Object.assign(new Error('Not Found'), { status: 404 }));
-    const log = vi.fn<Log>();
     const parking: RunPorts = { ...ports(log, octokit), getIssueSpend: () => 2 };
     await runIssue(briefRequest, parkingPolicy, parking);
-    expect(log.mock.calls.some(([type]) => type === 'environment_warning')).toBe(false);
-    expect(log.mock.calls.some(([, msg]) => msg.includes('could not post the issue park comment'))).toBe(false);
+    expect(events.some(([type]) => type === 'environment_warning')).toBe(false);
+    expect(events.some(([, msg]) => msg.includes('could not post the issue park comment'))).toBe(false);
   });
 
   it('a parked github-issue run still posts its park comment', async () => {
-    const { octokit, createComment } = githubOctokit();
-    const log = vi.fn<Log>();
+    const { octokit, bodies } = githubOctokit();
     const parking: RunPorts = { ...ports(log, octokit), getIssueSpend: () => 2 };
     const outcome = await runIssue(request, parkingPolicy, parking);
     expect(outcome).toMatchObject({ state: 'parked' });
-    expect(createComment).toHaveBeenCalledTimes(1);
-    const parkEvent = log.mock.calls.find(([type]) => type === 'fail');
-    const body = createComment.mock.calls[0]?.[0]?.body;
-    expect(body).toContain(parkEvent?.[1] ?? 'missing');
+    expect(bodies).toHaveLength(1);
+    const parkEvent = events.find(([type]) => type === 'fail');
+    expect(bodies[0]).toContain(parkEvent?.[1] ?? 'missing');
   });
 });

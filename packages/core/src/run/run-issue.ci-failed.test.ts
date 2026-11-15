@@ -83,6 +83,8 @@ const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-ci-failed-'));
 afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
 
 type Log = ReturnType<RunPorts['events']>;
+const events: Parameters<Log>[] = [];
+const log: Log = (...args) => events.push(args);
 
 function ports(log: Log): RunPorts {
   return {
@@ -100,6 +102,7 @@ function ports(log: Log): RunPorts {
 }
 
 beforeEach(() => {
+  events.length = 0;
   vi.mocked(planPhase).mockReset().mockResolvedValue(PLAN_OK);
   vi.mocked(buildPhase).mockReset().mockResolvedValue(BUILD_OK);
   vi.mocked(checkPhase).mockReset().mockResolvedValue(CHECK_OK);
@@ -120,33 +123,31 @@ describe('runIssue — SHIP CI failure parks as ci-failed (#2814)', () => {
       ciOutcome: 'failure',
       ciFailure: EVIDENCE,
     });
-    const log = vi.fn<Log>();
     const outcome = await runIssue(request, policy, ports(log));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'ci-failed' });
-    expect(log).toHaveBeenCalledWith(
+    expect(events).toContainEqual([
       'ci-failed',
       'ship phase failed: CI failed for PR #9',
       expect.objectContaining({ ciFailure: EVIDENCE }),
-    );
-    expect(log.mock.calls.some(([type]) => type === 'fail')).toBe(false);
+    ]);
+    expect(events.some(([type]) => type === 'fail')).toBe(false);
   });
 
   it('still parks a non-CI ship failure as fail', async () => {
     shipPhase.mockResolvedValue({ ok: false, reason: 'push failed' });
-    const log = vi.fn<Log>();
     const outcome = await runIssue(request, policy, ports(log));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
-    expect(log).toHaveBeenCalledWith(
+    expect(events).toContainEqual([
       'fail',
       'ship phase failed: push failed',
       expect.objectContaining({ attribution: expect.anything() }),
-    );
+    ]);
   });
 
   it('keeps ci-infra and escalate parks unchanged', async () => {
     shipPhase.mockResolvedValue({ ok: false, reason: 'infra', ciOutcome: 'infra-failure' });
-    expect(await runIssue(request, policy, ports(vi.fn<Log>()))).toMatchObject({ reason: 'ci-infra' });
+    expect(await runIssue(request, policy, ports(log))).toMatchObject({ reason: 'ci-infra' });
     shipPhase.mockResolvedValue({ ok: false, denied: true, deniedReason: 'no' });
-    expect(await runIssue(request, policy, ports(vi.fn<Log>()))).toMatchObject({ reason: 'escalate' });
+    expect(await runIssue(request, policy, ports(log))).toMatchObject({ reason: 'escalate' });
   });
 });

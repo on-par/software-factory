@@ -135,15 +135,18 @@ async function run(open: (breaker: ProviderBreaker) => Promise<void>, models: Mo
   const breaker = new ProviderBreaker(join(dir, `breaker-${counter}.json`), undefined, { fingerprint: () => 'fp' });
   await open(breaker);
   const events: Array<[string, string]> = [];
+  const planModels: Array<string | undefined> = [];
   const planPhase = vi.fn<typeof realPlanPhase>(
-    async (opts) =>
-      ({
+    async (opts) => (
+      planModels.push(opts.modelOverride),
+      {
         ok: true,
         route: 'claude',
         specPath: '/tmp/wt/spec.md',
         model: opts.modelOverride ?? 'm',
         designArtifact: null,
-      }) satisfies PlanResult,
+      } satisfies PlanResult
+    ),
   );
   const ports: RunPorts = {
     router: new ModelRouter(models, ROUTES),
@@ -160,17 +163,17 @@ async function run(open: (breaker: ProviderBreaker) => Promise<void>, models: Mo
     shipPhase: vi.fn<typeof realShipPhase>().mockResolvedValue({ ok: true, prNumber: 42 } satisfies ShipResult),
   };
   const outcome = await runIssue({ ...request, failover: { ...request.failover, enabled: false } }, policy, ports);
-  return { outcome, events, planPhase };
+  return { outcome, events, planModels };
 }
 
 describe('runIssue — all_providers_down release under providerOrder (#3340)', () => {
   it('claude, codex and opencode-go capped releases provider-cap with all_capped at the earliest reset', async () => {
-    const { outcome, planPhase } = await run(async (b) => {
+    const { outcome, planModels } = await run(async (b) => {
       await b.open('anthropic', 'usage_cap', 2 * HOUR);
       await b.open('openai', 'usage_cap', 4 * HOUR);
       await b.open('custom', 'usage_cap', 6 * HOUR);
     });
-    expect(planPhase).not.toHaveBeenCalled();
+    expect(planModels).toEqual([]);
     expect(outcome).toMatchObject({ state: 'released', reason: 'provider-cap' });
     if (outcome.state !== 'released' || outcome.reason !== 'provider-cap') throw new Error('unreachable');
     expect(outcome.allProvidersDown).toMatchObject({
@@ -183,25 +186,24 @@ describe('runIssue — all_providers_down release under providerOrder (#3340)', 
   });
 
   it('claude capped and codex/opencode-go auth-open releases provider-cap with reset_pending at the claude reset', async () => {
-    const { outcome, planPhase } = await run(async (b) => {
+    const { outcome, planModels } = await run(async (b) => {
       await b.open('anthropic', 'usage_cap', 2 * HOUR);
       await b.openUntilCredentialsChange('openai', 'local_auth');
       await b.openUntilCredentialsChange('custom', 'local_auth');
     });
-    expect(planPhase).not.toHaveBeenCalled();
+    expect(planModels).toEqual([]);
     expect(outcome.state).toBe('released');
     if (outcome.state !== 'released' || outcome.reason !== 'provider-cap') throw new Error('unreachable');
     expect(outcome.allProvidersDown).toMatchObject({ detail: 'reset_pending', nextAvailableAt: outcome.resetAt });
   });
 
   it('with providerOrder, claude and codex capped runs PLAN on opencode-go even when the plan tier lacks it', async () => {
-    const { outcome, planPhase, events } = await run(async (b) => {
+    const { outcome, planModels, events } = await run(async (b) => {
       await b.open('anthropic', 'usage_cap', HOUR);
       await b.open('openai', 'usage_cap', HOUR);
     }, NARROW_TIER);
     expect(outcome.state).not.toBe('released');
-    expect(planPhase).toHaveBeenCalledTimes(1);
-    expect(planPhase.mock.calls[0]?.[0].modelOverride).toBe('og-boss');
+    expect(planModels).toEqual(['og-boss']);
     expect(events.some(([t]) => t === 'all_providers_down')).toBe(false);
   });
 });

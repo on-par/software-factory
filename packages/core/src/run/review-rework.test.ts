@@ -33,7 +33,12 @@ const buildPhase = vi.fn<typeof realBuildPhase>();
 const checkPhase = vi.fn<typeof realCheckPhase>();
 const shipPhase = vi.fn<typeof realShipPhase>();
 const reworkWorker = vi.fn<typeof realReworkWorker>();
-const pullsCreate = vi.fn();
+const pullsCreate = vi.fn(() => order.push('pulls.create'));
+const order: string[] = [];
+const reworkCalls: Parameters<typeof realReworkWorker>[0][] = [];
+const checkCalls: Parameters<typeof realCheckPhase>[0][] = [];
+const shipCalls: Parameters<typeof realShipPhase>[0][] = [];
+const apiCalls: string[] = [];
 
 const PLAN_OK: PlanResult = { ok: true, route: 'codex', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null };
 const BUILD_OK: BuildResult = { ok: true, model: 'm', route: 'codex' };
@@ -49,6 +54,8 @@ const WORK: WorkRequest = {
   brief: 'do the thing',
   acceptanceCriteria: [],
 };
+const SHIP_OK = { ok: true, prNumber: 7 } as const;
+const DONE = { failovers: [], modelCompleted: true };
 const BRANCH = 'factory/42-x';
 
 const request: RunRequest = {
@@ -108,11 +115,11 @@ const comment = (id: number, review: number, body: string, extra: Record<string,
 
 function fakeOctokit(pull: { state: string; head: { ref: string } } = { state: 'open', head: { ref: BRANCH } }) {
   const listReviewComments = vi.fn();
-  const getReview = vi.fn(async () => ({
-    data: { body: 'please rename', state: 'CHANGES_REQUESTED', user: { login: 'alice' } },
-  }));
+  const review = { data: { body: 'please rename', state: 'CHANGES_REQUESTED', user: { login: 'alice' } } };
+  const getReview = vi.fn(async () => (apiCalls.push('getReview'), review));
+  const getPull = vi.fn(async () => (apiCalls.push('pulls.get'), { data: pull }));
   const octokit = Object.assign({} as Octokit, {
-    rest: { pulls: { get: vi.fn(async () => ({ data: pull })), getReview, listReviewComments, create: pullsCreate } },
+    rest: { pulls: { get: getPull, getReview, listReviewComments, create: pullsCreate } },
     paginate: vi.fn(async () => [
       comment(1, 200, 'R-one'),
       comment(2, 100, 'OLD-only'),
@@ -148,12 +155,12 @@ function ports(octokit: Octokit): RunPorts {
 }
 
 beforeEach(() => {
-  planPhase.mockReset().mockResolvedValue(PLAN_OK);
-  buildPhase.mockReset().mockResolvedValue(BUILD_OK);
-  checkPhase.mockReset().mockResolvedValue(CHECK_OK);
-  shipPhase.mockReset().mockResolvedValue({ ok: true, prNumber: 7 });
-  reworkWorker.mockReset().mockResolvedValue({ failovers: [], modelCompleted: true });
-  pullsCreate.mockReset();
+  for (const recorded of [order, reworkCalls, checkCalls, shipCalls, apiCalls]) recorded.length = 0;
+  planPhase.mockReset().mockImplementation(async () => (order.push('plan'), PLAN_OK));
+  buildPhase.mockReset().mockImplementation(async () => (order.push('build'), BUILD_OK));
+  checkPhase.mockReset().mockImplementation(async (opts) => (order.push('check'), checkCalls.push(opts), CHECK_OK));
+  shipPhase.mockReset().mockImplementation(async (opts) => (order.push('ship'), shipCalls.push(opts), SHIP_OK));
+  reworkWorker.mockReset().mockImplementation(async (o) => (order.push('rework'), reworkCalls.push(o), DONE));
 });
 
 describe('comment rework (#3882)', () => {
@@ -163,29 +170,27 @@ describe('comment rework (#3882)', () => {
   };
   const withComment = (body: string | null, pull?: { state: string; head: { ref: string } }) => {
     const { octokit, getReview } = fakeOctokit(pull);
-    const getComment = vi.fn(async () => ({ data: { body, user: { login: 'alice' } } }));
+    const getComment = async () => (apiCalls.push('getComment'), { data: { body, user: { login: 'alice' } } });
     Object.assign((octokit as any).rest, { issues: { getComment } });
-    return { octokit, getReview, getComment };
+    return { octokit, getReview };
   };
 
   it("a comment rework builds on the PR branch from that comment's feedback only", async () => {
-    const { octokit, getReview } = withComment('/factory rework rename foo to bar\nand tidy up');
+    const { octokit } = withComment('/factory rework rename foo to bar\nand tidy up');
     expect(await runIssue(commentRequest, policy, ports(octokit))).toMatchObject({ state: 'ready' });
-    expect(planPhase).not.toHaveBeenCalled();
-    const details = reworkWorker.mock.calls[0][0].summary.results[0].details ?? '';
+    expect(order).toEqual(['rework', 'check', 'ship']);
+    const details = reworkCalls[0].summary.results[0].details ?? '';
     expect(details).toContain('Comment 300 by @alice on PR #7');
     expect(details).toContain('rename foo to bar\nand tidy up');
     expect(details).not.toContain('/factory rework');
     expect(details).not.toContain('Inline comments:');
-    expect(getReview).not.toHaveBeenCalled();
-    expect(pullsCreate).not.toHaveBeenCalled();
+    expect(apiCalls).not.toContain('getReview');
   });
 
   it('a comment rework fails closed when the PR is not open on the run branch', async () => {
-    const { octokit, getComment } = withComment('/factory rework x', { state: 'open', head: { ref: 'other' } });
+    const { octokit } = withComment('/factory rework x', { state: 'open', head: { ref: 'other' } });
     expect(await runIssue(commentRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
-    expect(getComment).not.toHaveBeenCalled();
-    expect(reworkWorker).not.toHaveBeenCalled();
+    expect([apiCalls, order]).toEqual([['pulls.get'], []]);
   });
 
   it('throws ReviewReworkError when the comment is no longer a rework command', async () => {
@@ -203,10 +208,8 @@ describe('review rework (#3564)', () => {
     const { octokit } = fakeOctokit();
     const outcome = await runIssue(reviewRequest, policy, ports(octokit));
     expect(outcome).toMatchObject({ state: 'ready' });
-    expect(planPhase).not.toHaveBeenCalled();
-    expect(buildPhase).not.toHaveBeenCalled();
-    expect(reworkWorker).toHaveBeenCalledTimes(1);
-    const opts = reworkWorker.mock.calls[0][0];
+    expect(order).toEqual(['rework', 'check', 'ship']);
+    const opts = reworkCalls[0];
     expect(opts.worktree).toBe('/tmp/wt');
     const details = opts.summary.results[0].details ?? '';
     const block = /\n<untrusted-review-feedback>\n([\s\S]*)\n<\/untrusted-review-feedback>$/.exec(details)?.[1] ?? '';
@@ -214,24 +217,21 @@ describe('review rework (#3564)', () => {
     expect(block).toContain('R-one');
     expect(block).toContain('R-two');
     expect(details).not.toContain('OLD-only');
-    expect(reworkWorker.mock.invocationCallOrder[0]).toBeLessThan(checkPhase.mock.invocationCallOrder[0]);
-    expect(shipPhase.mock.calls[0][0].branch).toBe(BRANCH);
-    expect(pullsCreate).not.toHaveBeenCalled();
+    expect(shipCalls[0].branch).toBe(BRANCH);
   });
 
   it('throws ReviewReworkError when the PR head ref is not the run branch', async () => {
     const { octokit } = fakeOctokit({ state: 'open', head: { ref: 'other' } });
     await expect(runReviewReworkBuild(buildOpts(octokit))).rejects.toThrow(ReviewReworkError);
     expect(await runIssue(reviewRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
-    expect(reworkWorker).not.toHaveBeenCalled();
-    expect(checkPhase).not.toHaveBeenCalled();
+    expect(order).toEqual([]);
   });
 
   it('throws when the PR is closed', async () => {
     const { octokit } = fakeOctokit({ state: 'closed', head: { ref: BRANCH } });
     await expect(runReviewReworkBuild(buildOpts(octokit))).rejects.toThrow(/closed/);
     expect(await runIssue(reviewRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
-    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(order).not.toContain('rework');
   });
 
   it('throws when review R cannot be read', async () => {
@@ -240,23 +240,21 @@ describe('review rework (#3564)', () => {
     await expect(runReviewReworkBuild(buildOpts(octokit))).rejects.toThrow(
       /could not read PR #7 \/ review 200: Not Found/,
     );
-    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(order).not.toContain('rework');
   });
 
   it('throws when the rework worker never ran', async () => {
     reworkWorker.mockResolvedValueOnce({ failovers: [], modelCompleted: false, failureReason: 'boom' } as never);
     const { octokit } = fakeOctokit();
     expect(await runIssue(reviewRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
-    expect(checkPhase).not.toHaveBeenCalled();
-    expect(shipPhase).not.toHaveBeenCalled();
+    expect(order).toEqual([]);
   });
 
   it('resumeFrom wins over reviewRework and makes no review rework call', async () => {
     const { octokit } = fakeOctokit();
     const resumeFrom = { phase: 'check' as const, route: 'claude' as const, model: 'm', buildMinutes: 1 };
     await runIssue({ ...reviewRequest, resumeFrom }, policy, ports(octokit));
-    expect(reworkWorker).not.toHaveBeenCalled();
-    expect(planPhase).not.toHaveBeenCalled();
+    expect(order).toEqual(['check', 'ship']);
   });
 
   it('renderReviewFeedback renders an empty review and outdated comments', () => {
@@ -294,9 +292,7 @@ describe('review rework (#3564)', () => {
   it('a request without reviewRework still plans and builds', async () => {
     const { octokit } = fakeOctokit();
     await runIssue(request, policy, ports(octokit));
-    expect(planPhase).toHaveBeenCalled();
-    expect(buildPhase).toHaveBeenCalled();
-    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(order).toEqual(['plan', 'build', 'check', 'ship']);
   });
 });
 
@@ -307,13 +303,9 @@ describe('iterate (#3625)', () => {
     const { octokit } = fakeOctokit();
     const outcome = await runIssue(iterateRequest, policy, ports(octokit));
     expect(outcome).toMatchObject({ state: 'ready' });
-    expect(planPhase).not.toHaveBeenCalled();
-    expect(buildPhase).not.toHaveBeenCalled();
-    expect(reworkWorker).not.toHaveBeenCalled();
-    expect(checkPhase).toHaveBeenCalledTimes(1);
-    expect(checkPhase.mock.calls[0][0].worktree).toBe('/tmp/wt');
-    expect(shipPhase.mock.calls[0][0].branch).toBe(BRANCH);
-    expect(pullsCreate).not.toHaveBeenCalled();
+    expect(order).toEqual(['check', 'ship']);
+    expect(checkCalls[0].worktree).toBe('/tmp/wt');
+    expect(shipCalls[0].branch).toBe(BRANCH);
   });
 
   it.each([
@@ -322,16 +314,14 @@ describe('iterate (#3625)', () => {
   ])('throws ReviewReworkError and never ships when the PR is %s', async (_name, pull) => {
     const { octokit } = fakeOctokit(pull);
     expect(await runIssue(iterateRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
-    expect(checkPhase).not.toHaveBeenCalled();
-    expect(shipPhase).not.toHaveBeenCalled();
-    expect(pullsCreate).not.toHaveBeenCalled();
+    expect(order).toEqual([]);
   });
 
   it('wraps a PR read error as ReviewReworkError', async () => {
     const { octokit } = fakeOctokit();
     vi.mocked(octokit.rest.pulls.get).mockRejectedValueOnce(new Error('Not Found'));
     expect(await runIssue(iterateRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
-    expect(shipPhase).not.toHaveBeenCalled();
+    expect(order).not.toContain('ship');
   });
 
   it('runRequestedReviewRework rejects with ReviewReworkError directly', async () => {
@@ -345,8 +335,7 @@ describe('iterate (#3625)', () => {
     const { octokit } = fakeOctokit({ state: 'closed', head: { ref: BRANCH } });
     const resumeFrom = { phase: 'check' as const, route: 'claude' as const, model: 'm', buildMinutes: 1 };
     await runIssue({ ...iterateRequest, resumeFrom }, policy, ports(octokit));
-    expect(octokit.rest.pulls.get).not.toHaveBeenCalled();
-    expect(checkPhase).toHaveBeenCalled();
+    expect([apiCalls, order]).toEqual([[], ['check', 'ship']]);
   });
 });
 
@@ -374,8 +363,8 @@ describe('feedback round rework (#3910)', () => {
       prNumber: 7,
       summary,
     });
-    expect(reworkWorker).toHaveBeenCalledTimes(1);
-    expect(reworkWorker.mock.calls[0][0]).toMatchObject({
+    expect(reworkCalls).toHaveLength(1);
+    expect(reworkCalls[0]).toMatchObject({
       summary,
       extraInstructions: expect.stringContaining('reviewer'),
     });
@@ -387,7 +376,7 @@ describe('feedback round rework (#3910)', () => {
       prNumber: 7,
       summary: undefined,
     });
-    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(order).not.toContain('rework');
   });
 
   it('fails closed when the PR is closed, and wraps a read error', async () => {
@@ -411,7 +400,7 @@ describe('feedback round rework (#3910)', () => {
         plan,
       ),
     ).rejects.toThrow('could not read');
-    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(order).not.toContain('rework');
   });
 
   it('runIssue triages, reworks the actionable feedback at CHECK, ships and answers the comment', async () => {
@@ -436,12 +425,12 @@ describe('feedback round rework (#3910)', () => {
         route === listComments ? [{ id: 5, user: { login: 'maint' }, body: 'please rename foo', html_url: 'u' }] : [],
       ),
     });
-    shipPhase.mockResolvedValue({ ok: true, prNumber: 7, headSha: 'abcdef1234567' });
+    shipPhase.mockImplementation(async (opts) => (shipCalls.push(opts), { ...SHIP_OK, headSha: 'abcdef1234567' }));
     const outcome = await runIssue({ ...feedbackRequest, trustedApprovers: ['maint'] }, policy, ports(octokit));
     expect(outcome).toMatchObject({ state: 'ready' });
-    expect(planPhase).not.toHaveBeenCalled();
-    expect(reworkWorker.mock.calls[0][0].summary.results[0].details).toContain('please rename foo');
-    expect(shipPhase).toHaveBeenCalledTimes(1);
+    expect(order).not.toContain('plan');
+    expect(reworkCalls[0].summary.results[0].details).toContain('please rename foo');
+    expect(shipCalls).toHaveLength(1);
     expect(posted).toHaveLength(1);
     expect(posted[0]).toContain('Fixed in [`abcdef1`]');
   });
