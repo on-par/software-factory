@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { Octokit } from '@octokit/rest';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { RoutesConfig } from '../config/index.js';
+import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
@@ -18,7 +18,6 @@ import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
-import { EMPTY_MODELS as MODELS } from '../test-support/recorders.js';
 
 const planPhase = vi.fn<typeof realPlanPhase>();
 const buildPhase = vi.fn<typeof realBuildPhase>();
@@ -68,6 +67,14 @@ const request: RunRequest = {
 const noPr: RunRequest = { ...request, noPr: true };
 
 const ROUTES: RoutesConfig = { version: 1, routes: {} };
+const MODELS: ModelsConfig = {
+  version: 1,
+  models: {},
+  tiers: {},
+  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
+  routingRules: {},
+};
+
 const policy: RunPolicy = {
   models: MODELS,
   routes: ROUTES,

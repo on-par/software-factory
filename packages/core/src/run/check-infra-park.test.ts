@@ -5,7 +5,7 @@ import type { Octokit } from '@octokit/rest';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { checkInfraParkMessage } from '../checkers/triage.js';
-import type { RoutesConfig } from '../config/index.js';
+import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { BuildResult } from '../phases/build.js';
 import { checkPhase as realCheckPhase } from '../phases/check.js';
@@ -19,11 +19,17 @@ import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 import { workKeyFromIssue } from '../work/work-key.js';
-import { EMPTY_MODELS as MODELS } from '../test-support/recorders.js';
 
 const tempDirs = createTempDirs();
 afterAll(() => tempDirs.cleanup());
 
+const MODELS: ModelsConfig = {
+  version: 1,
+  models: {},
+  tiers: {},
+  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
+  routingRules: {},
+};
 const ROUTES: RoutesConfig = { version: 1, routes: {} };
 const WORK: WorkRequest = {
   id: 'github-issue:o/r#1',
