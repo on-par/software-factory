@@ -2,6 +2,13 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { Octokit } from '@octokit/rest';
+import {
+  createGitHubCredentialBroker,
+  installGitHubScopeGuard,
+  PhaseCredentialHolder,
+  type resolveGitHubCredentialSource,
+} from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -227,5 +234,45 @@ describe('landIssue risk gate (#3381)', () => {
     await expect(land(false)).resolves.toMatchObject({ prNumber: 77 });
     expect(octokit.rest.issues.addLabels).not.toHaveBeenCalled();
     expect(octokit.rest.issues.createComment).not.toHaveBeenCalled();
+  });
+});
+
+type CredentialSource = ReturnType<typeof resolveGitHubCredentialSource>['source'];
+
+const REPO = 'on-par/software-factory';
+
+async function guardedLandClient(files: string[]) {
+  const source: CredentialSource = {
+    kind: 'fine-grained',
+    lease: async (phase) => ({ phase, kind: 'fine-grained', token: `tok-${phase}`, release: async () => {} }),
+  };
+  const holder = new PhaseCredentialHolder(createGitHubCredentialBroker({ repo: REPO, source }), {
+    checkToken: () => undefined,
+    initialPhase: 'land',
+  });
+  await holder.enter('land');
+  octokit = installGitHubScopeGuard(Object.assign(new Octokit(), makeOctokit(files)), { repo: REPO, holder });
+  return holder;
+}
+
+describe('landIssue scoped merge (#4120)', () => {
+  it('does not enable a scoped merge when the risk gate holds the PR', async () => {
+    const holder = await guardedLandClient(['db/migrations/001.sql']);
+    trustTier = 'T2';
+    await expect(land(true)).rejects.toBeInstanceOf(AwaitingReviewError);
+    expect(holder.mergeAllowed).toBe(false);
+  });
+
+  it('enables a scoped merge after the risk gate allows it', async () => {
+    const holder = await guardedLandClient(['docs/readme.md']);
+    expect(holder.mergeAllowed).toBe(false);
+    await expect(land(true)).resolves.toMatchObject({ prNumber: 77 });
+    expect(holder.mergeAllowed).toBe(true);
+  });
+
+  it('enables a scoped merge for a human land that skips the gate', async () => {
+    const holder = await guardedLandClient(['db/migrations/001.sql']);
+    await expect(land(false)).resolves.toMatchObject({ prNumber: 77 });
+    expect(holder.mergeAllowed).toBe(true);
   });
 });

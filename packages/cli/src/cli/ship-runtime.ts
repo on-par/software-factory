@@ -15,7 +15,7 @@ import type {
   resolveEnvironmentAcquirer,
   resolveLaneBaseUrl,
 } from './index.js';
-import type { FactoryOctokitOptions } from './octokit.js';
+import type { ScopedOctokitOptions } from './github-scope.js';
 
 type ConfigLoaders = Required<Pick<CliDeps, ConfigLoaderKey>>;
 type GitOps = Required<Pick<CliDeps, GitOpKey>>;
@@ -32,7 +32,7 @@ export interface ShipRuntime {
   resolvePhaseOps: (overrides: Partial<PhaseOps>) => PhaseOps;
   getRepoRoot: (shell: ShellOps) => Promise<string>;
   getGitHubRepo: (shell: ShellOps) => Promise<string>;
-  getOctokit: (shell: ShellOps, options?: FactoryOctokitOptions) => Octokit;
+  getOctokit: (shell: ShellOps, options?: ScopedOctokitOptions) => Octokit;
   worktreePathFor: (
     repoRoot: string,
     ghRepo: string,

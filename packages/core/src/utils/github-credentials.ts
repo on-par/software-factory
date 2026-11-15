@@ -1,7 +1,7 @@
 const ACTIONS_RUNTIME_CREDENTIAL_VARS = new Set(['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_ID_TOKEN_REQUEST_TOKEN']);
 
 const GITHUB_SEGMENT = /(?:^|_)(?:GITHUB|GH)(?:_|$)/;
-const CREDENTIAL_SUFFIX = /(?:TOKEN|PAT|PASSWORD|SECRET|PRIVATE_KEY|CREDENTIALS?)$/;
+const CREDENTIAL_SUFFIX = /(?:TOKEN(?:_(?:PLAN|SHIP|LAND))?|PAT|PASSWORD|SECRET|PRIVATE_KEY|CREDENTIALS?)$/;
 
 export function isGitHubCredentialEnvVar(name: string): boolean {
   const upper = name.toUpperCase();

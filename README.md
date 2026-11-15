@@ -46,7 +46,7 @@ For the dependency graph and per-package detail, see [docs/architecture.md](docs
 
 - Node.js ≥ 24 and `git`. On older Node versions, the CLI stops and tells you which version it needs. Commits need a git identity: set it globally or with repo-local `git config`.
 - One supported coding agent CLI (see [docs/agents.md](docs/agents.md)) on your PATH and signed in. That guide covers install and sign-in for each agent.
-- `gh`, signed in with `gh auth login`. It also supplies the GitHub token (`GITHUB_TOKEN` or `GH_TOKEN` override it). `factory doctor` checks all of this and prints a fix for anything missing.
+- `gh`, signed in with `gh auth login`. It also supplies the GitHub token (`GITHUB_TOKEN` or `GH_TOKEN` override it). `factory doctor` checks all of this and prints a fix for anything missing. To give each phase its own repo-scoped GitHub credential instead of your broad token, see [docs/ops/github-credentials.md](docs/ops/github-credentials.md).
 - Optional: `ollama` for experimental local models.
 
 Before you start, read [Safety](#safety): the factory runs agents with permission prompts off.

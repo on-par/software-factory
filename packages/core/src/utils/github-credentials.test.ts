@@ -138,3 +138,26 @@ describe('redactExecError', () => {
     expect(redactExecError(null)).toBeNull();
   });
 });
+
+describe('per-phase scoped credentials', () => {
+  it('redacts a minted installation token from text', () => {
+    const token = 'ghs_16C7e42F292c6912E7710c838347Ae178B4a';
+    expect(redactGitHubCredentials(`remote says token ${token} was rejected`, {})).toBe(
+      'remote says token [redacted] was rejected',
+    );
+  });
+
+  it('strips per-phase factory GitHub tokens and the app private key from child env', () => {
+    const env = {
+      FACTORY_GITHUB_TOKEN_PLAN: 'github_pat_plan_value',
+      FACTORY_GITHUB_TOKEN_SHIP: 'github_pat_ship_value',
+      FACTORY_GITHUB_TOKEN_LAND: 'github_pat_land_value',
+      FACTORY_GITHUB_APP_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----',
+      PATH: '/usr/bin',
+    };
+    expect(childProcessEnv(env, undefined)).toEqual({ PATH: '/usr/bin' });
+    expect(redactGitHubCredentials('key -----BEGIN PRIVATE KEY----- and github_pat_ship_value', env)).toBe(
+      'key [redacted] and [redacted]',
+    );
+  });
+});

@@ -14,6 +14,7 @@
 import { z } from 'zod';
 
 import { isPlainObject, loadFactoryConfig, loadModelsConfig, type FactoryConfig } from './index.js';
+import { githubExampleNode, trackerExampleNode } from './example-nodes.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import {
   DEFAULT_T1_SAMPLE_RATE,
@@ -36,7 +37,7 @@ export const CONFIG_EXAMPLE_OMITTED_KEYS: Readonly<Record<string, string>> = {
   notifications: 'accepted; not read at runtime',
 };
 
-type Node =
+export type Node =
   | { kind: 'object'; key: string; doc?: string; children: Node[] }
   | { kind: 'value'; key: string; doc?: string; value: unknown }
   | { kind: 'unset'; key: string; doc?: string; example: string };
@@ -425,12 +426,8 @@ function runtimeNamespace(): Node[] {
     ship,
     section('worktree'),
     section('workspace'),
-    {
-      kind: 'unset',
-      key: 'tracker',
-      doc: 'Ticket tracker (ADR-0168, ADR-0173). kind: github (default) or linear. linear needs teamKey; projects maps a Linear project name or id to owner/repo; readyLabel (default factory:ready), laneLabelGroup (default lane), states.ready/inProgress/parked (default Todo/In Progress/Todo). The API key is read only from LINEAR_API_KEY, never from config; `factory doctor` checks it (#3891).',
-      example: '{ kind: "linear", linear: { teamKey: "ENG", projects: { "Factory": "owner/repo" } } }',
-    },
+    trackerExampleNode,
+    githubExampleNode,
     section('sandbox'),
     section('environment'),
     section('host'),

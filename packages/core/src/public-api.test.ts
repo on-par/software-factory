@@ -338,6 +338,8 @@ const INTERNAL_API_KEYS = [
   'resolveLinearProjectForRepo', // #3918
   'probeLinearSetup',
   'resolveTrackerConfig',
+  ...'allowScopedMerge installGitHubScopeGuard phaseHolderOf PhaseCredentialHolder'.split(' '),
+  ...'createGitHubCredentialBroker resolveGitHubCredentialSource resolveGitHubCredentialsConfig'.split(' '),
   'listBlockedBy',
   'aliasDeprecatedSizeGateMode', // #3832
   'isExplicitStackMode',

@@ -7,7 +7,9 @@ import {
   resolveHostedAuthority,
   type GitHubAuthorityBrokerOptions,
   type MintGitHubToken,
+  type MintGitHubTokenInput,
 } from './github-authority.js';
+import { scopeForPhase } from '../github-scope/matrix.js';
 import { createHostedJobStore, type StoredHostedJob } from './store.js';
 
 function jobFor(repoSlug: string): StoredHostedJob {
@@ -22,6 +24,20 @@ function jobFor(repoSlug: string): StoredHostedJob {
 }
 
 describe('prepareGitHubAuthority', () => {
+  it('mints the hosted credential with the ship phase permissions and the single target repository', async () => {
+    const inputs: MintGitHubTokenInput[] = [];
+    const mint: MintGitHubToken = async (input) => {
+      inputs.push(input);
+      return { token: 'app-tok', kind: 'installation' };
+    };
+
+    await prepareGitHubAuthority(jobFor('acme/widgets'), { mint, now: () => 2_000 });
+
+    expect(inputs[0]?.repositories).toEqual(['widgets']);
+    expect(inputs[0]?.permissions).toEqual(scopeForPhase('ship')?.permissions);
+    expect(inputs[0]?.permissions.pull_requests).toBe('write');
+  });
+
   it('scopes a fallback bundle to exactly the job repo and marks it prototype-fallback (AC#1)', async () => {
     const job = jobFor('owner/example-app');
     const options: GitHubAuthorityBrokerOptions = { mint: prototypeFallbackMint('local-tok'), now: () => 2_000 };

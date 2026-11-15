@@ -398,3 +398,13 @@ export { resolveTrackerConfig, type TrackerConfig } from './config/tracker-secti
 
 // Feedback round (#3910)
 export { countPendingFeedback } from './run/feedback-round-hooks.js';
+
+export { allowScopedMerge, installGitHubScopeGuard, phaseHolderOf } from './github-scope/guard.js';
+export {
+  createGitHubCredentialBroker,
+  PhaseCredentialHolder,
+  resolveGitHubCredentialSource,
+  type GitHubCredentialsSettings,
+  type ResolvedGitHubCredentialSource,
+} from './github-scope/broker.js';
+export { resolveGitHubCredentialsConfig } from './config/index.js';

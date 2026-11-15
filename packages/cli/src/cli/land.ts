@@ -42,6 +42,7 @@ import type { LandLock } from './land-pr.js';
 import { landLockFor } from './land-slot.js';
 import { landBaseGate } from './land-base-gate.js';
 import { enforceRiskAtLand } from './land-risk.js';
+import { allowScopedMerge } from '@on-par/factory-core/internal';
 import { isPrMerged, latestPrForBranch } from './land-merged.js';
 import { cleanupMergedLane, releaseLandedClaim } from './land-merged-cleanup.js';
 import { landRuntime } from './land-runtime.js';
@@ -215,6 +216,7 @@ export async function landIssue(
       throw new AwaitingReviewError(`PR #${prNumber} held for a human: ${gate.reason}`, prNumber, 'risk');
     }
   }
+  allowScopedMerge(octokit);
 
   try {
     try {
