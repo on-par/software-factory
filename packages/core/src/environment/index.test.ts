@@ -5,7 +5,7 @@ import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   acquirePortLease,
@@ -16,6 +16,7 @@ import {
   laneEnv,
   leaseEnv,
   PortLeaseError,
+  type ReapedLease,
   readPortLeases,
   reapStalePortLeases,
   recordLeasePgid,
@@ -454,7 +455,8 @@ describe('acquirePortLease reaping', () => {
         lockOpts: LOCK_OPTS,
       });
 
-      const onReap = vi.fn();
+      const reapedLeases: ReapedLease[] = [];
+      const onReap = (r: ReapedLease) => void reapedLeases.push(r);
       await acquirePortLease({
         registryFile,
         lockDir,
@@ -467,11 +469,7 @@ describe('acquirePortLease reaping', () => {
         lockOpts: LOCK_OPTS,
       });
 
-      expect(onReap).toHaveBeenCalledTimes(1);
-      expect(onReap.mock.calls[0][0]).toMatchObject({
-        reason: 'dead-pid',
-        lease: { worktreeId: '/wt/dead' },
-      });
+      expect(reapedLeases).toMatchObject([{ reason: 'dead-pid', lease: { worktreeId: '/wt/dead' } }]);
 
       const registry = JSON.parse(await readFile(registryFile, 'utf-8'));
       expect(registry.leases.map((l: { worktreeId: string }) => l.worktreeId)).not.toContain('/wt/dead');
@@ -494,7 +492,8 @@ describe('acquirePortLease reaping', () => {
         lockOpts: LOCK_OPTS,
       });
 
-      const onReap = vi.fn();
+      const reapedLeases: ReapedLease[] = [];
+      const onReap = (r: ReapedLease) => void reapedLeases.push(r);
       await acquirePortLease({
         registryFile,
         lockDir,
@@ -507,8 +506,7 @@ describe('acquirePortLease reaping', () => {
         lockOpts: LOCK_OPTS,
       });
 
-      expect(onReap).toHaveBeenCalledTimes(1);
-      expect(onReap.mock.calls[0][0]).toMatchObject({ reason: 'missing-worktree' });
+      expect(reapedLeases).toMatchObject([{ reason: 'missing-worktree' }]);
     });
   });
 
@@ -528,7 +526,8 @@ describe('acquirePortLease reaping', () => {
         lockOpts: LOCK_OPTS,
       });
 
-      const onReap = vi.fn();
+      const reapedLeases: ReapedLease[] = [];
+      const onReap = (r: ReapedLease) => void reapedLeases.push(r);
       await acquirePortLease({
         registryFile,
         lockDir,
@@ -541,8 +540,7 @@ describe('acquirePortLease reaping', () => {
         lockOpts: LOCK_OPTS,
       });
 
-      expect(onReap).toHaveBeenCalledTimes(1);
-      expect(onReap.mock.calls[0][0]).toMatchObject({ reason: 'dead-pid' });
+      expect(reapedLeases).toMatchObject([{ reason: 'dead-pid' }]);
     });
   });
 
@@ -641,7 +639,8 @@ describe('acquirePortLease reaping', () => {
         lockOpts: LOCK_OPTS,
       });
 
-      const onReap = vi.fn();
+      const reapedLeases: ReapedLease[] = [];
+      const onReap = (r: ReapedLease) => void reapedLeases.push(r);
       await acquirePortLease({
         registryFile,
         lockDir,
@@ -654,7 +653,7 @@ describe('acquirePortLease reaping', () => {
         lockOpts: LOCK_OPTS,
       });
 
-      expect(onReap).not.toHaveBeenCalled();
+      expect(reapedLeases).toEqual([]);
       const registry = JSON.parse(await readFile(registryFile, 'utf-8'));
       expect(registry.leases.map((l: { worktreeId: string }) => l.worktreeId).sort()).toEqual([
         '/wt/a',

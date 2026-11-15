@@ -11,6 +11,7 @@ import { ConstitutionLoader } from '../constitutions/index.js';
 import { ModelRouter } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { StubModelExecutor } from '../router/stub.js';
+import { recordingLog, sandboxRecordingRouter, type LoggedEvent } from '../test-support/recorders.js';
 import type { Constitution } from '../types/index.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import {
@@ -1038,17 +1039,17 @@ describe('accessibilityChecker', () => {
 describe('runCustomChecker', () => {
   it('parses a valid verdict and includes checker context in the prompt', async () => {
     const worktree = await makeWorktree();
-    const { router, stub } = makeRouter('{"checker":"custom_x","result":"PASS","details":"all good"}');
+    const { stub } = makeRouter('{"checker":"custom_x","result":"PASS","details":"all good"}');
     const sandbox = { runtime: 'none' } as SandboxPolicy;
-    const run = vi.spyOn(router, 'run');
+    const { router: recordingRouter, sandboxes } = sandboxRecordingRouter(models, routes, stub);
 
-    const result = await runCustomChecker({ ...makeContext(worktree), sandbox }, 'custom_x', router);
+    const result = await runCustomChecker({ ...makeContext(worktree), sandbox }, 'custom_x', recordingRouter);
 
     expect(result.result).toBe('PASS');
     expect(result.details).toBe('all good');
     expect(stub.calls[0].prompt).toContain('custom_x');
     expect(stub.calls[0].prompt).toContain('test constitution');
-    expect(run.mock.calls[0][2]?.sandbox).toBe(sandbox);
+    expect(sandboxes[0]).toBe(sandbox);
   });
 
   it('parses a verdict embedded in prose', async () => {
@@ -1513,18 +1514,19 @@ describe('runAllCheckers', () => {
     const worktree = await makeWorktree();
     const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
     const constitution = new ConstitutionLoader(constitutionDir).resolve(worktree, 'myproduct');
-    const log = vi.fn();
+    const events: LoggedEvent[] = [];
+    const log = recordingLog(events);
 
     const summary = await runAllCheckers({ ...makeContext(worktree), log }, router, constitution);
 
-    const started = log.mock.calls.filter(([type]) => type === 'checker_started');
-    const completed = log.mock.calls.filter(([type]) => type === 'checker_completed');
+    const started = events.filter((e) => e.type === 'checker_started');
+    const completed = events.filter((e) => e.type === 'checker_completed');
     expect(started.length).toBe(summary.total);
     expect(completed.length).toBe(summary.total);
-    for (const call of completed) {
-      expect(call[2].durationMs).toEqual(expect.any(Number));
+    for (const event of completed) {
+      expect(event.data?.durationMs).toEqual(expect.any(Number));
     }
-    expect(completed.some(([, msg]) => typeof msg === 'string' && msg.includes('not_a_real_checker'))).toBe(true);
+    expect(completed.some((e) => typeof e.msg === 'string' && e.msg.includes('not_a_real_checker'))).toBe(true);
   });
 
   it(
@@ -1533,12 +1535,13 @@ describe('runAllCheckers', () => {
     async () => {
       const worktree = await makeWorktree();
       const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
-      const onActivity = vi.fn().mockResolvedValue(undefined);
+      let touches = 0;
+      const onActivity = async () => void touches++;
 
       const summary = await runAllCheckers({ ...makeContext(worktree), onActivity }, router, null);
 
       expect(summary.total).toBeGreaterThan(0);
-      expect(onActivity).toHaveBeenCalledTimes(summary.total * 2);
+      expect(touches).toBe(summary.total * 2);
     },
   );
 
@@ -1548,15 +1551,16 @@ describe('runAllCheckers', () => {
     async () => {
       const worktree = await makeWorktree();
       const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
-      const log = vi.fn();
-      const onActivity = vi.fn().mockRejectedValue(new Error('disk full'));
+      const events: LoggedEvent[] = [];
+      const log = recordingLog(events);
+      const onActivity = async () => Promise.reject(new Error('disk full'));
 
       const summary = await runAllCheckers({ ...makeContext(worktree), log, onActivity }, router, null);
 
-      const failures = log.mock.calls.filter(([type]) => type === 'activity_touch_failed');
+      const failures = events.filter((e) => e.type === 'activity_touch_failed');
       expect(summary.total).toBeGreaterThan(0);
       expect(failures.length).toBe(summary.total * 2);
-      expect(failures[0][1]).toContain('disk full');
+      expect(failures[0].msg).toContain('disk full');
     },
   );
 
@@ -1578,16 +1582,16 @@ describe('runAllCheckers', () => {
         pythonTestSurface: { present: false, sources: [] },
         lintConfig: null,
       };
-      const probeWorktreeMock = vi.fn(async () => probe);
+      let probes = 0;
+      const probeWorktree = async () => {
+        probes++;
+        return probe;
+      };
       const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
 
-      const summary = await runAllCheckers(
-        { ...makeContext(worktree), probeWorktree: probeWorktreeMock },
-        router,
-        null,
-      );
+      const summary = await runAllCheckers({ ...makeContext(worktree), probeWorktree }, router, null);
 
-      expect(probeWorktreeMock).toHaveBeenCalledTimes(1);
+      expect(probes).toBe(1);
       const links = summary.results.find((r) => r.checker === 'links');
       const accessibility = summary.results.find((r) => r.checker === 'accessibility');
       expect(links?.result).toBe('PASS');

@@ -121,17 +121,17 @@ describe('rerunFailingTests', () => {
 
   it('reports passed and writes the log', async () => {
     const outputLogDir = await tmp();
-    const run = vi.fn(async () => result());
+    const calls: { argv: readonly string[]; opts: unknown }[] = [];
+    const run: CheckerContext['runCommand'] = async (argv, opts) => {
+      calls.push({ argv, opts });
+      return result();
+    };
     const ctx = ctxWith(run, { outputLogDir });
     const r = await rerunFailingTests({ ctx, plan });
     expect(r).toMatchObject({ verdict: 'passed', mode: 'targeted', tests: ['adds'] });
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(run).toHaveBeenCalledWith(plan.argv, {
-      cwd: '/wt',
-      timeoutMs: 600_000,
-      env: ctx.env,
-      onPgid: ctx.onPgid,
-    });
+    expect(calls).toEqual([
+      { argv: plan.argv, opts: { cwd: '/wt', timeoutMs: 600_000, env: ctx.env, onPgid: ctx.onPgid } },
+    ]);
     expect(r.logPath).toMatch(/flaky-rerun-tests\.log$/);
     expect(existsSync(r.logPath as string)).toBe(true);
   });
@@ -150,10 +150,14 @@ describe('rerunFailingTests', () => {
   });
 
   it('reports not-run without running when argv is empty', async () => {
-    const run = vi.fn(async () => result());
+    const calls: (readonly string[])[] = [];
+    const run: CheckerContext['runCommand'] = async (argv) => {
+      calls.push(argv);
+      return result();
+    };
     const r = await rerunFailingTests({ ctx: ctxWith(run), plan: { ...plan, mode: 'full', argv: [], tests: [] } });
     expect(r).toMatchObject({ verdict: 'not-run', reason: 'no tests command' });
-    expect(run).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
   });
 
   it('reports not-run when the command throws', async () => {
@@ -197,16 +201,25 @@ describe('rerunTestsChecker', () => {
     ok: true,
   };
 
+  const recordingRunner = () => {
+    const calls: (readonly string[])[] = [];
+    const run: CheckerContext['runCommand'] = async (argv) => {
+      calls.push(argv);
+      return ok;
+    };
+    return { calls, run };
+  };
+
   it('plans a targeted re-run from the failing details', async () => {
-    const run = vi.fn(async (_argv: readonly string[]) => ok);
+    const { calls, run } = recordingRunner();
     const ctx: CheckerContext = { worktree: await worktree(), specPath: 'spec.md', runCommand: run };
     const r = await rerunTestsChecker(ctx, ' × suite > adds');
-    expect(run.mock.calls[0]?.[0]).toEqual(['npm', 'test', '--', '-t', 'adds', '--no-file-parallelism']);
+    expect(calls[0]).toEqual(['npm', 'test', '--', '-t', 'adds', '--no-file-parallelism']);
     expect(r.verdict).toBe('passed');
   });
 
   it('never throws: returns not-run when planning throws', async () => {
-    const run = vi.fn(async () => ok);
+    const { calls, run } = recordingRunner();
     const ctx: CheckerContext = {
       worktree: await worktree(),
       specPath: 'spec.md',
@@ -214,6 +227,6 @@ describe('rerunTestsChecker', () => {
       probe: { packageJson: { status: 'unreadable', error: new Error('bad json') } } as WorktreeProbe,
     };
     expect(await rerunTestsChecker(ctx, ' × suite > adds')).toMatchObject({ verdict: 'not-run', reason: 'bad json' });
-    expect(run).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
   });
 });

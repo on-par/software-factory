@@ -82,9 +82,11 @@ const routes: RoutesConfig = {
 };
 
 const tempDirs = new Set<string>();
+const lines: string[] = [];
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  lines.length = 0;
   await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
 });
@@ -124,7 +126,7 @@ describe('loadRepoConfig', () => {
       tiers: { worker: ['gpt-model-a'] },
       route: 'opencode',
     });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(console, 'warn').mockImplementation((...args) => void lines.push(args.join(' ')));
 
     expect(loadRepoConfig(repoRoot)).toEqual({
       version: 2,
@@ -144,10 +146,9 @@ describe('loadRepoConfig', () => {
       tiers: { worker: ['gpt-model-a'] },
       route: 'opencode',
     });
-    expect(warn).toHaveBeenCalledOnce();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('factory migrate'));
+    expect(lines).toEqual([expect.stringContaining('factory migrate')]);
     loadRepoConfig(repoRoot);
-    expect(warn).toHaveBeenCalledOnce();
+    expect(lines).toHaveLength(1);
   });
 
   it('loads configuration from an external state root without creating checkout-local state', async () => {
@@ -283,9 +284,9 @@ describe('loadRepoConfig', () => {
   it('loads a minimal version-2 file without warning', async () => {
     const repoRoot = await tempRepoRoot();
     await writeRepoConfig(repoRoot, { version: 2 });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(console, 'warn').mockImplementation((...args) => void lines.push(args.join(' ')));
     expect(loadRepoConfig(repoRoot)).toEqual({ version: 2 });
-    expect(warn).not.toHaveBeenCalled();
+    expect(lines).toEqual([]);
   });
 
   it('rejects a v2 file containing a v1 key with the path and key in the error', async () => {
@@ -1111,7 +1112,7 @@ describe('repo models.registry (#2440)', () => {
   });
 
   it('merges non-conflicting registry ids with no redefinition error or warning', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args) => void lines.push(args.join(' ')));
     try {
       const merged = applyRepoConfig(models, withRegistry());
       expect(merged.models['my-opencode-model']).toBeDefined();
@@ -1119,7 +1120,7 @@ describe('repo models.registry (#2440)', () => {
       expect(() =>
         applyRepoConfig(models, { version: 2, models: { registry: { 'Claude-Model': custom, constructor: custom } } }),
       ).not.toThrow();
-      expect(warn).not.toHaveBeenCalled();
+      expect(lines).toEqual([]);
     } finally {
       warn.mockRestore();
     }

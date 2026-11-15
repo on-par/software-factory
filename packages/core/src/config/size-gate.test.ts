@@ -19,24 +19,26 @@ function withMode(mode: string) {
 
 describe('resolveSizeGateMode unknown mode warning (#3850)', () => {
   it.each(['Off', 'bogus'])('warns once naming %s and off, stack, and resolves to stack (#3850)', (mode) => {
-    const warn = vi.fn<(line: string) => void>();
+    const lines: string[] = [];
+    const warn = (line: string) => void lines.push(line);
     const config = withMode(mode);
     expect(resolveSizeGateMode(config, warn)).toBe('stack');
-    expect(warn).toHaveBeenCalledTimes(1);
-    const line = warn.mock.calls[0]![0];
+    expect(lines).toHaveLength(1);
+    const line = lines[0]!;
     expect(line).toContain(`"${mode}"`);
     expect(line).toContain('off, stack');
     expect(line).toContain('runs as stack');
     expect(resolveSizeGateMode(config, warn)).toBe('stack');
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(lines).toHaveLength(1);
   });
 
   it('does not warn for a missing mode, off or stack (#3850)', () => {
-    const warn = vi.fn<(line: string) => void>();
+    const lines: string[] = [];
+    const warn = (line: string) => void lines.push(line);
     expect(resolveSizeGateMode(loadFactoryConfig(), warn)).toBe('stack');
     expect(resolveSizeGateMode(withMode('off'), warn)).toBe('off');
     expect(resolveSizeGateMode(withMode('stack'), warn)).toBe('stack');
-    expect(warn).not.toHaveBeenCalled();
+    expect(lines).toEqual([]);
   });
 });
 
@@ -62,26 +64,29 @@ describe('warnSizeGateModeOnce and markSizeGateModeWarned (#3850)', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('warns once per path and value and reports true', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const lines: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((...args) => void lines.push(args.join(' ')));
     const raw = { sizeGate: { mode: 'bogus' } };
     expect(warnSizeGateModeOnce('/a/size-gate-once.yaml', raw)).toBe(true);
     expect(warnSizeGateModeOnce('/a/size-gate-once.yaml', raw)).toBe(true);
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0]?.[0])).toContain('/a/size-gate-once.yaml');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('/a/size-gate-once.yaml');
   });
 
   it('returns false for a valid mode', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const lines: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((...args) => void lines.push(args.join(' ')));
     expect(warnSizeGateModeOnce('/a/valid.yaml', { sizeGate: { mode: 'off' } })).toBe(false);
-    expect(warn).not.toHaveBeenCalled();
+    expect(lines).toEqual([]);
   });
 
   it('a marked config does not warn on resolve', () => {
-    const warn = vi.fn<(line: string) => void>();
+    const lines: string[] = [];
+    const warn = (line: string) => void lines.push(line);
     const config = withMode('bogus');
     markSizeGateModeWarned(config);
     expect(resolveSizeGateMode(config, warn)).toBe('stack');
-    expect(warn).not.toHaveBeenCalled();
+    expect(lines).toEqual([]);
   });
 });
 
@@ -94,13 +99,14 @@ describe('loadFactoryConfigForRepo unknown sizeGate.mode (#3850)', () => {
 
   it('loadFactoryConfigForRepo warns once for an unknown sizeGate.mode and resolves it to stack (#3850)', async () => {
     const dir = await tempDirs.make('factory-config-');
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const lines: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((...args) => void lines.push(args.join(' ')));
     const path = join(dir, 'config.json');
     await writeFile(path, JSON.stringify({ sizeGate: { mode: 'bogus' } }));
     const config = loadFactoryConfigForRepo(path);
     expect(resolveSizeGateMode(config)).toBe('stack');
-    expect(warn).toHaveBeenCalledTimes(1);
-    const line = String(warn.mock.calls[0]?.[0]);
+    expect(lines).toHaveLength(1);
+    const line = lines[0]!;
     expect(line).toContain(path);
     expect(line).toContain('"bogus"');
     expect(line).toContain('off, stack');

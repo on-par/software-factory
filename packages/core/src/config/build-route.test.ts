@@ -183,9 +183,11 @@ async function runBuildRoute(pin: string, flags: { localOnly?: boolean; codexDis
     });
     return { ok: true, route, specPath, model: 'm', designArtifact: null };
   });
-  const buildPhase = vi
-    .fn<typeof realBuildPhase>()
-    .mockResolvedValue({ ok: true, model: 'm', route: 'claude' } satisfies BuildResult);
+  const builtRoutes: string[] = [];
+  const buildPhase: typeof realBuildPhase = async (opts) => {
+    builtRoutes.push(opts.route as string);
+    return { ok: true, model: 'm', route: 'claude' } satisfies BuildResult;
+  };
   const checkPhase = vi.fn<typeof realCheckPhase>().mockResolvedValue({
     passed: true,
     summary: { failures: 0, passes: 1, skips: 0, total: 1, results: [] },
@@ -205,7 +207,7 @@ async function runBuildRoute(pin: string, flags: { localOnly?: boolean; codexDis
     shipPhase,
   };
   await runIssue(request, policy, ports);
-  return buildPhase.mock.calls[0][0].route as string;
+  return builtRoutes[0]!;
 }
 
 function statusLine(env: NodeJS.ProcessEnv): string {

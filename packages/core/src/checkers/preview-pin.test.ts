@@ -1,20 +1,26 @@
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { Server } from 'node:net';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { pinnedLookup, probePinned, vetPreviewHost } from './preview-pin.js';
 
 const PUBLIC = '93.184.216.34';
 
+type LookupCallback = Parameters<ReturnType<typeof pinnedLookup>>[2];
+
 describe('vetPreviewHost', () => {
   it('pins the first address a public hostname resolves to', async () => {
-    const resolveHost = vi.fn(async () => [PUBLIC, '2606:2800:220:1::1']);
+    const resolved: string[] = [];
+    const resolveHost = async (host: string) => {
+      resolved.push(host);
+      return [PUBLIC, '2606:2800:220:1::1'];
+    };
     expect(await vetPreviewHost('https://p.example.com/', resolveHost)).toEqual({
       ok: true,
       pin: { address: PUBLIC, family: 4 },
     });
-    expect(resolveHost).toHaveBeenCalledWith('p.example.com');
+    expect(resolved).toEqual(['p.example.com']);
   });
 
   it('pins an IPv6 address with family 6', async () => {
@@ -23,12 +29,16 @@ describe('vetPreviewHost', () => {
   });
 
   it('pins an IP literal host to itself without resolving it', async () => {
-    const resolveHost = vi.fn(async () => ['10.0.0.5']);
+    const resolved: string[] = [];
+    const resolveHost = async (host: string) => {
+      resolved.push(host);
+      return ['10.0.0.5'];
+    };
     expect(await vetPreviewHost('https://[2606:4700::1111]/', resolveHost)).toEqual({
       ok: true,
       pin: { address: '2606:4700::1111', family: 6 },
     });
-    expect(resolveHost).not.toHaveBeenCalled();
+    expect(resolved).toEqual([]);
   });
 
   it('refuses a hostname when any resolved address is not public', async () => {
@@ -54,15 +64,17 @@ describe('pinnedLookup', () => {
   const pin = { address: PUBLIC, family: 4 } as const;
 
   it('answers every hostname with the pinned address', () => {
-    const callback = vi.fn();
+    const answers: unknown[][] = [];
+    const callback = ((...args: unknown[]) => answers.push(args)) as LookupCallback;
     pinnedLookup(pin)('rebound.example.com', {}, callback);
-    expect(callback).toHaveBeenCalledWith(null, PUBLIC, 4);
+    expect(answers).toEqual([[null, PUBLIC, 4]]);
   });
 
   it('answers an all-addresses lookup with only the pinned address', () => {
-    const callback = vi.fn();
+    const answers: unknown[][] = [];
+    const callback = ((...args: unknown[]) => answers.push(args)) as LookupCallback;
     pinnedLookup(pin)('rebound.example.com', { all: true }, callback);
-    expect(callback).toHaveBeenCalledWith(null, [{ address: PUBLIC, family: 4 }]);
+    expect(answers).toEqual([[null, [{ address: PUBLIC, family: 4 }]]]);
   });
 });
 
