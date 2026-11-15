@@ -843,8 +843,6 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string, env: NodeJ
   };
 }
 
-// ---------- Constitution resolution ----------
-
 export function getConstitutionsDir(): string {
   return resolveConfigPath('constitutions');
 }
