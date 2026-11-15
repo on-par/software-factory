@@ -14,32 +14,42 @@ const PORCELAIN = [1, 2, 3]
   .join('\n');
 
 function fakes() {
-  const issuesGet = vi.fn().mockResolvedValue({ data: { state: 'open', labels: [] } });
-  const pullsList = vi.fn().mockResolvedValue({ data: [{ state: 'closed', merged_at: '2024-01-01T00:00:00Z' }] });
+  const issueGets: unknown[] = [];
+  const pullLists: unknown[] = [];
+  const commands: string[] = [];
+  const issuesGet = async (params: unknown) => {
+    issueGets.push(params);
+    return { data: { state: 'open', labels: [] } };
+  };
+  const pullsList = async (params: unknown) => {
+    pullLists.push(params);
+    return { data: [{ state: 'closed', merged_at: '2024-01-01T00:00:00Z' }] };
+  };
   const octokit = { rest: { issues: { get: issuesGet }, pulls: { list: pullsList } } } as never;
-  const runCommand = vi.fn(async (cmd: string) => {
+  const runCommand = async (cmd: string) => {
+    commands.push(cmd);
     if (cmd.startsWith('git worktree list')) return { stdout: PORCELAIN };
     if (cmd.startsWith('git rev-parse --verify origin/main')) return { stdout: 'main-tip\n' };
     return { stdout: '' };
-  });
-  return { issuesGet, pullsList, octokit, runCommand };
+  };
+  return { issueGets, pullLists, commands, octokit, runCommand };
 }
 
 describe('sweep issue lookups', () => {
   it('calls issues.get once for three worktrees of the same issue in a dry-run sweep that consults disposition, existence and claim', async () => {
-    const { issuesGet, octokit, runCommand } = fakes();
+    const { issueGets, octokit, runCommand } = fakes();
     const report = await sweepWorktrees(
       { repoRoot: '/nonexistent/repo', ttlDays: 7, dryRun: true, repo: 'o/r' },
       { runCommand, octokit, issueWarnDedup: new IssueWarnDedup() },
     );
-    expect(issuesGet).toHaveBeenCalledTimes(1);
+    expect(issueGets).toHaveLength(1);
     expect(report.noActiveClaim).toHaveLength(3);
   });
 });
 
 describe('gatherWorktreeEvidence', () => {
   it('makes no GitHub call for a protected entry in real mode', async () => {
-    const { issuesGet, pullsList, octokit, runCommand } = fakes();
+    const { issueGets, pullLists, commands, octokit, runCommand } = fakes();
     const ctx = createEvidenceContext(
       {
         repoRoot: '/nonexistent/repo',
@@ -58,29 +68,37 @@ describe('gatherWorktreeEvidence', () => {
       branch: 'factory/7-w',
     });
     expect(e.protected).toBe(true);
-    expect(issuesGet).not.toHaveBeenCalled();
-    expect(pullsList).not.toHaveBeenCalled();
-    expect(runCommand).not.toHaveBeenCalled();
+    expect(issueGets).toEqual([]);
+    expect(pullLists).toEqual([]);
+    expect(commands).toEqual([]);
   });
 });
 
 describe('defaultRunCommand', () => {
   it('runs the command as git argv with no shell and no prompts', async () => {
-    const runGit = vi.fn().mockResolvedValue({ stdout: 'out', stderr: '' });
+    const gitCalls: unknown[] = [];
+    const runGit = async (args: readonly string[], opts: unknown) => {
+      gitCalls.push([args, opts]);
+      return { stdout: 'out', stderr: '' };
+    };
 
     const result = await defaultRunCommand("git ls-remote --heads origin 'a b'\\''c'", { cwd: '/r' }, runGit);
 
     expect(result).toEqual({ stdout: 'out' });
-    expect(runGit).toHaveBeenCalledWith(['ls-remote', '--heads', 'origin', "a b'c"], { cwd: '/r', noPrompt: true });
+    expect(gitCalls).toEqual([[['ls-remote', '--heads', 'origin', "a b'c"], { cwd: '/r', noPrompt: true }]]);
   });
 
   it.each(['git status; rm -rf x', 'echo hi', "git 'unterminated", 'git $(x)', 'git a\\b', '', '   '])(
     'rejects %j without spawning',
     async (cmd) => {
-      const runGit = vi.fn();
+      const spawned: unknown[] = [];
+      const runGit = async (args: readonly string[]) => {
+        spawned.push(args);
+        return { stdout: '', stderr: '' };
+      };
 
       await expect(defaultRunCommand(cmd, undefined, runGit)).rejects.toThrow('unsupported git command');
-      expect(runGit).not.toHaveBeenCalled();
+      expect(spawned).toEqual([]);
     },
   );
 

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { InvalidWorkRequestInputError } from './index.js';
 import { createLinearIssueAdapter, parseLinearIssueRef } from './linear-issue.js';
@@ -10,8 +10,12 @@ function load(name: string) {
 }
 
 function setup(body: unknown, env: Record<string, string | undefined> = { LINEAR_API_KEY: 'test-key' }) {
-  const fetchDouble = vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
-  return { fetchDouble, adapter: createLinearIssueAdapter({ fetch: fetchDouble, env }) };
+  const requests: unknown[] = [];
+  const fetchDouble = async (url: string | Request | URL) => {
+    requests.push(url);
+    return new Response(JSON.stringify(body), { status: 200 });
+  };
+  return { requests, adapter: createLinearIssueAdapter({ fetch: fetchDouble, env }) };
 }
 
 describe('linear-issue adapter', () => {
@@ -41,13 +45,13 @@ describe('linear-issue adapter', () => {
   });
 
   it('rejects a GitHub issue URL with a usage error naming the expected form', async () => {
-    const { adapter, fetchDouble } = setup(load('linear-issue-on-12.json'));
+    const { adapter, requests } = setup(load('linear-issue-on-12.json'));
     const p = adapter.resolve('https://github.com/on-par/software-factory/issues/12');
 
     await expect(p).rejects.toBeInstanceOf(InvalidWorkRequestInputError);
     await expect(p).rejects.toThrow(/"ON-12"/);
     await expect(p).rejects.toThrow('https://linear.app/<workspace>/issue/ON-12');
-    expect(fetchDouble).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
   });
 
   it('parses a bare key and a linear.app issue URL to the same key', () => {
@@ -63,7 +67,7 @@ describe('linear-issue adapter', () => {
   });
 
   it('rejects other hosts and malformed keys', async () => {
-    const { adapter, fetchDouble } = setup(load('linear-issue-on-12.json'));
+    const { adapter, requests } = setup(load('linear-issue-on-12.json'));
     for (const input of [
       'https://linear.app.evil.com/acme/issue/ON-12',
       'http://linear.app/acme/issue/ON-12',
@@ -75,7 +79,7 @@ describe('linear-issue adapter', () => {
     ]) {
       await expect(adapter.resolve(input)).rejects.toBeInstanceOf(InvalidWorkRequestInputError);
     }
-    expect(fetchDouble).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
   });
 
   it('truncates a long echoed input', () => {
@@ -93,10 +97,10 @@ describe('linear-issue adapter', () => {
   });
 
   it('fails fast when LINEAR_API_KEY is missing', async () => {
-    const { adapter, fetchDouble } = setup(load('linear-issue-on-12.json'), {});
+    const { adapter, requests } = setup(load('linear-issue-on-12.json'), {});
 
     await expect(adapter.resolve('ON-12')).rejects.toThrow(/LINEAR_API_KEY/);
-    expect(fetchDouble).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
   });
 
   it('accepts { ref } params as well as a bare string', async () => {

@@ -18,25 +18,38 @@ const WEEKLY_USAGE_FIXTURE = {
   seven_day: { utilization: 96, resets_at: '2026-10-20T12:00:00Z' },
 };
 
+function recordingCredentialsFile() {
+  const reads: string[] = [];
+  const readCredentialsFile = () => {
+    reads.push('read');
+    return validCreds;
+  };
+  return { reads, readCredentialsFile };
+}
+
 describe('readClaudeAccessToken', () => {
   it('prefers an injected readKeychain over an injected exec', async () => {
     const readKeychain = vi.fn().mockResolvedValue(validCreds);
-    const exec = vi.fn();
+    const execCalls: string[] = [];
+    const exec = async (file: string) => {
+      execCalls.push(file);
+      return { stdout: '' };
+    };
 
     const token = await readClaudeAccessToken({ platform: 'darwin', readKeychain, exec });
 
     expect(token).toBe('sk-ant-oat-fixture-token');
-    expect(exec).not.toHaveBeenCalled();
+    expect(execCalls).toEqual([]);
   });
 
   it('returns the token from the keychain on darwin', async () => {
     const readKeychain = vi.fn().mockResolvedValue(validCreds);
-    const readCredentialsFile = vi.fn();
+    const { reads, readCredentialsFile } = recordingCredentialsFile();
 
     const token = await readClaudeAccessToken({ platform: 'darwin', readKeychain, readCredentialsFile });
 
     expect(token).toBe('sk-ant-oat-fixture-token');
-    expect(readCredentialsFile).not.toHaveBeenCalled();
+    expect(reads).toEqual([]);
   });
 
   it('falls back to the credentials file when the keychain read throws', async () => {
@@ -50,22 +63,26 @@ describe('readClaudeAccessToken', () => {
 
   it('falls back to the credentials file when the keychain resolves to an empty string', async () => {
     const readKeychain = vi.fn().mockResolvedValue('');
-    const readCredentialsFile = vi.fn().mockReturnValue(validCreds);
+    const { reads, readCredentialsFile } = recordingCredentialsFile();
 
     const token = await readClaudeAccessToken({ platform: 'darwin', readKeychain, readCredentialsFile });
 
     expect(token).toBe('sk-ant-oat-fixture-token');
-    expect(readCredentialsFile).toHaveBeenCalled();
+    expect(reads).toHaveLength(1);
   });
 
   it('skips the keychain entirely on non-darwin platforms', async () => {
-    const readKeychain = vi.fn();
+    const keychainReads: string[] = [];
+    const readKeychain = async () => {
+      keychainReads.push('read');
+      return '';
+    };
     const readCredentialsFile = vi.fn().mockReturnValue(validCreds);
 
     const token = await readClaudeAccessToken({ platform: 'linux', readKeychain, readCredentialsFile });
 
     expect(token).toBe('sk-ant-oat-fixture-token');
-    expect(readKeychain).not.toHaveBeenCalled();
+    expect(keychainReads).toEqual([]);
   });
 
   it('returns null for an expired token without refreshing', async () => {
@@ -110,8 +127,11 @@ describe('fetchSubscriptionUsage', () => {
   }
 
   it('returns utilization and resets_at on the happy path, sending the expected headers', async () => {
-    const fetchImpl = vi.fn<typeof fetch>();
-    fetchImpl.mockResolvedValue(Response.json({ five_hour: { utilization: 42, resets_at: '2026-07-15T18:00:00Z' } }));
+    const requests: Array<[unknown, RequestInit | undefined]> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      requests.push([url, init]);
+      return Response.json({ five_hour: { utilization: 42, resets_at: '2026-07-15T18:00:00Z' } });
+    };
 
     const result = await fetchSubscriptionUsage(deps({ fetchImpl }));
 
@@ -121,19 +141,20 @@ describe('fetchSubscriptionUsage', () => {
       sevenDayUtilization: null,
       sevenDayResetsAt: null,
     });
-    expect(fetchImpl).toHaveBeenCalledWith(
-      'https://api.anthropic.com/api/oauth/usage',
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'Bearer sk-ant-oat-fixture-token',
-          'anthropic-beta': 'oauth-2025-04-20',
-        }),
-      }),
-    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.[0]).toBe('https://api.anthropic.com/api/oauth/usage');
+    expect(requests[0]?.[1]?.headers).toMatchObject({
+      Authorization: 'Bearer sk-ant-oat-fixture-token',
+      'anthropic-beta': 'oauth-2025-04-20',
+    });
   });
 
   it('returns null and never calls fetchImpl when the token is unavailable', async () => {
-    const fetchImpl = vi.fn<typeof fetch>();
+    const requests: unknown[] = [];
+    const fetchImpl: typeof fetch = async (url) => {
+      requests.push(url);
+      return new Response(null, { status: 500 });
+    };
     const readCredentialsFile = vi.fn().mockImplementation(() => {
       throw new Error('ENOENT');
     });
@@ -141,7 +162,7 @@ describe('fetchSubscriptionUsage', () => {
     const result = await fetchSubscriptionUsage(deps({ readCredentialsFile, fetchImpl }));
 
     expect(result).toBeNull();
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
   });
 
   it('returns null on a 401 response', async () => {
