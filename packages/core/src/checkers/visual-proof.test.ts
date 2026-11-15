@@ -1,13 +1,11 @@
-import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import { VisualProofConfigSchema } from '../config/visual-proof-section.js';
-import type { CommandResult } from '../utils/command-runner.js';
+import { noisePng, okCommandResult } from '../test-support/visual-proof-fixtures.js';
 import {
   classifyVisualProof,
   runVisualProofCapture,
-  validateVisualProofManifest,
   type VisualProofCaptureDeps,
   type VisualProofRoute,
 } from './visual-proof.js';
@@ -79,10 +77,26 @@ describe('classifyVisualProof', () => {
 
   it('reports uncovered UI files as a non-success', () => {
     const r = classifyVisualProof({ changedFiles: ['src/ui/settings/a.ts', 'web/app.css'], config, planRoutes: [] });
-    expect(r).toMatchObject({
-      required: true,
-      diagnostic: 'UI files not covered by any visualProof route: web/app.css',
+    expect(r).toMatchObject({ required: true, uncovered: ['web/app.css'] });
+    expect(r).not.toHaveProperty('diagnostic');
+  });
+
+  it('carries steps and record only for stateful routes', () => {
+    const stateful = VisualProofConfigSchema.parse({
+      uiPaths: ['src/ui/**'],
+      routes: [
+        { route: '/a', assert: 'A', paths: ['src/ui/a/**'], steps: [{ click: '#x' }], record: 'gif' },
+        { route: '/b', assert: 'B', paths: ['src/ui/b/**'] },
+      ],
+      command: ['node', 'capture.mjs'],
     });
+    const r = classifyVisualProof({
+      changedFiles: ['src/ui/a/1.ts', 'src/ui/b/2.ts'],
+      config: stateful,
+      planRoutes: [],
+    });
+    expect(r).toMatchObject({ routes: [{ route: '/a', steps: [{ click: '#x' }], record: 'gif' }, { route: '/b' }] });
+    if (r.required) expect(JSON.stringify(r.routes[1])).toBe(JSON.stringify(route('/b', 'B')));
   });
 
   it('selects a configured plan route and never invents an unconfigured one', () => {
@@ -95,149 +109,13 @@ describe('classifyVisualProof', () => {
   });
 });
 
-describe('validateVisualProofManifest', () => {
-  const outDir = resolve('/tmp/out');
-  const png = (size = 4096): Buffer =>
-    Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(size)]);
-  const capture = (patch: Record<string, unknown> = {}) => ({
-    route: '/settings',
-    state: 'default',
-    viewport: VIEWPORT,
-    finalPath: '/settings',
-    assertion: { target: 'Settings', passed: true },
-    file: '0.png',
-    ...patch,
-  });
-  const manifest = (caps: Record<string, unknown>[] = [capture()], patch: Record<string, unknown> = {}) => ({
-    headSha: HEAD,
-    runId: RUN,
-    captures: caps,
-    ...patch,
-  });
-  const check = (raw: unknown, file: Buffer = png()) =>
-    validateVisualProofManifest(raw, { headSha: HEAD, runId: RUN, outDir, routes: [route('/settings')] }, () => file);
-
-  it('accepts a valid manifest', () => {
-    const r = check(manifest());
-    expect(r).toEqual({
-      ok: true,
-      captures: [
-        {
-          route: '/settings',
-          state: 'default',
-          viewport: VIEWPORT,
-          finalPath: '/settings',
-          file: '0.png',
-          bytes: 4104,
-        },
-      ],
-    });
-  });
-
-  it('rejects a manifest for another head or run', () => {
-    expect(check(manifest([capture()], { headSha: 'b'.repeat(40) }))).toEqual({
-      ok: false,
-      diagnostic: 'capture is for another head/run',
-    });
-    expect(check(manifest([capture()], { runId: 'other' }))).toMatchObject({
-      ok: false,
-      diagnostic: 'capture is for another head/run',
-    });
-  });
-
-  it('rejects a capture for an unconfigured route', () => {
-    expect(check(manifest([capture({ route: '/admin' })]))).toMatchObject({
-      ok: false,
-      diagnostic: expect.stringContaining('unconfigured route /admin'),
-    });
-  });
-
-  it('rejects a selected route without a capture', () => {
-    expect(check(manifest([]))).toMatchObject({
-      ok: false,
-      diagnostic: expect.stringContaining('no capture for selected route /settings'),
-    });
-  });
-
-  it('rejects a capture whose final path is a login redirect', () => {
-    expect(check(manifest([capture({ finalPath: '/login' })]))).toMatchObject({
-      ok: false,
-      diagnostic: expect.stringContaining('landed on /login, expected /settings — login redirect or wrong page'),
-    });
-  });
-
-  it('rejects a capture whose positive assertion did not pass', () => {
-    expect(check(manifest([capture({ assertion: { target: 'Settings', passed: false } })]))).toMatchObject({
-      ok: false,
-    });
-    expect(check(manifest([capture({ assertion: { target: 'Other', passed: true } })]))).toMatchObject({ ok: false });
-  });
-
-  it('rejects a viewport different from the configured one', () => {
-    expect(check(manifest([capture({ viewport: { width: 800, height: 600 } })]))).toMatchObject({
-      ok: false,
-      diagnostic: expect.stringContaining('800x600'),
-    });
-  });
-
-  it('rejects files outside the out dir', () => {
-    for (const file of ['/etc/passwd.png', '../x.png', 'a/../../x.png']) {
-      expect(check(manifest([capture({ file })]))).toMatchObject({
-        ok: false,
-        diagnostic: expect.stringContaining('outside the capture directory'),
-      });
-    }
-  });
-
-  it('rejects a blank or non-PNG capture', () => {
-    expect(check(manifest(), Buffer.from('not a png'.repeat(500)))).toMatchObject({
-      ok: false,
-      diagnostic: expect.stringContaining('not a PNG'),
-    });
-    expect(check(manifest(), png(100))).toMatchObject({
-      ok: false,
-      diagnostic: expect.stringContaining('blank or empty image'),
-    });
-    expect(check(manifest(), png(6 * 1024 * 1024))).toMatchObject({
-      ok: false,
-      diagnostic: expect.stringContaining('5 MiB'),
-    });
-  });
-
-  it('rejects an unreadable image, a malformed manifest and unknown keys', () => {
-    const unreadable = validateVisualProofManifest(
-      manifest(),
-      { headSha: HEAD, runId: RUN, outDir, routes: [route('/settings')] },
-      () => {
-        throw new Error('ENOENT');
-      },
-    );
-    expect(unreadable).toMatchObject({ ok: false, diagnostic: expect.stringContaining('could not be read') });
-    expect(check({ nope: true })).toMatchObject({
-      ok: false,
-      diagnostic: expect.stringContaining('invalid capture manifest'),
-    });
-    expect(check(manifest([], { extra: 1 }))).toMatchObject({ ok: false });
-  });
-});
-
 describe('runVisualProofCapture', () => {
   const tempDirs = createTempDirs();
   afterEach(() => tempDirs.cleanup());
   const logsDir = () => tempDirs.makeSync('vp-test-');
   const qa = { start: ['npm', 'start'], readyPath: '/', readyTimeoutSeconds: 5 };
   const requirement = { required: true as const, routes: [route('/settings')] };
-  const cmdResult = (patch: Partial<CommandResult> = {}): CommandResult => ({
-    command: [],
-    stdout: '',
-    stderr: '',
-    exitCode: 0,
-    killed: false,
-    timedOut: false,
-    ok: true,
-    ...patch,
-  });
-  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(4096)]);
+  const png = noisePng(4096);
   const goodManifest = Buffer.from(
     JSON.stringify({
       headSha: HEAD,
@@ -263,7 +141,7 @@ describe('runVisualProofCapture', () => {
     const full: Partial<VisualProofCaptureDeps> = {
       startApp,
       probeReady: vi.fn(async () => 200),
-      runCommand: vi.fn(async () => cmdResult()),
+      runCommand: vi.fn(async () => okCommandResult()),
       killGroup: vi.fn(async () => undefined),
       sleep: async () => {},
       now: Date.now,
@@ -381,18 +259,57 @@ describe('runVisualProofCapture', () => {
     });
   });
 
+  it('fails uncovered UI files under required listing every path', async () => {
+    let started = 0;
+    const { full } = deps({
+      startApp: () => {
+        started++;
+        return { pid: 1, exited: new Promise<never>(() => {}), output: () => '' };
+      },
+    });
+    const r = await runVisualProofCapture(
+      input({ requirement: { ...requirement, uncovered: ['web/a.css', 'web/b.css'] } }),
+      full,
+    );
+    expect(r).toMatchObject({
+      status: 'fail',
+      diagnostic: 'UI files not covered by any visualProof route: web/a.css, web/b.css',
+    });
+    expect(started).toBe(0);
+  });
+
+  it('captures covered routes and reports uncovered paths under advisory', async () => {
+    const { full } = deps();
+    const r = await runVisualProofCapture(
+      input({ mode: 'advisory', requirement: { ...requirement, uncovered: ['web/a.css'] } }),
+      full,
+    );
+    expect(r).toMatchObject({ status: 'pass', uncovered: ['web/a.css'], attempts: 1 });
+    const none = await runVisualProofCapture(
+      input({ mode: 'advisory', requirement: { required: true as const, routes: [], uncovered: ['web/a.css'] } }),
+      full,
+    );
+    expect(none).toMatchObject({ status: 'fail', diagnostic: expect.stringContaining('web/a.css') });
+  });
+
   it('fails when the app answers 200 but the capture command exits non-zero', async () => {
-    const { full } = deps({ runCommand: async () => cmdResult({ ok: false, exitCode: 2, stderr: 'browser missing' }) });
+    const { full } = deps({
+      runCommand: async () => okCommandResult({ ok: false, exitCode: 2, stderr: 'browser missing' }),
+    });
     const r = await runVisualProofCapture(input(), full);
-    expect(r).toMatchObject({ status: 'fail', diagnostic: 'capture command exited 2: browser missing' });
+    expect(r).toMatchObject({
+      status: 'fail',
+      attempts: 3,
+      diagnostic: 'after 3 attempts: capture command exited 2: browser missing',
+    });
   });
 
   it('fails on a capture timeout', async () => {
     const { full } = deps({
-      runCommand: async () => cmdResult({ ok: false, timedOut: true, killed: true, exitCode: -1 }),
+      runCommand: async () => okCommandResult({ ok: false, timedOut: true, killed: true, exitCode: -1 }),
     });
     const r = await runVisualProofCapture(input(), full);
-    expect(r).toMatchObject({ status: 'fail', diagnostic: 'capture command timed out after 300s' });
+    expect(r).toMatchObject({ status: 'fail', diagnostic: 'after 3 attempts: capture command timed out after 300s' });
   });
 
   it('fails when the manifest is missing or invalid', async () => {
@@ -407,6 +324,6 @@ describe('runVisualProofCapture', () => {
     expect(missing).toMatchObject({ status: 'fail', diagnostic: expect.stringContaining('manifest.json') });
     const wrongHead = Buffer.from(JSON.stringify({ headSha: 'b'.repeat(40), runId: RUN, captures: [] }));
     const stale = await runVisualProofCapture(input(), deps({ readFile: () => wrongHead }).full);
-    expect(stale).toMatchObject({ status: 'fail', diagnostic: 'capture is for another head/run' });
+    expect(stale).toMatchObject({ status: 'fail', diagnostic: 'after 3 attempts: capture is for another head/run' });
   });
 });
