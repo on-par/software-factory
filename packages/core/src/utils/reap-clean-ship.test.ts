@@ -1,4 +1,3 @@
-// packages/core/src/utils/reap-clean-ship.test.ts — reapCleanShipWorktree against real throwaway git repos (#3008)
 import { execFile as execFileCb } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,7 +10,7 @@ import { reapCleanShipWorktree, setupWorktree } from './index.js';
 
 const execFile = promisify(execFileCb);
 
-describe('reapCleanShipWorktree', () => {
+describe('reapCleanShipWorktree against real throwaway git repos', () => {
   const kit = new PipelineTestKit();
 
   afterEach(async () => {

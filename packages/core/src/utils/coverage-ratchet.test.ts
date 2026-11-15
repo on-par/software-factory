@@ -11,8 +11,6 @@ import {
   renderRatchetReport,
 } from './coverage-ratchet.js';
 
-/** The metric block as it appears in a v8 coverage-summary.json on disk: `pct` may be absent or
- *  non-numeric, which is exactly what parseCoverageSummary's field guards exist to reject. */
 interface RawCoverageMetricBlock {
   total: number;
   covered: number;

@@ -1,7 +1,3 @@
-// src/utils/in-place.ts — in-place workspace mode (#3904): run the pipeline in the current
-// checkout instead of a factory worktree. The clone is the isolation boundary, so the checkout
-// must be clean and at the fetched default-branch tip, and nothing here ever deletes anything.
-
 import type { EventKind } from '../events/kinds.js';
 import type { RemoteBranchRecord } from '../types/index.js';
 import type { PrLookup } from '../phases/ship.js';
@@ -33,7 +29,6 @@ async function revParse(repoRoot: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-/** Why the checkout cannot host an in-place run, or null when it is clean and at origin/<default>. */
 export async function checkInPlaceCheckout(repoRoot: string): Promise<InPlaceCheckoutProblem | null> {
   await gitFetch(repoRoot);
   const { stdout: status } = await execGit(['status', '--porcelain'], { cwd: repoRoot });
@@ -78,16 +73,14 @@ export async function checkInPlaceCheckout(repoRoot: string): Promise<InPlaceChe
   return null;
 }
 
-/** Switches the checkout to the factory branch, cut from origin/<default> (or the branch's open
- *  PR head). Re-checks readiness first to guard a race with the preflight. Never deletes. */
 export async function setupInPlaceCheckout(
   repoRoot: string,
   branch: string,
   log?: (type: EventKind, msg: string) => void,
   opts?: Pick<WorktreeSetupOptions, 'findOpenPr'>,
 ): Promise<WorktreeSetupResult> {
-  const problem = await checkInPlaceCheckout(repoRoot);
-  if (problem) throw new Error(problem.message);
+  const problemSincePreflight = await checkInPlaceCheckout(repoRoot);
+  if (problemSincePreflight) throw new Error(problemSincePreflight.message);
   let openPrBranch = false;
   let remoteBranch: RemoteBranchRecord | null = null;
   const remoteSha = await detectRemoteBranch(repoRoot, branch);

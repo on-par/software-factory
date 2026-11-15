@@ -1,5 +1,3 @@
-// packages/core/src/utils/ci-evidence.ts — bounded, read-only evidence for a SHIP CI-watch failure (#2814)
-
 import type { Octokit } from '@octokit/rest';
 
 import type { CiCodeScanningAlert, CiFailingCheck, CiFailureEvidence, CiJobLogExcerpt } from '../types/index.js';
@@ -22,12 +20,8 @@ export const CI_EVIDENCE_LIMITS = {
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/**
- * Re-list the branch's check runs after the CI watch ended 'failure' and summarise the ones that did
- * not pass. When a failing check is CodeQL, also list the open code-scanning alerts on the PR's merge ref:
- * CodeQL on pull_request analyzes refs/pull/<n>/merge, so refs/pull/<n>/head returns no alerts.
- * Best-effort and GET-only: it never throws and never changes the park reason.
- */
+const codeqlPullRequestAnalysisRef = (prNumber: number): string => `refs/pull/${prNumber}/merge`;
+
 export async function collectCiFailureEvidence(opts: {
   octokit: Octokit;
   owner: string;
@@ -69,7 +63,7 @@ export async function collectCiFailureEvidence(opts: {
       const { data } = await octokit.rest.codeScanning.listAlertsForRepo({
         owner,
         repo,
-        ref: `refs/pull/${prNumber}/merge`,
+        ref: codeqlPullRequestAnalysisRef(prNumber),
         state: 'open',
         per_page: 100,
       });
@@ -98,11 +92,6 @@ export async function collectCiFailureEvidence(opts: {
 const LOG_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z /;
 const ANSI_ESCAPE = new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g');
 
-/**
- * Download the log tails of the named failing Actions jobs on `ref` for non-CodeQL CI rework (#3537).
- * A check run's id is the Actions job id. Best-effort and GET-only: it never throws; a listing or
- * per-job failure is returned in `errors` and the remaining jobs are still fetched.
- */
 export async function collectFailingJobLogs(opts: {
   octokit: Octokit;
   owner: string;

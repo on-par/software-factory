@@ -1,5 +1,3 @@
-// src/utils/lane-removal.ts — the keep / clean guard a lane applies before removing its own worktree (#3443)
-
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -19,7 +17,6 @@ function laneIssueFromBranch(branch: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-/** The lane's keep record and tracked-file cleanliness, decided by decideLaneRemoval. */
 async function laneRemovalDecision(
   repoRoot: string,
   worktreePath: string,
@@ -39,8 +36,6 @@ async function laneRemovalDecision(
   };
 }
 
-/** setupWorktree's replace step: throws, removing nothing, when the existing lane worktree has a keep
- *  record, modified tracked files, or an unverifiable state. Only a path holding a `.git` entry is judged. */
 export async function assertLaneReplaceable(
   repoRoot: string,
   branch: string,
@@ -64,7 +59,6 @@ export async function assertLaneReplaceable(
   );
 }
 
-/** reapLaneWorktree's keep gate: the outcome to return when the worktree must stay, else null. */
 export async function laneReapKept(
   repoRoot: string,
   worktreePath: string,

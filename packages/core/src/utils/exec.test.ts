@@ -103,9 +103,7 @@ describe('defaultExecFn', () => {
         while (Date.now() < deadline && raw === '') {
           try {
             raw = (await readFile(pidFile, 'utf-8')).trim();
-          } catch {
-            // not written yet
-          }
+          } catch {}
           if (raw === '') await new Promise((r) => setTimeout(r, 50));
         }
         const grandchildPid = Number(raw);

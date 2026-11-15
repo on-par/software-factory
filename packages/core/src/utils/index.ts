@@ -1,5 +1,3 @@
-// src/utils/index.ts — Shared utilities: logging, git ops, cost tracking, shell helpers
-
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -37,8 +35,6 @@ import { ensureWorktreeParentExcluded } from './worktree-location.js';
 export type { WorktreeSandbox } from './microvm.js';
 
 export { colorEnabled, formatEventLine } from './format.js';
-
-// ---------- Event Logging ----------
 
 export function logEvent(
   eventsFile: string,
@@ -109,30 +105,23 @@ export function logEvent(
 
 export { logCost, readCosts } from './cost-log.js';
 
-// ---------- Git Operations ----------
-
-// Every git call below runs through execGit, which imposes a hard deadline and
-// kills the child on expiry. Without one, a wedged worktree op hangs its caller
-// forever with no output — the failure mode #755 was opened for.
 export async function gitFetch(repoRoot: string): Promise<void> {
   await execGit(['fetch', 'origin', '-q', '--prune'], { cwd: repoRoot });
 }
 
-/** The repo default branch's remote-tracking ref (from origin/HEAD), or
- *  'origin/main' when origin/HEAD is unset (e.g. a clone of an empty bare repo). */
+const FALLBACK_REMOTE_BASE = 'origin/main';
+
 export async function defaultRemoteBase(repoRoot: string): Promise<string> {
   try {
     const { stdout } = await execGit(['symbolic-ref', '-q', 'refs/remotes/origin/HEAD'], { cwd: repoRoot });
     const m = stdout.trim().match(/^refs\/remotes\/(origin\/.+)$/);
     if (m) return m[1];
   } catch {
-    // fall through — origin/HEAD unset or not a repo; caller keeps the historical default
+    return FALLBACK_REMOTE_BASE;
   }
-  return 'origin/main';
+  return FALLBACK_REMOTE_BASE;
 }
 
-/** SHA of refs/remotes/origin/<branch>, or null when that remote-tracking ref does not
- *  exist. Reads local refs only; call after gitFetch (setupWorktree does). Never throws. */
 export async function detectRemoteBranch(repoRoot: string, branch: string): Promise<string | null> {
   try {
     const { stdout } = await execGit(['rev-parse', '--verify', '-q', `refs/remotes/origin/${branch}^{commit}`], {
@@ -145,21 +134,14 @@ export async function detectRemoteBranch(repoRoot: string, branch: string): Prom
 }
 
 export interface WorktreeSetupOptions {
-  /** Looks up an open PR whose head is `branch`; only called when origin/<branch> exists.
-   *  When it reports an open PR and no startPoint is given, the worktree is based on origin/<branch> (#3099). */
   findOpenPr?: (branch: string) => Promise<PrLookup>;
-  /** worktree-keeps.json to consult before replacing an existing lane worktree; defaults to the repo's state dir. */
   keepsFile?: string;
-  /** The lane issue; defaults to the number in a `<prefix>/<n>-` branch. */
   issue?: number;
-  /** Clock for the `.bak-YYYYMMDD` rename-aside suffix (#3651); defaults to the current time. */
   now?: () => Date;
 }
 
 export interface WorktreeSetupResult {
-  /** The ref the worktree was created from. */
   base: string;
-  /** Resolved HEAD SHA of the new worktree. */
   head: string;
   remoteBranch: RemoteBranchRecord | null;
 }
@@ -173,8 +155,6 @@ export async function setupWorktree(
   log?: (type: EventKind, msg: string) => void,
   opts?: WorktreeSetupOptions,
 ): Promise<WorktreeSetupResult> {
-  // The base of record is the freshly fetched remote-tracking ref — never local
-  // branch state, which can be stale, dirty, or ahead (#1167).
   await gitFetch(repoRoot);
   if (startPoint) {
     try {
@@ -185,9 +165,6 @@ export async function setupWorktree(
       );
     }
   }
-  // An earlier run's push (#1868) is recorded and reported here. When an open PR's head is
-  // this branch and the caller gave no start point, the lane continues on it (#3099), so
-  // SHIP pushes fast-forward to that PR. Otherwise it is never adopted or discarded here.
   let openPrBranch = false;
   let remoteBranch: RemoteBranchRecord | null = null;
   let prStatus: PrLookup['status'] | null = null;
@@ -221,12 +198,13 @@ export async function setupWorktree(
   await assertLaneReplaceable(repoRoot, branch, worktreePath, opts, log ?? (() => {}));
   await execGit(['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot }).catch(() => {});
   await execGit(['branch', '-D', branch], { cwd: repoRoot }).catch(() => {});
-  // A kept lane branch that -D could not clear (checked out elsewhere) is moved aside, never fatal (#3651).
-  const stuck = await execGit(['rev-parse', '--verify', '-q', `refs/heads/${branch}`], { cwd: repoRoot }).then(
+  const branchCheckedOutElsewhere = await execGit(['rev-parse', '--verify', '-q', `refs/heads/${branch}`], {
+    cwd: repoRoot,
+  }).then(
     () => true,
     () => false,
   );
-  if (stuck)
+  if (branchCheckedOutElsewhere)
     await moveLaneBranchAside(repoRoot, branch, { remoteSha, prStatus, now: opts?.now, log: log ?? (() => {}) });
   mkdirSync(dirname(worktreePath), { recursive: true });
   await ensureWorktreeParentExcluded(repoRoot, dirname(worktreePath));
@@ -268,15 +246,6 @@ export interface LaneWorktreeReapResult {
   branchDeleted: boolean;
 }
 
-/**
- * Eagerly removes a lane's own worktree when the lane parks or fails (#1007), fail-closed:
- * the checked-out branch must match `<prefix>/<issue>-*` (a human checkout squatting the lane
- * path is left alone), the issue must have no keep record (#3316), the tree must have no modified tracked files (both
- * decided by decideLaneRemoval), and the local branch is
- * deleted only when its content is provably on the remote — an unpushed parked attempt's
- * branch survives as its only handle. Every probe failure means keep. A registered-but-deleted
- * path returns `absent` (pruning it is sweepWorktrees' job).
- */
 export async function reapLaneWorktree(
   repoRoot: string,
   worktreePath: string,
@@ -350,13 +319,6 @@ export async function reapLaneWorktree(
   return { outcome: 'removed', branch, branchDeleted };
 }
 
-/**
- * Removes the lane worktree and local branch of a one-shot `factory ship` that ended without a
- * PR (#3008), fail-closed: the checked-out branch must be the lane's `<prefix>/<issue>-*`
- * branch, the tree must be completely clean (untracked files count), and HEAD must have zero
- * commits beyond the default remote base. Zero commits also means no PR can exist. Every probe
- * failure returns kept-unverified.
- */
 export async function reapCleanShipWorktree(
   repoRoot: string,
   worktreePath: string,
@@ -432,15 +394,13 @@ export async function reapCleanShipWorktree(
 
 export { branchPrefixSlug, slugify };
 
-/** Prefixes recognized as factory branches: the resolved slug only. */
 export function factoryBranchPrefixes(prefix?: string): string[] {
   return [branchPrefixSlug(prefix)];
 }
 
-/** Issue number of a `<prefix>/<n>-…` factory branch on the resolved prefix; null otherwise. */
 export function factoryBranchIssue(branch: string, prefix?: string): number | null {
   for (const p of factoryBranchPrefixes(prefix)) {
-    const match = new RegExp(`^${p}/(\\d+)-`).exec(branch); // slugs are [a-z0-9-] only
+    const match = new RegExp(`^${p}/(\\d+)-`).exec(branch);
     if (match) return Number(match[1]);
   }
   return null;
@@ -461,20 +421,14 @@ export async function getIssueTitle(repo: string, issue: number, octokit: Pick<O
   return data.title;
 }
 
-// ---------- Shell helpers ----------
-
 export function shellEscape(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
-
-// ---------- File helpers ----------
 
 export function ensureDir(path: string): void {
   if (!existsSync(path)) {
     mkdirSync(path, { recursive: true });
   }
 }
-
-// ---------- Escalation ----------
 
 export { escalationLine, isEscalation } from './escalation.js';

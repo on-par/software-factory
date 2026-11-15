@@ -45,10 +45,9 @@ describe('execGit', () => {
 
   it('kills the child and rejects with a named timeout error once the deadline passes', async () => {
     const started = Date.now();
+    const commandBlockedOnOpenStdin = ['hash-object', '--stdin'];
 
-    // `hash-object --stdin` waits on stdin forever (execFile leaves it open);
-    // the assertion on elapsed time proves the child was killed, not awaited.
-    const err: any = await execGit(['hash-object', '--stdin'], { timeoutMs: 50 }).catch((e) => e);
+    const err: any = await execGit(commandBlockedOnOpenStdin, { timeoutMs: 50 }).catch((e) => e);
 
     expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe('GitTimeoutError');

@@ -1,12 +1,3 @@
-// src/utils/github-identity.live.test.ts — resolveSelfIdentity against real GitHub with a real App installation token.
-//
-// A GitHub Actions job token is an installation token of the `github-actions` App, so it reproduces exactly what a
-// factory running under its own App sees. The CI `static` job passes its `github.token` as
-// FACTORY_LIVE_GITHUB_TOKEN. Everywhere else (local runs, test shards, factory runs inside Actions with another
-// token) the variable is unset and the suite is skipped. Read-only: GET-style calls only, nothing is written.
-//
-// The suite logs what GitHub returned for `viewer` (login and databaseId, neither secret; the token is never
-// logged), so the CI log records the raw answer the fallback is built on, not only a pass/fail.
 import { Octokit } from '@octokit/rest';
 import { describe, expect, it } from 'vitest';
 
@@ -16,7 +7,6 @@ const token = process.env.FACTORY_LIVE_GITHUB_TOKEN ?? '';
 const live = process.env.GITHUB_ACTIONS === 'true' && token !== '';
 const ACTIONS_BOT = 'github-actions[bot]';
 
-/** An Octokit that records each request it sends as `METHOD /route-template`, e.g. `GET /users/{username}`. */
 function recordingOctokit(): { octokit: Octokit; requests: string[] } {
   const octokit = new Octokit({ auth: token });
   const requests: string[] = [];

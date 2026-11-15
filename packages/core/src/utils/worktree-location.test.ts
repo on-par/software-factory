@@ -1,4 +1,3 @@
-// packages/core/src/utils/worktree-location.test.ts
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

@@ -1,11 +1,9 @@
-// STOP-file source marker (#3209): a one-line JSON body naming who set the STOP.
 import { readFileSync, statSync } from 'node:fs';
 
 export type StopSource = 'manual' | 'usage-watchdog' | 'self-update' | 'unknown';
 
 export interface StopMarker {
   source: StopSource;
-  /** Absent when neither the body nor the file's mtime could be read. */
   at?: string;
   detail?: string;
 }
@@ -25,7 +23,6 @@ function isEnoent(err: unknown): boolean {
   return (err as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 }
 
-/** Reads the STOP marker. Null when the file is absent; `unknown` source for empty, legacy or unparsable content. */
 export function readStopMarker(path: string, deps: Partial<StopMarkerDeps> = {}): StopMarker | null {
   const readFile = deps.readFile ?? ((p: string) => readFileSync(p, 'utf-8'));
   const statMtimeMs = deps.statMtimeMs ?? ((p: string) => statSync(p).mtimeMs);
