@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- Per-package line budget: `npm run loc-budget` in verify and CI `static` checks `loc-budget.json`, which may only fall; raising it needs a human-applied `loc-budget:override` label (#4124).
 - Scoped per-phase GitHub credentials (App installation or fine-grained tokens) with no merge route outside land (#4120).
 - `factory worktree gc` and the pre-run auto GC prune old `*.bak*`, `queue.bak.relaunch-*` and `*-relaunch.log` files in the state root, keeping the newest `worktree.stateBackupKeep` per kind and anything newer than `worktree.stateBackupMaxAgeDays` (#4055).
 - `npm run knip` now reports unused exports of `@on-par/factory-core`'s entry points and test-only code (`knip --production`) against a shrink-only `knip-baseline.json` (#4126).

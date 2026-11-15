@@ -34,6 +34,7 @@
     "regression-issue": "tsx scripts/regression-issue.ts",
     "knip": "tsx scripts/knip-baseline.ts",
     "knip:raw": "knip",
+    "loc-budget": "tsx scripts/loc-budget.ts",
     "duplication": "jscpd --config .jscpd.json . && tsx scripts/duplication-baseline.ts"
   },
   "engines": {

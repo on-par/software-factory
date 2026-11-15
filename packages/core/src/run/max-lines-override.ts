@@ -2,7 +2,9 @@ import type { CheckSummary } from '../types/index.js';
 
 export const MAX_LINES_OVERRIDE_LABEL = 'max-lines:override';
 
-export const HUMAN_ONLY_LABELS: readonly string[] = [MAX_LINES_OVERRIDE_LABEL];
+const LOC_BUDGET_OVERRIDE_LABEL = 'loc-budget:override';
+
+export const HUMAN_ONLY_LABELS: readonly string[] = [MAX_LINES_OVERRIDE_LABEL, LOC_BUDGET_OVERRIDE_LABEL];
 
 export function withoutHumanOnlyLabels(labels: readonly string[]): string[] {
   return labels.filter((label) => !HUMAN_ONLY_LABELS.includes(label.trim().toLowerCase()));
