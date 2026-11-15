@@ -1,26 +1,20 @@
-import { createTempDirs } from '@on-par/factory-core/testing';
+import { createTempDirs, fakeOctokit } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { landBaseGate } from './land-base-gate.js';
 
-const fakeOctokit = (head: string, merge: string | null, status = 'ahead') => {
+const baseOctokit = (head: string, merge: string | null, status = 'ahead') => {
   const getBranch = vi.fn(async () => ({ data: { commit: { sha: head } } }));
-  const octokit = {
-    rest: {
-      pulls: { get: async () => ({ data: { base: { ref: 'release' }, merge_commit_sha: merge } }) },
-      repos: {
-        getBranch,
-        getStatusChecksProtection: async () => ({ data: { contexts: ['ci'] } }),
-        getBranchRules: async () => ({ data: [] }),
-        compareCommitsWithBasehead: async () => ({ data: { status } }),
-      },
-      checks: {
-        listForRef: async () => ({
-          data: { check_runs: [{ name: 'ci', status: 'completed', conclusion: 'failure' }] },
-        }),
-      },
-      actions: { listWorkflowRunsForRepo: async () => ({ data: { workflow_runs: [] } }) },
-    },
-  } as never;
+  const octokit = fakeOctokit({
+    'pulls.get': async () => ({ data: { base: { ref: 'release' }, merge_commit_sha: merge } }),
+    'repos.getBranch': getBranch,
+    'repos.getStatusChecksProtection': async () => ({ data: { contexts: ['ci'] } }),
+    'repos.getBranchRules': async () => ({ data: [] }),
+    'repos.compareCommitsWithBasehead': async () => ({ data: { status } }),
+    'checks.listForRef': async () => ({
+      data: { check_runs: [{ name: 'ci', status: 'completed', conclusion: 'failure' }] },
+    }),
+    'actions.listWorkflowRunsForRepo': async () => ({ data: { workflow_runs: [] } }),
+  }).octokit as never;
   return { octokit, getBranch };
 };
 
@@ -31,7 +25,7 @@ const withState = (fn: (state: string) => Promise<void>) => fn(dirs.makeSync('ba
 describe('landing base lookup', () => {
   it('reads the actual base branch and records its merged commit', () =>
     withState(async (state) => {
-      const { octokit, getBranch } = fakeOctokit('merge', 'merge');
+      const { octokit, getBranch } = baseOctokit('merge', 'merge');
       const log = vi.fn();
       const gate = landBaseGate({ octokit, owner: 'o', repo: 'r', prNumber: 1, state, log });
       await gate.record();
@@ -46,7 +40,7 @@ describe('landing base lookup', () => {
     withState(async (state) => {
       const log = vi.fn();
       const gate = landBaseGate({
-        ...fakeOctokit('child', 'merge', status),
+        ...baseOctokit('child', 'merge', status),
         owner: 'o',
         repo: 'r',
         prNumber: 1,
@@ -60,7 +54,7 @@ describe('landing base lookup', () => {
   );
   it('rejects recording a merge without a merge commit', () =>
     withState(async (state) => {
-      const gate = landBaseGate({ ...fakeOctokit('x', null), owner: 'o', repo: 'r', prNumber: 1, state, log: vi.fn() });
+      const gate = landBaseGate({ ...baseOctokit('x', null), owner: 'o', repo: 'r', prNumber: 1, state, log: vi.fn() });
       await expect(gate.record()).rejects.toThrow('no merge commit');
     }));
 });

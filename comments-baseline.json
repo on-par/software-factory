@@ -722,7 +722,7 @@
   "packages/core/src/steward/packet.ts": 37,
   "packages/core/src/steward/run.ts": 10,
   "packages/core/src/test-support/index.ts": 5,
-  "packages/core/src/test-support/phase.ts": 3,
+  "packages/core/src/test-support/phase.ts": 1,
   "packages/core/src/test-support/setup-env.ts": 13,
   "packages/core/src/test-support/spec-content-plan.test.ts": 4,
   "packages/core/src/testing.ts": 3,

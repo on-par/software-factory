@@ -15,6 +15,7 @@ import {
   type PollBlockedParksOptions,
   pollBlockedParks,
 } from './poller.js';
+import { fakeOctokit } from '../test-support/index.js';
 import { fakeIssueComments } from '../queue/fake-issue-comments.js';
 
 function fakeClient(labels: Map<number, string[]>) {
@@ -345,7 +346,7 @@ describe('pollBlockedParks', () => {
 });
 
 describe('createOctokitBlockedParkStore', () => {
-  function fakeOctokit(opts: { body?: string | null; graphql?: unknown }) {
+  function blockedParkOctokit(opts: { body?: string | null; graphql?: unknown }) {
     const updates: unknown[] = [];
     const queries: Array<[string, unknown]> = [];
     const updateComment = async (input: unknown) => {
@@ -358,15 +359,18 @@ describe('createOctokitBlockedParkStore', () => {
       return opts.graphql;
     };
     const request = async () => ({ data: [{ number: 3, state: 'open', repository: { full_name: 'o/r' } }] });
-    const octokit = Object.assign({} as Octokit, { rest: { issues: { get, updateComment } }, graphql, request });
-    return { octokit, updates, queries };
+    const { octokit } = fakeOctokit({ 'issues.get': get, 'issues.updateComment': updateComment, graphql, request });
+    return { octokit: octokit as Octokit, updates, queries };
   }
   const merged = (...m: unknown[]) => ({
     repository: { issue: { closedByPullRequestsReferences: { nodes: m.map((merged) => ({ merged })) } } },
   });
 
   it('detects the factory-blocker marker and a merged closing PR', async () => {
-    const f = fakeOctokit({ body: 'x <!-- factory-blocker v1 parent:5 hash:abc -->', graphql: merged(false, true) });
+    const f = blockedParkOctokit({
+      body: 'x <!-- factory-blocker v1 parent:5 hash:abc -->',
+      graphql: merged(false, true),
+    });
     const store = createOctokitBlockedParkStore(f.octokit, 'o/r');
     expect(await store.blockerEvidence(9)).toEqual({ factoryFiled: true, mergedClosingPr: true });
     expect(f.queries).toEqual([
@@ -375,14 +379,20 @@ describe('createOctokitBlockedParkStore', () => {
   });
 
   it('reports unmerged PRs, a null body, and malformed GraphQL as not merged', async () => {
-    const un = createOctokitBlockedParkStore(fakeOctokit({ body: 'plain', graphql: merged(false) }).octokit, 'o/r');
+    const un = createOctokitBlockedParkStore(
+      blockedParkOctokit({ body: 'plain', graphql: merged(false) }).octokit,
+      'o/r',
+    );
     expect(await un.blockerEvidence(9)).toEqual({ factoryFiled: false, mergedClosingPr: false });
-    const nul = createOctokitBlockedParkStore(fakeOctokit({ body: null, graphql: null }).octokit, 'o/r');
+    const nul = createOctokitBlockedParkStore(blockedParkOctokit({ body: null, graphql: null }).octokit, 'o/r');
     expect(await nul.blockerEvidence(9)).toEqual({ factoryFiled: false, mergedClosingPr: false });
-    const bad = createOctokitBlockedParkStore(fakeOctokit({ body: '', graphql: { repository: {} } }).octokit, 'o/r');
+    const bad = createOctokitBlockedParkStore(
+      blockedParkOctokit({ body: '', graphql: { repository: {} } }).octokit,
+      'o/r',
+    );
     expect((await bad.blockerEvidence(9)).mergedClosingPr).toBe(false);
     const holes = createOctokitBlockedParkStore(
-      fakeOctokit({
+      blockedParkOctokit({
         body: '',
         graphql: { repository: { issue: { closedByPullRequestsReferences: { nodes: [null] } } } },
       }).octokit,
@@ -392,7 +402,7 @@ describe('createOctokitBlockedParkStore', () => {
   });
 
   it('updates comments and lists blocked_by through octokit', async () => {
-    const f = fakeOctokit({});
+    const f = blockedParkOctokit({});
     const store = createOctokitBlockedParkStore(f.octokit, 'o/r');
     await store.updateComment(11, 'new');
     expect(f.updates).toEqual([{ owner: 'o', repo: 'r', comment_id: 11, body: 'new' }]);

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { defaultFactoryConfig } from '@on-par/factory-config';
 import type { Octokit } from '@octokit/rest';
 import { workKeyFromIssue, type EventKind } from '@on-par/factory-core';
-import { createTempDirs } from '@on-par/factory-core/testing';
+import { createTempDirs, fakeOctokit } from '@on-par/factory-core/testing';
 import {
   countReviewReworkRuns,
   createFileReviewReworkStore,
@@ -25,34 +25,33 @@ const SHA = 'abc1234def';
 
 type Stored = { id: number; user: { id: number }; body: string };
 
-function fakeOctokit(opts: { pulls?: unknown[]; listFails?: boolean } = {}): { octokit: Octokit; comments: Stored[] } {
+function commentStoreOctokit(opts: { pulls?: unknown[]; listFails?: boolean } = {}): {
+  octokit: Octokit;
+  comments: Stored[];
+} {
   const comments: Stored[] = [];
   let next = 100;
   const pulls = opts.pulls ?? [{ number: 9, head: { ref: BRANCH, sha: SHA, repo: { full_name: REPO } } }];
-  const rest = {
-    users: { getAuthenticated: async () => ({ data: { id: SELF } }) },
-    pulls: {
-      list: async () => {
-        if (opts.listFails) throw new Error('boom');
-        return { data: pulls };
-      },
-      get: async () => ({ data: { head: { sha: SHA } } }),
+  const { octokit } = fakeOctokit({
+    'users.getAuthenticated': async () => ({ data: { id: SELF } }),
+    'pulls.list': async () => {
+      if (opts.listFails) throw new Error('boom');
+      return { data: pulls };
     },
-    issues: {
-      listComments: async ({ page }: { page: number }) => ({ data: page === 1 ? comments : [] }),
-      createComment: async ({ body }: { body: string }) => {
-        const c = { id: next++, user: { id: SELF }, body };
-        comments.push(c);
-        return { data: c };
-      },
-      updateComment: async ({ comment_id, body }: { comment_id: number; body: string }) => {
-        const c = comments.find((x) => x.id === comment_id);
-        if (c) c.body = body;
-        return { data: c };
-      },
+    'pulls.get': async () => ({ data: { head: { sha: SHA } } }),
+    'issues.listComments': async ({ page }: { page: number }) => ({ data: page === 1 ? comments : [] }),
+    'issues.createComment': async ({ body }: { body: string }) => {
+      const c = { id: next++, user: { id: SELF }, body };
+      comments.push(c);
+      return { data: c };
     },
-  };
-  return { octokit: Object.assign({} as Octokit, { rest }), comments };
+    'issues.updateComment': async ({ comment_id, body }: { comment_id: number; body: string }) => {
+      const c = comments.find((x) => x.id === comment_id);
+      if (c) c.body = body;
+      return { data: c };
+    },
+  });
+  return { octokit: octokit as Octokit, comments };
 }
 
 function prState(over: Partial<PrRunState> = {}): PrRunState {
@@ -101,7 +100,7 @@ describe('ship PR run state', () => {
   afterEach(() => temp.cleanup());
 
   it('a fresh clone with no local state restores two handled review rounds and the remaining cap', async () => {
-    const { octokit } = fakeOctokit();
+    const { octokit } = commentStoreOctokit();
     await savePrRunState({ octokit, repo: REPO, prNumber: 9, state: prState() });
 
     const restored = await restorePrRunStateForRun(base(octokit));
@@ -115,7 +114,7 @@ describe('ship PR run state', () => {
   });
 
   it('stops after one round, deletes local state, and resumes from the PR state', async () => {
-    const { octokit } = fakeOctokit();
+    const { octokit } = commentStoreOctokit();
     createFileReviewReworkStore(reviewReworkFile).record({
       reviewId: 11,
       pr: 9,
@@ -152,7 +151,7 @@ describe('ship PR run state', () => {
   });
 
   it('skips the save when nothing changed and does nothing without a PR number', async () => {
-    const { octokit, comments } = fakeOctokit();
+    const { octokit, comments } = commentStoreOctokit();
     const record = prRunStateRecorder(async () => {}, {
       octokit,
       repo: REPO,
@@ -182,7 +181,7 @@ describe('ship PR run state', () => {
   });
 
   it('saves draftReason ci-pending and status awaiting-ci on a CI-pending ready update, and drops it later', async () => {
-    const { octokit, comments } = fakeOctokit();
+    const { octokit, comments } = commentStoreOctokit();
     const record = prRunStateRecorder(async () => {}, {
       octokit,
       repo: REPO,
@@ -213,7 +212,7 @@ describe('ship PR run state', () => {
   });
 
   it('logs pr_state_ignored for a forged block and restores nothing', async () => {
-    const { octokit, comments } = fakeOctokit();
+    const { octokit, comments } = commentStoreOctokit();
     await savePrRunState({ octokit, repo: REPO, prNumber: 9, state: prState() });
     if (comments[0]) comments[0].user.id = 999;
 
@@ -230,7 +229,7 @@ describe('ship PR run state', () => {
   });
 
   it('a GitHub failure logs pr_state_failed and never throws', async () => {
-    const { octokit } = fakeOctokit({ listFails: true });
+    const { octokit } = commentStoreOctokit({ listFails: true });
     await expect(restorePrRunStateForRun(base(octokit))).resolves.toBeUndefined();
     expect(events.map((e) => e.kind)).toEqual(['pr_state_failed']);
 
@@ -276,20 +275,20 @@ describe('ship PR run state', () => {
   });
 
   it('skips when no open PR matches the branch', async () => {
-    const { octokit } = fakeOctokit({ pulls: [] });
+    const { octokit } = commentStoreOctokit({ pulls: [] });
     expect(await restorePrRunStateForRun(base(octokit))).toBeUndefined();
     expect(events).toEqual([]);
   });
 
   it('logs pr_state_failed when several open PRs match the branch', async () => {
     const pr = (n: number) => ({ number: n, head: { ref: BRANCH, sha: SHA, repo: { full_name: REPO } } });
-    const { octokit } = fakeOctokit({ pulls: [pr(9), pr(10)] });
+    const { octokit } = commentStoreOctokit({ pulls: [pr(9), pr(10)] });
     expect(await restorePrRunStateForRun(base(octokit))).toBeUndefined();
     expect(events.map((e) => e.kind)).toEqual(['pr_state_failed']);
   });
 
   it('shipRunStateRecorder keeps the bare local recorder when skipped and saves to the PR otherwise', async () => {
-    const { octokit, comments } = fakeOctokit();
+    const { octokit, comments } = commentStoreOctokit();
     const opts = {
       octokit,
       repo: REPO,

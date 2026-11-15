@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { Octokit } from '@octokit/rest';
 import { getFactoryPaths, workKeyFromIssue, type EventKind } from '@on-par/factory-core';
 import { loadPrRunState, savePrRunState, type CiOutcome, type PrRunState } from '@on-par/factory-core/internal';
-import { createTempDirs } from '@on-par/factory-core/testing';
+import { createTempDirs, fakeOctokit } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -47,49 +47,45 @@ function statePayload(issue: number, pr: number, over: Partial<PrRunState> = {})
 
 type Stored = { id: number; user: { id: number }; body: string };
 
-function fakeOctokit(pulls: PullSpec[], comments: Record<number, Stored[]>) {
+function commentStoreOctokit(pulls: PullSpec[], comments: Record<number, Stored[]>) {
   const listed: unknown[] = [];
-  const rest = {
-    users: { getAuthenticated: async () => ({ data: { id: SELF } }) },
-    pulls: {
-      list: async (p: unknown) => {
-        listed.push(p);
-        return {
-          data: pulls.map((p2) => ({
-            number: p2.number,
-            draft: p2.draft ?? true,
-            node_id: `PR_${p2.number}`,
-            head: { ref: p2.ref ?? `factory/${p2.issue}-thing`, sha: SHA },
-            base: { ref: 'main' },
-          })),
-        };
-      },
+  const { octokit } = fakeOctokit({
+    'users.getAuthenticated': async () => ({ data: { id: SELF } }),
+    'pulls.list': async (p: unknown) => {
+      listed.push(p);
+      return {
+        data: pulls.map((p2) => ({
+          number: p2.number,
+          draft: p2.draft ?? true,
+          node_id: `PR_${p2.number}`,
+          head: { ref: p2.ref ?? `factory/${p2.issue}-thing`, sha: SHA },
+          base: { ref: 'main' },
+        })),
+      };
     },
-    issues: {
-      listComments: async ({ issue_number, page }: { issue_number: number; page: number }) => ({
-        data: page === 1 ? (comments[issue_number] ?? []) : [],
-      }),
-      createComment: async ({ issue_number, body }: { issue_number: number; body: string }) => {
-        const c = { id: 900 + (comments[issue_number]?.length ?? 0), user: { id: SELF }, body };
-        (comments[issue_number] ??= []).push(c);
-        return { data: c };
-      },
-      updateComment: async ({ comment_id, body }: { comment_id: number; body: string }) => {
-        for (const list of Object.values(comments)) {
-          const c = list.find((x) => x.id === comment_id);
-          if (c) c.body = body;
-        }
-        return { data: {} };
-      },
+    'issues.listComments': async ({ issue_number, page }: { issue_number: number; page: number }) => ({
+      data: page === 1 ? (comments[issue_number] ?? []) : [],
+    }),
+    'issues.createComment': async ({ issue_number, body }: { issue_number: number; body: string }) => {
+      const c = { id: 900 + (comments[issue_number]?.length ?? 0), user: { id: SELF }, body };
+      (comments[issue_number] ??= []).push(c);
+      return { data: c };
     },
-  };
-  return { octokit: Object.assign({} as Octokit, { rest }), listed };
+    'issues.updateComment': async ({ comment_id, body }: { comment_id: number; body: string }) => {
+      for (const list of Object.values(comments)) {
+        const c = list.find((x) => x.id === comment_id);
+        if (c) c.body = body;
+      }
+      return { data: {} };
+    },
+  });
+  return { octokit: octokit as Octokit, listed };
 }
 
 /** A run-state comment written the way production writes it (savePrRunState), optionally re-authored. */
 async function stateComment(state: PrRunState, userId = SELF): Promise<Stored> {
   const scratch: Record<number, Stored[]> = {};
-  const { octokit } = fakeOctokit([], scratch);
+  const { octokit } = commentStoreOctokit([], scratch);
   await savePrRunState({ octokit, repo: REPO, prNumber: state.prNumber, state });
   const stored = scratch[state.prNumber]?.[0];
   if (!stored) throw new Error('state comment was not written');
@@ -102,7 +98,7 @@ function setup(
   over: Partial<CiPendingDraftSweepDeps> = {},
   verdict: CiOutcome = 'success',
 ) {
-  const { octokit } = fakeOctokit(pulls, comments);
+  const { octokit } = commentStoreOctokit(pulls, comments);
   const logs: { type: EventKind; issue: number; msg: string }[] = [];
   const deps: CiPendingDraftSweepDeps = {
     octokit,
@@ -124,7 +120,7 @@ const draftOf = async (
   pr: number,
   issue: number,
 ): Promise<PrRunState | undefined> => {
-  const { octokit } = fakeOctokit([], comments);
+  const { octokit } = commentStoreOctokit([], comments);
   const loaded = await loadPrRunState({ octokit, repo: REPO, prNumber: pr, key: workKeyFromIssue(issue) });
   return loaded.status === 'found' ? loaded.state : undefined;
 };
@@ -325,7 +321,7 @@ describe('runCiPendingDraftSweep (#3932)', () => {
     const root = temp.makeSync('ci-pending-sweep-');
     const paths = getFactoryPaths(root);
     const comments = { 5: [await stateComment(statePayload(42, 5))] };
-    const { octokit } = fakeOctokit([{ number: 5, issue: 42 }], comments);
+    const { octokit } = commentStoreOctokit([{ number: 5, issue: 42 }], comments);
     Object.assign(octokit.rest, {
       checks: {
         listForRef: async () => ({

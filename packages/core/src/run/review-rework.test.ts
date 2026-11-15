@@ -15,6 +15,7 @@ import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { shipPhase as realShipPhase } from '../phases/ship.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
+import { fakeOctokit } from '../test-support/index.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
@@ -113,20 +114,24 @@ const comment = (id: number, review: number, body: string, extra: Record<string,
   ...extra,
 });
 
-function fakeOctokit(pull: { state: string; head: { ref: string } } = { state: 'open', head: { ref: BRANCH } }) {
+function reworkOctokit(pull: { state: string; head: { ref: string } } = { state: 'open', head: { ref: BRANCH } }) {
   const listReviewComments = vi.fn();
   const review = { data: { body: 'please rename', state: 'CHANGES_REQUESTED', user: { login: 'alice' } } };
   const getReview = vi.fn(async () => (apiCalls.push('getReview'), review));
   const getPull = vi.fn(async () => (apiCalls.push('pulls.get'), { data: pull }));
-  const octokit = Object.assign({} as Octokit, {
-    rest: { pulls: { get: getPull, getReview, listReviewComments, create: pullsCreate } },
+  const { octokit } = fakeOctokit({
+    'pulls.get': getPull,
+    'pulls.getReview': getReview,
+    'pulls.listReviewComments': listReviewComments,
+    'pulls.create': pullsCreate,
     paginate: vi.fn(async () => [
       comment(1, 200, 'R-one'),
       comment(2, 100, 'OLD-only'),
       comment(3, 200, 'R-two', { line: null }),
     ]),
   });
-  return { octokit, getReview };
+  octokit.rest.pulls.get = vi.fn(octokit.rest.pulls.get);
+  return { octokit: octokit as Octokit, getReview };
 }
 
 const buildOpts = (octokit: Octokit) => ({
@@ -169,10 +174,11 @@ describe('comment rework (#3882)', () => {
     reviewRework: { prNumber: 7, reviewId: 300, reviewer: 'alice', source: 'comment' },
   };
   const withComment = (body: string | null, pull?: { state: string; head: { ref: string } }) => {
-    const { octokit, getReview } = fakeOctokit(pull);
+    const { octokit, getReview } = reworkOctokit(pull);
     const getComment = async () => (apiCalls.push('getComment'), { data: { body, user: { login: 'alice' } } });
     Object.assign((octokit as any).rest, { issues: { getComment } });
-    return { octokit, getReview };
+    octokit.rest.pulls.get = vi.fn(octokit.rest.pulls.get);
+    return { octokit: octokit as Octokit, getReview };
   };
 
   it("a comment rework builds on the PR branch from that comment's feedback only", async () => {
@@ -205,7 +211,7 @@ describe('comment rework (#3882)', () => {
 
 describe('review rework (#3564)', () => {
   it('review rework builds on the PR branch with only the triggering review', async () => {
-    const { octokit } = fakeOctokit();
+    const { octokit } = reworkOctokit();
     const outcome = await runIssue(reviewRequest, policy, ports(octokit));
     expect(outcome).toMatchObject({ state: 'ready' });
     expect(order).toEqual(['rework', 'check', 'ship']);
@@ -221,21 +227,21 @@ describe('review rework (#3564)', () => {
   });
 
   it('throws ReviewReworkError when the PR head ref is not the run branch', async () => {
-    const { octokit } = fakeOctokit({ state: 'open', head: { ref: 'other' } });
+    const { octokit } = reworkOctokit({ state: 'open', head: { ref: 'other' } });
     await expect(runReviewReworkBuild(buildOpts(octokit))).rejects.toThrow(ReviewReworkError);
     expect(await runIssue(reviewRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
     expect(order).toEqual([]);
   });
 
   it('throws when the PR is closed', async () => {
-    const { octokit } = fakeOctokit({ state: 'closed', head: { ref: BRANCH } });
+    const { octokit } = reworkOctokit({ state: 'closed', head: { ref: BRANCH } });
     await expect(runReviewReworkBuild(buildOpts(octokit))).rejects.toThrow(/closed/);
     expect(await runIssue(reviewRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
     expect(order).not.toContain('rework');
   });
 
   it('throws when review R cannot be read', async () => {
-    const { octokit, getReview } = fakeOctokit();
+    const { octokit, getReview } = reworkOctokit();
     getReview.mockRejectedValueOnce(new Error('Not Found'));
     await expect(runReviewReworkBuild(buildOpts(octokit))).rejects.toThrow(
       /could not read PR #7 \/ review 200: Not Found/,
@@ -245,13 +251,13 @@ describe('review rework (#3564)', () => {
 
   it('throws when the rework worker never ran', async () => {
     reworkWorker.mockResolvedValueOnce({ failovers: [], modelCompleted: false, failureReason: 'boom' } as never);
-    const { octokit } = fakeOctokit();
+    const { octokit } = reworkOctokit();
     expect(await runIssue(reviewRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
     expect(order).toEqual([]);
   });
 
   it('resumeFrom wins over reviewRework and makes no review rework call', async () => {
-    const { octokit } = fakeOctokit();
+    const { octokit } = reworkOctokit();
     const resumeFrom = { phase: 'check' as const, route: 'claude' as const, model: 'm', buildMinutes: 1 };
     await runIssue({ ...reviewRequest, resumeFrom }, policy, ports(octokit));
     expect(order).toEqual(['check', 'ship']);
@@ -272,7 +278,7 @@ describe('review rework (#3564)', () => {
   });
 
   it('uses original_line for an outdated comment and keeps GitHub order', async () => {
-    const { octokit } = fakeOctokit();
+    const { octokit } = reworkOctokit();
     const rework = vi.fn<typeof realReworkWorker>().mockResolvedValue({ failovers: [], modelCompleted: true });
     const checkOpts = { log: vi.fn(), issue: 42, worktree: '/tmp/wt' } as never;
     const { feedback } = await runReviewReworkBuild({
@@ -290,7 +296,7 @@ describe('review rework (#3564)', () => {
   });
 
   it('a request without reviewRework still plans and builds', async () => {
-    const { octokit } = fakeOctokit();
+    const { octokit } = reworkOctokit();
     await runIssue(request, policy, ports(octokit));
     expect(order).toEqual(['plan', 'build', 'check', 'ship']);
   });
@@ -300,7 +306,7 @@ describe('iterate (#3625)', () => {
   const iterateRequest: RunRequest = { ...request, iterate: { prNumber: 7, commentId: 300, actor: 'alice' } };
 
   it('an iterate request skips PLAN and BUILD and runs CHECK on the PR branch', async () => {
-    const { octokit } = fakeOctokit();
+    const { octokit } = reworkOctokit();
     const outcome = await runIssue(iterateRequest, policy, ports(octokit));
     expect(outcome).toMatchObject({ state: 'ready' });
     expect(order).toEqual(['check', 'ship']);
@@ -312,27 +318,27 @@ describe('iterate (#3625)', () => {
     ['closed', { state: 'closed', head: { ref: BRANCH } }],
     ['retargeted', { state: 'open', head: { ref: 'other' } }],
   ])('throws ReviewReworkError and never ships when the PR is %s', async (_name, pull) => {
-    const { octokit } = fakeOctokit(pull);
+    const { octokit } = reworkOctokit(pull);
     expect(await runIssue(iterateRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
     expect(order).toEqual([]);
   });
 
   it('wraps a PR read error as ReviewReworkError', async () => {
-    const { octokit } = fakeOctokit();
+    const { octokit } = reworkOctokit();
     vi.mocked(octokit.rest.pulls.get).mockRejectedValueOnce(new Error('Not Found'));
     expect(await runIssue(iterateRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
     expect(order).not.toContain('ship');
   });
 
   it('runRequestedReviewRework rejects with ReviewReworkError directly', async () => {
-    const { octokit } = fakeOctokit({ state: 'closed', head: { ref: BRANCH } });
+    const { octokit } = reworkOctokit({ state: 'closed', head: { ref: BRANCH } });
     await expect(
       runRequestedReviewRework(iterateRequest, { octokit, reworkWorker }, { log: vi.fn() } as never),
     ).rejects.toThrow(ReviewReworkError);
   });
 
   it('resumeFrom wins over iterate', async () => {
-    const { octokit } = fakeOctokit({ state: 'closed', head: { ref: BRANCH } });
+    const { octokit } = reworkOctokit({ state: 'closed', head: { ref: BRANCH } });
     const resumeFrom = { phase: 'check' as const, route: 'claude' as const, model: 'm', buildMinutes: 1 };
     await runIssue({ ...iterateRequest, resumeFrom }, policy, ports(octokit));
     expect([apiCalls, order]).toEqual([[], ['check', 'ship']]);
@@ -357,7 +363,7 @@ describe('feedback round rework (#3910)', () => {
   });
 
   it('reworks with the plan summary after the open-PR guard', async () => {
-    const { octokit } = fakeOctokit();
+    const { octokit } = reworkOctokit();
     const log = vi.fn();
     await runRequestedReviewRework(feedbackRequest, { octokit, reworkWorker }, { log } as never, {
       prNumber: 7,
@@ -371,7 +377,7 @@ describe('feedback round rework (#3910)', () => {
   });
 
   it('does nothing when no item is actionable', async () => {
-    const { octokit } = fakeOctokit();
+    const { octokit } = reworkOctokit();
     await runRequestedReviewRework(feedbackRequest, { octokit, reworkWorker }, { log: vi.fn() } as never, {
       prNumber: 7,
       summary: undefined,
@@ -380,7 +386,7 @@ describe('feedback round rework (#3910)', () => {
   });
 
   it('fails closed when the PR is closed, and wraps a read error', async () => {
-    const closed = fakeOctokit({ state: 'closed', head: { ref: BRANCH } });
+    const closed = reworkOctokit({ state: 'closed', head: { ref: BRANCH } });
     const plan = { prNumber: 7, summary };
     await expect(
       runRequestedReviewRework(
@@ -390,7 +396,7 @@ describe('feedback round rework (#3910)', () => {
         plan,
       ),
     ).rejects.toThrow(ReviewReworkError);
-    const broken = fakeOctokit();
+    const broken = reworkOctokit();
     vi.mocked(broken.octokit.rest.pulls.get).mockRejectedValueOnce(new Error('Not Found'));
     await expect(
       runRequestedReviewRework(
@@ -404,7 +410,7 @@ describe('feedback round rework (#3910)', () => {
   });
 
   it('runIssue triages, reworks the actionable feedback at CHECK, ships and answers the comment', async () => {
-    const { octokit } = fakeOctokit();
+    const { octokit } = reworkOctokit();
     const posted: string[] = [];
     const listComments = vi.fn();
     Object.assign(octokit.rest, {

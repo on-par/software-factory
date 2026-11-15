@@ -5,6 +5,7 @@ import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CLAIMED_BY_LABEL_PREFIX, claimExpiresLabel } from '../queue/github-queue.js';
+import { fakeOctokit } from '../test-support/index.js';
 import { isZeroCommitLane, sweepWorktrees } from './worktree-gc.js';
 import type { SweepDeps } from './worktree-gc.js';
 
@@ -40,17 +41,16 @@ describe('sweepWorktrees in-flight lanes, claims and zero-commit branches (#2964
     return double as NonNullable<SweepDeps['octokit']>;
   }
 
-  function fakeOctokit(
+  function sweepOctokit(
     result: () => { data: Array<Record<string, unknown>> },
     issueResult: () => { data: Record<string, unknown> } = () => ({ data: { state: 'open', labels: [] } }),
   ) {
-    const double = {
-      rest: {
-        pulls: { list: vi.fn(async (_params: unknown) => result()) },
-        issues: { get: vi.fn(async (_params: unknown) => issueResult()) },
-      },
-    };
-    const octokit = asSweepOctokit(double);
+    const octokit = asSweepOctokit(
+      fakeOctokit({
+        'pulls.list': vi.fn(async (_params: unknown) => result()),
+        'issues.get': vi.fn(async (_params: unknown) => issueResult()),
+      }).octokit,
+    );
     return { octokit };
   }
 
@@ -78,7 +78,7 @@ describe('sweepWorktrees in-flight lanes, claims and zero-commit branches (#2964
 
   it('keeps a zero-commit lane worktree whose issue is in protectedIssues even with a closed PR on its branch (#2964)', async () => {
     const { root, runCommand, removedCmds } = rig(31, '0\n');
-    const { octokit } = fakeOctokit(closedPr);
+    const { octokit } = sweepOctokit(closedPr);
     const report = await sweepWorktrees(
       { repoRoot: root, ttlDays: 7, repo: 'owner/example-app', protectedIssues: new Set([31]) },
       { runCommand, octokit },
@@ -90,7 +90,7 @@ describe('sweepWorktrees in-flight lanes, claims and zero-commit branches (#2964
 
   it('keeps a merged-PR worktree whose open issue carries an active claim label (#2964)', async () => {
     const { root, runCommand } = rig(32, '3\n');
-    const { octokit } = fakeOctokit(mergedPr, () => ({
+    const { octokit } = sweepOctokit(mergedPr, () => ({
       data: { state: 'open', labels: [`${CLAIMED_BY_LABEL_PREFIX}lane-a`] },
     }));
     const report = await sweepWorktrees(
@@ -103,7 +103,7 @@ describe('sweepWorktrees in-flight lanes, claims and zero-commit branches (#2964
 
   it('keeps a TTL-expired worktree whose open issue carries an active claim label (#2964)', async () => {
     const { root, runCommand } = rig(33, '3\n');
-    const { octokit } = fakeOctokit(
+    const { octokit } = sweepOctokit(
       () => ({ data: [] }),
       () => ({ data: { state: 'open', labels: [`${CLAIMED_BY_LABEL_PREFIX}lane-a`] } }),
     );
@@ -118,7 +118,7 @@ describe('sweepWorktrees in-flight lanes, claims and zero-commit branches (#2964
   it('still reaps when the claim label lease has expired (#2964)', async () => {
     const { root, runCommand } = rig(34, '3\n');
     const expired = claimExpiresLabel(Math.floor(Date.now() / 1000) - 3600);
-    const { octokit } = fakeOctokit(mergedPr, () => ({
+    const { octokit } = sweepOctokit(mergedPr, () => ({
       data: { state: 'open', labels: [`${CLAIMED_BY_LABEL_PREFIX}lane-a`, expired] },
     }));
     const report = await sweepWorktrees(
@@ -130,7 +130,7 @@ describe('sweepWorktrees in-flight lanes, claims and zero-commit branches (#2964
 
   it('does not reap a zero-commit branch as merged when an older closed PR exists for its name (#2964)', async () => {
     const { root, runCommand, removedCmds } = rig(35, '0\n');
-    const { octokit } = fakeOctokit(closedPr);
+    const { octokit } = sweepOctokit(closedPr);
     const report = await sweepWorktrees(
       { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
       { runCommand, octokit },
@@ -142,7 +142,7 @@ describe('sweepWorktrees in-flight lanes, claims and zero-commit branches (#2964
 
   it('does not reap a zero-commit branch as merged on a GitHub-merged PR verdict (#2964)', async () => {
     const { root, runCommand } = rig(36, '0\n');
-    const { octokit } = fakeOctokit(mergedPr);
+    const { octokit } = sweepOctokit(mergedPr);
     const report = await sweepWorktrees(
       { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
       { runCommand, octokit },
@@ -153,7 +153,7 @@ describe('sweepWorktrees in-flight lanes, claims and zero-commit branches (#2964
 
   it('still removes a squash-merged unclaimed lane with commits ahead of main (#2964)', async () => {
     const { root, runCommand } = rig(37, '3\n');
-    const { octokit } = fakeOctokit(mergedPr);
+    const { octokit } = sweepOctokit(mergedPr);
     const report = await sweepWorktrees(
       { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
       { runCommand, octokit },

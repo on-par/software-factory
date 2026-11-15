@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import { getFactoryPaths, readPortLeases, toWorkKey, workKeyFromIssue } from '@on-par/factory-core';
 import type { QueueBackend } from '@on-par/factory-core/internal';
+import { fakeOctokit } from '@on-par/factory-core/testing';
 import { RunLockHeldError, type withScopedRunLock } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -2912,14 +2913,14 @@ describe('cli', () => {
     const listForRepo = vi.fn(async () => ({
       data: [{ number: 5, title: 'Five', labels: ['factory:queued', 'factory:lane:ops', 'factory:order:1'] }],
     }));
-    const fakeOctokit = {
+    const { octokit: fake } = fakeOctokit({
       paginate: async (fn: any, args: any) => (await fn(args)).data,
-      rest: { issues: { listForRepo } },
-    } as any;
+      'issues.listForRepo': listForRepo,
+    });
 
     it('--local-queue reads the file and never resolves a token or builds octokit', async () => {
       const token = vi.fn(() => 'ghp_x');
-      const octokit = vi.fn(() => fakeOctokit);
+      const octokit = vi.fn(() => fake);
       const reader = tuiQueueReader({ ...base, localQueue: true, token, octokit });
       expect(reader.source).toBe('local file');
       expect(await reader.read()).toEqual({ entries: [] });
@@ -2929,7 +2930,7 @@ describe('cli', () => {
 
     it('GitHub path resolves the token up front and builds octokit exactly once across reads', async () => {
       const token = vi.fn(() => 'ghp_x');
-      const octokit = vi.fn(() => fakeOctokit);
+      const octokit = vi.fn(() => fake);
       const reader = tuiQueueReader({ ...base, localQueue: false, token, octokit });
       expect(token).toHaveBeenCalledTimes(1);
       expect(octokit).toHaveBeenCalledWith('ghp_x');
@@ -2943,7 +2944,7 @@ describe('cli', () => {
     it('with no token at startup, reports it per read and recovers once a token appears', async () => {
       let current: string | undefined = undefined;
       const token = vi.fn(() => current);
-      const octokit = vi.fn(() => fakeOctokit);
+      const octokit = vi.fn(() => fake);
       const reader = tuiQueueReader({ ...base, localQueue: false, token, octokit });
       expect(reader.pollMs).toBe(30_000);
       expect(await reader.read()).toEqual({ entries: [], error: 'no GitHub token — run `gh auth login`' });

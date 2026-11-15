@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { EventKind } from '../events/kinds.js';
 import type { SlicePlan } from '../readiness/slice-plan.js';
 import type { SlicePlanStore } from '../readiness/slice-plan-store.js';
+import { fakeOctokit } from '../test-support/index.js';
 import { parseSlicePlanComment } from '../readiness/slice-plan.js';
 import { toWorkKey, workKeyFromIssue, type WorkKey } from '../work/work-key.js';
 import { recordShippedSlice } from './slice-ship-record.js';
@@ -39,17 +40,15 @@ const plan: SlicePlan = {
 
 type Comment = { issue_number: number; body: string };
 
-function fakeOctokit() {
+function commentStoreOctokit() {
   const listed: unknown[] = [];
   const created: Comment[] = [];
-  const issues = {
-    listComments: async (a: unknown) => (listed.push(a), { data: [] }),
-    createComment: async (a: Comment) => (created.push(a), { data: { id: 9, body: a.body } }),
-  };
-  const octokit = Object.assign({} as Octokit, {
-    rest: { users: { getAuthenticated: async () => ({ data: { id: 1 } }) }, issues },
+  const { octokit } = fakeOctokit({
+    'users.getAuthenticated': async () => ({ data: { id: 1 } }),
+    'issues.listComments': async (a: unknown) => (listed.push(a), { data: [] }),
+    'issues.createComment': async (a: Comment) => (created.push(a), { data: { id: 9, body: a.body } }),
   });
-  return { octokit, listed, created };
+  return { octokit: octokit as Octokit, listed, created };
 }
 
 const HEAD = 'a'.repeat(40);
@@ -67,7 +66,7 @@ function run(
   impl: (wt: string) => Promise<string> = async () => HEAD,
   store?: SlicePlanStore,
 ) {
-  const { octokit, listed, created } = fakeOctokit();
+  const { octokit, listed, created } = commentStoreOctokit();
   const { logs, log } = fakeLog();
   const reads: string[] = [];
   const readHeadSha = async (wt: string) => (reads.push(wt), impl(wt));

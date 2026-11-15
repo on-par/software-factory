@@ -13,6 +13,7 @@ export const TESTING_API_KEYS = [
   'createSimWorkspace',
   'simWorkspace',
   'failOnCall',
+  'fakeOctokit',
   'realSimClock',
   'resolveLatencyMs',
   'applyLatency',
