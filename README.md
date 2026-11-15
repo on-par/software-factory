@@ -285,21 +285,33 @@ visualProof:
       assert: 'Settings' # text or selector the capture command must positively assert
       paths: ['src/ui/settings/**'] # files this route covers
       viewport: { width: 1280, height: 800 } # default; width 320-3840, height 240-2160
+    - route: /items
+      state: item-created # a named state reached by interaction
+      assert: '#item-1'
+      paths: ['src/ui/items/**']
+      steps: # optional, 1-20 ordered steps applied after the route loads
+        - { click: '#new' }
+        - { fill: '#name', value: Demo }
+        - { press: Enter }
+        - { waitFor: '#item-1' }
+      record: gif # optional: gif | video, needs steps
   command: [node, scripts/capture.mjs] # argv, never shell-interpolated
   maxCaptures: 3 # 1-5; the first matching routes, in config order
   timeoutSeconds: 300
+  captureAttempts: 3 # 1-5; attempts per SHIP before a capture failure is final
   evidenceBranch: factory-evidence # never the PR branch, never `factory/*`
 ```
 
 The command runs once the app answers `qa.readyPath` with a status below 500. It gets the checker environment (no `GITHUB_TOKEN` or other host secrets) plus:
 
-| Variable                | Value                                                           |
-| ----------------------- | --------------------------------------------------------------- |
-| `VISUAL_PROOF_BASE_URL` | `http://127.0.0.1:<leased port>`                                |
-| `VISUAL_PROOF_OUT_DIR`  | directory to write the PNGs and `manifest.json` into            |
-| `VISUAL_PROOF_ROUTES`   | JSON array of the selected `{ route, state, assert, viewport }` |
-| `FACTORY_HEAD_SHA`      | the head commit being proved                                    |
-| `FACTORY_RUN_ID`        | the current run id                                              |
+| Variable                      | Value                                                                                                            |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `VISUAL_PROOF_BASE_URL`       | `http://127.0.0.1:<leased port>`                                                                                 |
+| `VISUAL_PROOF_OUT_DIR`        | directory to write the PNGs and `manifest.json` into                                                             |
+| `VISUAL_PROOF_ROUTES`         | JSON array of the selected `{ route, state, assert, viewport }`; stateful routes also carry `steps` and `record` |
+| `VISUAL_PROOF_MAX_CLIP_BYTES` | size cap for a recorded clip (10 MiB)                                                                            |
+| `FACTORY_HEAD_SHA`            | the head commit being proved                                                                                     |
+| `FACTORY_RUN_ID`              | the current run id                                                                                               |
 
 It must write `manifest.json` into `VISUAL_PROOF_OUT_DIR`, one entry per selected route and state:
 
@@ -320,7 +332,37 @@ It must write `manifest.json` into `VISUAL_PROOF_OUT_DIR`, one entry per selecte
 }
 ```
 
-`finalPath` is the path the page ended on after any redirects, and `assertion.target` must equal the route's `assert`. `file` is relative to the out dir. The gate rejects the capture, with a named diagnostic, for any of:
+A route with `steps` is stateful. The capture command loads the route and captures `before`, applies the steps in order, and captures the `after` image once the steps ran and `assert` passed. With `record`, it also writes a clip of the steps. A stateful capture entry adds `before`, an echo of the `steps` and, for `record`, a `clip`; a step that failed is reported under a top-level `failures` list:
+
+```json
+{
+  "headSha": "<FACTORY_HEAD_SHA>",
+  "runId": "<FACTORY_RUN_ID>",
+  "captures": [
+    {
+      "route": "/items",
+      "state": "item-created",
+      "viewport": { "width": 1280, "height": 800 },
+      "finalPath": "/items",
+      "assertion": { "target": "#item-1", "passed": true },
+      "file": "items-after.png",
+      "before": { "file": "items-before.png", "finalPath": "/items" },
+      "steps": [
+        { "click": "#new" },
+        { "fill": "#name", "value": "Demo" },
+        { "press": "Enter" },
+        { "waitFor": "#item-1" }
+      ],
+      "clip": { "file": "items.gif", "format": "gif" }
+    }
+  ],
+  "failures": [{ "route": "/items", "state": "item-created", "step": 2, "message": "no element for #name" }]
+}
+```
+
+Leave `failures` out on success. `clip.format` is `gif`, `webm` or `mp4`. Routes without `steps` are unchanged: they write no `before`, `steps` or `clip`, and the gate rejects those fields on them.
+
+`finalPath` is the path the page ended on after any redirects (the last `goto` step's path when the steps navigate), and `assertion.target` must equal the route's `assert`. `file` is relative to the out dir. The gate rejects the capture, with a named diagnostic, for any of:
 
 - a manifest for another head or run (`capture is for another head/run`)
 - a capture for a route that was not selected, or a selected route with no capture
@@ -329,12 +371,18 @@ It must write `manifest.json` into `VISUAL_PROOF_OUT_DIR`, one entry per selecte
 - a viewport other than the configured one
 - a `file` that is absolute, contains `..` or leaves the out dir
 - a file that is not a PNG, is under 2048 bytes (`blank or empty image`) or is over 5 MiB
+- an image that is one flat colour (`blank image <file> (uniform colour)`) or does not decode (`is not a decodable PNG`)
+- a reported failure for a selected route (`/items (state item-created) step 2 fill "#name" with "Demo" failed: ...`)
+- a stateful route with no `before`, a `before` on another path, echoed `steps` that differ from the configured ones, or an `after` identical to `before` (`steps had no visible effect`)
+- a missing clip (`clip missing`), a clip of the wrong type (`clip is not a gif` or `clip is not a video`) or over 10 MiB (`clip exceeds 10 MiB`)
 
 Other diagnostics: `visual proof required by the plan's screenshot entries (...) but .factory config has no visualProof section`, `plan screenshot route <r> is not in visualProof.routes`, `UI files not covered by any visualProof route: <files>`, `qa.start missing`, `no leased lane port — enable environment.ports`, start exited or never ready, `capture command timed out after Ns`, a non-zero capture exit (a 200 from the app does not make it pass), `upload failed: ...` and `embedded asset unavailable: ...`.
 
+A capture failure is retried: SHIP makes up to `visualProof.captureAttempts` attempts (default 3), each with a fresh app start and output directory, and logs each failed attempt's reason as `visual proof capture attempt N/M failed: ...`. The final diagnostic reads `after M attempts: <last reason>`. Missing configuration (no `visualProof` section, `qa.start`, lane port) and uncovered UI files are not retried. The PR body always gets a block: the proof, or `**Visual proof unavailable: <reason>**` for any non-pass result, including an error thrown while gathering the changed files or uploading. Under `advisory`, UI files that no route covers do not stop the capture; the block gets a `Coverage warning` line and SHIP logs a warning naming them. Under `required` they fail with the files listed.
+
 `visualProof.mode` sets how much a result counts. `required` (the default) is the blocking gate described below. `advisory` still classifies, captures, uploads and embeds proof, but a `fail` or `unavailable` result is only logged as a warning and noted as advisory in the PR body's block: SHIP does not fail, the run does not park, and land does not block. The `factory/visual-proof` status is then `success` with an `advisory:` description, so it never reads as red CI. `off` skips the gate, even when the plan names screenshots. A repo with no `visualProof` section whose plan names screenshots still fails with the "no visualProof section" diagnostic.
 
-A valid capture is committed through the Git Data API to `evidenceBranch` under `visual-proof/<pr>/<run>/<head12>/`, read back, and embedded in the PR body's "Visual proof" block as `github.com/.../blob/<commit>/...?raw=true` images with run, head, route, state and viewport next to each. The result is `pass`, `fail` or `unavailable`. Screenshots are never committed to the PR branch. In `required` mode, any non-pass leaves the PR unmarked as ready and parks the run `fail`; the park policy then decides what happens to the PR. CI-rework does not retry a visual proof failure. The block and the status are rewritten on each SHIP.
+A valid capture is committed through the Git Data API to `evidenceBranch` under `visual-proof/<pr>/<run>/<head12>/`, read back, and embedded in the PR body's "Visual proof" block as `github.com/.../blob/<commit>/...?raw=true` images with run, head, route, state and viewport next to each. A stateful route renders a Before | After table, its numbered steps and the clip (a GIF is embedded, a video is linked). The result is `pass`, `fail` or `unavailable`. Screenshots are never committed to the PR branch. In `required` mode, any non-pass leaves the PR unmarked as ready and parks the run `fail`; the park policy then decides what happens to the PR. CI-rework does not retry a visual proof failure. The block and the status are rewritten on each SHIP.
 
 Land enforces the result. A PR whose body carries the required visual proof block is only merged when its exact head commit has a `factory/visual-proof` success status created by the factory's own identity. After a push, the older head has no such status, so land leaves the PR open with the remedy `re-run SHIP (factory resume --from ship) to capture proof for <head12>`. Land never re-captures. A PR without the block merges as before. Runs that change no UI start no app and no browser, and repos without a `visualProof` section and without plan screenshots behave as before.
 

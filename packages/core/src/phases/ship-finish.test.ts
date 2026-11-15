@@ -120,6 +120,34 @@ describe('finishShip visual proof gate (#2232)', () => {
     );
   });
 
+  const advisoryWarnings = async (result: Partial<VisualProofResult>) => {
+    const lines: string[] = [];
+    const { finish } = setup(async () => proof(result), {
+      visualProofMode: 'advisory',
+      log: (type, message) => lines.push(`${type}: ${message}`),
+    });
+    return { r: await finish(), warnings: lines.filter((l) => l.startsWith('warn: ')) };
+  };
+
+  it('advisory visual proof non-pass still only warns', async () => {
+    const { r, warnings } = await advisoryWarnings({
+      status: 'unavailable',
+      diagnostic: 'after 3 attempts: app not ready',
+    });
+    expect(r).toMatchObject({ ok: true, visualProof: { status: 'unavailable' } });
+    expect(warnings).toEqual([
+      `warn: visual proof unavailable for PR #5 at ${HEAD.slice(0, 12)}: after 3 attempts: app not ready (advisory: not blocking SHIP)`,
+    ]);
+  });
+
+  it('logs a warning naming the UI files no visualProof route covers (#4054)', async () => {
+    const { r, warnings } = await advisoryWarnings({ uncovered: ['web/a.css', 'web/b.css'] });
+    expect(r).toMatchObject({ ok: true, visualProof: { status: 'pass' } });
+    expect(warnings).toEqual([
+      'warn: visual proof coverage: UI files not covered by any visualProof route: web/a.css, web/b.css',
+    ]);
+  });
+
   it('advisory mode: unavailable proof while CI is pending leaves a ci-pending draft (#4047)', async () => {
     const { finish, graphql } = setup(
       async () => {
