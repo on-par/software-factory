@@ -1,13 +1,14 @@
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ProviderOrder } from '../config/provider-order.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { pickOrderedProvider } from '../run/provider-breaker-gate.js';
 
 import { ProviderBreaker } from './breaker.js';
+import { recordArgs } from '../test-support/recorders.js';
 
 const tempDirs = createTempDirs();
 afterEach(() => tempDirs.cleanup());
@@ -54,13 +55,13 @@ describe('restore probe claim races another lane (#3708)', () => {
         },
       }),
     );
-    const probe = vi.fn(async () => {});
+    const { calls: probeCalls, fn: probe } = recordArgs(async () => {});
     const registryRef = { get: () => ({ provider: 'anthropic', harness: 'claude-cli' }) } as never;
     const order: ProviderOrder = { boss: [], worker: ['claude-w'], checker: [], triage: [] };
     const gated = racing();
     armed = true;
     await pickOrderedProvider({ router: { registryRef }, breaker: gated, probe }, order, 'build', new Set());
-    expect(probe).not.toHaveBeenCalled();
+    expect(probeCalls).toHaveLength(0);
     expect(existsSync(claimFile)).toBe(false);
   });
 

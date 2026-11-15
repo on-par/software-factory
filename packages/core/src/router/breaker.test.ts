@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ProviderOrder } from '../config/provider-order.js';
 import { pickOrderedProvider } from '../run/provider-breaker-gate.js';
@@ -18,6 +18,7 @@ import {
   ProviderBreaker,
   reportedCooldownMs,
 } from './breaker.js';
+import { recordArgs } from '../test-support/recorders.js';
 
 const tempDirs = new Set<string>();
 
@@ -465,7 +466,7 @@ describe('restore probe claim across lanes (#3339)', () => {
     expect(await b.probeDue('anthropic')).toBeDefined();
 
     const { a: c, b: d } = await lanes();
-    const probe = vi.fn(async () => {});
+    const { calls: probeCalls, fn: probe } = recordArgs(async () => {});
     const registryRef = { get: () => ({ provider: 'anthropic', harness: 'claude-cli' }) } as never;
     const order: ProviderOrder = { boss: [], worker: ['claude-w'], checker: [], triage: [] };
     await Promise.all(
@@ -473,6 +474,6 @@ describe('restore probe claim across lanes (#3339)', () => {
         pickOrderedProvider({ router: { registryRef }, breaker, probe }, order, 'build', new Set()),
       ),
     );
-    expect(probe).toHaveBeenCalledTimes(1);
+    expect(probeCalls).toHaveLength(1);
   });
 });
