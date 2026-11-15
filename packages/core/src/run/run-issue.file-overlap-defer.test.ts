@@ -106,7 +106,17 @@ const design: DesignArtifact = {
   openQuestions: [],
 };
 
-const issues = { createComment: vi.fn(), updateComment: vi.fn(), addLabels: vi.fn(), removeLabel: vi.fn() };
+const posted: unknown[] = [];
+const issues = {
+  createComment: async (arg: unknown) => {
+    posted.push(arg);
+  },
+  updateComment: async (arg: unknown) => {
+    posted.push(arg);
+  },
+  addLabels: async () => {},
+  removeLabel: async () => {},
+};
 
 function makePorts(overrides: Partial<RunPorts>, events: Array<[string, string]>): RunPorts {
   return {
@@ -141,10 +151,20 @@ describe('runIssue — same-file lane hold defers instead of parking (#3576)', (
     const collision = { issue: workKeyFromIssue(3232), file: 'src/shared.ts' };
     const guard = new LaneFileGuard(join(breakerDir, 'lane-files-defer.json'));
     vi.spyOn(guard, 'findCollision').mockResolvedValue(collision);
-    const recordHold = vi.spyOn(guard, 'recordHold').mockResolvedValue();
-    const register = vi.spyOn(guard, 'register');
+    await guard.register('o/r', workKeyFromIssue(3232), ['src/shared.ts']);
+    posted.length = 0;
+    const buildOpts: Parameters<typeof realBuildPhase>[0][] = [];
     const events: Array<[string, string]> = [];
-    const ports = makePorts({ laneFileGuard: guard }, events);
+    const ports = makePorts(
+      {
+        laneFileGuard: guard,
+        buildPhase: async (o) => (
+          buildOpts.push(o),
+          { ok: true, model: 'my-model', route: 'command' } satisfies BuildResult
+        ),
+      },
+      events,
+    );
     const outcome = await runIssue({ ...request, issue: 1896 }, policy, ports);
     expect(outcome).toMatchObject({ state: 'released', reason: 'file-overlap', holder: 3232, file: 'src/shared.ts' });
     expect(outcome.state).not.toBe('parked');
@@ -152,11 +172,15 @@ describe('runIssue — same-file lane hold defers instead of parking (#3576)', (
     expect(
       events.some(([type, msg]) => type === 'issue_deferred' && msg.includes('#3232') && msg.includes('src/shared.ts')),
     ).toBe(true);
-    expect(issues.createComment).not.toHaveBeenCalled();
-    expect(issues.updateComment).not.toHaveBeenCalled();
-    expect(recordHold).toHaveBeenCalledWith('o/r', workKeyFromIssue(1896), collision);
-    expect(register).not.toHaveBeenCalled();
-    expect(ports.buildPhase).not.toHaveBeenCalled();
+    expect(posted).toEqual([]);
+    expect(await guard.liveHold('o/r', workKeyFromIssue(1896))).toMatchObject({
+      repo: 'o/r',
+      issue: workKeyFromIssue(1896),
+      holder: workKeyFromIssue(3232),
+      file: 'src/shared.ts',
+    });
+    expect(await guard.claimsForIssue(workKeyFromIssue(1896))).toEqual([]);
+    expect(buildOpts).toEqual([]);
   });
 
   it('still defers when recording the hold fails', async () => {

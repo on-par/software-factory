@@ -13,7 +13,7 @@ import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { readWorktreeKeeps } from '../utils/worktree-keeps.js';
-import type { CheckResumeStore } from './resume-context.js';
+import type { CheckResumeRecord, CheckResumeStore } from './resume-context.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
@@ -91,19 +91,36 @@ const policy: RunPolicy = {
 
 type Log = ReturnType<RunPorts['events']>;
 
+function recordingLog() {
+  const events: Array<[string, string]> = [];
+  const log: Log = (type, msg) => {
+    events.push([type, msg]);
+  };
+  return { events, log };
+}
+
 function githubOctokit() {
-  const createComment = vi.fn(async () => ({ data: { id: 1 } }));
-  const getAuthenticated = vi.fn(async () => ({ data: { id: 9 } }));
+  const posted: unknown[] = [];
+  const createComment = async (arg: unknown) => {
+    posted.push(arg);
+    return { data: { id: 1 } };
+  };
   const octokit = Object.assign({} as Octokit, {
     rest: {
-      users: { getAuthenticated },
+      users: { getAuthenticated: vi.fn(async () => ({ data: { id: 9 } })) },
       issues: { listComments: vi.fn(async () => ({ data: [] })), createComment, updateComment: vi.fn() },
     },
   });
-  return { octokit, createComment, getAuthenticated };
+  return { octokit, posted };
 }
 
-function ports(log: Log, octokit: Octokit = {} as Octokit): RunPorts {
+interface Recorders {
+  plan: Parameters<typeof realPlanPhase>[0][];
+  build: Parameters<typeof realBuildPhase>[0][];
+  ship: Parameters<typeof realShipPhase>[0][];
+}
+
+function ports(log: Log, octokit: Octokit = {} as Octokit, rec?: Recorders): RunPorts {
   return {
     router: new ModelRouter(MODELS, ROUTES),
     octokit,
@@ -111,10 +128,10 @@ function ports(log: Log, octokit: Octokit = {} as Octokit): RunPorts {
     events: () => log,
     breaker: new ProviderBreaker(join(tmp, 'breaker.json')),
     resolveConstitution: () => null,
-    planPhase,
-    buildPhase,
+    planPhase: async (o) => (rec?.plan.push(o), planPhase(o)),
+    buildPhase: async (o) => (rec?.build.push(o), buildPhase(o)),
     checkPhase,
-    shipPhase,
+    shipPhase: async (o) => (rec?.ship.push(o), shipPhase(o)),
   };
 }
 
@@ -130,32 +147,35 @@ beforeEach(() => {
 
 describe('runIssue — --no-pr', () => {
   it('stops after a clean CHECK: no SHIP, ready on the branch, no-pr-complete logged', async () => {
-    const log = vi.fn<Log>();
-    const outcome = await runIssue(noPr, policy, ports(log));
+    const { events, log } = recordingLog();
+    const rec: Recorders = { plan: [], build: [], ship: [] };
+    const outcome = await runIssue(noPr, policy, ports(log, undefined, rec));
     expect(outcome).toMatchObject({ state: 'ready', route: 'codex', branch: request.branch, reworkRounds: 0 });
-    expect(shipPhase).not.toHaveBeenCalled();
-    const done = log.mock.calls.filter(([type]) => type === 'no-pr-complete');
+    expect(rec.ship).toEqual([]);
+    const done = events.filter(([type]) => type === 'no-pr-complete');
     expect(done).toHaveLength(1);
     expect(done[0][1]).toContain('/tmp/wt');
   });
 
   it('a normal run still ships (control)', async () => {
-    await runIssue(request, policy, ports(vi.fn<Log>()));
-    expect(shipPhase).toHaveBeenCalledTimes(1);
+    const rec: Recorders = { plan: [], build: [], ship: [] };
+    await runIssue(request, policy, ports(recordingLog().log, undefined, rec));
+    expect(rec.ship).toHaveLength(1);
   });
 
   it('keeps the worktree from GC with a keep record', async () => {
-    await runIssue(noPr, policy, ports(vi.fn<Log>()));
+    await runIssue(noPr, policy, ports(recordingLog().log));
     expect(readWorktreeKeeps(keepsFile)).toEqual([
       expect.objectContaining({ issue: 1, path: '/tmp/wt', reason: 'no-pr run' }),
     ]);
   });
 
   it('turns off BUILD publishing, the size gate, and the issue-body update without the routing and prompt switch of localOnly', async () => {
-    await runIssue(noPr, policy, ports(vi.fn<Log>()));
-    expect(buildPhase.mock.calls[0][0]).toMatchObject({ disablePublish: true });
-    expect(planPhase.mock.calls[0][0]).toMatchObject({ enforceSizeGate: false, updateIssueBodyOnEnrich: false });
-    expect(buildPhase.mock.calls[0][0].localOnly).toBeFalsy();
+    const rec: Recorders = { plan: [], build: [], ship: [] };
+    await runIssue(noPr, policy, ports(recordingLog().log, undefined, rec));
+    expect(rec.build[0]).toMatchObject({ disablePublish: true });
+    expect(rec.plan[0]).toMatchObject({ enforceSizeGate: false, updateIssueBodyOnEnrich: false });
+    expect(rec.build[0]?.localOnly).toBeFalsy();
   });
 
   it('a red-base CHECK failure records no check-resume point, so resume can never ship it', async () => {
@@ -164,33 +184,35 @@ describe('runIssue — --no-pr', () => {
       passed: false,
       environment: { baseSha: 'abc1234567890def', failingChecks: ['tests'], cause: 'environment', logPaths: [] },
     });
-    const checkResume = {
-      load: vi.fn<CheckResumeStore['load']>().mockResolvedValue(null),
-      record: vi.fn<CheckResumeStore['record']>().mockResolvedValue(undefined),
-      clear: vi.fn<CheckResumeStore['clear']>().mockResolvedValue(undefined),
+    const recorded: CheckResumeRecord[] = [];
+    const checkResume: CheckResumeStore = {
+      load: async () => null,
+      record: async (entry) => {
+        recorded.push(entry);
+      },
+      clear: async () => {},
     };
-    const outcome = await runIssue(noPr, policy, { ...ports(vi.fn<Log>()), checkResume });
+    const outcome = await runIssue(noPr, policy, { ...ports(recordingLog().log), checkResume });
     expect(outcome).not.toHaveProperty('buildPreserved');
-    expect(checkResume.record).not.toHaveBeenCalled();
+    expect(recorded).toEqual([]);
   });
 
   it('a failed keep-record write warns but the run still ends ready', async () => {
-    const log = vi.fn<Log>();
+    const { events, log } = recordingLog();
     const unwritable = { ...noPr, worktreeKeepsPath: join(tmp, 'missing-dir', 'keeps.json', 'x') };
     rmSync(join(tmp, 'missing-dir'), { recursive: true, force: true });
     const { writeFileSync } = await import('node:fs');
     writeFileSync(join(tmp, 'missing-dir'), 'a file, so the keeps dir cannot be created');
     const outcome = await runIssue(unwritable, policy, ports(log));
     expect(outcome).toMatchObject({ state: 'ready' });
-    expect(log.mock.calls.some(([type, msg]) => type === 'warn' && msg.includes('keep record'))).toBe(true);
+    expect(events.some(([type, msg]) => type === 'warn' && msg.includes('keep record'))).toBe(true);
   });
 
   it('a park posts no issue comment', async () => {
-    const { octokit, createComment, getAuthenticated } = githubOctokit();
-    const parking: RunPorts = { ...ports(vi.fn<Log>(), octokit), getIssueSpend: () => 2 };
+    const { octokit, posted } = githubOctokit();
+    const parking: RunPorts = { ...ports(recordingLog().log, octokit), getIssueSpend: () => 2 };
     const outcome = await runIssue(noPr, { ...policy, budget: { perIssueCapUsd: 1 } }, parking);
     expect(outcome).toMatchObject({ state: 'parked' });
-    expect(createComment).not.toHaveBeenCalled();
-    expect(getAuthenticated).not.toHaveBeenCalled();
+    expect(posted).toEqual([]);
   });
 });

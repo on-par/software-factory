@@ -105,6 +105,7 @@ async function run(opts: { open: boolean; models?: Record<string, ModelDef>; req
   const breaker = new ProviderBreaker(join(breakerDir, `breaker-oc-${counter}.json`));
   if (opts.open) await breaker.open('opencode-go', 'usage_cap', 30 * 60_000);
   const events: Array<[string, string]> = [];
+  const buildOpts: Parameters<typeof realBuildPhase>[0][] = [];
   const buildPhase = vi
     .fn<typeof realBuildPhase>()
     .mockResolvedValue({ ok: true, model: 'm', route: 'opencode' } satisfies BuildResult);
@@ -122,7 +123,7 @@ async function run(opts: { open: boolean; models?: Record<string, ModelDef>; req
       model: 'm',
       designArtifact: null,
     } satisfies PlanResult),
-    buildPhase,
+    buildPhase: async (o) => (buildOpts.push(o), buildPhase(o)),
     checkPhase: vi.fn<typeof realCheckPhase>().mockResolvedValue({
       passed: true,
       summary: { failures: 0, passes: 1, skips: 0, total: 1, results: [] },
@@ -131,7 +132,7 @@ async function run(opts: { open: boolean; models?: Record<string, ModelDef>; req
     shipPhase: vi.fn<typeof realShipPhase>().mockResolvedValue({ ok: true, prNumber: 42 } satisfies ShipResult),
   };
   const outcome = await runIssue({ ...request, ...opts.request }, policy, ports);
-  return { events, outcome, buildPhase, call: buildPhase.mock.calls[0]?.[0] };
+  return { events, outcome, buildOpts, call: buildOpts[0] };
 }
 
 describe('runIssue — opencode provider breaker before BUILD (#2891)', () => {
@@ -158,8 +159,8 @@ describe('runIssue — opencode provider breaker before BUILD (#2891)', () => {
   });
 
   it("fails BUILD with the cap reason and reset time without calling buildPhase when the pinned opencode route's breaker is open", async () => {
-    const { events, outcome, buildPhase } = await run({ open: true, request: { preferredRoute: 'opencode' } });
-    expect(buildPhase).not.toHaveBeenCalled();
+    const { events, outcome, buildOpts } = await run({ open: true, request: { preferredRoute: 'opencode' } });
+    expect(buildOpts).toEqual([]);
     expect(outcome.state).toBe('escalated');
     const reason = (outcome as { reason?: string }).reason ?? '';
     expect(reason).toMatch(/usage_cap/);

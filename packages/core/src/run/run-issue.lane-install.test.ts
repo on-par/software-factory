@@ -104,10 +104,12 @@ async function harness(files: string[], installResult: CommandResult = commandRe
     else await writeFile(join(wt, f), '');
   }
   const order: string[] = [];
-  const installStub = vi.fn(async (_argv: readonly string[], _opts?: { cwd?: string }) => {
+  const installs: Array<{ argv: string[]; cwd: string | undefined }> = [];
+  const installStub = async (_argv: readonly string[], _opts?: { cwd?: string }) => {
+    installs.push({ argv: [..._argv], cwd: _opts?.cwd });
     order.push('install');
     return installResult;
-  });
+  };
   const buildPhase = vi.fn<typeof realBuildPhase>(async () => {
     order.push('build');
     return { ok: false, model: 'm', route: 'claude', reason: 'no_diff' };
@@ -132,7 +134,7 @@ async function harness(files: string[], installResult: CommandResult = commandRe
     installLaneDependencies: (o: Parameters<typeof installLaneDependencies>[0]) =>
       installLaneDependencies({ ...o, runCommand: installStub }),
   };
-  return { wt, order, installStub, buildPhase, events, ports };
+  return { wt, order, installs, events, ports };
 }
 
 describe('runIssue — lane dependency install (#3370)', () => {
@@ -141,25 +143,22 @@ describe('runIssue — lane dependency install (#3370)', () => {
     await runIssue(request, policy, h.ports);
     expect(h.order[0]).toBe('install');
     expect(h.order.indexOf('install')).toBeLessThan(h.order.indexOf('build'));
-    expect(h.installStub).toHaveBeenCalledTimes(1);
-    expect(h.installStub.mock.calls[0][0]).toEqual(['npm', 'ci', '--no-audit', '--no-fund']);
-    expect(h.installStub.mock.calls[0][1]?.cwd).toBe(h.wt);
+    expect(h.installs).toEqual([{ argv: ['npm', 'ci', '--no-audit', '--no-fund'], cwd: h.wt }]);
   });
 
   it('runs the pnpm frozen install in the worktree before the BUILD worker when pnpm-lock.yaml is present', async () => {
     const h = await harness(['package.json', 'pnpm-lock.yaml']);
     await runIssue(request, policy, h.ports);
-    expect(h.installStub.mock.calls[0][0]).toEqual(['pnpm', 'install', '--frozen-lockfile']);
-    expect(h.installStub.mock.calls[0][1]?.cwd).toBe(h.wt);
+    expect(h.installs).toEqual([{ argv: ['pnpm', 'install', '--frozen-lockfile'], cwd: h.wt }]);
     expect(h.order).toEqual(['install', 'build']);
   });
 
   it('skips the install and logs the reason when node_modules already exists', async () => {
     const h = await harness(['package.json', 'package-lock.json', 'node_modules']);
     await runIssue(request, policy, h.ports);
-    expect(h.installStub).not.toHaveBeenCalled();
+    expect(h.installs).toEqual([]);
     expect(h.events.some(([t, m]) => t === 'lane_install' && m.includes('node_modules'))).toBe(true);
-    expect(h.buildPhase).toHaveBeenCalled();
+    expect(h.order).toEqual(['build']);
   });
 
   it('logs lane_install_failed with the command and still calls the BUILD worker when the install exits non-zero', async () => {
@@ -171,7 +170,7 @@ describe('runIssue — lane dependency install (#3370)', () => {
     const failed = h.events.find(([t]) => t === 'lane_install_failed');
     expect(failed?.[1]).toContain('pnpm install --frozen-lockfile');
     expect(failed?.[1]).toContain('ERR_PNPM_OUTDATED_LOCKFILE');
-    expect(h.buildPhase).toHaveBeenCalledTimes(1);
+    expect(h.order.filter((x) => x === 'build')).toHaveLength(1);
   });
 
   it('does not abort the run when an injected install port rejects', async () => {
@@ -181,6 +180,6 @@ describe('runIssue — lane dependency install (#3370)', () => {
     };
     await runIssue(request, policy, h.ports);
     expect(h.events.some(([t, m]) => t === 'lane_install_failed' && m.includes('boom'))).toBe(true);
-    expect(h.buildPhase).toHaveBeenCalledTimes(1);
+    expect(h.order).toEqual(['build']);
   });
 });

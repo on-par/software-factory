@@ -110,6 +110,13 @@ function portsWith(
   };
 }
 
+function recordBuild(
+  buildOpts: Parameters<typeof realBuildPhase>[0][],
+  buildPhase: typeof realBuildPhase,
+): typeof realBuildPhase {
+  return async (o) => (buildOpts.push(o), buildPhase(o));
+}
+
 const OPEN_QUESTION = 'Where do test commands come from?';
 const DESIGN: DesignArtifact = {
   restatedProblem: 'problem',
@@ -145,17 +152,18 @@ describe('runIssue — no-diff park message (#3273)', () => {
       noDiffDetail: 'cause: sandbox\nsandbox_apply: Operation not permitted',
     });
     const events: Array<[string, string]> = [];
+    const buildOpts: Parameters<typeof realBuildPhase>[0][] = [];
     const outcome = await runIssue(
       request,
       policy,
-      portsWith(planPhase, buildPhase, (t, m) => events.push([t, m])),
+      portsWith(planPhase, recordBuild(buildOpts, buildPhase), (t, m) => events.push([t, m])),
     );
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
     const parked = events.find(([type]) => type === 'fail')?.[1] ?? '';
     expect(parked).toContain(text);
     expect(parked).toContain('cause: sandbox');
     expect(parked).toContain('sandbox_apply');
-    expect(buildPhase.mock.calls[0][0].openQuestions).toEqual([OPEN_QUESTION]);
+    expect(buildOpts[0]?.openQuestions).toEqual([OPEN_QUESTION]);
   });
 
   it('leaves the park message unchanged when the build carries no detail', async () => {
@@ -166,14 +174,15 @@ describe('runIssue — no-diff park message (#3273)', () => {
       .fn<typeof realBuildPhase>()
       .mockResolvedValue({ ok: false, model: 'm', route: 'claude', reason: 'no_diff' });
     const events: Array<[string, string]> = [];
+    const buildOpts: Parameters<typeof realBuildPhase>[0][] = [];
     await runIssue(
       request,
       policy,
-      portsWith(planPhase, buildPhase, (t, m) => events.push([t, m])),
+      portsWith(planPhase, recordBuild(buildOpts, buildPhase), (t, m) => events.push([t, m])),
     );
     expect(events.find(([type]) => type === 'fail')?.[1]).toBe(
       'build produced no diff against the base ref — no implementation was produced',
     );
-    expect(buildPhase.mock.calls[0][0].openQuestions).toBeUndefined();
+    expect(buildOpts[0]?.openQuestions).toBeUndefined();
   });
 });
