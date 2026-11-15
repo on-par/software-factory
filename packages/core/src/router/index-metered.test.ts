@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from './index.js';
 import { StubModelExecutor } from './stub.js';
+import { recordArgs } from '../test-support/record-args.test.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -135,11 +136,7 @@ describe('metered failover guard (#3234)', () => {
   });
 
   it('the plan is detected once per model per router', async () => {
-    let reads = 0;
-    const readFile = () => {
-      reads++;
-      return noFile();
-    };
+    const { calls: reads, fn: readFile } = recordArgs(noFile);
     const stub = new StubModelExecutor({ scripts: { plan: [] } });
     const router = new ModelRouter(meteredModels, routes, false, stub);
     router.setProviderHold(heldClaude);
@@ -153,9 +150,9 @@ describe('metered failover guard (#3234)', () => {
     });
 
     await expect(router.run('plan', 'do it')).rejects.toMatchObject({ detail: 'only_metered_left' });
-    const afterFirst = reads;
+    const afterFirst = reads.length;
     await expect(router.run('plan', 'do it')).rejects.toMatchObject({ detail: 'only_metered_left' });
     expect(afterFirst).toBeGreaterThan(0);
-    expect(reads).toBe(afterFirst);
+    expect(reads).toHaveLength(afterFirst);
   });
 });

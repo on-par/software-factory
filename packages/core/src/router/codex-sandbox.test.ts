@@ -5,6 +5,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { CodingHarness, HarnessRequest } from '../harness/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { CliModelExecutor, type ModelExecutorContext, ModelRouter } from './index.js';
+import { recordArgs } from '../test-support/record-args.test.js';
 
 const fakeGitExec: ExecFn = async () => ({ stdout: '', stderr: '' });
 
@@ -64,11 +65,7 @@ describe('ModelRouter codex sandbox threading (#3830)', () => {
       models: { 'codex-model': { ...stubModel, provider: 'openai', harness: 'codex-cli' } },
       tiers: { boss: ['codex-model'] },
     };
-    const reqs: HarnessRequest[] = [];
-    const run = async (req: HarnessRequest) => {
-      reqs.push(req);
-      return { output: 'ok' };
-    };
+    const { calls: reqs, fn: run } = recordArgs(async (_req: HarnessRequest) => ({ output: 'ok' }));
     const codex: CodingHarness = { id: 'codex-cli', agentic: true, run };
     const router = new ModelRouter(
       codexModels,
@@ -83,8 +80,9 @@ describe('ModelRouter codex sandbox threading (#3830)', () => {
     router.setCodexSandbox('danger-full-access');
     await router.run('plan', 'do it');
     expect(reqs).toHaveLength(1);
-    expect(reqs[0]!.codexSandbox).toBe('danger-full-access');
-    expect(reqs[0]!.codexFullAccessTasks).toEqual(['build_codex']);
+    const [req] = reqs[0]!;
+    expect(req.codexSandbox).toBe('danger-full-access');
+    expect(req.codexFullAccessTasks).toEqual(['build_codex']);
   });
 
   it('leaves codexSandbox undefined when the setter is never called or is reset', async () => {

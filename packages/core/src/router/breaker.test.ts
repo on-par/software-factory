@@ -18,6 +18,7 @@ import {
   ProviderBreaker,
   reportedCooldownMs,
 } from './breaker.js';
+import { recordArgs } from '../test-support/record-args.test.js';
 
 const tempDirs = new Set<string>();
 
@@ -465,8 +466,7 @@ describe('restore probe claim across lanes (#3339)', () => {
     expect(await b.probeDue('anthropic')).toBeDefined();
 
     const { a: c, b: d } = await lanes();
-    let probes = 0;
-    const probe = async () => void probes++;
+    const { calls: probeCalls, fn: probe } = recordArgs(async () => {});
     const registryRef = { get: () => ({ provider: 'anthropic', harness: 'claude-cli' }) } as never;
     const order: ProviderOrder = { boss: [], worker: ['claude-w'], checker: [], triage: [] };
     await Promise.all(
@@ -474,6 +474,6 @@ describe('restore probe claim across lanes (#3339)', () => {
         pickOrderedProvider({ router: { registryRef }, breaker, probe }, order, 'build', new Set()),
       ),
     );
-    expect(probes).toBe(1);
+    expect(probeCalls).toHaveLength(1);
   });
 });

@@ -6,6 +6,7 @@ import type { HarnessLiveUsage, HarnessRequest } from '../harness/index.js';
 import { BudgetStopError, isBudgetStopError, watchBudget } from './budget-guard.js';
 import { CliModelExecutor, type ModelExecutor, ModelRouter } from './index.js';
 import { ModelRegistry } from '../models/index.js';
+import { recordArgs } from '../test-support/record-args.test.js';
 
 const def = (provider: 'anthropic' | 'openai') => ({
   provider,
@@ -37,23 +38,10 @@ const live = (over: Partial<HarnessLiveUsage> = {}): HarnessLiveUsage => ({
   ...over,
 });
 
-const recordingGuard = (answer: boolean) => {
-  const seen: [number, number][] = [];
-  const guard = (usd: number, calls: number) => {
-    seen.push([usd, calls]);
-    return answer;
-  };
-  return { seen, guard };
-};
-
 describe('watchBudget', () => {
   it('prices cumulative usage with the registry rates and records a stop only when the guard returns true', () => {
-    const seen: [number, number][] = [];
     const answers = [false, true];
-    const guard = (usd: number, calls: number) => {
-      seen.push([usd, calls]);
-      return answers.shift()!;
-    };
+    const { calls: seen, fn: guard } = recordArgs(() => answers.shift()!);
     const watch = watchBudget(registry, 'model-a', guard);
     watch.onLiveUsage(live({ calls: 1 }));
     expect(seen.at(-1)).toEqual([3, 1]);
@@ -66,7 +54,7 @@ describe('watchBudget', () => {
   });
 
   it('ignores updates after a stop', () => {
-    const { seen, guard } = recordingGuard(true);
+    const { calls: seen, fn: guard } = recordArgs(() => true);
     const watch = watchBudget(registry, 'model-a', guard);
     watch.onLiveUsage(live({ calls: 1 }));
     watch.onLiveUsage(live({ calls: 2 }));
@@ -75,14 +63,14 @@ describe('watchBudget', () => {
   });
 
   it('skips the guard for an unpriced model and for a non-finite cost', () => {
-    const { seen, guard } = recordingGuard(true);
+    const { calls: seen, fn: guard } = recordArgs(() => true);
     watchBudget(registry, 'no-such-model', guard).onLiveUsage(live());
     watchBudget(registry, 'model-a', guard).onLiveUsage(live({ costUsd: Number.NaN }));
     expect(seen).toEqual([]);
   });
 
   it('uses costUsd when the harness supplies it', () => {
-    const { seen, guard } = recordingGuard(false);
+    const { calls: seen, fn: guard } = recordArgs(() => false);
     watchBudget(registry, 'model-a', guard).onLiveUsage(live({ costUsd: 12.5 }));
     expect(seen).toEqual([[12.5, 7]]);
   });
@@ -108,24 +96,21 @@ describe('ModelRouter budget guard', () => {
   };
 
   it('a budget-stopped attempt records a cost row for the partial session and throws BudgetStopError without retry, failover or worktree reset', async () => {
-    const seen: string[] = [];
-    const runModel = async (m: string, _p: string, ctx: Parameters<ModelExecutor['runModel']>[2]) => {
-      seen.push(m);
-      ctx.onLiveUsage?.(live({ inputTokens: 5000, outputTokens: 200, calls: 183 }));
-      throw new Error('killed');
-    };
+    const { calls: seen, fn: runModel } = recordArgs(
+      async (_m: string, _p: string, ctx: Parameters<ModelExecutor['runModel']>[2]) => {
+        ctx.onLiveUsage?.(live({ inputTokens: 5000, outputTokens: 200, calls: 183 }));
+        throw new Error('killed');
+      },
+    );
     const { router, rows, gitCalls } = setup({ runModel });
-    const infos: unknown[] = [];
-    const onProviderFailure = (info: unknown) => {
-      infos.push(info);
-    };
+    const { calls: infos, fn: onProviderFailure } = recordArgs(() => {});
     const err = await router.run('build_claude', 'go', { budgetGuard: () => true, onProviderFailure }).then(
       () => undefined,
       (e: unknown) => e,
     );
     expect(err).toBeInstanceOf(BudgetStopError);
     expect((err as BudgetStopError).stop.calls).toBe(183);
-    expect(seen).toEqual(['model-a']);
+    expect(seen).toHaveLength(1);
     expect(infos).toEqual([]);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ inputTokens: 5000, outputTokens: 200, estimated: false });
@@ -144,11 +129,9 @@ describe('ModelRouter budget guard', () => {
   });
 
   it('keeps ordinary failures on the retry and failover path when the guard never trips', async () => {
-    const seen: string[] = [];
-    const runModel = async (m: string): Promise<string> => {
-      seen.push(m);
+    const { calls: seen, fn: runModel } = recordArgs(async (_m: string): Promise<string> => {
       throw new Error('boom');
-    };
+    });
     const { router } = setup({ runModel });
     const err = await router.run('build_claude', 'go', { budgetGuard: () => false }).catch((e: unknown) => e);
     expect(isBudgetStopError(err)).toBe(false);
@@ -156,11 +139,8 @@ describe('ModelRouter budget guard', () => {
   });
 
   it('CliModelExecutor forwards ctx.onLiveUsage as HarnessRequest.onUsage', async () => {
-    const reqs: HarnessRequest[] = [];
-    const run = vi.spyOn(ClaudeCliHarness.prototype, 'run').mockImplementation(async (req) => {
-      reqs.push(req);
-      return { output: 'ok' };
-    });
+    const { calls: reqs, fn: runStub } = recordArgs(async (_req: HarnessRequest) => ({ output: 'ok' }));
+    const run = vi.spyOn(ClaudeCliHarness.prototype, 'run').mockImplementation(runStub);
     const onLiveUsage = () => {};
     await new CliModelExecutor().runModel('model-a', 'p', {
       worktree: '/tmp',
@@ -170,7 +150,7 @@ describe('ModelRouter budget guard', () => {
       routesConfig: routes,
       onLiveUsage,
     });
-    expect(reqs[0].onUsage).toBe(onLiveUsage);
+    expect(reqs[0]![0].onUsage).toBe(onLiveUsage);
     run.mockRestore();
   });
 });

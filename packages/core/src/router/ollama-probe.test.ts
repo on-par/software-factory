@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FetchFn } from './index.js';
 import { claimOllamaSkipNotice, ollamaEndpoint, probeOllama, resetOllamaProbeCache } from './ollama-probe.js';
+import { recordArgs } from '../test-support/record-args.test.js';
 
 const EP = 'http://127.0.0.1:11434';
 const response = (ok: boolean, status: number) => ({
@@ -12,12 +13,8 @@ const response = (ok: boolean, status: number) => ({
   json: async () => ({}),
 });
 const okFetch = () => {
-  const calls: [string, RequestInit | undefined][] = [];
-  const fetchFn: FetchFn = async (url, init) => {
-    calls.push([url, init]);
-    return response(true, 200);
-  };
-  return { fetchFn, calls };
+  const { calls, fn } = recordArgs(async (_url: string, _init?: RequestInit) => response(true, 200));
+  return { fetchFn: fn, calls };
 };
 
 describe('probeOllama', () => {

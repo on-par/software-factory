@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { HarnessError } from '../harness/index.js';
 import { ModelRouter } from './index.js';
+import { recordArgs } from '../test-support/record-args.test.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -36,11 +37,9 @@ describe('router local-auth sink for opencode (#2890)', () => {
         throw new HarnessError('401 unauthorized', 'local_auth');
       },
     });
-    const reported: string[] = [];
-    router.setLocalAuthSink((a) => {
-      reported.push(a);
-    });
+    const { calls: reported, fn: sink } = recordArgs(() => {});
+    router.setLocalAuthSink(sink);
     await expect(router.run('plan', 'plan')).rejects.toBeDefined();
-    expect(reported).toEqual(['opencode']);
+    expect(reported).toEqual([['opencode']]);
   });
 });
