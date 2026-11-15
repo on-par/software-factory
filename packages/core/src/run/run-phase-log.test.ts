@@ -89,11 +89,12 @@ describe('run phase logs', () => {
   it('warns and omits a location when writes fail; disabled logging stays silent', async () => {
     const logsDir = await root();
     await writeFile(join(logsDir, 'issue-17'), 'file blocks directory creation');
-    const warn = vi.fn();
+    const logged: [string, string][] = [];
+    const warn = (t: string, m: string) => logged.push([t, m]);
     const logger = createRunPhaseLogger({ logsDir, issue: key, runId: 'bad', log: warn });
     await logger.build(result('output'));
     expect(logger.parkMessage('parked')).toBe('parked');
-    expect(warn).toHaveBeenCalledWith('warn', expect.stringContaining('write failed'));
+    expect(logged.some(([t, m]) => t === 'warn' && m.includes('write failed'))).toBe(true);
     const disabled = createRunPhaseLogger({ issue: key, runId: 'none', log: warn });
     await disabled.plan(result(''));
     expect(disabled.parkMessage('parked')).toBe('parked');

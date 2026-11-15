@@ -16,6 +16,7 @@ import { createTempDirs } from '../harness/temp-dir.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
+import { recordArgs } from '../test-support/recorders.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
 const planPhase = vi.fn<typeof realPlanPhase>();
@@ -102,11 +103,12 @@ const classifier = {
 const t1 = { ...classifier, trustTier: 'T1' as const, t1SampleRate: RATE };
 
 function setup(path: string, labelError?: Error) {
-  const addLabels = vi.fn(async () => {
+  const addLabels = recordArgs(async (_a: { owner: string; repo: string; issue_number: number; labels: string[] }) => {
     if (labelError) throw labelError;
     return {};
   });
-  const octokit = Object.assign({} as Octokit, { rest: { issues: { addLabels } } });
+  const shipped: Parameters<typeof realShipPhase>[0][] = [];
+  const octokit = Object.assign({} as Octokit, { rest: { issues: { addLabels: addLabels.fn } } });
   const events: { kind: string; msg: string }[] = [];
   const ports: RunPorts = {
     router: new ModelRouter(MODELS, ROUTES),
@@ -120,11 +122,11 @@ function setup(path: string, labelError?: Error) {
     planPhase,
     buildPhase,
     checkPhase,
-    shipPhase,
+    shipPhase: (o) => (shipped.push(o), shipPhase(o)),
     readReviewFloorChanges: async () => [{ path, added: 1, removed: 0 }],
   };
   const gated = () => events.filter((e) => e.kind === 'merge-gated');
-  return { addLabels, ports, gated };
+  return { labels: addLabels.calls, shipped, ports, gated };
 }
 
 beforeEach(() => {
@@ -139,43 +141,49 @@ describe('T1 sampling (#1958)', () => {
     const t = setup('docs/guide.md');
     const outcome = await runIssue(request(SAMPLED, t1), policy, t.ports);
     expect(outcome.state).toBe('ready');
-    expect(t.addLabels).toHaveBeenCalledWith({
-      owner: 'o',
-      repo: 'r',
-      issue_number: SAMPLED,
-      labels: ['no-auto-merge'],
-    });
+    expect(t.labels).toEqual([
+      [
+        {
+          owner: 'o',
+          repo: 'r',
+          issue_number: SAMPLED,
+          labels: ['no-auto-merge'],
+        },
+      ],
+    ]);
     expect(t.gated()).toHaveLength(1);
     expect(t.gated()[0].msg.startsWith('t1-sampled')).toBe(true);
-    expect(shipPhase.mock.calls[0][0].reviewRouting?.sample?.held).toBe(true);
+    expect(t.shipped[0]!.reviewRouting?.sample?.held).toBe(true);
   });
 
   it('lets an unsampled A-floor PR through with no label', async () => {
     const t = setup('docs/guide.md');
     await runIssue(request(UNSAMPLED, t1), policy, t.ports);
-    expect(t.addLabels).not.toHaveBeenCalled();
+    expect(t.labels).toEqual([]);
     expect(t.gated()).toHaveLength(0);
-    expect(shipPhase.mock.calls[0][0].reviewRouting).toMatchObject({ gated: false, sample: { held: false } });
+    expect(t.shipped[0]!.reviewRouting).toMatchObject({ gated: false, sample: { held: false } });
   });
 
   it('holds a sensitive-path PR even when the sample would not', async () => {
     const t = setup('.github/workflows/ci.yml');
     await runIssue(request(UNSAMPLED, t1), policy, t.ports);
-    expect(t.addLabels).toHaveBeenCalledTimes(1);
+    expect(t.labels).toHaveLength(1);
+    expect(t.labels[0]![0].labels).toEqual(['no-auto-merge']);
     expect(t.gated()[0].msg).toContain('classifier:floor:C:');
   });
 
   it('does not sample at T0, even at rate 1', async () => {
     const t = setup('docs/guide.md');
     await runIssue(request(SAMPLED, { ...classifier, t1SampleRate: 1 }), policy, t.ports);
-    expect(t.addLabels).not.toHaveBeenCalled();
-    expect(shipPhase.mock.calls[0][0].reviewRouting?.sample).toBeUndefined();
+    expect(t.labels).toEqual([]);
+    expect(t.shipped[0]!.reviewRouting?.sample).toBeUndefined();
   });
 
   it('parks held and never ships when the label for a sampled PR cannot be applied', async () => {
     const t = setup('docs/guide.md', new Error('403'));
     const outcome = await runIssue(request(SAMPLED, t1), policy, t.ports);
     expect(outcome).toMatchObject({ state: 'parked', reason: 'held' });
-    expect(shipPhase).not.toHaveBeenCalled();
+    expect(t.shipped).toEqual([]);
+    expect(outcome).not.toHaveProperty('prNumber');
   });
 });

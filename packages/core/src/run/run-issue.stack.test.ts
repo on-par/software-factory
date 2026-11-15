@@ -22,6 +22,7 @@ import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { CheckSummary } from '../types/index.js';
 import type { WorkRequest } from '../work/index.js';
+import { recordArgs } from '../test-support/recorders.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
@@ -121,9 +122,22 @@ const freshPlan = (): SlicePlan => ({
 });
 const branch = (k: number) => stackSliceBranch(1, k);
 
-function stackSetup(opts: { recordBranches?: boolean; pulls?: unknown; lower?: 'pr-open' | 'merged' } = {}) {
+type TimelineEntry = { kind: 'write'; body: string } | { kind: 'build'; branch: string };
+
+type StackOpts = { recordBranches?: boolean; pulls?: unknown; lower?: 'pr-open' | 'merged' } & {
+  [K in 'branchError' | 'recordError']?: Error;
+};
+
+function stackSetup(opts: StackOpts = {}) {
   const recordBranches = opts.recordBranches ?? true;
   const bodies: string[] = [];
+  const timeline: TimelineEntry[] = [];
+  const rec = {
+    planned: [] as Parameters<typeof realPlanPhase>[0][],
+    built: [] as Parameters<typeof realBuildPhase>[0][],
+    checked: [] as Parameters<typeof realCheckPhase>[0][],
+    shipped: [] as Parameters<typeof realShipPhase>[0][],
+  };
   let run = 0;
   planPhase.mockImplementation(async () => {
     const index = ++run;
@@ -141,11 +155,12 @@ function stackSetup(opts: { recordBranches?: boolean; pulls?: unknown; lower?: '
   let pr = 100;
   shipPhase.mockImplementation(async () => ({ ok: true, prNumber: ++pr }));
   let head = 0;
-  const readWorktreeHead = vi.fn(async (_worktree: string) => `wt-head-${++head}`);
-  const record = vi.fn(async (a: { body: string }) => {
+  const record = async (a: { body: string }) => {
+    if (opts.recordError) throw opts.recordError;
     bodies.push(a.body);
+    timeline.push({ kind: 'write', body: a.body });
     return { data: {} };
-  });
+  };
   const octokit: Octokit = {
     rest: {
       pulls: opts.pulls,
@@ -157,7 +172,9 @@ function stackSetup(opts: { recordBranches?: boolean; pulls?: unknown; lower?: '
       },
     },
   } as never;
-  const createSliceBranch = vi.fn(async (_o: { worktree: string; branch: string; startPoint: string }) => {});
+  const createSliceBranch = recordArgs(async (_o: { worktree: string; branch: string; startPoint: string }) => {
+    if (opts.branchError) throw opts.branchError;
+  });
   breakerCounter += 1;
   const ports: RunPorts = {
     router: new ModelRouter(MODELS, ROUTES),
@@ -166,14 +183,14 @@ function stackSetup(opts: { recordBranches?: boolean; pulls?: unknown; lower?: '
     events: () => vi.fn(),
     breaker: new ProviderBreaker(join(breakerDir, `breaker-${breakerCounter}.json`)),
     resolveConstitution: () => null,
-    planPhase,
-    buildPhase,
-    checkPhase,
-    shipPhase,
-    createSliceBranch,
-    readWorktreeHead,
+    planPhase: (o) => (rec.planned.push(o), planPhase(o)),
+    buildPhase: (o) => (rec.built.push(o), timeline.push({ kind: 'build', branch: o.branch }), buildPhase(o)),
+    checkPhase: (o) => (rec.checked.push(o), checkPhase(o)),
+    shipPhase: (o) => (rec.shipped.push(o), shipPhase(o)),
+    createSliceBranch: createSliceBranch.fn,
+    readWorktreeHead: async () => `wt-head-${++head}`,
   };
-  return { ports, createSliceBranch, record, bodies, readWorktreeHead };
+  return { ports, branches: createSliceBranch.calls, bodies, timeline, ...rec };
 }
 
 beforeEach(() => {
@@ -191,40 +208,40 @@ async function runSlices(ports: RunPorts, count: number, request: RunRequest = b
 
 describe('runIssue — stack mode builds one slice per run (ADR-0161)', () => {
   it('stops after slice 1 and waits for review before slice 2 (#3349)', async () => {
-    const { ports, createSliceBranch } = stackSetup();
+    const { ports, branches, planned, built } = stackSetup();
     const outcome = await runIssue(baseRequest(), policy, ports);
 
     expect(outcome).toMatchObject({ state: 'ready', slice: { index: 1, count: 3 } });
-    expect(createSliceBranch).toHaveBeenCalledTimes(1);
-    expect(planPhase).toHaveBeenCalledTimes(1);
-    expect(buildPhase).toHaveBeenCalledTimes(1);
+    expect(branches).toHaveLength(1);
+    expect(planned).toHaveLength(1);
+    expect(built).toHaveLength(1);
   });
 
   it('builds three slices across three runs, branching each from its parent', async () => {
-    const { ports, createSliceBranch } = stackSetup();
+    const { ports, branches, built } = stackSetup();
     const outcomes = await runSlices(ports, 3);
 
-    expect(createSliceBranch.mock.calls.map((c) => [c[0].branch, c[0].startPoint])).toEqual([
+    expect(branches.map(([o]) => [o.branch, o.startPoint])).toEqual([
       [branch(1), 'origin/main'],
       [branch(2), branch(1)],
       [branch(3), branch(2)],
     ]);
-    expect(buildPhase.mock.calls.map((c) => c[0].branch)).toEqual([branch(1), branch(2), branch(3)]);
+    expect(built.map((o) => o.branch)).toEqual([branch(1), branch(2), branch(3)]);
     expect(outcomes.map((o) => (o.state === 'ready' ? o.slice?.index : undefined))).toEqual([1, 2, 3]);
   });
 
   it('branches slice 2 from origin/main and opens it on main after slice 1 merged (#3367)', async () => {
-    const { ports, createSliceBranch } = stackSetup({ lower: 'merged' });
+    const { ports, branches, checked, built, shipped } = stackSetup({ lower: 'merged' });
     await runSlices(ports, 2);
 
-    expect(createSliceBranch.mock.calls[1]![0]).toMatchObject({ branch: branch(2), startPoint: 'origin/main' });
-    expect(checkPhase.mock.calls[1]![0].parentBaseRef).toBeUndefined();
-    expect(buildPhase.mock.calls[1]![0].parentBaseRef).toBeUndefined();
-    expect(shipPhase.mock.calls[1]![0].stack).toMatchObject({ index: 2, base: 'main' });
+    expect(branches[1]![0]).toMatchObject({ branch: branch(2), startPoint: 'origin/main' });
+    expect(checked[1]!.parentBaseRef).toBeUndefined();
+    expect(built[1]!.parentBaseRef).toBeUndefined();
+    expect(shipped[1]!.stack).toMatchObject({ index: 2, base: 'main' });
   });
 
   it('parks over-cap through the gate and builds no slice', async () => {
-    const { ports } = stackSetup();
+    const { ports, planned, built } = stackSetup();
     planPhase.mockImplementation(async () => ({
       ok: false,
       route: 'codex',
@@ -236,38 +253,40 @@ describe('runIssue — stack mode builds one slice per run (ADR-0161)', () => {
     const outcome = await runIssue(baseRequest({ maxSlices: 2 }), policy, ports);
 
     expect(outcome.state).toBe('escalated');
-    expect(planPhase).toHaveBeenCalledTimes(1);
-    expect(buildPhase).not.toHaveBeenCalled();
+    expect(planned).toHaveLength(1);
+    expect(built).toEqual([]);
   });
 
   it('passes the parent slice branch to checkPhase as parentBaseRef', async () => {
-    const { ports } = stackSetup();
+    const { ports, checked, built } = stackSetup();
     await runSlices(ports, 3);
 
-    expect(checkPhase.mock.calls.map((c) => c[0].parentBaseRef)).toEqual([undefined, branch(1), branch(2)]);
-    expect(buildPhase.mock.calls.map((c) => c[0].parentBaseRef)).toEqual([undefined, branch(1), branch(2)]);
+    expect(checked.map((o) => o.parentBaseRef)).toEqual([undefined, branch(1), branch(2)]);
+    expect(built.map((o) => o.parentBaseRef)).toEqual([undefined, branch(1), branch(2)]);
   });
 
   it('records each slice branch in the plan comment before BUILD', async () => {
-    const { ports, record, bodies } = stackSetup();
+    const { ports, timeline } = stackSetup();
     await runSlices(ports, 3);
 
     for (const k of [1, 2, 3]) {
-      const writeIdx = bodies.findIndex((b) => {
-        const parsed = parseSlicePlanComment(b);
+      const writeIdx = timeline.findIndex((e) => {
+        if (e.kind !== 'write') return false;
+        const parsed = parseSlicePlanComment(e.body);
         return parsed?.ok === true && parsed.plan.slices[k - 1]?.branch === branch(k);
       });
+      const buildIdx = timeline.findIndex((e) => e.kind === 'build' && e.branch === branch(k));
       expect(writeIdx).toBeGreaterThanOrEqual(0);
-      expect(record.mock.invocationCallOrder[writeIdx]).toBeLessThan(buildPhase.mock.invocationCallOrder[k - 1]);
+      expect(writeIdx).toBeLessThan(buildIdx);
     }
   });
 
   it('branches slice 1 from parentBaseRef when set', async () => {
-    const { ports, createSliceBranch } = stackSetup();
+    const { ports, branches, shipped } = stackSetup();
     await runIssue(baseRequest({ parentBaseRef: 'origin/feat/x' }), policy, ports);
 
-    expect(createSliceBranch.mock.calls[0]![0]).toMatchObject({ branch: branch(1), startPoint: 'origin/feat/x' });
-    expect(shipPhase.mock.calls[0]![0].stack).toMatchObject({ index: 1, base: 'feat/x' });
+    expect(branches[0]![0]).toMatchObject({ branch: branch(1), startPoint: 'origin/feat/x' });
+    expect(shipped[0]!.stack).toMatchObject({ index: 1, base: 'feat/x' });
   });
 
   it("records each slice's branch and PR when slices chain through parentBaseRef", async () => {
@@ -287,14 +306,14 @@ describe('runIssue — stack mode builds one slice per run (ADR-0161)', () => {
   });
 
   it('stops the chain at the first non-ready slice', async () => {
-    const { ports } = stackSetup();
+    const { ports, planned } = stackSetup();
     checkPhase
       .mockReset()
       .mockResolvedValueOnce(CHECK_OK)
       .mockResolvedValue({ passed: false, summary: { ...CHECK_SUMMARY, failures: 1 }, reworkRounds: 0 });
     const outcomes = await runSlices(ports, 2);
 
-    expect(planPhase).toHaveBeenCalledTimes(2);
+    expect(planned).toHaveLength(2);
     expect(outcomes[1]!.state).not.toBe('ready');
   });
 
@@ -302,7 +321,7 @@ describe('runIssue — stack mode builds one slice per run (ADR-0161)', () => {
     { name: 'fail', stuck: false, reason: 'fail' },
     { name: 'stuck', stuck: true, reason: 'escalate' },
   ])('halts the stack when slice 2 of 3 fails CHECK ($name)', async ({ stuck, reason }) => {
-    const { ports, createSliceBranch } = stackSetup();
+    const { ports, branches, planned, built, checked, shipped } = stackSetup();
     const failed: CheckPhaseResult = {
       passed: false,
       stuck,
@@ -319,11 +338,11 @@ describe('runIssue — stack mode builds one slice per run (ADR-0161)', () => {
     checkPhase.mockReset().mockResolvedValueOnce(CHECK_OK).mockResolvedValueOnce(failed);
     const outcome = (await runSlices(ports, 2))[1];
 
-    expect(planPhase).toHaveBeenCalledTimes(2);
-    expect(createSliceBranch.mock.calls.map((c) => c[0].branch)).toEqual([branch(1), branch(2)]);
-    expect(buildPhase.mock.calls.map((c) => c[0].branch)).toEqual([branch(1), branch(2)]);
-    expect(checkPhase).toHaveBeenCalledTimes(2);
-    expect(shipPhase).toHaveBeenCalledTimes(1);
+    expect(planned).toHaveLength(2);
+    expect(branches.map(([o]) => o.branch)).toEqual([branch(1), branch(2)]);
+    expect(built.map((o) => o.branch)).toEqual([branch(1), branch(2)]);
+    expect(checked).toHaveLength(2);
+    expect(shipped).toHaveLength(1);
     expect(outcome).toMatchObject({
       state: 'parked',
       reason,
@@ -334,67 +353,65 @@ describe('runIssue — stack mode builds one slice per run (ADR-0161)', () => {
   });
 
   it('parks fail when the parent slice branch is not recorded', async () => {
-    const { ports, createSliceBranch } = stackSetup();
+    const { ports, branches, built } = stackSetup();
     planPhase.mockImplementation(async () => ({ ...PLAN_OK, slice: { plan: freshPlan(), index: 2 } }));
     const outcome = await runIssue(baseRequest(), policy, ports);
 
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
-    expect(createSliceBranch).not.toHaveBeenCalled();
-    expect(buildPhase).not.toHaveBeenCalled();
+    expect(branches).toEqual([]);
+    expect(built).toEqual([]);
   });
 
   it('parks fail when the slice branch cannot be created', async () => {
-    const { ports, createSliceBranch } = stackSetup();
-    createSliceBranch.mockRejectedValue(new Error('bad ref'));
+    const { ports, built } = stackSetup({ branchError: new Error('bad ref') });
     const outcome = await runIssue(baseRequest(), policy, ports);
 
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
-    expect(buildPhase).not.toHaveBeenCalled();
+    expect(built).toEqual([]);
   });
 
   it('parks fail when recording the branch in the plan comment fails', async () => {
-    const { ports, record } = stackSetup();
-    record.mockRejectedValue(new Error('boom'));
+    const { ports, built } = stackSetup({ recordError: new Error('boom') });
     const outcome = await runIssue(baseRequest(), policy, ports);
 
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
-    expect(buildPhase).not.toHaveBeenCalled();
+    expect(built).toEqual([]);
   });
 
   it.each(['off'] as const)('%s mode makes a single pass and creates no branch', async (mode) => {
-    const { ports, createSliceBranch } = stackSetup();
+    const { ports, planned, branches } = stackSetup();
     await runIssue(baseRequest({ sizeGateMode: mode }), policy, ports);
 
-    expect(planPhase).toHaveBeenCalledTimes(1);
-    expect(createSliceBranch).not.toHaveBeenCalled();
+    expect(planned).toHaveLength(1);
+    expect(branches).toEqual([]);
   });
 
   it("opens slice 2 on slice 1's branch (#3348)", async () => {
-    const { ports } = stackSetup();
+    const { ports, shipped } = stackSetup();
     await runSlices(ports, 3);
 
-    expect(shipPhase.mock.calls.map((c) => c[0].stack?.base)).toEqual(['main', branch(1), branch(2)]);
-    expect(shipPhase.mock.calls[1]![0].stack).toMatchObject({ index: 2, count: 3 });
+    expect(shipped.map((o) => o.stack?.base)).toEqual(['main', branch(1), branch(2)]);
+    expect(shipped[1]!.stack).toMatchObject({ index: 2, count: 3 });
   });
 
   it('never ships a branch created from a parent slice on main (#3348)', async () => {
-    const { ports, createSliceBranch } = stackSetup();
+    const { ports, branches, shipped } = stackSetup();
     await runSlices(ports, 3);
 
-    for (const [o] of createSliceBranch.mock.calls) {
+    for (const [o] of branches) {
       if (o.startPoint === 'origin/main') continue;
-      const shipped = shipPhase.mock.calls.find((c) => c[0].branch === o.branch);
-      expect(shipped?.[0].stack?.base).toBe(o.startPoint);
+      const match = shipped.find((s) => s.branch === o.branch);
+      expect(match?.stack?.base).toBe(o.startPoint);
     }
   });
 
   it("rewrites slice 1's PR when slice 2 opens (#3348)", async () => {
     const get = vi.fn(async () => ({ data: { body: '## Summary\nHi.' } }));
-    const update = vi.fn(async (_a: unknown) => ({}));
-    const { ports } = stackSetup({ pulls: { get, update } });
+    const update = recordArgs(async (_a: { pull_number: number; body: string }) => ({}));
+    const { ports } = stackSetup({ pulls: { get, update: update.fn } });
     await runSlices(ports, 2);
 
-    const arg = update.mock.calls[0]![0] as { pull_number: number; body: string };
+    const arg = update.calls[0]![0];
     expect(arg.pull_number).toBe(101);
     expect(arg.body).toContain('next: slice 2 #102');
   });
