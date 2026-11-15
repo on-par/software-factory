@@ -177,8 +177,7 @@ describe('comment rework (#3882)', () => {
     const { octokit, getReview } = reworkOctokit(pull);
     const getComment = async () => (apiCalls.push('getComment'), { data: { body, user: { login: 'alice' } } });
     Object.assign((octokit as any).rest, { issues: { getComment } });
-    octokit.rest.pulls.get = vi.fn(octokit.rest.pulls.get);
-    return { octokit: octokit as Octokit, getReview };
+    return { octokit, getReview };
   };
 
   it("a comment rework builds on the PR branch from that comment's feedback only", async () => {
