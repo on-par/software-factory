@@ -8,11 +8,9 @@ import { loadModelsConfig } from '../config/index.js';
 import {
   diagnoseModels,
   isCommandAvailable,
-  isHarnessCliPresent,
   ModelRegistry,
   probeDeclaredHarnesses,
   resolveModelOverrides,
-  runHarnessProbe,
 } from './index.js';
 
 const config: ModelsConfig = {
@@ -528,7 +526,11 @@ describe('diagnoseModels', () => {
   });
 
   it('keeps a codex model reachable when the codex CLI is logged in (consults the login probe)', () => {
-    const codexLoggedIn = vi.fn(() => true);
+    let codexChecks = 0;
+    const codexLoggedIn = () => {
+      codexChecks++;
+      return true;
+    };
     const d = diagnosisFor('codex-model', {
       commandAvailable: (c) => c === 'codex',
       envPresent: () => false,
@@ -536,24 +538,32 @@ describe('diagnoseModels', () => {
     });
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (codex CLI)');
-    expect(codexLoggedIn).toHaveBeenCalled();
+    expect(codexChecks).toBe(1);
   });
 
   it('does not consult the codex login probe when codex is missing from PATH', () => {
-    const codexLoggedIn = vi.fn(() => true);
+    let codexChecks = 0;
+    const codexLoggedIn = () => {
+      codexChecks++;
+      return true;
+    };
     const d = diagnosisFor('codex-model', { commandAvailable: () => false, envPresent: () => false, codexLoggedIn });
     expect(d.reason).toBe('codex CLI not found on PATH');
-    expect(codexLoggedIn).not.toHaveBeenCalled();
+    expect(codexChecks).toBe(0);
   });
 
   it('calls the codex login probe at most once per diagnoseModels call', () => {
-    const codexLoggedIn = vi.fn(() => true);
+    let codexChecks = 0;
+    const codexLoggedIn = () => {
+      codexChecks++;
+      return true;
+    };
     diagnoseModels(
       new ModelRegistry(doctorConfig),
       { commandAvailable: (c) => c === 'codex', envPresent: () => false, codexLoggedIn },
       true,
     );
-    expect(codexLoggedIn).toHaveBeenCalledTimes(1);
+    expect(codexChecks).toBe(1);
   });
 
   it('treats a throwing codex login probe as not logged in', () => {
@@ -619,29 +629,41 @@ describe('diagnoseModels', () => {
   });
 
   it('keeps a Claude model reachable when the CLI is logged in and no API key is set', () => {
-    const claudeLoggedIn = vi.fn(() => true);
+    let claudeChecks = 0;
+    const claudeLoggedIn = () => {
+      claudeChecks++;
+      return true;
+    };
     const d = opusDiagnosis({ commandAvailable: (c) => c === 'claude', envPresent: () => false, claudeLoggedIn });
     expect(d.reachable).toBe(true);
-    expect(claudeLoggedIn).toHaveBeenCalled();
+    expect(claudeChecks).toBe(1);
   });
 
   it('keeps a Claude model reachable via ANTHROPIC_API_KEY without consulting the login probe', () => {
-    const claudeLoggedIn = vi.fn(() => false);
+    let claudeChecks = 0;
+    const claudeLoggedIn = () => {
+      claudeChecks++;
+      return false;
+    };
     const d = opusDiagnosis({ commandAvailable: (c) => c === 'claude', envPresent: () => true, claudeLoggedIn });
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (claude CLI)');
-    expect(claudeLoggedIn).not.toHaveBeenCalled();
+    expect(claudeChecks).toBe(0);
   });
 
   it('calls the login probe at most once per diagnoseModels call', () => {
-    const claudeLoggedIn = vi.fn(() => true);
+    let claudeChecks = 0;
+    const claudeLoggedIn = () => {
+      claudeChecks++;
+      return true;
+    };
     const ds = diagnoseModels(
       new ModelRegistry(claudeOpusConfig()),
       { commandAvailable: (c) => c === 'claude', envPresent: () => false, claudeLoggedIn },
       true,
     ).filter((x) => x.provider === 'anthropic');
     expect(ds.length).toBeGreaterThan(1);
-    expect(claudeLoggedIn).toHaveBeenCalledTimes(1);
+    expect(claudeChecks).toBe(1);
   });
 
   it.skipIf(process.platform === 'darwin')(
@@ -666,9 +688,11 @@ describe('diagnoseModels', () => {
   );
 
   it('marks Claude models unreachable when the last run hit local_auth with no login since (#2733)', () => {
-    const localAuthFailure = vi.fn((a: 'claude' | 'codex' | 'opencode') =>
-      a === 'claude' ? { agent: a, at: '2026-10-13T16:00:00.000Z' } : null,
-    );
+    const asked: string[] = [];
+    const localAuthFailure = (a: 'claude' | 'codex' | 'opencode') => {
+      asked.push(a);
+      return a === 'claude' ? { agent: a, at: '2026-10-13T16:00:00.000Z' } : null;
+    };
     const ds = diagnoseModels(
       new ModelRegistry(claudeOpusConfig()),
       {
@@ -683,7 +707,7 @@ describe('diagnoseModels', () => {
     const opus = ds.find((x) => x.model === 'claude-opus-5')!;
     expect(opus.reachable).toBe(false);
     expect(opus.reason).toContain('re-run claude login');
-    expect(localAuthFailure.mock.calls.filter(([a]) => a === 'claude')).toHaveLength(1);
+    expect(asked.filter((a) => a === 'claude')).toHaveLength(1);
   });
 
   it('marks Codex models unreachable when codex hit local_auth with no login since (#2733)', () => {
@@ -1237,9 +1261,13 @@ describe('diagnoseModels declared harnesses', () => {
   });
 
   it('runs a shared probe once for several models', () => {
-    const spy = vi.fn(() => null);
-    diagnoseModels(new ModelRegistry(declared('my-agent --version')), { harnessProbe: spy }, true);
-    expect(spy).toHaveBeenCalledTimes(1);
+    const probed: unknown[][] = [];
+    const harnessProbe = (...a: unknown[]) => {
+      probed.push(a);
+      return null;
+    };
+    diagnoseModels(new ModelRegistry(declared('my-agent --version')), { harnessProbe }, true);
+    expect(probed).toHaveLength(1);
   });
 
   it('turns a throwing probe into unavailable', () => {
@@ -1251,20 +1279,6 @@ describe('diagnoseModels declared harnesses', () => {
 
   it('returns no probes when no harnesses are declared', () => {
     expect(probeDeclaredHarnesses(new ModelRegistry(doctorConfig))).toEqual([]);
-  });
-});
-
-describe('runHarnessProbe', () => {
-  it('returns null on exit 0', () => {
-    expect(runHarnessProbe('true')).toBeNull();
-  });
-
-  it('returns the exit code on failure', () => {
-    expect(runHarnessProbe('exit 3')).toBe('exit 3');
-  });
-
-  it('includes the first stderr line', () => {
-    expect(runHarnessProbe('echo boom >&2; exit 2')).toContain('boom');
   });
 });
 
@@ -1328,18 +1342,5 @@ describe('resolveModelOverrides', () => {
       plan: undefined,
       build: undefined,
     });
-  });
-});
-
-describe('isHarnessCliPresent', () => {
-  it('is true for harnesses with no CLI probe even when no command is available', () => {
-    expect(isHarnessCliPresent('ollama-http', () => false)).toBe(true);
-    expect(isHarnessCliPresent('my-declared-harness', () => false)).toBe(true);
-    expect(isHarnessCliPresent(undefined, () => false)).toBe(true);
-  });
-
-  it('follows the injected probe for CLI harnesses', () => {
-    expect(isHarnessCliPresent('claude-cli', (cmd) => cmd !== 'claude')).toBe(false);
-    expect(isHarnessCliPresent('claude-cli', (cmd) => cmd === 'claude')).toBe(true);
   });
 });

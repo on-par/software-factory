@@ -305,7 +305,11 @@ describe('fetchHumanEventSources', () => {
   });
 
   it('calls pulls.get only for merged PRs and surfaces merged_by', async () => {
-    const getMock = vi.fn().mockResolvedValue({ data: { merged_by: { login: 'eve' } } });
+    const getArgs: unknown[] = [];
+    const get = async (a: unknown) => {
+      getArgs.push(a);
+      return { data: { merged_by: { login: 'eve' } } };
+    };
     const client = makeClient({
       list: vi.fn().mockResolvedValue({
         data: [
@@ -319,13 +323,12 @@ describe('fetchHumanEventSources', () => {
           { number: 2, head: { ref: 'factory/2-other' }, state: 'open', merged_at: null, closed_at: null },
         ],
       }),
-      get: getMock,
+      get,
     });
 
     const sources = await fetchHumanEventSources(client, 'owner', 'repo', new Set(['1', '2']));
 
-    expect(getMock).toHaveBeenCalledTimes(1);
-    expect(getMock).toHaveBeenCalledWith({ owner: 'owner', repo: 'repo', pull_number: 1 });
+    expect(getArgs).toEqual([{ owner: 'owner', repo: 'repo', pull_number: 1 }]);
     const merged = sources.find((s) => s.prNumber === 1)!;
     expect(merged.mergedAt).toBe('2026-07-20T01:00:00.000Z');
     expect(merged.mergedBy).toBe('eve');
@@ -354,12 +357,17 @@ describe('fetchHumanEventSources', () => {
   });
 
   it('stops paging on a short page', async () => {
-    const listMock = vi.fn().mockResolvedValue({ data: [] });
-    const client = makeClient({ list: listMock });
+    const pages: unknown[] = [];
+    const client = makeClient({
+      list: async (a: unknown) => {
+        pages.push(a);
+        return { data: [] };
+      },
+    });
 
     await fetchHumanEventSources(client, 'owner', 'repo', new Set(['1']));
 
-    expect(listMock).toHaveBeenCalledTimes(1);
+    expect(pages).toHaveLength(1);
   });
 });
 
@@ -405,11 +413,13 @@ describe('fetchHumanEventSources prefix matching (#2342)', () => {
 describe('reconstructKpiEvents (#2342)', () => {
   it('merges reconstructed human events and passes only numeric issues to the fetcher', async () => {
     const events = [event({ issue: '1' }), event({ issue: 'all' })];
-    const fetchSources = vi
-      .fn()
-      .mockResolvedValue([prSource({ issue: '1', mergedAt: '2026-07-21T00:00:00.000Z', mergedBy: 'bob' })]);
+    const requested: ReadonlySet<string>[] = [];
+    const fetchSources = async (ids: ReadonlySet<string>) => {
+      requested.push(ids);
+      return [prSource({ issue: '1', mergedAt: '2026-07-21T00:00:00.000Z', mergedBy: 'bob' })];
+    };
     const res = await reconstructKpiEvents(events, fetchSources);
-    expect(fetchSources).toHaveBeenCalledWith(new Set(['1']));
+    expect(requested).toEqual([new Set(['1'])]);
     expect(res.partial).toBe(false);
     expect(res.error).toBeNull();
     expect(res.sources).toHaveLength(1);

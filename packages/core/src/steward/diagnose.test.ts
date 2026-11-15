@@ -162,11 +162,15 @@ describe('diagnoseStewardPacket', () => {
   async function readVerdict(dir: string): Promise<Record<string, unknown>> {
     return JSON.parse(await readFile(join(dir, STEWARD_VERDICT_FILE), 'utf-8'));
   }
-  const replying = (reply: unknown, usage?: HarnessUsage) =>
-    vi.fn(async (_call: StewardModelCall): Promise<StewardModelReply> => ({
-      text: typeof reply === 'string' ? reply : JSON.stringify(reply),
-      ...(usage ? { usage } : {}),
-    }));
+  const replying = (reply: unknown, usage?: HarnessUsage) => {
+    const calls: StewardModelCall[] = [];
+    const text = typeof reply === 'string' ? reply : JSON.stringify(reply);
+    const invoke = async (call: StewardModelCall): Promise<StewardModelReply> => {
+      calls.push(call);
+      return { text, ...(usage ? { usage } : {}) };
+    };
+    return Object.assign(invoke, { calls });
+  };
   const costsFileIn = (dir: string) => join(dir, 'costs.jsonl');
   const BOSS = ['claude-opus-5'];
 
@@ -264,8 +268,8 @@ describe('diagnoseStewardPacket', () => {
     const dir = await tmp();
     const invoke = replying(validVerdict());
     await diagnoseStewardPacket(dir, fixturePacket(), { invoke, costsFile: costsFileIn(dir), bossModels: BOSS });
-    expect(invoke).toHaveBeenCalledTimes(1);
-    const call = invoke.mock.calls[0][0];
+    expect(invoke.calls).toHaveLength(1);
+    const call = invoke.calls[0]!;
     expect(call).toMatchObject({
       route: 'steward',
       model: 'claude-opus-5',
@@ -284,7 +288,7 @@ describe('diagnoseStewardPacket', () => {
       costsFile: costsFileIn(dir),
       bossModels: ['gpt-5.6-terra-high', 'gpt-5.6-sol'],
     });
-    expect(invoke.mock.calls[0][0].model).toBe('gpt-5.6-terra-high');
+    expect(invoke.calls.map((c) => c.model)).toEqual(['gpt-5.6-terra-high']);
     expect(readCosts(costsFileIn(dir))[0]).toMatchObject({ model: 'gpt-5.6-terra-high' });
   });
 
@@ -297,14 +301,14 @@ describe('diagnoseStewardPacket', () => {
       costsFile: costsFileIn(dir),
       bossModels: ['gpt-5.6-terra-high'],
     });
-    expect(invoke.mock.calls[0][0].model).toBe('claude-opus-5');
+    expect(invoke.calls.map((c) => c.model)).toEqual(['claude-opus-5']);
   });
 
   it('refuses the packaged route with no boss models without calling the model', async () => {
     const dir = await tmp();
     const invoke = replying(validVerdict());
     await diagnoseStewardPacket(dir, fixturePacket(), { invoke, costsFile: costsFileIn(dir) });
-    expect(invoke).not.toHaveBeenCalled();
+    expect(invoke.calls).toEqual([]);
     expect(await readVerdict(dir)).toMatchObject({ reason: 'steward-error', errorKind: 'route-misconfigured' });
     expect(readCosts(costsFileIn(dir))).toEqual([]);
   });
@@ -317,7 +321,7 @@ describe('diagnoseStewardPacket', () => {
     const dir = await tmp();
     const invoke = replying(validVerdict());
     await diagnoseStewardPacket(dir, fixturePacket(), { invoke, route, costsFile: costsFileIn(dir) });
-    expect(invoke).not.toHaveBeenCalled();
+    expect(invoke.calls).toEqual([]);
     expect(await readVerdict(dir)).toMatchObject({ reason: 'steward-error', errorKind: 'route-misconfigured' });
     expect(readCosts(costsFileIn(dir))).toEqual([]);
   });

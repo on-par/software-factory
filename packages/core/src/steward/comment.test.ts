@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   findStewardComment,
   publishStewardComment,
@@ -158,7 +158,7 @@ function makeFakeClient(seedLabels: string[] = ['factory:stuck']) {
       }
     },
   };
-  return { client, comments, labels, calls, addLabels: vi.fn(), createPrComment: vi.fn() };
+  return { client, comments, labels, calls };
 }
 
 const target = { owner: 'o', repo: 'r', issue: 123 };
@@ -214,8 +214,6 @@ describe('publishStewardComment', () => {
       if (call.method === 'updateIssueComment') expect(ids.has(call.args.comment_id as number)).toBe(true);
       else expect(call.args.issue_number).toBe(123);
     }
-    expect(fake.addLabels).not.toHaveBeenCalled();
-    expect(fake.createPrComment).not.toHaveBeenCalled();
   });
 
   it('propagates port errors without creating anything', async () => {

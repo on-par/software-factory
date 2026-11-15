@@ -24,10 +24,20 @@ function mkdtemp(): string {
 }
 
 /** Fake subscription deps: null utilization means no token (fetch is never called). */
-function subscriptionDeps(utilization: number | null, fetchImpl = vi.fn<typeof fetch>()): SubscriptionUsageDeps {
-  if (utilization !== null) {
-    fetchImpl.mockResolvedValue(Response.json({ five_hour: { utilization, resets_at: null } }));
-  }
+function recordingFetch(utilization: number | null) {
+  const fetched: Parameters<typeof fetch>[] = [];
+  const fetchImpl = (async (...a: Parameters<typeof fetch>) => {
+    fetched.push(a);
+    if (utilization === null) throw new Error('fetch must not be reached without a token');
+    return Response.json({ five_hour: { utilization, resets_at: null } });
+  }) as typeof fetch;
+  return { fetched, fetchImpl };
+}
+
+function subscriptionDeps(
+  utilization: number | null,
+  fetchImpl: typeof fetch = recordingFetch(utilization).fetchImpl,
+): SubscriptionUsageDeps {
   return {
     platform: 'linux',
     env: {},
@@ -55,7 +65,7 @@ afterEach(() => {
 
 describe('readUsage defaults', () => {
   it('falls back to the default estimator over the default transcript roots', async () => {
-    const fetchImpl = vi.fn<typeof fetch>();
+    const { fetched, fetchImpl } = recordingFetch(null);
     const transcript = join(home, '.claude/projects/p/session.jsonl');
     mkdirSync(join(home, '.claude/projects/p'), { recursive: true });
     writeFileSync(
@@ -74,11 +84,11 @@ describe('readUsage defaults', () => {
     });
 
     expect(reading).toEqual({ pct: 3 / 227, source: 'estimate', detail: 'trailing-5h usage ~= $3 = 1% of $227 cap' });
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fetched).toEqual([]);
   });
 
   it('default fetchSubscription wires to fetchSubscriptionUsage', async () => {
-    const fetchImpl = vi.fn<typeof fetch>();
+    const { fetched, fetchImpl } = recordingFetch(42);
 
     const reading = await readUsage({
       cap: 227,
@@ -88,11 +98,11 @@ describe('readUsage defaults', () => {
     });
 
     expect(reading).toEqual({ pct: 0.42, source: 'subscription', detail: '5h subscription window at 42%' });
-    expect(fetchImpl).toHaveBeenCalledOnce();
-    expect(fetchImpl).toHaveBeenCalledWith(
-      'https://api.anthropic.com/api/oauth/usage',
-      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer sk-ant-oat-test' }) }),
-    );
+    expect(fetched).toHaveLength(1);
+    expect(fetched[0]![0]).toBe('https://api.anthropic.com/api/oauth/usage');
+    expect(fetched[0]![1]).toMatchObject({
+      headers: expect.objectContaining({ Authorization: 'Bearer sk-ant-oat-test' }),
+    });
   });
 });
 

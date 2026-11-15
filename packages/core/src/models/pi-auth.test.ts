@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
 import { diagnoseModels, ModelRegistry } from './index.js';
@@ -73,40 +73,54 @@ describe('diagnoseModels pi auth check (#2903)', () => {
   });
 
   it('does not run the probe when pi is not on PATH', () => {
-    const probe = vi.fn<(m: string) => PiAuthStatus>(() => 'ready');
+    const seen: string[] = [];
+    const probe = (m: string): PiAuthStatus => {
+      seen.push(m);
+      return 'ready';
+    };
     const [d] = diagnose(single, probe, false);
     expect(d.reason).toBe('pi CLI not found on PATH');
-    expect(probe).not.toHaveBeenCalled();
+    expect(seen).toEqual([]);
   });
 
   it('runs the check once per distinct provider model', () => {
-    const probe = vi.fn<(m: string) => PiAuthStatus>(() => 'ready');
+    const seen: string[] = [];
+    const probe = (m: string): PiAuthStatus => {
+      seen.push(m);
+      return 'ready';
+    };
     const rows = diagnose(piConfig({ 'pi-a': piModel('openrouter/x/y'), 'pi-b': piModel('openrouter/x/y') }), probe);
     expect(rows.every((r) => r.reachable)).toBe(true);
-    expect(probe).toHaveBeenCalledTimes(1);
-    expect(probe).toHaveBeenCalledWith('openrouter/x/y');
+    expect(seen).toEqual(['openrouter/x/y']);
   });
 
   it('falls back to the model id when there is no providerModel', () => {
-    const probe = vi.fn<(m: string) => PiAuthStatus>(() => 'ready');
+    const seen: string[] = [];
+    const probe = (m: string): PiAuthStatus => {
+      seen.push(m);
+      return 'ready';
+    };
     diagnose(piConfig({ 'pi-c': piModel() }), probe);
-    expect(probe).toHaveBeenCalledWith('pi-c');
+    expect(seen).toEqual(['pi-c']);
   });
 });
 
 describe('runPiAuthCheck (#2903)', () => {
   const fake = (res: Partial<ReturnType<PiSpawn>> | Error) => {
-    const spawn = vi.fn<PiSpawn>(() => {
+    const calls: Parameters<PiSpawn>[] = [];
+    const asSpawn: PiSpawn = (...a) => {
+      calls.push(a);
       if (res instanceof Error) throw res;
       return { status: null, signal: null, stdout: '', ...res };
-    });
-    return { spawn, asSpawn: spawn };
+    };
+    return { calls, asSpawn };
   };
 
   it('passes an argv array and clears DEEPSEEK_API_KEY', () => {
-    const { spawn, asSpawn } = fake({ status: 0, stdout: 'ready\n', signal: null });
+    const { calls, asSpawn } = fake({ status: 0, stdout: 'ready\n', signal: null });
     runPiAuthCheck('openrouter/x/y', asSpawn);
-    const [cmd, args, opts] = spawn.mock.calls[0]!;
+    expect(calls).toHaveLength(1);
+    const [cmd, args, opts] = calls[0]!;
     expect(cmd).toBe('pi');
     expect(args).toEqual(['auth', 'check', '--model', 'openrouter/x/y', '--no-refresh']);
     expect(opts?.env?.DEEPSEEK_API_KEY).toBeUndefined();
