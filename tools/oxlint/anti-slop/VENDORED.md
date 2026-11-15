@@ -48,4 +48,4 @@ cp /tmp/anti-slop/LICENSE tools/oxlint/anti-slop/LICENSE
 
 Then update the pinned commit recorded at the top of this file, and run `bash scripts/verify.sh`.
 
-`rules/no-direct-tmpdir-mkdtemp.ts` (#4050) and `rules/no-call-assertions.ts` (#4051) are local to this repo, not upstream. Do not overwrite them when re-vendoring.
+`rules/no-direct-tmpdir-mkdtemp.ts` (#4050), `rules/no-call-assertions.ts` (#4051) and `rules/package-boundaries.ts` (#4052) are local to this repo, not upstream. Do not overwrite them when re-vendoring.
