@@ -644,7 +644,7 @@
   "packages/core/src/readiness/decompose-guard.test.ts": 1,
   "packages/core/src/readiness/decompose-guard.ts": 11,
   "packages/core/src/readiness/decompose-prompt.ts": 7,
-  "packages/core/src/readiness/decompose.test.ts": 5,
+  "packages/core/src/readiness/decompose.test.ts": 3,
   "packages/core/src/readiness/decompose.ts": 51,
   "packages/core/src/readiness/duplicate-guard.test.ts": 1,
   "packages/core/src/readiness/duplicate-guard.ts": 6,
