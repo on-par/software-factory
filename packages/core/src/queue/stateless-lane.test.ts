@@ -1,6 +1,6 @@
 // packages/core/src/queue/stateless-lane.test.ts — Lane-labelled issues with no state label (#3426).
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   claimExpiresLabel,
@@ -13,16 +13,19 @@ import {
 import type { LabelListClient } from './label-cache.js';
 import { findStatelessLaneIssues, listRepoLaneLabels, listStatelessLaneIssues } from './stateless-lane.js';
 
-function labelClient(names: string[]): LabelListClient {
-  return {
+function labelClient(names: string[]) {
+  const pages: number[] = [];
+  const client: LabelListClient = {
     rest: {
       issues: {
-        listLabelsForRepo: vi.fn(async ({ page }: { page: number }) => ({
-          data: names.slice((page - 1) * 100, page * 100).map((name) => ({ name })),
-        })),
+        listLabelsForRepo: async ({ page }: { page: number }) => {
+          pages.push(page);
+          return { data: names.slice((page - 1) * 100, page * 100).map((name) => ({ name })) };
+        },
       },
     },
   };
+  return { client, pages };
 }
 
 describe('reconcile: lane-labelled issues with no state label', () => {
@@ -63,28 +66,27 @@ describe('reconcile: lane-labelled issues with no state label', () => {
       { number: 267, labels: ['factory:lane:mac-v1', 'factory:lane:web'] },
       { number: 5, labels: ['factory:lane:web', QUEUED_LABEL] },
     ];
-    const listOpenIssuesWithLabels = vi.fn(async ({ labels }: { labels: string[] }) =>
-      issues.filter((i) => labels.every((l) => i.labels.includes(l))),
-    );
+    const requested: string[][] = [];
+    const listOpenIssuesWithLabels = async ({ labels }: { labels: string[] }) => {
+      requested.push(labels);
+      return issues.filter((i) => labels.every((l) => i.labels.includes(l)));
+    };
     const found = await listStatelessLaneIssues({
       client: { listOpenIssuesWithLabels } as Pick<QueueGitHubClient, 'listOpenIssuesWithLabels'>,
-      labelClient: labelClient(['factory:lane:mac-v1', 'factory:lane:web', QUEUED_LABEL, 'bug']),
+      labelClient: labelClient(['factory:lane:mac-v1', 'factory:lane:web', QUEUED_LABEL, 'bug']).client,
       owner: 'o',
       repo: 'r',
     });
     expect(found).toHaveLength(1);
     expect(found[0]).toMatchObject({ issue: 267, lanes: ['mac-v1', 'web'] });
-    expect(listOpenIssuesWithLabels.mock.calls.map(([arg]) => arg.labels)).toEqual([
-      ['factory:lane:mac-v1'],
-      ['factory:lane:web'],
-    ]);
+    expect(requested).toEqual([['factory:lane:mac-v1'], ['factory:lane:web']]);
   });
 
   it('listRepoLaneLabels pages until a short page and throws when the API fails', async () => {
     const names = Array.from({ length: 100 }, (_, i) => `filler-${i}`).concat(['factory:lane:late', 'factory:lane:']);
-    const client = labelClient(names);
+    const { client, pages } = labelClient(names);
     expect(await listRepoLaneLabels(client, 'o', 'r')).toEqual(['factory:lane:late']);
-    expect(client.rest.issues.listLabelsForRepo).toHaveBeenCalledTimes(2);
+    expect(pages).toEqual([1, 2]);
 
     const failing: LabelListClient = {
       rest: {

@@ -7,29 +7,39 @@ const input = { owner: 'o', repo: 'r', issue_number: 7 };
 
 describe('the Octokit queue client issue comments', () => {
   it('the Octokit queue client posts, lists in id order and deletes issue comments', async () => {
-    const createComment = vi.fn(async () => ({ data: { id: 303 } }));
-    const deleteComment = vi.fn(async () => ({}));
+    const created: unknown[] = [];
+    const deleted: unknown[] = [];
+    const paginated: Array<Record<string, unknown>> = [];
+    const createComment = async (arg: unknown) => {
+      created.push(arg);
+      return { data: { id: 303 } };
+    };
+    const deleteComment = async (arg: unknown) => {
+      deleted.push(arg);
+      return {};
+    };
     const pages = [[comment(205), comment(101)], [comment(303)]];
     const listComments = vi.fn(async ({ page }: { page: number }) => ({ data: pages[page - 1] }));
-    const paginate = vi.fn(async (fn: unknown, params: Record<string, unknown>) => {
+    const paginate = async (fn: unknown, params: Record<string, unknown>) => {
+      paginated.push(params);
       expect(fn).toBe(listComments);
       const first = await listComments({ ...params, page: 1 } as { page: number });
       const second = await listComments({ ...params, page: 2 } as { page: number });
       return [...first.data, ...second.data];
-    });
+    };
     const octokit = { rest: { issues: { createComment, listComments, deleteComment } }, paginate } as any;
     const client = createOctokitQueueClient(octokit);
 
     await expect(client.createIssueComment({ ...input, body: 'claim-marker' })).resolves.toEqual({ id: 303 });
-    expect(createComment).toHaveBeenCalledWith({ ...input, body: 'claim-marker' });
+    expect(created).toEqual([{ ...input, body: 'claim-marker' }]);
 
     await expect(client.listIssueComments(input)).resolves.toEqual(
       [101, 205, 303].map((id) => ({ id, body: `body-${id}`, createdAt: comment(id).created_at })),
     );
-    expect(paginate.mock.calls[0]?.[1]).toMatchObject({ issue_number: 7, per_page: 100 });
+    expect(paginated[0]).toMatchObject({ issue_number: 7, per_page: 100 });
 
     await expect(client.deleteIssueComment({ owner: 'o', repo: 'r', comment_id: 101 })).resolves.toBeUndefined();
-    expect(deleteComment).toHaveBeenCalledWith({ owner: 'o', repo: 'r', comment_id: 101 });
+    expect(deleted).toEqual([{ owner: 'o', repo: 'r', comment_id: 101 }]);
   });
 
   it('deleteIssueComment treats a 404 as already deleted and rethrows any other error', async () => {
