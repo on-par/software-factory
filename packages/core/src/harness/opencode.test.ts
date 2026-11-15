@@ -314,11 +314,8 @@ describe('OpenCode doctor auth probe', () => {
   });
 
   it('keeps an envKey-less model reachable without consulting the login probe', () => {
-    const d = diagnose('keyless-model', {
-      commandAvailable: hasOpencode,
-      envPresent: () => false,
-      opencodeLoggedIn: loggedIn(false),
-    });
+    const opencodeLoggedIn = loggedIn(false);
+    const d = diagnose('keyless-model', { commandAvailable: hasOpencode, envPresent: () => false, opencodeLoggedIn });
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (opencode CLI)');
     expect(probes).toBe(0);

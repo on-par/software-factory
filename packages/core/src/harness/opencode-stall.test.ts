@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { describe, expect, it } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
 import { ModelRegistry } from '../models/index.js';
