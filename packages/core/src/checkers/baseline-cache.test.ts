@@ -305,14 +305,12 @@ describe('BaselineCache TTL (#3540)', () => {
     const cache = new BaselineCache(file, () => T0 + 24 * HOUR + 1);
     expect(await cache.get(SHA, env, cfg, 'tests')).toBeUndefined();
     const dir = dirname(file);
-    const runCheckers = vi.fn(async () => ({
-      failures: 0,
-      passes: 1,
-      skips: 0,
-      total: 1,
-      results: [out('tests', 'PASS')],
-    }));
-    await runBaselineCheckers({
+    const ran: string[][] = [];
+    const runCheckers = async (...args: unknown[]) => {
+      ran.push(args[4] as string[]);
+      return { failures: 0, passes: 1, skips: 0, total: 1, results: [out('tests', 'PASS')] };
+    };
+    const report = await runBaselineCheckers({
       baseSha: SHA,
       laneWorktree: dir,
       failing: [out('tests', 'FAIL')],
@@ -326,8 +324,8 @@ describe('BaselineCache TTL (#3540)', () => {
         makeTempDir: () => mkdtemp(join(dir, 'p-')),
       },
     });
-    expect(runCheckers).toHaveBeenCalledTimes(1);
-    expect((runCheckers.mock.calls[0] as unknown[])[4]).toEqual(['tests']);
+    expect(ran).toEqual([['tests']]);
+    expect(report.checkers[0]).toMatchObject({ verdict: 'clean-on-base' });
   });
 
   it('reuses a PASS younger than the TTL without running checkers', async () => {
@@ -336,8 +334,15 @@ describe('BaselineCache TTL (#3540)', () => {
     const cache = new BaselineCache(file, () => T0 + 23 * HOUR);
     expect((await cache.get(SHA, env, cfg, 'tests'))?.result).toBe('PASS');
     const dir = dirname(file);
-    const runCheckers = vi.fn();
-    const runCommand = vi.fn(async () => cmdOk());
+    const ranCheckers: unknown[][] = [];
+    const runCheckers = async (...args: unknown[]) => {
+      ranCheckers.push(args);
+    };
+    const ranCommands: unknown[][] = [];
+    const runCommand = async (...args: unknown[]) => {
+      ranCommands.push(args);
+      return cmdOk();
+    };
     const report = await runBaselineCheckers({
       baseSha: SHA,
       laneWorktree: dir,
@@ -348,8 +353,8 @@ describe('BaselineCache TTL (#3540)', () => {
       cache,
       deps: { runCommand, runCheckers: runCheckers as never, makeTempDir: () => mkdtemp(join(dir, 'p-')) },
     });
-    expect(runCheckers).not.toHaveBeenCalled();
-    expect(runCommand).not.toHaveBeenCalled();
+    expect(ranCheckers).toEqual([]);
+    expect(ranCommands).toEqual([]);
     expect(report.checkers[0]).toMatchObject({ cached: true, verdict: 'clean-on-base' });
   });
 
