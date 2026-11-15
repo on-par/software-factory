@@ -159,8 +159,6 @@
   "packages/core/src/run/run-issue.no-pr.test.ts": 10,
   "packages/core/src/run/run-issue.opencode-breaker.test.ts": 2,
   "packages/core/src/run/run-issue.test.ts": 184,
-  "packages/repo-context/src/github.test.ts": 21,
-  "packages/repo-context/src/memory.test.ts": 7,
   "packages/tui/src/components/App.idle.test.tsx": 2,
   "packages/tui/src/components/App.test.tsx": 16,
   "packages/tui/src/fallback.test.ts": 2,
