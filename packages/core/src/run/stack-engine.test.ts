@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { runStack, type SliceOutcome, type StackLogLevel, type StackSlice } from './stack-engine.js';
 
@@ -11,12 +11,14 @@ function setup() {
 }
 
 function fake(title: string, result: SliceOutcome | undefined | Error) {
-  const run = vi.fn(async (_base: string | undefined) => {
+  const bases: Array<string | undefined> = [];
+  const run = async (base: string | undefined) => {
+    bases.push(base);
     if (result instanceof Error) throw result;
     return result;
-  });
+  };
   const slice: StackSlice = { title, run };
-  return { slice, run };
+  return { slice, bases };
 }
 
 const opts = { prefix: 'run-x', noun: 'slice' };
@@ -34,7 +36,7 @@ describe('runStack (#3798)', () => {
       a.map((f) => f.slice),
       { ...opts, chain: true, log },
     );
-    expect(a.map((f) => f.run.mock.calls[0]![0])).toEqual([undefined, 'b1', 'b2']);
+    expect(a.map((f) => f.bases)).toEqual([[undefined], ['b1'], ['b2']]);
     expect(r.ok).toBe(true);
     expect(logs).toContainEqual(['info', 'run-x: [2/3] stacking on b1']);
     const b = mk();
@@ -42,7 +44,7 @@ describe('runStack (#3798)', () => {
       b.map((f) => f.slice),
       { ...opts, base: 'feat/x', chain: true, log },
     );
-    expect(b.map((f) => f.run.mock.calls[0]![0])).toEqual(['feat/x', 'b1', 'b2']);
+    expect(b.map((f) => f.bases)).toEqual([['feat/x'], ['b1'], ['b2']]);
   });
 
   it('stops at the first failure and skips the rest', async () => {
@@ -51,7 +53,7 @@ describe('runStack (#3798)', () => {
     const s3 = fake('slice 3', { prNumber: 3, branch: 'b3' });
     const { log, logs } = setup();
     const r = await runStack([s1.slice, s2.slice, s3.slice], { ...opts, chain: true, log });
-    expect(s3.run).not.toHaveBeenCalled();
+    expect(s3.bases).toEqual([]);
     expect(r.ok).toBe(false);
     expect(r.results[1]).toEqual({ title: 'slice 2', status: 'failed', detail: 'boom' });
     expect(r.results[2]).toEqual({ title: 'slice 3', status: 'skipped', detail: 'stack stopped: slice 2 failed' });
@@ -60,9 +62,9 @@ describe('runStack (#3798)', () => {
   });
 
   it('records a non-Error throw as its string form', async () => {
-    const run = vi.fn(async () => {
+    const run = async () => {
       throw 'plain';
-    });
+    };
     const { log } = setup();
     const r = await runStack([{ title: 't', run }], { ...opts, chain: false, log });
     expect(r.results[0]!.detail).toBe('plain');
@@ -73,7 +75,7 @@ describe('runStack (#3798)', () => {
     const s2 = fake('two', { prNumber: 2, branch: 'b2' });
     const { log } = setup();
     const r = await runStack([s1.slice, s2.slice], { ...opts, chain: true, log });
-    expect(s2.run).not.toHaveBeenCalled();
+    expect(s2.bases).toEqual([]);
     expect(r.results[1]!.detail).toBe('stack stopped: one opened no PR');
   });
 
@@ -82,8 +84,8 @@ describe('runStack (#3798)', () => {
     const s2 = fake('two', { prNumber: 2, branch: 'b2' });
     const { log, logs } = setup();
     const r = await runStack([s1.slice, s2.slice], { ...opts, base: 'main2', chain: false, log });
-    expect(s1.run).toHaveBeenCalledWith('main2');
-    expect(s2.run).toHaveBeenCalledWith('main2');
+    expect(s1.bases).toEqual(['main2']);
+    expect(s2.bases).toEqual(['main2']);
     expect(logs.some(([, l]) => l.includes('stacking on'))).toBe(false);
     expect(r.results[1]).toEqual({ title: 'two', status: 'ready', prNumber: 2 });
     expect('base' in r.results[1]!).toBe(false);
