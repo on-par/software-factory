@@ -50,7 +50,7 @@ describe('resolveSelfIdentity', () => {
   ] as const;
 
   it.each(VIEWER_LOGINS)(
-    'accepts %s only when REST names the [bot] account a Bot with the same id',
+    'after an integration-token 403, accepts %s only when REST names the [bot] account a Bot with the same id',
     async (_label, login) => {
       const { octokit, lookups } = octokitWith({ fail: INTEGRATION_403() }, viewer({ login, databaseId: 7 }), {
         response: { data: { id: 7, login: 'octo[bot]', type: 'Bot' } },

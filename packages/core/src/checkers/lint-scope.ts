@@ -211,10 +211,7 @@ export function scopeLintCommand(cmd: LintCommand, changedStillOnDisk: readonly 
       reason: `${cmd.label}: skipped — warning: runs ${profile.tool} in write mode (${why}); declare a check-mode command such as \`${profile.checkModeHint}\``,
     };
   }
-  const changedConfigForcesWholeRepoRun = changedStillOnDisk.some((p) =>
-    profile.configFiles.some((re) => re.test(basename(p))),
-  );
-  if (changedConfigForcesWholeRepoRun) {
+  if (changedStillOnDisk.some((p) => profile.configFiles.some((re) => re.test(basename(p))))) {
     return { kind: 'whole', argv: cmd.argv, profile };
   }
   const exts = profile.extensions;
@@ -353,7 +350,7 @@ export async function withMergeBaseWorktree<T>(
         }
         return { ok: true as const, value: await fn(base) };
       } finally {
-        await removeBaseWorktreeBestEffort(run, laneWorktree, base);
+        await removeBaseWorktree(run, laneWorktree, base);
       }
     });
   } catch (e: unknown) {
@@ -361,7 +358,7 @@ export async function withMergeBaseWorktree<T>(
   }
 }
 
-async function removeBaseWorktreeBestEffort(
+async function removeBaseWorktree(
   run: MergeBaseWorktreeOptions['run'],
   laneWorktree: string,
   base: string,

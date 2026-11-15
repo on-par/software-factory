@@ -445,14 +445,11 @@ describe('shipWithCiRework — visual proof gate (#2232)', () => {
     expect(listPrChangedFiles).toHaveBeenCalled();
   });
 
-  const unreadableEvidencePlanRequest = { ...request, specPath: breakerDir };
+  const unreadablePlan = { ...request, specPath: breakerDir };
 
-  it('builds a gate with no visualProof section when the plan needs proof (#4047)', async () => {
+  it('builds a gate with no visualProof section when an unreadable evidence plan needs proof (#4047)', async () => {
     shipPhase.mockResolvedValueOnce({ ok: true, prNumber: 9 });
-    await runIssue(unreadableEvidencePlanRequest, policy, {
-      ...ports(vi.fn<Log>()),
-      loadVisualProofConfig: () => undefined,
-    });
+    await runIssue(unreadablePlan, policy, { ...ports(vi.fn<Log>()), loadVisualProofConfig: () => undefined });
     expect(shipPhase.mock.calls[0][0]).toHaveProperty('visualProofGate');
     expect(shipPhase.mock.calls[0][0]).not.toHaveProperty('visualProofMode');
   });
@@ -461,7 +458,7 @@ describe('shipWithCiRework — visual proof gate (#2232)', () => {
     shipPhase.mockResolvedValueOnce({ ok: true, prNumber: 9 });
     const log = vi.fn<Log>();
     const off = { ...VISUAL_PROOF, mode: 'off' as const };
-    await runIssue(unreadableEvidencePlanRequest, policy, { ...ports(log), loadVisualProofConfig: () => off });
+    await runIssue(unreadablePlan, policy, { ...ports(log), loadVisualProofConfig: () => off });
     expect(shipPhase.mock.calls[0][0]).not.toHaveProperty('visualProofGate');
     expect(log).toHaveBeenCalledWith('ship', 'visual proof is off by config (visualProof.mode: off)');
   });

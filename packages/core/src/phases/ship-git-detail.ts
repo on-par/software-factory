@@ -58,12 +58,7 @@ export type RemoteAncestry = { status: 'ancestor' } | { status: 'diverged' } | {
 
 const GIT_NOT_AN_ANCESTOR_EXIT_CODE = 1;
 
-const REMOTE_COMMIT_MISSING_LOCALLY_MARKERS = [
-  'not a valid object name',
-  'not a valid commit',
-  'bad object',
-  'unknown revision',
-];
+const MISSING_OBJECT_MARKERS = ['not a valid object name', 'not a valid commit', 'bad object', 'unknown revision'];
 
 export async function checkRemoteIsAncestor(
   run: CommandRunner,
@@ -77,9 +72,7 @@ export async function checkRemoteIsAncestor(
   } catch (err) {
     if ((err as { code?: unknown } | null)?.code === GIT_NOT_AN_ANCESTOR_EXIT_CODE) return { status: 'diverged' };
     const detail = shortDetail(err);
-    if (REMOTE_COMMIT_MISSING_LOCALLY_MARKERS.some((marker) => detail.toLowerCase().includes(marker))) {
-      return { status: 'diverged' };
-    }
+    if (MISSING_OBJECT_MARKERS.some((marker) => detail.toLowerCase().includes(marker))) return { status: 'diverged' };
     return { status: 'unreadable', detail };
   }
 }

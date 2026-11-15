@@ -192,7 +192,7 @@ describe('reworkWorker on a declared agentic harness (#3066)', () => {
       memMb: 4096,
     };
     const calls: string[] = [];
-    const recordCommandAndCommitFix = async (cmd: string, opts: { cwd?: string }) => {
+    const stubExec = async (cmd: string, opts: { cwd?: string }) => {
       calls.push(cmd);
       const cwd = opts.cwd ?? worktree;
       await writeFile(join(cwd, 'fix.txt'), 'fix\n');
@@ -208,7 +208,7 @@ describe('reworkWorker on a declared agentic harness (#3066)', () => {
       specPath: join(worktree, 'issue-3066.md'),
       summary: failingSummary,
       constitution: null,
-      router: new ModelRouter(commandModels, commandRoutes, false, new CliModelExecutor(recordCommandAndCommitFix)),
+      router: new ModelRouter(commandModels, commandRoutes, false, new CliModelExecutor(stubExec)),
       log: (type, msg) => logs.push([type, msg]),
       sandbox: policy,
       reworkRoute: 'command',

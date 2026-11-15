@@ -175,11 +175,10 @@ export async function publishVisualProof(
   if (body !== (data.body ?? '')) await octokit.rest.pulls.update({ owner, repo, pull_number: prNumber, body });
   const pass = result.status === 'pass';
   const diagnostic = oneLine(result.diagnostic ?? `visual proof ${result.status}`);
-  const advisoryStampsSuccessSoRequiredChecksNeitherSeeRedNorWaitUnreported = mode === 'advisory';
-  const state = pass || advisoryStampsSuccessSoRequiredChecksNeitherSeeRedNorWaitUnreported ? 'success' : 'failure';
+  const state = pass || mode === 'advisory' ? 'success' : 'failure';
   const description = pass
     ? `visual proof captured for ${head12(result.headSha)}`
-    : advisoryStampsSuccessSoRequiredChecksNeitherSeeRedNorWaitUnreported
+    : mode === 'advisory'
       ? `advisory: visual proof ${result.status}: ${diagnostic}`
       : diagnostic;
   await octokit.rest.repos.createCommitStatus({
@@ -199,10 +198,10 @@ export function upsertVisualProofBlock(
 ): string {
   const start = startMarker(mode);
   const other = mode === 'advisory' ? VISUAL_PROOF_START : VISUAL_PROOF_ADVISORY_START;
-  const otherModeBlockReplacedSoModeSwitchNeverLeavesTwo = body?.includes(other)
+  const swapped = body?.includes(other)
     ? upsertMarkedBlock(body, block, { start: other, end: VISUAL_PROOF_END })
     : body;
-  return upsertMarkedBlock(otherModeBlockReplacedSoModeSwitchNeverLeavesTwo, block, { start, end: VISUAL_PROOF_END });
+  return upsertMarkedBlock(swapped, block, { start, end: VISUAL_PROOF_END });
 }
 
 export class VisualProofMissingError extends Error {

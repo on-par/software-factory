@@ -22,8 +22,8 @@ export function childProcessEnv<V extends string | undefined>(
   overrides: Record<string, V> | undefined,
   options: { githubAuth?: boolean } = {},
 ): Record<string, string | V | undefined> {
-  const mergedWithOverridesLast = { ...parent, ...overrides };
-  return options.githubAuth ? mergedWithOverridesLast : withoutGitHubCredentials(mergedWithOverridesLast);
+  const merged = { ...parent, ...overrides };
+  return options.githubAuth ? merged : withoutGitHubCredentials(merged);
 }
 
 const GITHUB_TOKEN_PATTERN = /\b(?:gh[pousr]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+)/g;

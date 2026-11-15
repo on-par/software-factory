@@ -6,7 +6,7 @@ import { defaultIsPidAlive } from '../environment/index.js';
 import type { WorkKey } from '../work/work-key.js';
 import { withFileLock } from './lock.js';
 
-const DEFAULT_DEAD_LOCK_RECLAIM_WINDOW_MS = 250;
+const DEFAULT_STALE_RETRY_MS = 250;
 const DEFAULT_POLL_MS = 25;
 
 export interface RunLockHolder {
@@ -68,12 +68,12 @@ export function readRunLockHolder(lockDir: string): RunLockHolder | null {
   return holder;
 }
 
-const lockDirsHeldByThisProcess = new Set<string>();
+const held = new Set<string>();
 
 export async function withRunLock<T>(lockDir: string, fn: () => Promise<T>, opts: RunLockOptions = {}): Promise<T> {
   const isPidAlive = opts.isPidAlive ?? defaultIsPidAlive;
 
-  if (lockDirsHeldByThisProcess.has(lockDir)) {
+  if (held.has(lockDir)) {
     return fn();
   }
 
@@ -82,7 +82,7 @@ export async function withRunLock<T>(lockDir: string, fn: () => Promise<T>, opts
     throw new RunLockHeldError(lockDir, holder);
   }
 
-  lockDirsHeldByThisProcess.add(lockDir);
+  held.add(lockDir);
   let lockAcquired = false;
   try {
     return await withFileLock(
@@ -101,7 +101,7 @@ export async function withRunLock<T>(lockDir: string, fn: () => Promise<T>, opts
         return fn();
       },
       {
-        timeoutMs: opts.staleRetryMs ?? DEFAULT_DEAD_LOCK_RECLAIM_WINDOW_MS,
+        timeoutMs: opts.staleRetryMs ?? DEFAULT_STALE_RETRY_MS,
         pollMs: opts.pollMs ?? DEFAULT_POLL_MS,
         graceMs: opts.graceMs,
         isPidAlive,
@@ -114,7 +114,7 @@ export async function withRunLock<T>(lockDir: string, fn: () => Promise<T>, opts
     }
     throw err;
   } finally {
-    lockDirsHeldByThisProcess.delete(lockDir);
+    held.delete(lockDir);
   }
 }
 

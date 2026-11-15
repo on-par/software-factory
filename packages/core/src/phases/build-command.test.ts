@@ -172,7 +172,7 @@ describe('buildPhase command route (#2872)', () => {
       memMb: 4096,
     };
     const calls: string[] = [];
-    const recordCommandAndCommitFeature = async (cmd: string, opts: { cwd?: string }) => {
+    const stubExec = async (cmd: string, opts: { cwd?: string }) => {
       calls.push(cmd);
       const cwd = opts.cwd ?? worktree;
       await writeFile(join(cwd, 'feature.txt'), 'feature\n');
@@ -188,7 +188,7 @@ describe('buildPhase command route (#2872)', () => {
       specPath: join(worktree, 'issue-3064.md'),
       branch: 'ship-it/3064-declared',
       route: 'command',
-      router: new ModelRouter(models, routes, false, new CliModelExecutor(recordCommandAndCommitFeature)),
+      router: new ModelRouter(models, routes, false, new CliModelExecutor(stubExec)),
       constitution: null,
       log: () => {},
       modelOverride: 'my-model',

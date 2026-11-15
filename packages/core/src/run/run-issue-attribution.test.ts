@@ -127,7 +127,7 @@ function setup(resolve: ModelByRouterTask) {
 const callsOf = (log: ReturnType<typeof vi.fn>, type: string) => log.mock.calls.filter((c) => c[0] === type);
 
 describe('runIssue — plan/build attribution on terminal events (#3321)', () => {
-  it('terminal events carry plan and build model and provider (ship-it #305 failover case)', async () => {
+  it('terminal events carry plan and build model and provider, and the phase fail is not a second terminal (ship-it #305 failover case)', async () => {
     const { ports, log, planPhase, buildPhase, checkPhase } = setup({
       plan: 'claude-opus-5-5',
       build_codex: 'gpt-6-luna-high',
@@ -152,9 +152,9 @@ describe('runIssue — plan/build attribution on terminal events (#3321)', () =>
       build: { model: 'gpt-6-luna-high', provider: 'openai', effort: 'xhigh' },
       endedIn: 'check',
     };
-    const runIssueOnlyTerminalFails = callsOf(log, 'fail');
-    expect(runIssueOnlyTerminalFails).toHaveLength(1);
-    for (const call of runIssueOnlyTerminalFails) expect(call[2].attribution).toEqual(expected);
+    const fails = callsOf(log, 'fail');
+    expect(fails).toHaveLength(1);
+    for (const call of fails) expect(call[2].attribution).toEqual(expected);
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail', attribution: expected });
   });
 

@@ -42,9 +42,7 @@ afterEach(async () => {
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
 
-async function makeRepoWithOneCommitChanging(
-  files = ['src/my widget.ts'],
-): Promise<{ worktree: string; base: string }> {
+async function makeRepo(files = ['src/my widget.ts']): Promise<{ worktree: string; base: string }> {
   const worktree = await tempDirs.make('check-affected-');
   dirs.push(worktree);
   git(worktree, 'init', '-q');
@@ -77,7 +75,7 @@ const FULL_FAIL = res(false, ' FAIL  src/a.test.ts > adds\nAssertionError');
 const AFFECTED_PASS = res(true, ' Tests  1 passed (1)');
 
 async function run(opts: { results: CommandResult[]; files?: string[]; affected?: boolean; maxReworkRounds?: number }) {
-  const { worktree, base } = await makeRepoWithOneCommitChanging(opts.files);
+  const { worktree, base } = await makeRepo(opts.files);
   const stub = new StubModelExecutor({ defaultOutput: 'rework complete' });
   const router = new ModelRouter(models, routes, false, stub);
   const argvs: string[][] = [];

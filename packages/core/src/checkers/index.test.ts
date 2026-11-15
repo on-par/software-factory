@@ -131,7 +131,7 @@ function envAssertingPackageJson(scriptKey: string): string {
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 
-async function linkRepoTypescriptWhereNpxWalksUpFromCwd(worktree: string): Promise<void> {
+async function linkTypescript(worktree: string): Promise<void> {
   const binDir = join(worktree, 'node_modules', '.bin');
   await mkdir(binDir, { recursive: true });
   await symlink(join(repoRoot, 'node_modules', 'typescript'), join(worktree, 'node_modules', 'typescript'), 'dir');
@@ -459,7 +459,7 @@ exit 1
     expect(result.details).not.toMatch(/^verify\.sh failed: error: required option/);
   });
 
-  it('keeps the end of verify.sh output when no test runner format is recognized', async () => {
+  it('keeps the end of verify.sh output, stripped of CSI and charset-select escapes, when no test runner format is recognized', async () => {
     const worktree = await makeWorktree({ 'scripts/verify.sh': '#!/bin/bash\nexit 1' });
     const esc = String.fromCharCode(27);
     const stdout = [
@@ -784,7 +784,7 @@ describe('lintChecker', () => {
       'tsconfig.json': '{"compilerOptions":{"strict":true,"noEmit":true},"include":["index.ts"]}',
       'index.ts': 'export const x: number = 1;\n',
     });
-    await linkRepoTypescriptWhereNpxWalksUpFromCwd(worktree);
+    await linkTypescript(worktree);
 
     const result = await lintChecker(makeContext(worktree));
 
@@ -797,7 +797,7 @@ describe('lintChecker', () => {
       'tsconfig.json': '{"compilerOptions":{"strict":true,"noEmit":true},"include":["index.ts"]}',
       'index.ts': 'export const x: number = "not a number";\n',
     });
-    await linkRepoTypescriptWhereNpxWalksUpFromCwd(worktree);
+    await linkTypescript(worktree);
 
     const result = await lintChecker(makeContext(worktree));
 

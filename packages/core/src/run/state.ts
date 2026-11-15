@@ -6,8 +6,6 @@ import type { CheckerOutput, FailurePhase, IssueRunState, RunStatus } from '../t
 import { isNumericWorkKey, issueNumberOf, toWorkKey, workKeyFromIssue, type WorkKey } from '../work/work-key.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
 
-const DEFAULT_ROUTE_BEFORE_PLAN: BuildRoute = 'claude';
-
 export function runStateFile(runsDir: string, key: WorkKey): string {
   return resolve(runsDir, `issue-${key}.json`);
 }
@@ -169,7 +167,7 @@ export function nextIssueRunState(
     ...base,
     branch: update.branch ?? prev?.branch ?? base.branch,
     status: update.status,
-    route: update.route ?? prev?.route ?? DEFAULT_ROUTE_BEFORE_PLAN,
+    route: update.route ?? prev?.route ?? 'claude',
     model: update.model ?? prev?.model ?? '',
     attempts: update.attempts ?? prev?.attempts ?? 1,
     startedAt: base.startedAt,

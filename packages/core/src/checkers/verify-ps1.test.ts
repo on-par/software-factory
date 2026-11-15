@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { CommandResult } from '../utils/command-runner.js';
+import { inconclusiveOutputCause } from './inconclusive.js';
 import { type CheckerContext, resolveTestsCommand, testsChecker } from './index.js';
 
 const tempDirs = createTempDirs();
@@ -117,5 +118,17 @@ describe('testsChecker with scripts/verify.ps1', () => {
     expect(result.result).toBe('FAIL');
     expect(result.details).toContain('pwsh');
     expect(calls).toEqual([]);
+  });
+
+  it('records a missing pwsh as command-not-found exit 127, which reads as inconclusive', async () => {
+    const worktree = await makeWorktree({ 'scripts/verify.ps1': 'exit 0' });
+    const { run } = stubRunner({ ok: true, exitCode: 0 });
+    const result = await testsChecker({
+      ...makeContext(worktree),
+      env: { PATH: await makeWorktree() },
+      runCommand: run,
+    });
+    expect(result.failedCommand?.exitCode).toBe(127);
+    expect(inconclusiveOutputCause(result)).toBe('missing-command');
   });
 });

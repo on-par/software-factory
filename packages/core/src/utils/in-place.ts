@@ -79,8 +79,8 @@ export async function setupInPlaceCheckout(
   log?: (type: EventKind, msg: string) => void,
   opts?: Pick<WorktreeSetupOptions, 'findOpenPr'>,
 ): Promise<WorktreeSetupResult> {
-  const problemSincePreflight = await checkInPlaceCheckout(repoRoot);
-  if (problemSincePreflight) throw new Error(problemSincePreflight.message);
+  const problem = await checkInPlaceCheckout(repoRoot);
+  if (problem) throw new Error(problem.message);
   let openPrBranch = false;
   let remoteBranch: RemoteBranchRecord | null = null;
   const remoteSha = await detectRemoteBranch(repoRoot, branch);
