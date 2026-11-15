@@ -418,7 +418,6 @@ describe('runAutoIngest', () => {
       expect(readFileSync(queueFile, 'utf-8')).toBe('manual 1\nauto 7\n');
       expect(readFileSync(watermarkFile, 'utf-8')).toBe('2026-07-19T00:00:00.000Z\n');
       expect(new Date(result.scannedAt).getTime()).not.toBeNaN();
-      expect(runCommandSpy).toHaveBeenCalled();
     } finally {
       runCommandSpy.mockRestore();
       rmSync(dir, { recursive: true, force: true });

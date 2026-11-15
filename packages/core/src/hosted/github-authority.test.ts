@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   prepareGitHubAuthority,
@@ -108,16 +108,25 @@ describe('redactGitHubCredential', () => {
   });
 });
 
+function recordingMint() {
+  const minted: unknown[] = [];
+  const mint: MintGitHubToken = async (...a) => {
+    minted.push(a);
+    return { token: 't', kind: 'prototype-fallback' };
+  };
+  return { minted, mint };
+}
+
 describe('resolveHostedAuthority (AC#5 off-switch)', () => {
   it('resolves null and never calls mint when FACTORY_HOSTED_EXEC is unset', async () => {
     const job = jobFor('o/r');
-    const mint = vi.fn<MintGitHubToken>(async () => ({ token: 't', kind: 'prototype-fallback' }));
+    const { minted, mint } = recordingMint();
     const options: GitHubAuthorityBrokerOptions = { mint, now: () => 2_000 };
 
     const bundle = await resolveHostedAuthority({}, job, options);
 
     expect(bundle).toBeNull();
-    expect(mint).not.toHaveBeenCalled();
+    expect(minted).toEqual([]);
   });
 
   it('resolves a bundle when FACTORY_HOSTED_EXEC is exactly 1', async () => {
@@ -131,12 +140,12 @@ describe('resolveHostedAuthority (AC#5 off-switch)', () => {
 
   it('treats any non-"1" value as off', async () => {
     const job = jobFor('o/r');
-    const mint = vi.fn<MintGitHubToken>(async () => ({ token: 't', kind: 'prototype-fallback' }));
+    const { minted, mint } = recordingMint();
     const options: GitHubAuthorityBrokerOptions = { mint, now: () => 2_000 };
 
     const bundle = await resolveHostedAuthority({ FACTORY_HOSTED_EXEC: 'true' }, job, options);
 
     expect(bundle).toBeNull();
-    expect(mint).not.toHaveBeenCalled();
+    expect(minted).toEqual([]);
   });
 });
