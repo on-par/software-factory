@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_CI_NO_CHECKS_GRACE_MS, noChecksVerdictMs, watchChecks } from './ci-watch.js';
 
@@ -18,8 +18,8 @@ describe('noChecksVerdictMs', () => {
       clock += ms;
     };
     const listForRef = async () => ({ data: { check_runs: [] } });
-    const getCombinedStatusForRef = vi.fn(async () => ({ data: { total_count: 0, statuses: [], sha: 'abc123' } }));
-    const onNoChecks = vi.fn();
+    const getCombinedStatusForRef = async () => ({ data: { total_count: 0, statuses: [], sha: 'abc123' } });
+    const infos: Array<{ reason: string; waitedMs: number }> = [];
     const octokit = { rest: { checks: { listForRef }, repos: { getCombinedStatusForRef } } };
 
     const outcome = await watchChecks({
@@ -28,13 +28,14 @@ describe('noChecksVerdictMs', () => {
       ref: 'ship-it/3098-readme-wait',
       octokit: octokit as any,
       noChecksGraceMs: DEFAULT_CI_NO_CHECKS_GRACE_MS,
-      onNoChecks,
+      onNoChecks: (i) => void infos.push(i),
       sleep,
       now,
     });
 
     expect(outcome).toBe('no-checks');
-    const info = onNoChecks.mock.calls[0][0];
+    expect(infos).toHaveLength(1);
+    const [info] = infos;
     expect(info.reason).toBe('grace-elapsed');
     expect(info.waitedMs).toBe(noChecksVerdictMs());
   });

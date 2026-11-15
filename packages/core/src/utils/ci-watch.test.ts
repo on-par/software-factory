@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { classifyCiFailure, watchChecks, watchChecksWithInfraRerun } from './ci-watch.js';
 
@@ -349,9 +349,16 @@ describe('watchChecks', () => {
   });
 
   it('polls until the deadline and returns timeout when zero check runs register (#647)', async () => {
-    const listForRef = vi.fn(async () => ({ data: { check_runs: [] } }));
-    const getCombinedStatusForRef = vi.fn();
-    const onProgress = vi.fn();
+    let listReads = 0;
+    const listForRef = async () => {
+      listReads++;
+      return { data: { check_runs: [] } };
+    };
+    let statusReads = 0;
+    const getCombinedStatusForRef = async () => {
+      statusReads++;
+    };
+    const progress: unknown[] = [];
     const { now, sleep, sleeps } = createClock();
     const octokit = { rest: { checks: { listForRef }, repos: { getCombinedStatusForRef } } };
 
@@ -362,7 +369,7 @@ describe('watchChecks', () => {
       ref: 'x',
       sleep,
       now,
-      onProgress,
+      onProgress: (p) => void progress.push(p),
       deadlineMs: 60_000,
       initialIntervalMs: 1_000,
       maxIntervalMs: 8_000,
@@ -370,9 +377,9 @@ describe('watchChecks', () => {
 
     expect(outcome).toBe('timeout');
     expect(sleeps.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(60_000);
-    expect(listForRef.mock.calls.length).toBeGreaterThan(1);
-    expect(onProgress).not.toHaveBeenCalled();
-    expect(getCombinedStatusForRef).not.toHaveBeenCalled();
+    expect(listReads).toBeGreaterThan(1);
+    expect(progress).toEqual([]);
+    expect(statusReads).toBe(0);
   });
 
   it('does not return success from a check-run set that is still growing (#602)', async () => {

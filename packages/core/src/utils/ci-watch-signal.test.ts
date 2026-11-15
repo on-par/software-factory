@@ -8,10 +8,14 @@ const base = { owner: 'o', repo: 'r', ref: 'abc' };
 
 describe('hasAnyCiSignal (#3208)', () => {
   it('is true when a check run exists, without reading statuses', async () => {
-    const getCombinedStatusForRef = statuses(0);
+    let statusReads = 0;
+    const getCombinedStatusForRef = async () => {
+      statusReads++;
+      return { data: { total_count: 0, statuses: [], sha: 'abc' } };
+    };
     const octokit = { rest: { checks: { listForRef: runs([{ name: 'x' }]) }, repos: { getCombinedStatusForRef } } };
     expect(await hasAnyCiSignal(octokit as any, 'o', 'r', 'abc')).toBe(true);
-    expect(getCombinedStatusForRef).not.toHaveBeenCalled();
+    expect(statusReads).toBe(0);
   });
 
   it('is true when only a commit status exists', async () => {
@@ -62,15 +66,15 @@ describe('watchChecks onNoRequiredChecks (#3208)', () => {
   };
 
   it('fires once when the branch has no required contexts', async () => {
-    const cb = vi.fn();
-    expect(await watch([], cb)).toBe('success');
-    expect(cb).toHaveBeenCalledExactlyOnceWith({ branch: 'main' });
+    const seen: Array<{ branch: string }> = [];
+    expect(await watch([], (i) => void seen.push(i))).toBe('success');
+    expect(seen).toEqual([{ branch: 'main' }]);
   });
 
   it('does not fire when contexts are required, and a throwing callback is swallowed', async () => {
-    const cb = vi.fn();
-    await watch(['lint'], cb);
-    expect(cb).not.toHaveBeenCalled();
+    const seen: Array<{ branch: string }> = [];
+    await watch(['lint'], (i) => void seen.push(i));
+    expect(seen).toEqual([]);
     expect(
       await watch([], () => {
         throw new Error('boom');

@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   claudeConfigDirOverride,
@@ -80,19 +80,32 @@ describe('claudeKeychainService', () => {
   });
 });
 
+function recordExec(fail?: Error) {
+  const execCalls: Array<[string, readonly string[]]> = [];
+  const exec = (file: string, args: readonly string[]) => {
+    execCalls.push([file, args]);
+    if (fail) throw fail;
+  };
+  return { execCalls, exec };
+}
+
 const noFile = (): string => {
   throw new Error('ENOENT');
 };
 
 describe('hasClaudeLoginEvidence', () => {
   it('returns true for a non-empty CLAUDE_CODE_OAUTH_TOKEN without touching exec or the filesystem', () => {
-    const exec = vi.fn();
-    const fileExists = vi.fn(() => false);
+    const { execCalls, exec } = recordExec();
+    const fileExistsCalls: string[] = [];
+    const fileExists = (path: string) => {
+      fileExistsCalls.push(path);
+      return false;
+    };
     expect(
       hasClaudeLoginEvidence({ env: { CLAUDE_CODE_OAUTH_TOKEN: 'tok' }, platform: 'darwin', exec, fileExists }),
     ).toBe(true);
-    expect(exec).not.toHaveBeenCalled();
-    expect(fileExists).not.toHaveBeenCalled();
+    expect(execCalls).toEqual([]);
+    expect(fileExistsCalls).toEqual([]);
   });
 
   it('ignores a whitespace-only CLAUDE_CODE_OAUTH_TOKEN', () => {
@@ -106,29 +119,30 @@ describe('hasClaudeLoginEvidence', () => {
   });
 
   it('checks keychain-entry existence without reading the secret (no -w), uses only env and file evidence, and never runs claude', () => {
-    const exec = vi.fn();
+    const { execCalls, exec } = recordExec();
     expect(hasClaudeLoginEvidence({ env: {}, platform: 'darwin', exec, fileExists: () => false })).toBe(true);
-    expect(exec).toHaveBeenCalledTimes(1);
-    expect(exec).toHaveBeenCalledWith('security', ['find-generic-password', '-s', 'Claude Code-credentials']);
-    expect(exec.mock.calls[0]![1]).not.toContain('-w');
-    expect(exec.mock.calls.some(([file]) => file === 'claude')).toBe(false);
+    expect(execCalls).toEqual([['security', ['find-generic-password', '-s', 'Claude Code-credentials']]]);
+    expect(execCalls.flatMap(([, a]) => a)).not.toContain('-w');
+    expect(execCalls.map(([f]) => f)).not.toContain('claude');
   });
 
   it('resolves the keychain service and credentials file for CLAUDE_CONFIG_DIR', () => {
     const env = { CLAUDE_CONFIG_DIR: '/home/dev/.claude-work' };
-    const exec = vi.fn(() => {
-      throw new Error('not found');
-    });
-    const fileExists = vi.fn(() => true);
+    const { execCalls, exec } = recordExec(new Error('not found'));
+    const fileExistsCalls: string[] = [];
+    const fileExists = (path: string) => {
+      fileExistsCalls.push(path);
+      return true;
+    };
     expect(hasClaudeLoginEvidence({ env, platform: 'darwin', exec, fileExists })).toBe(true);
-    expect(exec).toHaveBeenCalledWith('security', ['find-generic-password', '-s', claudeKeychainService(env)]);
-    expect(fileExists).toHaveBeenCalledWith(resolve('/home/dev/.claude-work', '.credentials.json'));
+    expect(execCalls).toContainEqual(['security', ['find-generic-password', '-s', claudeKeychainService(env)]]);
+    expect(fileExistsCalls).toContainEqual(resolve('/home/dev/.claude-work', '.credentials.json'));
   });
 
   it('falls back to the credentials file when the darwin keychain lookup throws', () => {
-    const exec = vi.fn(() => {
+    const exec = () => {
       throw new Error('no keychain');
-    });
+    };
     expect(
       hasClaudeLoginEvidence({ env: {}, platform: 'darwin', exec, fileExists: () => true, readFile: noFile }),
     ).toBe(true);
@@ -136,12 +150,12 @@ describe('hasClaudeLoginEvidence', () => {
   });
 
   it('never calls exec on linux; only the credentials file decides', () => {
-    const exec = vi.fn();
+    const { execCalls, exec } = recordExec();
     expect(hasClaudeLoginEvidence({ env: {}, platform: 'linux', exec, fileExists: () => true, readFile: noFile })).toBe(
       true,
     );
     expect(hasClaudeLoginEvidence({ env: {}, platform: 'linux', exec, fileExists: () => false })).toBe(false);
-    expect(exec).not.toHaveBeenCalled();
+    expect(execCalls).toEqual([]);
   });
 
   it('returns false when the file check throws', () => {
@@ -200,9 +214,13 @@ describe('claudeStoredSessionState (#2721)', () => {
   });
 
   it('reads the selected profile file', () => {
-    const readFile = vi.fn(file({ accessToken: 'a', expiresAt: NOW + 3_600_000 }));
-    state(readFile);
-    expect(readFile).toHaveBeenCalledWith(resolve('/p', '.credentials.json'));
+    const read = file({ accessToken: 'a', expiresAt: NOW + 3_600_000 });
+    const readPaths: string[] = [];
+    state((path) => {
+      readPaths.push(path);
+      return read();
+    });
+    expect(readPaths).toEqual([resolve('/p', '.credentials.json')]);
   });
 
   it('runs with real defaults without throwing', () => {
@@ -226,9 +244,13 @@ describe('hasClaudeLoginEvidence with an expired stored login (#2721)', () => {
   });
 
   it('a CLAUDE_CODE_OAUTH_TOKEN still wins without reading the file', () => {
-    const readFile = vi.fn(() => '{}');
+    const readPaths: string[] = [];
+    const readFile = (path: string) => {
+      readPaths.push(path);
+      return '{}';
+    };
     expect(hasClaudeLoginEvidence({ ...base, env: { CLAUDE_CODE_OAUTH_TOKEN: 't' }, readFile })).toBe(true);
-    expect(readFile).not.toHaveBeenCalled();
+    expect(readPaths).toEqual([]);
   });
 });
 
@@ -265,17 +287,15 @@ describe('detectClaudePlan (#3214)', () => {
   });
 
   it('is unknown on darwin when the keychain probe throws and there is no file', () => {
-    const exec = vi.fn(() => {
-      throw new Error('not found');
-    });
+    const { execCalls, exec } = recordExec(new Error('not found'));
     expect(detectClaudePlan({ ...base, platform: 'darwin', env: {}, fileExists: () => false, exec })).toBe('unknown');
-    expect(exec).toHaveBeenCalled();
+    expect(execCalls.length).toBeGreaterThan(0);
   });
 
   it('does not probe the keychain when an API key is set', () => {
-    const exec = vi.fn();
+    const { execCalls, exec } = recordExec();
     expect(detectClaudePlan({ ...base, platform: 'darwin', env: { ANTHROPIC_API_KEY: 'x' }, exec })).toBe('api');
-    expect(exec).not.toHaveBeenCalled();
+    expect(execCalls).toEqual([]);
   });
 
   it('is unknown for an unusable credentials file', () => {
