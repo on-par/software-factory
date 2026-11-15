@@ -2,10 +2,13 @@ import { join } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { recordArgs } from '../test-support/recorders.js';
+
 import { hasOpencodeLoginEvidence } from './opencode-config.js';
 
 const home = () => '/home/u';
-const reading = (content: string) => vi.fn(() => content);
+const recordingRead = (content: string) => recordArgs((_path: string) => content);
+const reading = (content: string) => recordingRead(content).fn;
 
 describe('hasOpencodeLoginEvidence', () => {
   it('is true when auth.json has a credential entry', () => {
@@ -25,15 +28,15 @@ describe('hasOpencodeLoginEvidence', () => {
   });
 
   it('honors XDG_DATA_HOME', () => {
-    const readFile = reading('{"a":{}}');
+    const { calls, fn: readFile } = recordingRead('{"a":{}}');
     hasOpencodeLoginEvidence({ env: { XDG_DATA_HOME: '/xdg' }, homedir: home, readFile });
-    expect(readFile).toHaveBeenCalledWith(join('/xdg', 'opencode', 'auth.json'));
+    expect(calls).toEqual([[join('/xdg', 'opencode', 'auth.json')]]);
   });
 
   it.each([undefined, '', '  '])('falls back to ~/.local/share when XDG_DATA_HOME is %j', (xdg) => {
-    const readFile = reading('{"a":{}}');
+    const { calls, fn: readFile } = recordingRead('{"a":{}}');
     hasOpencodeLoginEvidence({ env: { XDG_DATA_HOME: xdg }, homedir: home, readFile });
-    expect(readFile).toHaveBeenCalledWith(join('/home/u', '.local', 'share', 'opencode', 'auth.json'));
+    expect(calls).toEqual([[join('/home/u', '.local', 'share', 'opencode', 'auth.json')]]);
   });
 
   it('does not throw with default deps', () => {

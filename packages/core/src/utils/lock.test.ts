@@ -14,6 +14,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { recordArgs } from '../test-support/recorders.js';
 import { withFileLock, withFileLockSync, withGitLock } from './lock.js';
 
 const delay = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -123,12 +124,12 @@ describe('withFileLock', () => {
 
   it('propagates an fn() error carrying an EEXIST code instead of swallowing and retrying', async () => {
     const lockDir = makeLockDir();
-    const fn = vi.fn(async () => {
+    const { calls: runs, fn } = recordArgs(async () => {
       throw Object.assign(new Error('caller EEXIST'), { code: 'EEXIST' });
     });
 
     await expect(withFileLock(lockDir, fn)).rejects.toThrow('caller EEXIST');
-    expect(fn).toHaveBeenCalledTimes(1);
+    expect(runs).toHaveLength(1);
     expect(existsSync(lockDir)).toBe(false);
   });
 
@@ -136,7 +137,7 @@ describe('withFileLock', () => {
     const lockDir = makeLockDir();
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'pid'), '999999');
-    const onSteal = vi.fn();
+    const { calls: steals, fn: onSteal } = recordArgs((_pid: number | null) => undefined);
     let ran = false;
 
     await withFileLock(
@@ -148,14 +149,14 @@ describe('withFileLock', () => {
     );
 
     expect(ran).toBe(true);
-    expect(onSteal).toHaveBeenCalledWith(999999);
+    expect(steals).toEqual([[999999]]);
   });
 
   it('waits while the holder is alive', async () => {
     const lockDir = makeLockDir();
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'pid'), '12345');
-    const onSteal = vi.fn();
+    const { calls: steals, fn: onSteal } = recordArgs((_pid: number | null) => undefined);
     let removed = false;
 
     const timer = setTimeout(() => {
@@ -175,14 +176,14 @@ describe('withFileLock', () => {
       clearTimeout(timer);
     }
 
-    expect(onSteal).not.toHaveBeenCalled();
+    expect(steals).toEqual([]);
   });
 
   it('times out on a live holder', async () => {
     const lockDir = makeLockDir();
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'pid'), '12345');
-    const fn = vi.fn();
+    const { calls: runs, fn } = recordArgs(async () => undefined);
 
     await expect(
       withFileLock(lockDir, fn, {
@@ -192,7 +193,7 @@ describe('withFileLock', () => {
       }),
     ).rejects.toThrow(/stuck/);
 
-    expect(fn).not.toHaveBeenCalled();
+    expect(runs).toHaveLength(0);
   });
 
   it('tags the timeout error with reason "timeout" so callers can distinguish it from a plain failure', async () => {
@@ -201,7 +202,7 @@ describe('withFileLock', () => {
     writeFileSync(join(lockDir, 'pid'), '12345');
 
     await expect(
-      withFileLock(lockDir, vi.fn(), {
+      withFileLock(lockDir, async () => {}, {
         pollMs: 10,
         timeoutMs: 50,
         isPidAlive: () => true,
@@ -214,7 +215,7 @@ describe('withFileLock', () => {
     mkdirSync(lockDir);
     const past = new Date(Date.now() - 1_000);
     utimesSync(lockDir, past, past);
-    const onSteal = vi.fn();
+    const { calls: steals, fn: onSteal } = recordArgs((_pid: number | null) => undefined);
     let ran = false;
 
     await withFileLock(
@@ -226,14 +227,14 @@ describe('withFileLock', () => {
     );
 
     expect(ran).toBe(true);
-    expect(onSteal).toHaveBeenCalledWith(null);
+    expect(steals).toEqual([[null]]);
   });
 
   it('does not steal a fresh dir with no pid file inside the grace window', async () => {
     const lockDir = makeLockDir();
     mkdirSync(lockDir);
-    const onSteal = vi.fn();
-    const fn = vi.fn();
+    const { calls: steals, fn: onSteal } = recordArgs((_pid: number | null) => undefined);
+    const { calls: runs, fn } = recordArgs(async () => undefined);
 
     await expect(
       withFileLock(lockDir, fn, {
@@ -244,19 +245,19 @@ describe('withFileLock', () => {
       }),
     ).rejects.toThrow(/stuck/);
 
-    expect(fn).not.toHaveBeenCalled();
-    expect(onSteal).not.toHaveBeenCalled();
+    expect(runs).toHaveLength(0);
+    expect(steals).toEqual([]);
   });
 
   it('defaultIsPidAlive: treats our own live pid as alive, so acquisition times out', async () => {
     const lockDir = makeLockDir();
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'pid'), String(process.pid));
-    const fn = vi.fn();
+    const { calls: runs, fn } = recordArgs(async () => undefined);
 
     await expect(withFileLock(lockDir, fn, { pollMs: 10, timeoutMs: 50 })).rejects.toThrow(/stuck/);
 
-    expect(fn).not.toHaveBeenCalled();
+    expect(runs).toHaveLength(0);
   });
 
   it('defaultIsPidAlive: treats a dead pid as not alive, so it steals after grace', async () => {
@@ -320,7 +321,7 @@ describe('withFileLock', () => {
     chmodSync(parent, 0o555);
 
     try {
-      await expect(withFileLock(lockDir, vi.fn())).rejects.toThrow();
+      await expect(withFileLock(lockDir, async () => {})).rejects.toThrow();
     } finally {
       chmodSync(parent, 0o755);
     }
@@ -340,8 +341,8 @@ describe('withFileLock', () => {
     const lockDir = makeLockDir();
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'pid'), '999999');
-    const onSteal = vi.fn();
-    const fn = vi.fn();
+    const { calls: steals, fn: onSteal } = recordArgs((_pid: number | null) => undefined);
+    const { calls: runs, fn } = recordArgs(async () => undefined);
 
     let calls = 0;
     const isPidAlive = vi.fn(() => {
@@ -359,8 +360,8 @@ describe('withFileLock', () => {
       /stuck/,
     );
 
-    expect(fn).not.toHaveBeenCalled();
-    expect(onSteal).not.toHaveBeenCalled();
+    expect(runs).toHaveLength(0);
+    expect(steals).toEqual([]);
     expect(existsSync(lockDir)).toBe(true);
     expect(readFileSync(join(lockDir, 'pid'), 'utf-8')).toBe('4242');
   });
@@ -369,7 +370,7 @@ describe('withFileLock', () => {
     const lockDir = makeLockDir();
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'pid'), '999999');
-    const onSteal = vi.fn();
+    const { calls: steals, fn: onSteal } = recordArgs((_pid: number | null) => undefined);
     let ran = false;
 
     let calls = 0;
@@ -394,8 +395,7 @@ describe('withFileLock', () => {
     );
 
     expect(ran).toBe(true);
-    expect(onSteal).toHaveBeenCalledTimes(1);
-    expect(onSteal).toHaveBeenCalledWith(999999);
+    expect(steals).toEqual([[999999]]);
   });
 
   it('backs off instead of stealing while another stealer holds the steal arbiter', async () => {
@@ -403,8 +403,8 @@ describe('withFileLock', () => {
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'pid'), '999999');
     mkdirSync(`${lockDir}.steal`);
-    const onSteal = vi.fn();
-    const fn = vi.fn();
+    const { calls: steals, fn: onSteal } = recordArgs((_pid: number | null) => undefined);
+    const { calls: runs, fn } = recordArgs(async () => undefined);
 
     await expect(
       withFileLock(lockDir, fn, {
@@ -416,8 +416,8 @@ describe('withFileLock', () => {
       }),
     ).rejects.toThrow(/stuck/);
 
-    expect(fn).not.toHaveBeenCalled();
-    expect(onSteal).not.toHaveBeenCalled();
+    expect(runs).toHaveLength(0);
+    expect(steals).toEqual([]);
     expect(existsSync(lockDir)).toBe(true);
     expect(existsSync(`${lockDir}.steal`)).toBe(true);
   });
@@ -429,7 +429,7 @@ describe('withFileLock', () => {
     mkdirSync(`${lockDir}.steal`);
     const past = new Date(Date.now() - 1_000);
     utimesSync(`${lockDir}.steal`, past, past);
-    const onSteal = vi.fn();
+    const { calls: steals, fn: onSteal } = recordArgs((_pid: number | null) => undefined);
     let ran = false;
 
     await withFileLock(
@@ -441,7 +441,7 @@ describe('withFileLock', () => {
     );
 
     expect(ran).toBe(true);
-    expect(onSteal).toHaveBeenCalledWith(999999);
+    expect(steals).toEqual([[999999]]);
     expect(existsSync(`${lockDir}.steal`)).toBe(false);
     expect(existsSync(lockDir)).toBe(false);
   });
@@ -450,7 +450,7 @@ describe('withFileLock', () => {
     const lockDir = makeLockDir();
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'pid'), '999999');
-    const onSteal = vi.fn();
+    const { calls: steals, fn: onSteal } = recordArgs((_pid: number | null) => undefined);
     let ran = false;
 
     let calls = 0;
@@ -471,7 +471,7 @@ describe('withFileLock', () => {
     );
 
     expect(ran).toBe(true);
-    expect(onSteal).not.toHaveBeenCalled();
+    expect(steals).toEqual([]);
   });
 });
 
@@ -519,7 +519,7 @@ describe('withFileLockSync', () => {
     mkdirSync(lockDir);
     const dead = spawnSync(process.execPath, ['-e', 'process.exit(0)']);
     writeFileSync(join(lockDir, 'pid'), String(dead.pid));
-    const onSteal = vi.fn();
+    const { calls: steals, fn: onSteal } = recordArgs((_pid: number | null) => undefined);
     let ran = false;
 
     withFileLockSync(
@@ -531,7 +531,7 @@ describe('withFileLockSync', () => {
     );
 
     expect(ran).toBe(true);
-    expect(onSteal).toHaveBeenCalledWith(dead.pid);
+    expect(steals).toEqual([[dead.pid]]);
   });
 
   it('steals a pid-less lock dir whose mtime is past graceMs (no onSteal arm)', () => {
@@ -556,7 +556,7 @@ describe('withFileLockSync', () => {
     const lockDir = makeLockDir();
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'pid'), '12345');
-    const fn = vi.fn();
+    const { calls: runs, fn } = recordArgs(() => undefined);
 
     expect(() =>
       withFileLockSync(lockDir, fn, {
@@ -566,7 +566,7 @@ describe('withFileLockSync', () => {
       }),
     ).toThrow(/stuck/);
 
-    expect(fn).not.toHaveBeenCalled();
+    expect(runs).toHaveLength(0);
   });
 
   it('treats an unparseable pid file as orphaned and steals it once stale', () => {
@@ -575,7 +575,7 @@ describe('withFileLockSync', () => {
     writeFileSync(join(lockDir, 'pid'), 'not-a-pid');
     const past = new Date(Date.now() - 1_000);
     utimesSync(lockDir, past, past);
-    const onSteal = vi.fn();
+    const { calls: steals, fn: onSteal } = recordArgs((_pid: number | null) => undefined);
     let ran = false;
 
     withFileLockSync(
@@ -587,15 +587,15 @@ describe('withFileLockSync', () => {
     );
 
     expect(ran).toBe(true);
-    expect(onSteal).toHaveBeenCalledWith(null);
+    expect(steals).toEqual([[null]]);
   });
 
   it('does not delete a live lock when the observed dead holder was replaced mid-steal (#597)', () => {
     const lockDir = makeLockDir();
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'pid'), '999999');
-    const onSteal = vi.fn();
-    const fn = vi.fn();
+    const { calls: steals, fn: onSteal } = recordArgs((_pid: number | null) => undefined);
+    const { calls: runs, fn } = recordArgs(() => undefined);
 
     let calls = 0;
     const isPidAlive = vi.fn(() => {
@@ -611,8 +611,8 @@ describe('withFileLockSync', () => {
 
     expect(() => withFileLockSync(lockDir, fn, { pollMs: 5, timeoutMs: 25, isPidAlive, onSteal })).toThrow(/stuck/);
 
-    expect(fn).not.toHaveBeenCalled();
-    expect(onSteal).not.toHaveBeenCalled();
+    expect(runs).toHaveLength(0);
+    expect(steals).toEqual([]);
     expect(existsSync(lockDir)).toBe(true);
     expect(readFileSync(join(lockDir, 'pid'), 'utf-8')).toBe('4242');
   });
@@ -622,8 +622,8 @@ describe('withFileLockSync', () => {
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'pid'), '999999');
     mkdirSync(`${lockDir}.steal`);
-    const onSteal = vi.fn();
-    const fn = vi.fn();
+    const { calls: steals, fn: onSteal } = recordArgs((_pid: number | null) => undefined);
+    const { calls: runs, fn } = recordArgs(() => undefined);
 
     expect(() =>
       withFileLockSync(lockDir, fn, {
@@ -635,8 +635,8 @@ describe('withFileLockSync', () => {
       }),
     ).toThrow(/stuck/);
 
-    expect(fn).not.toHaveBeenCalled();
-    expect(onSteal).not.toHaveBeenCalled();
+    expect(runs).toHaveLength(0);
+    expect(steals).toEqual([]);
     expect(existsSync(lockDir)).toBe(true);
     expect(existsSync(`${lockDir}.steal`)).toBe(true);
   });
@@ -648,7 +648,7 @@ describe('withFileLockSync', () => {
     mkdirSync(`${lockDir}.steal`);
     const past = new Date(Date.now() - 1_000);
     utimesSync(`${lockDir}.steal`, past, past);
-    const onSteal = vi.fn();
+    const { calls: steals, fn: onSteal } = recordArgs((_pid: number | null) => undefined);
     let ran = false;
 
     withFileLockSync(
@@ -660,7 +660,7 @@ describe('withFileLockSync', () => {
     );
 
     expect(ran).toBe(true);
-    expect(onSteal).toHaveBeenCalledWith(999999);
+    expect(steals).toEqual([[999999]]);
     expect(existsSync(`${lockDir}.steal`)).toBe(false);
     expect(existsSync(lockDir)).toBe(false);
   });

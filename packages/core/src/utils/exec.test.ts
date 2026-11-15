@@ -176,12 +176,15 @@ describe('defaultExecFn GitHub credential isolation', () => {
   });
 
   it('ignores onStdout on the non-detached path', async () => {
-    const onStdout = vi.fn();
+    const chunks: string[] = [];
+    const onStdout = (chunk: string) => {
+      chunks.push(chunk);
+    };
 
     const { stdout } = await defaultExecFn('echo hi', { onStdout });
 
     expect(stdout).toBe('hi\n');
-    expect(onStdout).not.toHaveBeenCalled();
+    expect(chunks).toEqual([]);
   });
 
   describe.skipIf(process.platform === 'win32')('onPgid (detached) path', () => {

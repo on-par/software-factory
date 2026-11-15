@@ -4,9 +4,10 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { PipelineTestKit } from '../test-support/index.js';
+import { recordingLog, type LoggedEvent } from '../test-support/recorders.js';
 import { checkInPlaceCheckout, setupInPlaceCheckout } from './in-place.js';
 
 const execFile = promisify(execFileCb);
@@ -72,12 +73,14 @@ describe('in-place checkout', () => {
 
   it('switches the checkout to the factory branch from origin default', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
-    const log = vi.fn();
-    const res = await setupInPlaceCheckout(repoRoot, 'factory/1-x', log);
+    const events: LoggedEvent[] = [];
+    const res = await setupInPlaceCheckout(repoRoot, 'factory/1-x', recordingLog(events));
     expect(res).toMatchObject({ base: 'origin/main', remoteBranch: null });
     expect(res.head).toBe(await git(repoRoot, 'rev-parse', 'HEAD'));
     expect(await git(repoRoot, 'branch', '--show-current')).toBe('factory/1-x');
-    expect(log).toHaveBeenCalledWith('worktree-base', expect.stringContaining('in-place: switched'));
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'worktree-base', msg: expect.stringContaining('in-place: switched') }),
+    );
   });
 
   it('setup re-checks readiness, refusing a checkout dirtied after the preflight', async () => {

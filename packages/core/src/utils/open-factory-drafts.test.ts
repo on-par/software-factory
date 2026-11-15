@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { recordArgs } from '../test-support/recorders.js';
+
 import {
   formatOpenFactoryDraftsLine,
   readOpenFactoryDrafts,
@@ -38,7 +40,7 @@ describe('summarizeOpenFactoryDrafts', () => {
 
 describe('readOpenFactoryDrafts', () => {
   const row = (ref: string, draft = true) => ({ head: { ref }, draft, created_at: ago(2) });
-  const reader = (list: ReturnType<typeof vi.fn>) =>
+  const reader = (list: (params: unknown) => Promise<unknown>) =>
     readOpenFactoryDrafts({
       octokit: { rest: { pulls: { list } } } as never,
       owner: 'o',
@@ -48,14 +50,18 @@ describe('readOpenFactoryDrafts', () => {
     });
 
   it('pages until a short page and counts both pages', async () => {
-    const list = vi
-      .fn()
-      .mockResolvedValueOnce({ data: Array.from({ length: 100 }, () => row('factory/x')) })
-      .mockResolvedValueOnce({ data: [row('factory/y'), row('other/z')] });
+    let n = 0;
+    const { calls, fn: list } = recordArgs(async (_params: unknown) => {
+      n++;
+      return n === 1
+        ? { data: Array.from({ length: 100 }, () => row('factory/x')) }
+        : { data: [row('factory/y'), row('other/z')] };
+    });
     expect(await reader(list)).toEqual({ count: 101, oldestHours: 2 });
-    expect(list).toHaveBeenCalledTimes(2);
-    expect(list).toHaveBeenNthCalledWith(1, { owner: 'o', repo: 'r', state: 'open', per_page: 100, page: 1 });
-    expect(list).toHaveBeenNthCalledWith(2, { owner: 'o', repo: 'r', state: 'open', per_page: 100, page: 2 });
+    expect(calls).toEqual([
+      [{ owner: 'o', repo: 'r', state: 'open', per_page: 100, page: 1 }],
+      [{ owner: 'o', repo: 'r', state: 'open', per_page: 100, page: 2 }],
+    ]);
   });
 
   it('returns null when the first page rejects', async () => {
@@ -72,9 +78,10 @@ describe('readOpenFactoryDrafts', () => {
 
   it('returns null when every page up to the cap is full', async () => {
     const full = Array.from({ length: 100 }, () => row('factory/x'));
-    const list = vi.fn().mockResolvedValue({ data: full });
+    const { calls, fn: list } = recordArgs(async (_params: unknown) => ({ data: full }));
     expect(await reader(list)).toBeNull();
-    expect(list).toHaveBeenCalledTimes(50);
+    expect(calls).toHaveLength(50);
+    expect(calls[49]).toEqual([{ owner: 'o', repo: 'r', state: 'open', per_page: 100, page: 50 }]);
   });
 
   it('returns null when the response is not an array', async () => {

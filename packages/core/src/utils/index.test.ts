@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PipelineTestKit } from '../test-support/index.js';
+import { recordingLog, type LoggedEvent } from '../test-support/recorders.js';
 import { getFactoryPaths } from '../config/index.js';
 import type { ExecFn } from './exec.js';
 import {
@@ -132,11 +133,14 @@ describe('utils', () => {
   it('logs worktree cleanup failures without rejecting', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-cleanup-'));
     const worktreePath = join(tmpDir, 'nonexistent-wt');
-    const spy = vi.fn();
+    const events: LoggedEvent[] = [];
+    const spy = recordingLog(events);
 
     await expect(cleanupWorktree(tmpDir, worktreePath, spy)).resolves.toBeUndefined();
 
-    expect(spy).toHaveBeenCalledWith('warn', expect.stringContaining('nonexistent-wt'));
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'warn', msg: expect.stringContaining('nonexistent-wt') }),
+    );
   });
 
   it('does not throw when called without a log callback', async () => {
@@ -634,7 +638,8 @@ describe('gitFetch / setupWorktree', () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 203);
     const branch = 'contributor/adopted-pr';
-    const log = vi.fn();
+    const events: LoggedEvent[] = [];
+    const log = recordingLog(events);
 
     await execFile('git', ['checkout', '-b', branch], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'ADOPTED.txt'), 'remote head\n');
@@ -646,7 +651,9 @@ describe('gitFetch / setupWorktree', () => {
     await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, undefined, log);
 
     expect(readFileSync(join(worktree, 'ADOPTED.txt'), 'utf-8')).toBe('remote head\n');
-    expect(log).toHaveBeenCalledWith('worktree-base', expect.stringContaining('origin/contributor/adopted-pr'));
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'worktree-base', msg: expect.stringContaining('origin/contributor/adopted-pr') }),
+    );
   });
 
   it('fetches origin itself, so the worktree starts from the current remote base despite stale tracking refs', async () => {
@@ -687,13 +694,14 @@ describe('gitFetch / setupWorktree', () => {
   it('emits a worktree-base event recording the base ref and resolved commit SHA', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 206);
-    const log = vi.fn();
+    const events: LoggedEvent[] = [];
+    const log = recordingLog(events);
 
     await setupWorktree(repoRoot, 'factory/206-base-event', worktree, undefined, undefined, log);
 
-    const call = log.mock.calls.find(([type]) => type === 'worktree-base');
-    expect(call).toBeDefined();
-    const msg = call?.[1] as string;
+    const event = events.find((e) => e.type === 'worktree-base');
+    expect(event).toBeDefined();
+    const msg = event?.msg ?? '';
     expect(msg).toMatch(/^created from origin\/main @ [0-9a-f]{40}$/);
     const { stdout } = await execFile('git', ['rev-parse', 'origin/main'], { cwd: repoRoot });
     expect(msg.endsWith(stdout.trim())).toBe(true);
@@ -743,19 +751,23 @@ describe('setupWorktree / cleanupWorktree sandbox lifecycle', () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 653);
     const branch = 'factory/653-no-sandbox';
-    const exec = vi.fn();
 
     await setupWorktree(repoRoot, branch, worktree);
+    expect(existsSync(worktree)).toBe(true);
     await cleanupWorktree(repoRoot, worktree);
 
-    expect(exec).not.toHaveBeenCalled();
+    expect(existsSync(worktree)).toBe(false);
   });
 
   it('setupWorktree with a docker-sandbox descriptor creates the VM via the injected exec', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 654);
     const branch = 'factory/654-docker-sandbox';
-    const exec: ExecFn = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
+    const cmds: string[] = [];
+    const exec: ExecFn = async (cmd) => {
+      cmds.push(cmd);
+      return { stdout: '', stderr: '' };
+    };
     const sandbox: WorktreeSandbox = {
       runtime: 'docker-sandbox',
       authPaths: ['/home/user/.claude'],
@@ -766,7 +778,7 @@ describe('setupWorktree / cleanupWorktree sandbox lifecycle', () => {
 
     await setupWorktree(repoRoot, branch, worktree, 'origin/main', sandbox);
 
-    expect(exec).toHaveBeenCalledWith(expect.stringContaining('sbx create'), expect.anything());
+    expect(cmds).toContainEqual(expect.stringContaining('sbx create'));
   });
 
   it('setupWorktree forwards its log callback into createMicroVm so a fallback is observable', async () => {
@@ -781,18 +793,25 @@ describe('setupWorktree / cleanupWorktree sandbox lifecycle', () => {
       exec,
       isAvailable: () => true,
     };
-    const log = vi.fn();
+    const events: LoggedEvent[] = [];
+    const log = recordingLog(events);
 
     await setupWorktree(repoRoot, branch, worktree, 'origin/main', sandbox, log);
 
-    expect(log).toHaveBeenCalledWith('sandbox-unavailable', expect.stringContaining('sbx create failed'));
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'sandbox-unavailable', msg: expect.stringContaining('sbx create failed') }),
+    );
   });
 
   it('cleanupWorktree with the same descriptor removes the VM and is idempotent on a second call', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 655);
     const branch = 'factory/655-docker-sandbox-cleanup';
-    const exec: ExecFn = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
+    const cmds: string[] = [];
+    const exec: ExecFn = async (cmd) => {
+      cmds.push(cmd);
+      return { stdout: '', stderr: '' };
+    };
     const sandbox: WorktreeSandbox = {
       runtime: 'docker-sandbox',
       authPaths: ['/home/user/.claude'],
@@ -800,13 +819,14 @@ describe('setupWorktree / cleanupWorktree sandbox lifecycle', () => {
       exec,
       isAvailable: () => true,
     };
-    const log = vi.fn();
+    const events: LoggedEvent[] = [];
+    const log = recordingLog(events);
 
     await setupWorktree(repoRoot, branch, worktree, 'origin/main', sandbox);
     await cleanupWorktree(repoRoot, worktree, log, sandbox);
     await expect(cleanupWorktree(repoRoot, worktree, log, sandbox)).resolves.toBeUndefined();
 
-    expect(exec).toHaveBeenCalledWith(expect.stringContaining('sbx rm --force'), expect.anything());
+    expect(cmds).toContainEqual(expect.stringContaining('sbx rm --force'));
   });
 });
 
@@ -843,7 +863,8 @@ describe('reapLaneWorktree', () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 302);
     const branch = 'factory/302-unpushed';
-    const log = vi.fn();
+    const events: LoggedEvent[] = [];
+    const log = recordingLog(events);
     await setupWorktree(repoRoot, branch, worktree);
     writeFileSync(join(worktree, 'WORK.txt'), 'only copy\n');
     await execFile('git', ['add', 'WORK.txt'], { cwd: worktree });
@@ -854,14 +875,17 @@ describe('reapLaneWorktree', () => {
     expect(result).toEqual({ outcome: 'removed', branch, branchDeleted: false });
     expect(existsSync(worktree)).toBe(false);
     expect(await branchList(repoRoot, branch)).toContain(branch);
-    expect(log).toHaveBeenCalledWith('worktree-gc', expect.stringContaining('only handle'));
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'worktree-gc', msg: expect.stringContaining('only handle') }),
+    );
   });
 
   it('keeps a worktree with modified tracked files and logs a warn', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 303);
     const branch = 'factory/303-dirty';
-    const log = vi.fn();
+    const events: LoggedEvent[] = [];
+    const log = recordingLog(events);
     await setupWorktree(repoRoot, branch, worktree);
     writeFileSync(join(worktree, 'README.md'), 'live uncommitted work\n');
 
@@ -869,14 +893,17 @@ describe('reapLaneWorktree', () => {
 
     expect(result).toEqual({ outcome: 'kept-dirty', branch, branchDeleted: false });
     expect(existsSync(worktree)).toBe(true);
-    expect(log).toHaveBeenCalledWith('warn', expect.stringContaining('modified tracked files'));
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'warn', msg: expect.stringContaining('modified tracked files') }),
+    );
   });
 
   it('leaves a worktree checked out on a non-matching branch untouched', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 304);
     const branch = 'manual/experiment-x';
-    const log = vi.fn();
+    const events: LoggedEvent[] = [];
+    const log = recordingLog(events);
     await setupWorktree(repoRoot, branch, worktree);
 
     const result = await reapLaneWorktree(repoRoot, worktree, { issue: 304, log });
@@ -884,7 +911,9 @@ describe('reapLaneWorktree', () => {
     expect(result).toEqual({ outcome: 'kept-branch-mismatch', branch, branchDeleted: false });
     expect(existsSync(worktree)).toBe(true);
     expect(await branchList(repoRoot, branch)).toContain(branch);
-    expect(log).toHaveBeenCalledWith('warn', expect.stringContaining('leaving it alone'));
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'warn', msg: expect.stringContaining('leaving it alone') }),
+    );
   });
 
   it('honors a custom branch prefix for the identity gate', async () => {

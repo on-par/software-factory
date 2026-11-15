@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+
+import { recordingLog, type LoggedEvent } from '../test-support/recorders.js';
 
 import type { ExecFn } from './exec.js';
 import {
@@ -11,11 +13,16 @@ import {
   worktreeSandboxFor,
 } from './microvm.js';
 
-function makeExec(impl: (cmd: string) => Promise<{ stdout: string; stderr: string }>): ExecFn {
-  return vi.fn(impl);
+function makeExec(impl: (cmd: string) => Promise<{ stdout: string; stderr: string }>) {
+  const calls: [string, unknown][] = [];
+  const exec: ExecFn = (async (cmd, opts) => {
+    calls.push([cmd, opts]);
+    return impl(cmd);
+  }) as ExecFn;
+  return { exec, calls };
 }
 
-const OK_EXEC = makeExec(async () => ({ stdout: '', stderr: '' }));
+const OK_EXEC = makeExec(async () => ({ stdout: '', stderr: '' })).exec;
 
 function baseOpts(overrides: Partial<MicroVmLifecycleOptions> = {}): MicroVmLifecycleOptions {
   return {
@@ -85,94 +92,91 @@ describe('microVmName', () => {
 
 describe('createMicroVm', () => {
   it('issues a pre-clean sbx rm, then sbx create with the worktree as writable root plus one --mount per auth path', async () => {
-    const exec = makeExec(async () => ({ stdout: '', stderr: '' }));
-    const log = vi.fn();
+    const { exec, calls } = makeExec(async () => ({ stdout: '', stderr: '' }));
+    const events: LoggedEvent[] = [];
 
-    const created = await createMicroVm(baseOpts({ exec, log }));
+    const created = await createMicroVm(baseOpts({ exec, log: recordingLog(events) }));
 
     expect(created).toBe(true);
-    expect(exec).toHaveBeenCalledTimes(2);
-    const createCall = (exec as any).mock.calls.find(([cmd]: [string]) => cmd.includes('sbx create'))[0];
+    const cmds = calls.map(([cmd]) => cmd);
     const name = microVmName('/repo/.worktrees/653');
-    expect(createCall).toBe(
+    expect(cmds).toEqual([
+      `sbx rm --force ${name}`,
       `sbx create --name ${name} --mount '/repo/.worktrees/653':rw --mount '/home/user/.claude':rw --mount '/home/user/.codex':rw --mount '/home/user/.npm':rw --allow-network 'api.anthropic.com' --allow-network 'github.com'`,
-    );
-    expect(log).toHaveBeenCalledWith('sandbox', expect.stringContaining(name));
+    ]);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'sandbox', msg: expect.stringContaining(name) }));
   });
 
   it('renders --network none when the allowlist is empty', async () => {
-    const exec = makeExec(async () => ({ stdout: '', stderr: '' }));
+    const { exec, calls } = makeExec(async () => ({ stdout: '', stderr: '' }));
 
     await createMicroVm(baseOpts({ exec, allowHosts: [] }));
 
-    const createCall = (exec as any).mock.calls.find(([cmd]: [string]) => cmd.includes('sbx create'))[0];
+    const createCall = calls.map(([cmd]) => cmd).find((cmd) => cmd.includes('sbx create')) ?? '';
     expect(createCall).toMatch(/--network none$/);
     expect(createCall).not.toContain('--allow-network');
   });
 
   it('returns false and issues no create when sbx is not installed', async () => {
-    const exec = makeExec(async () => ({ stdout: '', stderr: '' }));
-    const log = vi.fn();
+    const { exec, calls } = makeExec(async () => ({ stdout: '', stderr: '' }));
+    const events: LoggedEvent[] = [];
 
-    const created = await createMicroVm(baseOpts({ exec, isAvailable: () => false, log }));
+    const created = await createMicroVm(baseOpts({ exec, isAvailable: () => false, log: recordingLog(events) }));
 
     expect(created).toBe(false);
-    expect(exec).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith('sandbox-unavailable', expect.stringContaining('sbx not installed'));
+    expect(calls).toEqual([]);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'sandbox-unavailable', msg: expect.stringContaining('sbx not installed') }),
+    );
   });
 
   it('returns false and issues no exec for non-docker-sandbox runtimes', async () => {
-    const exec = makeExec(async () => ({ stdout: '', stderr: '' }));
+    const { exec, calls } = makeExec(async () => ({ stdout: '', stderr: '' }));
 
     for (const runtime of ['sandbox-exec', 'firejail', 'none'] as const) {
       const created = await createMicroVm(baseOpts({ exec, runtime }));
       expect(created).toBe(false);
     }
-    expect(exec).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
   });
 
   it('does not throw and returns false when exec rejects', async () => {
-    const exec = makeExec(async (cmd: string) => {
+    const { exec } = makeExec(async (cmd: string) => {
       if (cmd.includes('sbx create')) throw new Error('sbx create failed');
       return { stdout: '', stderr: '' };
     });
-    const log = vi.fn();
+    const events: LoggedEvent[] = [];
 
-    await expect(createMicroVm(baseOpts({ exec, log }))).resolves.toBe(false);
-    expect(log).toHaveBeenCalledWith('sandbox-unavailable', expect.stringContaining('sbx create failed'));
+    await expect(createMicroVm(baseOpts({ exec, log: recordingLog(events) }))).resolves.toBe(false);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'sandbox-unavailable', msg: expect.stringContaining('sbx create failed') }),
+    );
   });
 
   it('best-effort removes a stale VM of the same name before creating', async () => {
-    const calls: string[] = [];
-    const exec = makeExec(async (cmd: string) => {
-      calls.push(cmd);
-      return { stdout: '', stderr: '' };
-    });
+    const { exec, calls } = makeExec(async () => ({ stdout: '', stderr: '' }));
 
     await createMicroVm(baseOpts({ exec }));
 
-    expect(calls[0]).toContain('sbx rm --force');
-    expect(calls[1]).toContain('sbx create');
+    expect(calls[0]?.[0]).toContain('sbx rm --force');
+    expect(calls[1]?.[0]).toContain('sbx create');
   });
 });
 
 describe('removeMicroVm', () => {
   it('issues sbx rm --force <name>', async () => {
-    const exec = makeExec(async () => ({ stdout: '', stderr: '' }));
-    const log = vi.fn();
+    const { exec, calls } = makeExec(async () => ({ stdout: '', stderr: '' }));
+    const events: LoggedEvent[] = [];
     const name = microVmName('/repo/.worktrees/653');
 
-    await removeMicroVm(baseOpts({ exec, log }));
+    await removeMicroVm(baseOpts({ exec, log: recordingLog(events) }));
 
-    expect(exec).toHaveBeenCalledWith(
-      `sbx rm --force ${name}`,
-      expect.objectContaining({ timeoutMs: expect.any(Number) }),
-    );
-    expect(log).toHaveBeenCalledWith('sandbox', expect.stringContaining(name));
+    expect(calls).toEqual([[`sbx rm --force ${name}`, expect.objectContaining({ timeoutMs: expect.any(Number) })]]);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'sandbox', msg: expect.stringContaining(name) }));
   });
 
   it('resolves (swallows) when exec rejects', async () => {
-    const exec = makeExec(async () => {
+    const { exec } = makeExec(async () => {
       throw new Error('vm not found');
     });
 
@@ -180,34 +184,34 @@ describe('removeMicroVm', () => {
   });
 
   it('issues nothing when sbx is not installed', async () => {
-    const exec = makeExec(async () => ({ stdout: '', stderr: '' }));
+    const { exec, calls } = makeExec(async () => ({ stdout: '', stderr: '' }));
 
     await removeMicroVm(baseOpts({ exec, isAvailable: () => false }));
 
-    expect(exec).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
   });
 
   it('is a no-op for non-docker-sandbox runtimes', async () => {
-    const exec = makeExec(async () => ({ stdout: '', stderr: '' }));
+    const { exec, calls } = makeExec(async () => ({ stdout: '', stderr: '' }));
 
     await removeMicroVm(baseOpts({ exec, runtime: 'none' }));
 
-    expect(exec).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
   });
 });
 
 describe('listMicroVms', () => {
   it('returns [] when sbx is not installed', async () => {
-    const exec = makeExec(async () => ({ stdout: 'factory-abc123\n', stderr: '' }));
+    const { exec, calls } = makeExec(async () => ({ stdout: 'factory-abc123\n', stderr: '' }));
 
     const names = await listMicroVms({ exec, isAvailable: () => false });
 
     expect(names).toEqual([]);
-    expect(exec).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
   });
 
   it('returns [] when exec rejects', async () => {
-    const exec = makeExec(async () => {
+    const { exec } = makeExec(async () => {
       throw new Error('sbx list failed');
     });
 
@@ -215,7 +219,7 @@ describe('listMicroVms', () => {
   });
 
   it('keeps only lines whose first token starts with factory-', async () => {
-    const exec = makeExec(async () => ({
+    const { exec } = makeExec(async () => ({
       stdout: 'factory-abc123   running\nother-vm   running\nfactory-def456   stopped\n\n',
       stderr: '',
     }));
@@ -226,29 +230,28 @@ describe('listMicroVms', () => {
   });
 
   it('issues sbx list', async () => {
-    const exec = makeExec(async () => ({ stdout: '', stderr: '' }));
+    const { exec, calls } = makeExec(async () => ({ stdout: '', stderr: '' }));
 
     await listMicroVms({ exec, isAvailable: () => true });
 
-    expect(exec).toHaveBeenCalledWith('sbx list', expect.objectContaining({ timeoutMs: expect.any(Number) }));
+    expect(calls).toEqual([['sbx list', expect.objectContaining({ timeoutMs: expect.any(Number) })]]);
   });
 });
 
 describe('reapOrphanMicroVm', () => {
   it('issues sbx rm --force <name> and returns removed: true on success', async () => {
-    const exec = makeExec(async () => ({ stdout: '', stderr: '' }));
+    const { exec, calls } = makeExec(async () => ({ stdout: '', stderr: '' }));
 
     const result = await reapOrphanMicroVm('factory-abc123', { exec });
 
-    expect(exec).toHaveBeenCalledWith(
-      "sbx rm --force 'factory-abc123'",
-      expect.objectContaining({ timeoutMs: expect.any(Number) }),
-    );
+    expect(calls).toEqual([
+      ["sbx rm --force 'factory-abc123'", expect.objectContaining({ timeoutMs: expect.any(Number) })],
+    ]);
     expect(result).toEqual({ name: 'factory-abc123', removed: true, detail: 'sbx rm --force factory-abc123 ok' });
   });
 
   it('returns removed: false with the error text (never throws) when exec rejects', async () => {
-    const exec = makeExec(async () => {
+    const { exec } = makeExec(async () => {
       const err = Object.assign(new Error('vm not found'), { stderr: 'no such vm' });
       throw err;
     });

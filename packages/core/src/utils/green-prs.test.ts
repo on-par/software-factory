@@ -23,10 +23,15 @@ function pr(overrides: Partial<OpenPullRequestSummary> = {}): OpenPullRequestSum
 function makeClient(
   prs: OpenPullRequestSummary[],
   checkRunsByRef: Record<string, Array<{ status: string | null; conclusion: string | null }>>,
-): GreenPrGitHubClient {
+): GreenPrGitHubClient & { checkRunRefs: string[] } {
+  const checkRunRefs: string[] = [];
   return {
-    listOpenPullRequests: vi.fn(async () => prs),
-    listCheckRuns: vi.fn(async ({ ref }) => checkRunsByRef[ref] ?? []),
+    checkRunRefs,
+    listOpenPullRequests: async () => prs,
+    listCheckRuns: async ({ ref }) => {
+      checkRunRefs.push(ref);
+      return checkRunsByRef[ref] ?? [];
+    },
   };
 }
 
@@ -71,7 +76,7 @@ describe('findUnmergedGreenPrs', () => {
 
     const result = await findUnmergedGreenPrs({ client, owner: 'o', repo: 'r' });
     expect(result).toEqual([]);
-    expect(client.listCheckRuns).not.toHaveBeenCalled();
+    expect(client.checkRunRefs).toEqual([]);
   });
 
   it('skips a PR with zero check runs', async () => {
