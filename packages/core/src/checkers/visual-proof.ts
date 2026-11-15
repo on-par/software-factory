@@ -1,5 +1,3 @@
-// src/checkers/visual-proof.ts — SHIP UI visual proof: classify, capture through the repo's tooling and validate (#2232)
-
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve, sep } from 'node:path';
@@ -28,7 +26,6 @@ export interface VisualProofCapture {
   state: string;
   viewport: { width: number; height: number };
   finalPath: string;
-  /** Path of the PNG relative to the capture out dir. */
   file: string;
   bytes: number;
 }
@@ -49,7 +46,6 @@ export interface VisualProofResult {
   runId: string;
   captures: VisualProofCapture[];
   images?: VisualProofImage[];
-  /** Local capture directory of a pass; read by the evidence upload, never rendered. */
   outDir?: string;
   diagnostic?: string;
 }

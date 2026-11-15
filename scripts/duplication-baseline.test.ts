@@ -31,6 +31,7 @@ describe('runDuplicationBaselineCli', () => {
     const { code, text } = run(report(10, 2.5), baseline);
     expect(code).toBe(0);
     expect(text).toContain('duplication: PASS');
+    expect(text).not.toContain('clones dropped');
     expect(text).toContain('measured 10 clones, 2.5% (baseline 10, 2.5%)');
   });
 
@@ -40,33 +41,32 @@ describe('runDuplicationBaselineCli', () => {
     expect(text).toContain('duplication: FAIL — clones rose above duplication-baseline.json');
   });
 
-  it('fails when the percentage rises above the baseline', () => {
-    const { code, text } = run(report(10, 2.6), baseline);
+  it('fails when clones rise even though the percentage drops', () => {
+    const { code, text } = run(report(11, 2.4), baseline);
     expect(code).toBe(1);
-    expect(text).toContain('duplication: FAIL — percentage rose above duplication-baseline.json');
+    expect(text).toContain('duplication: FAIL — clones rose above duplication-baseline.json');
   });
 
-  it('fails as rose when one field rose and the other fell', () => {
-    const { code, text } = run(report(9, 2.6), baseline);
-    expect(code).toBe(1);
-    expect(text).toContain('percentage rose above');
-  });
-
-  it('fails and asks to lower the baseline when the clone count drops', () => {
-    const { code, text } = run(report(9, 2.5), baseline);
-    expect(code).toBe(1);
-    expect(text).toContain('lower duplication-baseline.json to {"clones": 9, "percentage": 2.5}');
-  });
-
-  it('fails and asks to lower the baseline when the percentage drops', () => {
-    const { code, text } = run(report(10, 2.4), baseline);
-    expect(code).toBe(1);
-    expect(text).toContain('lower duplication-baseline.json to {"clones": 10, "percentage": 2.4}');
-  });
-
-  it('treats percentages equal after rounding to 2 decimals as unchanged', () => {
-    const { code } = run(report(10, 2.5004), baseline);
+  it('passes when only the percentage rises', () => {
+    const { code, text } = run(report(10, 3.1), baseline);
     expect(code).toBe(0);
+    expect(text).toContain('duplication: PASS');
+    expect(text).not.toContain('FAIL');
+  });
+
+  it('passes with a notice when clones drop while the percentage rises', () => {
+    const { code, text } = run(report(9, 2.6), baseline);
+    expect(code).toBe(0);
+    expect(text).toContain('duplication: PASS — clones dropped');
+    expect(text).not.toContain('FAIL');
+  });
+
+  it('passes and prints suggested lower numbers when clones drop', () => {
+    const { code, text } = run(report(9, 2.4567), baseline);
+    expect(code).toBe(0);
+    expect(text).toContain(
+      'duplication: PASS — clones dropped; you may lower duplication-baseline.json to {"clones": 9, "percentage": 2.46}',
+    );
   });
 
   it('fails on a missing or malformed report', () => {

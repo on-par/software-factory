@@ -205,7 +205,7 @@ describe('rerunTestsChecker', () => {
     expect(r.verdict).toBe('passed');
   });
 
-  it('returns not-run when planning throws', async () => {
+  it('never throws: returns not-run when planning throws', async () => {
     const run = vi.fn(async () => ok);
     const ctx: CheckerContext = {
       worktree: await worktree(),

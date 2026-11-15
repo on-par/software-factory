@@ -40,7 +40,7 @@ async function succeeds(cwd: string, ...args: string[]): Promise<boolean> {
   }
 }
 
-async function conflictedFilesOrNone(cwd: string): Promise<string[]> {
+async function conflictedFiles(cwd: string): Promise<string[]> {
   try {
     return (await git(cwd, 'diff', '--name-only', '--diff-filter=U')).split('\n').filter(Boolean);
   } catch {
@@ -65,7 +65,7 @@ export async function rebaseAndPushStack(opts: StackRebaseOptions): Promise<Stac
         await git(tmp, 'checkout', '--detach', layer.recordedHead);
         await git(tmp, 'rebase', '--onto', newBase, layer.upstream);
       } catch (err) {
-        const files = await conflictedFilesOrNone(tmp);
+        const files = await conflictedFiles(tmp);
         await succeeds(tmp, 'rebase', '--abort');
         const why = files.length > 0 ? `conflicted in: ${files.join(', ')}` : `failed: ${gitErrorDetail(err)}`;
         return { ok: false, at, phase: 'rebase', reason: `onto ${newBase} ${why}; nothing was pushed`, files };

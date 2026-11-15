@@ -81,16 +81,21 @@ describe('reapPrlessShip', () => {
       configLoaders: { loadFactoryConfigForRepo: () => ({}) as never, loadRepoConfig: () => ({}) as never, ...rt },
       worktreePathFor,
     };
-    const reap = vi.fn<typeof reapCleanShipWorktree>(async () => {
+    const reapCalls: Parameters<typeof reapCleanShipWorktree>[] = [];
+    const reap: typeof reapCleanShipWorktree = async (...a) => {
+      reapCalls.push(a);
       throw new Error('reap failed');
+    };
+    const lines: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
+      lines.push(a.join(' '));
     });
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const args: [number, string, string, typeof paths, undefined] = [999998, repoRoot, 'o/r', paths, undefined];
-    return { runtime, reap, log, args };
+    return { runtime, reap, reapCalls, lines, args };
   }
 
   it('prints no kept-worktree line when the config could not be loaded', async () => {
-    const { runtime, reap, log, args } = setup(
+    const { runtime, reap, reapCalls, lines, args } = setup(
       {
         loadFactoryConfigForRepo: () => {
           throw new Error('expected object, received null');
@@ -99,13 +104,13 @@ describe('reapPrlessShip', () => {
       () => '/never',
     );
     await reapPrlessShip(runtime, reap, args);
-    expect(reap).not.toHaveBeenCalled();
-    expect(log.mock.calls.flat().join('\n')).not.toMatch(/Kept (the )?worktree/);
+    expect(reapCalls).toEqual([]);
+    expect(lines.join('\n')).not.toMatch(/Kept (the )?worktree/);
   });
 
   it('still reports an unverified worktree when the path resolved and the reap threw', async () => {
-    const { runtime, reap, log, args } = setup({}, () => '/wt/999998');
+    const { runtime, reap, lines, args } = setup({}, () => '/wt/999998');
     await reapPrlessShip(runtime, reap, args);
-    expect(log.mock.calls.flat().join('\n')).toContain('Kept worktree /wt/999998 — its state could not be verified');
+    expect(lines.join('\n')).toContain('Kept worktree /wt/999998 — its state could not be verified');
   });
 });

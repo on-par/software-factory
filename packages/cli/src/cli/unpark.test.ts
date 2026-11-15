@@ -9,9 +9,13 @@ const names = (...n: string[]) => n.map((name) => ({ name }));
 
 /** Octokit mock for lane `ops`: #23 queued at order 23, #24 kept order:24 after `factory:queued` was removed, #12 parked. */
 function opsOctokit() {
+  const added: string[] = [];
   const issues = {
     createLabel: vi.fn(async () => ({})),
-    addLabels: vi.fn(async () => ({})),
+    addLabels: async ({ labels }: any) => {
+      added.push(...labels);
+      return {};
+    },
     removeLabel: vi.fn(async () => ({})),
     listForRepo: vi.fn(async () => ({
       data: [
@@ -23,20 +27,19 @@ function opsOctokit() {
     listLabelsOnIssue: vi.fn(async () => ({ data: names('factory:parked', 'factory:lane:ops') })),
   };
   return {
-    issues,
+    added,
     octokit: { paginate: async (fn: any, args: any) => (await fn(args)).data, rest: { issues } } as never,
   };
 }
 
 describe('unpark order-label-kept-after-queued-removed', () => {
   it('assigns the next free position, never the order label an open non-queued issue kept', async () => {
-    const { issues, octokit } = opsOctokit();
+    const { added, octokit } = opsOctokit();
 
     const json = await runUnpark({ client: createOctokitQueueClient(octokit), owner: 'o', repo: 'r', issue: 12 });
 
     expect(json).toMatchObject({ action: 'unpark', issue: 12, lane: 'ops', order: 25 });
     expect(json.collision).toEqual({ order: 24, heldBy: [24] });
-    const added = (issues.addLabels.mock.calls as any[]).flatMap(([a]) => a.labels);
     expect(added).toContain('factory:order:25');
     expect(added).not.toContain('factory:order:24');
     expect(renderUnparkLines(json).join('\n')).toContain('factory:order:24 held by #24');

@@ -1,5 +1,3 @@
-// src/harness/classify.test.ts — table-driven coverage for Codex/ChatGPT limit classification.
-
 import { describe, expect, it } from 'vitest';
 
 import { classifyFailure, isRejectedCredentialText } from './classify.js';
@@ -52,6 +50,17 @@ describe('classifyFailure', () => {
     const result = classifyFailure(stderr, 1);
     expect(result).not.toBe('usage_cap');
     expect(result).not.toBe('rate_limit');
+  });
+
+  it('treats 429 as rate_limit only in an HTTP or retry context, not as a line number', () => {
+    expect(classifyFailure('response status 429', 1)).toBe('rate_limit');
+    expect(classifyFailure('SyntaxError at main.ts:429:3', 1)).toBe('error');
+  });
+
+  it('needs a cap or billing noun after insufficient or credit to call it usage_cap', () => {
+    expect(classifyFailure('insufficient quota', 1)).toBe('usage_cap');
+    expect(classifyFailure('insufficient permissions', 1)).toBe('unknown');
+    expect(classifyFailure('accreditation pending', 1)).toBe('unknown');
   });
 });
 

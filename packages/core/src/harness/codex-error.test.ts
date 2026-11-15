@@ -33,7 +33,7 @@ describe('parseCodexResetAt', () => {
     expect(rel('try again in 999999 days')).toBe(at(MAX_REPORTED_COOLDOWN_MS));
   });
 
-  it('parses the absolute form in the zone and rejects bad fields', () => {
+  it('parses the absolute form in the zone and rejects bad fields or an unknown zone', () => {
     expect(parseCodexResetAt('try again at 3:05 PM.', NOW, 'UTC')).toBe('2026-10-19T15:05:00.000Z');
     expect(parseCodexResetAt('try again at 11:00 am', NOW, 'UTC')).toBe('2026-10-20T11:00:00.000Z');
     expect(parseCodexResetAt('try again at 13:05 PM', NOW, 'UTC')).toBeUndefined();

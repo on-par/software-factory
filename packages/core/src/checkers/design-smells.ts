@@ -1,5 +1,3 @@
-// src/checkers/design-smells.ts — CHECK-phase program-design smell critic over the real diff (#483).
-
 import { readFile } from 'node:fs/promises';
 
 import { createFsReader } from '@on-par/repo-context';
@@ -17,14 +15,10 @@ import type { CheckerContext } from './index.js';
 export const DESIGN_SMELLS_CHECKER = 'design_smells';
 export const WORKER_OUTPUT_CHECKER = 'worker_output';
 
-/** Smell taxonomy from #483 — the four maintainability failures binary gates cannot see. */
 export const SMELL_KINDS = ['cast-to-pass', 'swallowed-error', 'shotgun-surgery', 'boundary-violation'] as const;
 
-/** Base refs tried in order; the first that resolves is the merge-base target. */
 export const BASE_REF_CANDIDATES = ['origin/main', 'origin/master'] as const;
 
-/** Generated/vendored/cache paths neither the design critic nor the build
- *  no-op guard should count as implementation (#483, #1162). */
 export const DIFF_EXCLUDES = [
   ':!package-lock.json',
   ':!**/package-lock.json',
@@ -42,11 +36,8 @@ export const DIFF_EXCLUDES = [
   ':!**/node_modules/**',
 ] as const;
 
-/** Hard cap on diff characters injected into the critic prompt. */
 export const MAX_DIFF_CHARS = 120_000;
-/** Cap on the frozen spec text injected into the critic prompt. */
 export const MAX_SPEC_CHARS = 8_000;
-/** Cap on the rendered detail string handed to the rework worker. */
 export const MAX_SMELLS_RENDERED = 10;
 const MAX_FIELD_CHARS = 240;
 
@@ -63,10 +54,6 @@ export const DesignSmellSchema = z.object({
   suggestion: z.string().min(1),
 });
 
-/**
- * Envelope-only validation. Elements are validated one at a time in
- * `parseDesignSmellVerdict` so one malformed smell cannot discard its valid siblings (#643).
- */
 export const DesignSmellVerdictSchema = z.object({
   checker: z.literal(DESIGN_SMELLS_CHECKER),
   result: z.enum(['PASS', 'FAIL']),
@@ -84,7 +71,6 @@ export interface DesignSmellVerdict {
   smells: DesignSmell[];
 }
 
-/** A `smells` element that failed validation: its array index and the zod issues. */
 export interface RejectedSmell {
   index: number;
   errors: string[];
@@ -98,14 +84,10 @@ export const defaultDiffRunner: DiffRunner = async (argv, cwd) => {
 };
 
 export interface CollectedDiff {
-  /** '' when there is nothing to grade. */
   text: string;
   baseRef: string | null;
   truncated: boolean;
-  /** Set when the diff could not be collected at all (not a git checkout, no base ref). */
   skipReason?: string;
-  /** Raw changed paths (no excludes) — populated only when the filtered diff is empty,
-   *  so the caller can distinguish "no change at all" from "only generated/cache churn". */
   excludedPaths?: string[];
 }
 
@@ -116,8 +98,6 @@ export async function collectDesignDiff(
 ): Promise<CollectedDiff> {
   let baseRef: string | null = null;
 
-  // baseRefOverride (e.g. a slice's parent branch) outranks BASE_REF_CANDIDATES
-  // and has no fallback: an unresolvable override skips rather than diffing main.
   if (opts?.baseRefOverride !== undefined) {
     const override = opts.baseRefOverride;
     const check = await run(['git', 'rev-parse', '--verify', '--quiet', `${override}^{commit}`], worktree);
@@ -142,8 +122,6 @@ export async function collectDesignDiff(
     }
   }
 
-  // Caller-provided checkouts (e.g. factory run-brief --workspace) have no
-  // remote base; the pre-build HEAD captured by buildPhase stands in (#1162).
   if (baseRef === null && opts?.fallbackBaseRef !== undefined) {
     const check = await run(['git', 'rev-parse', '--verify', '--quiet', `${opts.fallbackBaseRef}^{commit}`], worktree);
     if (check.ok) baseRef = opts.fallbackBaseRef;
@@ -186,8 +164,6 @@ export async function collectDesignDiff(
   return { text, baseRef, truncated };
 }
 
-/** Exclude-free changed paths against the base — non-empty when the filtered
- *  diff was empty only because every change matched DIFF_EXCLUDES. */
 async function collectRawChangedPaths(worktree: string, baseRef: string, run: DiffRunner): Promise<string[]> {
   const committed = await run(['git', 'diff', '--name-only', `${baseRef}...HEAD`], worktree);
   const uncommitted = await run(['git', 'diff', '--name-only', 'HEAD'], worktree);
@@ -203,8 +179,6 @@ async function collectRawChangedPaths(worktree: string, baseRef: string, run: Di
   return [...paths].sort();
 }
 
-/** SHA of the worktree's current HEAD, captured before a worker runs, for use as
- *  collectDesignDiff's fallbackBaseRef in checkouts with no remote base. */
 export async function captureDiffBase(
   worktree: string,
   run: DiffRunner = defaultDiffRunner,
@@ -214,17 +188,21 @@ export async function captureDiffBase(
   return r.ok && sha.length > 0 ? sha : undefined;
 }
 
-/** Verifies that the worker changed a product file before repairs can begin. */
+function collectCheckerDiff(
+  ctx: CheckerContext,
+  collectDiff: typeof collectDesignDiff = collectDesignDiff,
+): Promise<CollectedDiff> {
+  return collectDiff(ctx.worktree, undefined, {
+    fallbackBaseRef: ctx.diffBase,
+    baseRefOverride: ctx.parentBaseRef,
+  });
+}
+
 export async function workerOutputChecker(
   ctx: CheckerContext,
   deps?: { collectDiff?: typeof collectDesignDiff },
 ): Promise<CheckerOutput> {
-  // Second positional arg stays undefined so injected test stubs with the old
-  // 1-arg shape still typecheck against `typeof collectDesignDiff`.
-  const diff = await (deps?.collectDiff ?? collectDesignDiff)(ctx.worktree, undefined, {
-    fallbackBaseRef: ctx.diffBase,
-    baseRefOverride: ctx.parentBaseRef,
-  });
+  const diff = await collectCheckerDiff(ctx, deps?.collectDiff);
   if (diff.skipReason) {
     return { checker: WORKER_OUTPUT_CHECKER, result: 'SKIP', details: diff.skipReason };
   }
@@ -238,7 +216,6 @@ export async function workerOutputChecker(
   return { checker: WORKER_OUTPUT_CHECKER, result: 'PASS', details: `worker produced a diff against ${diff.baseRef}` };
 }
 
-/** Operators disable the critic per-run with FACTORY_DESIGN_SMELLS=0. */
 export function designSmellsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.FACTORY_DESIGN_SMELLS !== '0';
 }
@@ -376,7 +353,6 @@ export function renderSmellDetails(smells: DesignSmell[]): string {
   return `${smells.length} program-design smell(s): ${rendered.join('; ')}${suffix}`;
 }
 
-/** Renders the dropped elements so a malformed finding is visible, not silent (#643). */
 export function renderRejectedSmells(rejected: RejectedSmell[]): string {
   const shown = rejected.slice(0, MAX_SMELLS_RENDERED);
   const rendered = shown.map((r) => `[${r.index}] ${truncateField(r.errors.join(', '))}`);
@@ -395,12 +371,7 @@ export async function designSmellsChecker(
     return { checker: DESIGN_SMELLS_CHECKER, result: 'SKIP', details: 'disabled by FACTORY_DESIGN_SMELLS=0' };
   }
 
-  // Second positional arg stays undefined so injected test stubs with the old
-  // 1-arg shape still typecheck against `typeof collectDesignDiff`.
-  const diff = await (deps?.collectDiff ?? collectDesignDiff)(ctx.worktree, undefined, {
-    fallbackBaseRef: ctx.diffBase,
-    baseRefOverride: ctx.parentBaseRef,
-  });
+  const diff = await collectCheckerDiff(ctx, deps?.collectDiff);
   if (diff.skipReason) return { checker: DESIGN_SMELLS_CHECKER, result: 'SKIP', details: diff.skipReason };
   if (diff.text === '') {
     return {
@@ -463,8 +434,6 @@ export async function designSmellsChecker(
 
   const { verdict, rejected, reason } = parseDesignSmellVerdict(output);
   if (verdict === null) {
-    // Fail closed: an unreadable verdict is not evidence of a clean diff (#643),
-    // matching runCustomChecker in ./index.ts.
     return { checker: DESIGN_SMELLS_CHECKER, result: 'FAIL', details: reason ?? 'critic produced no valid JSON' };
   }
 

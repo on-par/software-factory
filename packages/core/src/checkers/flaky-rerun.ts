@@ -1,4 +1,3 @@
-// src/checkers/flaky-rerun.ts — serial re-run of a failing tests checker (#2291, #2301)
 import { extractFailingTestNames } from './baseline.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import {
@@ -17,7 +16,6 @@ export interface RerunPlan {
   mode: 'targeted' | 'full';
   argv: string[];
   timeoutMs: number;
-  /** Test identifiers the targeted argv selects; [] for a full re-run. */
   tests: string[];
 }
 
@@ -58,11 +56,8 @@ export function buildRerunPlan(cmd: TestsCommand, pkg: PackageJson | null, detai
 export interface FlakeRerun {
   verdict: 'passed' | 'reproduced' | 'not-run';
   mode: RerunPlan['mode'];
-  /** RerunPlan.tests: [] for a full re-run. */
   tests: string[];
-  /** Full-output log (<outputLogDir>/flaky-rerun-tests.log); absent when no outputLogDir or the write failed. */
   logPath?: string;
-  /** Why the verdict is not-run. */
   reason?: string;
 }
 
@@ -86,7 +81,6 @@ export async function rerunFailingTests({ ctx, plan }: { ctx: CheckerContext; pl
   return { ...withLog, verdict: r.ok ? 'passed' : 'reproduced' };
 }
 
-/** Resolve + plan + run for the failing `tests` checker; never throws (#2301). */
 export async function rerunTestsChecker(ctx: CheckerContext, details: string): Promise<FlakeRerun> {
   try {
     const cmd = await resolveTestsCommand(ctx);

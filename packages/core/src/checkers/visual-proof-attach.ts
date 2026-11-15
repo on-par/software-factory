@@ -1,5 +1,3 @@
-// src/checkers/visual-proof-attach.ts — uploads proof images to the evidence branch, embeds them in the PR body and stamps the per-head status (#2232)
-
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -10,9 +8,7 @@ import { upsertMarkedBlock } from '../review/marked-block.js';
 import type { VisualProofResult } from './visual-proof.js';
 
 export const VISUAL_PROOF_STATUS_CONTEXT = 'factory/visual-proof';
-/** Start marker of a required-mode block: land enforces proof only when the PR body carries it. */
 export const VISUAL_PROOF_START = '<!-- factory:visual-proof v1 required -->';
-/** Start marker of an advisory-mode block (#4047): same end marker, never enforced by land. */
 export const VISUAL_PROOF_ADVISORY_START = '<!-- factory:visual-proof v1 advisory -->';
 export const VISUAL_PROOF_END = '<!-- /factory:visual-proof -->';
 export const DEFAULT_EVIDENCE_BRANCH = 'factory-evidence';
@@ -37,12 +33,10 @@ interface UploadTarget {
   owner: string;
   repo: string;
   prNumber: number;
-  /** The PR head branch: never written. */
   branch: string;
   evidenceBranch?: string;
 }
 
-/** Commits the captured PNGs to the evidence branch and returns their immutable, read-back-verified URLs. */
 export async function attachVisualProof(
   octokit: Octokit,
   target: UploadTarget,
@@ -132,7 +126,6 @@ export async function attachVisualProof(
 
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim().slice(0, DIAGNOSTIC_MAX);
 
-/** The modes that publish a block; `off` never runs the gate. */
 export type PublishedVisualProofMode = Exclude<VisualProofMode, 'off'>;
 
 const startMarker = (mode: PublishedVisualProofMode): string =>
@@ -170,7 +163,6 @@ export function renderVisualProofBlock(result: VisualProofResult, mode: Publishe
   return lines.join('\n');
 }
 
-/** Upserts the proof block into the PR body, then stamps the per-head commit status. */
 export async function publishVisualProof(
   octokit: Octokit,
   target: { owner: string; repo: string; prNumber: number },
@@ -183,11 +175,6 @@ export async function publishVisualProof(
   if (body !== (data.body ?? '')) await octokit.rest.pulls.update({ owner, repo, pull_number: prNumber, body });
   const pass = result.status === 'pass';
   const diagnostic = oneLine(result.diagnostic ?? `visual proof ${result.status}`);
-  // Advisory non-pass stamps `success` with an "advisory:" description rather than skipping the
-  // status (#4047). A failure/error would read as red to anything that treats the context as a
-  // required check (ci-watch's readRequiredState, GitHub branch protection, the awaiting-CI recheck);
-  // skipping it would leave a repo that lists factory/visual-proof as required waiting forever on
-  // "not reported yet". Land is unaffected: it only enforces the status under the required marker.
   const state = pass || mode === 'advisory' ? 'success' : 'failure';
   const description = pass
     ? `visual proof captured for ${head12(result.headSha)}`
@@ -204,7 +191,6 @@ export async function publishVisualProof(
   });
 }
 
-/** Writes the block in place of either marker variant, so switching modes never leaves two blocks. */
 export function upsertVisualProofBlock(
   body: string | null | undefined,
   block: string,
@@ -228,7 +214,6 @@ export class VisualProofMissingError extends Error {
   }
 }
 
-/** Throws unless a marked PR's exact head carries a factory-created `factory/visual-proof` success status. */
 export async function assertVisualProofForHead(
   octokit: Octokit,
   target: { owner: string; repo: string; prNumber: number; prBody: string | null; headSha: string },

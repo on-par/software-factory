@@ -1,6 +1,3 @@
-// src/harness/provider-failure.ts — provider-agnostic failure shape (#3225).
-// Harness adapters put `kind`/`resetAt` on HarnessError.details at throw time; the router reads them back here.
-
 import { ModelExecutorError } from '../router/executor-error.js';
 import { describeFailureDetail } from '../router/failure-detail.js';
 import { classifyFailure, isRejectedCredentialText } from './classify.js';
@@ -10,16 +7,13 @@ import { HarnessError } from './index.js';
 export const PROVIDER_FAILURE_KINDS = ['usage_cap', 'rate_limit', 'auth', 'unavailable', 'other'] as const;
 export type ProviderFailureKind = (typeof PROVIDER_FAILURE_KINDS)[number];
 
-/** One classified provider failure. `reason` stays the fine-grained label for logs and telemetry. */
 export interface ProviderFailure {
   kind: ProviderFailureKind;
-  /** ISO instant at which the provider says it works again, when it said so. */
   resetAt?: string;
   reason: HarnessFailureReason;
   detail: string;
 }
 
-// Exhaustive so a new FailoverReason fails typecheck until it is mapped.
 const KIND_BY_REASON: Record<HarnessFailureReason, ProviderFailureKind> = {
   usage_cap: 'usage_cap',
   rate_limit: 'rate_limit',
@@ -36,13 +30,10 @@ const KIND_BY_REASON: Record<HarnessFailureReason, ProviderFailureKind> = {
   local_auth: 'unavailable',
 };
 
-/** One-way map from the 13 failure reasons onto the five kinds. */
 export function failureKindForReason(reason: HarnessFailureReason): ProviderFailureKind {
   return KIND_BY_REASON[reason];
 }
 
-/** Like failureKindForReason, but a local_auth failure whose text reports a rejected credential is kind `auth`,
- *  so the breaker holds the provider until its credentials change (#3232). Signed-out text stays `unavailable`. */
 export function failureKindFor(reason: HarnessFailureReason, text: string): ProviderFailureKind {
   return reason === 'local_auth' && isRejectedCredentialText(text) ? 'auth' : failureKindForReason(reason);
 }
@@ -51,7 +42,6 @@ function isProviderFailureKind(value: unknown): value is ProviderFailureKind {
   return typeof value === 'string' && (PROVIDER_FAILURE_KINDS as readonly string[]).includes(value);
 }
 
-/** Normalized ISO string when `value` is a parseable instant, else undefined. */
 export function normalizeIsoInstant(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const ms = Date.parse(value);
@@ -73,8 +63,6 @@ function exitCodeOf(err: unknown): number {
   return typeof exitCode === 'number' ? exitCode : 1;
 }
 
-/** Classifier for harnesses without their own `classifyError`: the typed reason (or classifyFailure on
- *  stderr/exit code) mapped to a kind, plus any kind/resetAt the adapter left on `details`. */
 export function defaultClassifyError(err: unknown): ProviderFailure {
   const detail = describeFailureDetail(err);
   if (err instanceof HarnessError || err instanceof ModelExecutorError) {
@@ -91,7 +79,6 @@ export function defaultClassifyError(err: unknown): ProviderFailure {
   return { kind: failureKindFor(reason, stderrOf(err)), reason, detail };
 }
 
-/** What the router calls for a thrown error. Adapters have already put kind/resetAt on `details`. */
 export function providerFailureOf(err: unknown): ProviderFailure {
   return defaultClassifyError(err);
 }

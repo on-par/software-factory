@@ -37,7 +37,7 @@ describe('hashBaselineEnv', () => {
     expect(hashBaselineEnv({ A: '1', B: '2' })).toBe(hashBaselineEnv({ B: '2', A: '1' }));
   });
 
-  it('ignores per-lane and per-run keys', () => {
+  it('ignores per-lane and per-run keys, which do not describe the environment contract', () => {
     const base = { FACTORY_HEADLESS: '1' };
     expect(
       hashBaselineEnv({

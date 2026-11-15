@@ -10,7 +10,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe('runVerificationCommand', () => {
+describe("runVerificationCommand: orchestration-only variables never change a repo's verification result (#3428)", () => {
   it("removes the supervisor's merge flags inherited from the factory process and from options.env", async () => {
     vi.stubEnv('FACTORY_MERGE_ADMIN', '1');
     vi.stubEnv('FACTORY_MERGE', '1');
@@ -50,7 +50,7 @@ describe('runVerificationCommand', () => {
   });
 });
 
-describe('checker env allow-list (#1590)', () => {
+describe('checker env allow-list keeps host secrets from agent-written scripts (#1590)', () => {
   const dirs = createTempDirs();
   afterEach(() => dirs.cleanup());
 

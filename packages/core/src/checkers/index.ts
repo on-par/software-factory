@@ -1,5 +1,3 @@
-// src/checkers/index.ts — Checker framework: built-in + custom checkers
-
 import { readFile } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 
@@ -68,71 +66,39 @@ export interface CheckerContext {
   sandbox?: SandboxPolicy;
   worktree: string;
   specPath: string;
-  /** Test seam; when undefined, app_smoke reads `qa` from the worktree's .factory/config.json. */
   qa?: QaConfig | null;
-  /** Test seam; when undefined, the build/test/lint resolvers read `checks` from the worktree's .factory/config.json. */
   checks?: ChecksConfig | null;
-  /** Run-start HEAD SHA captured by buildPhase before the worker ran — the diff base
-   *  for checkouts with no origin/main or origin/master (#1162, #1211). */
   diffBase?: string;
-  /** Parent ref of a stacked slice branch (e.g. 'slice-1'); when set, base-ref checkers diff against it
-   *  instead of origin/main, with no fallback (#2716). Set by checkPhase. */
   parentBaseRef?: string;
-  /** Review floor rules (packaged + repo classifier overrides, #1723); design_smells skips a class A diff (#3374). Defaults to DEFAULT_REVIEW_FLOOR_RULES. */
   reviewFloorRules?: ReviewFloorRuleSet;
-  /** Set by runAllCheckers from the resolved constitution — the single source of the standards text */
   constitutionBody?: string;
   packageJson?: PackageJson | null;
-  /** Set by runAllCheckers from constitution.requireTests — missing test command becomes FAIL instead of SKIP */
   testsRequired?: boolean;
-  /** Once-per-round worktree facts (package.json, HTML files, Playwright configs) — set by checkPhase
-   *  each round; runAllCheckers probes and attaches these when it is absent. */
   probe?: WorktreeProbe;
-  /** Injection seam for tests: overrides the default probeWorktree implementation. */
   probeWorktree?: (worktree: string) => Promise<WorktreeProbe>;
-  /** Injection seam for tests: overrides the default runCommand implementation. */
   runCommand?: (argv: readonly string[], options?: RunCommandOptions) => Promise<CommandResult>;
-  /** Lane environment (FACTORY_HEADLESS, PLAYWRIGHT_HEADLESS, and PORT/FACTORY_APP_PORT/FACTORY_BASE_URL when a port is leased) merged into every checker command — set by checkPhase */
   env?: Record<string, string>;
-  /** When set, every checker command is spawned detached (its own process
-   *  group) and its pid reported here so the lane can track and later kill
-   *  the whole group — set by checkPhase. */
   onPgid?: (pgid: number) => void;
   processGroupTracker?: Pick<ProcessGroupTracker, 'killAll'>;
-  /** Injection seam for phase/checker timing events (#1321) — set by checkPhase. */
   log?: (type: EventKind, msg: string, extra?: { durationMs?: number }) => void;
-  /** Heartbeat hook (#1326): called around every checker so the persisted run-phase
-   *  snapshot's `lastActivityAt` advances during CHECK, not just at phase transitions —
-   *  set by checkPhase. A rejection is logged (`activity_touch_failed`) and swallowed:
-   *  this is an observability side channel, not a checker-run invariant. */
   onActivity?: () => void | Promise<void>;
-  /** Directory where a failing checker command writes its full stdout/stderr — set by
-   *  checkPhase per round. The FAIL details carry only a bounded summary plus this
-   *  log's path, so the rework worker and a human can read what the cap cut. */
   outputLogDir?: string;
-  /** Timeout for the tests checker command, in seconds (`timeouts.tests_seconds`, #2299). Defaults to 300. */
   testsTimeoutSeconds?: number;
-  /** Timeout for the compile checker command, in seconds (`timeouts.compile_seconds`, #3185). Defaults to 120. */
   compileTimeoutSeconds?: number;
-  /** Affected-test selection for this round (#3260) — set by checkPhase on rework rounds only; undefined = full suite. */
   affectedTests?: AffectedTestsResolution & { round: number };
 }
 
 export type CheckerFn = (ctx: CheckerContext) => Promise<CheckerOutput>;
 
-/** A runnable checker in the single unified registry — one shape for every world. */
 export interface Checker {
   name: string;
   run(ctx: CheckerRunCtx): Promise<CheckerOutput>;
 }
 
-/** CheckerContext bound by runAllCheckers with the router + custom-checker timeout. */
 export interface CheckerRunCtx extends CheckerContext {
   router: ModelRouter;
   timeoutSeconds?: number;
 }
-
-// ---------- Built-in Checkers ----------
 
 const DEFAULT_COMPILE_TIMEOUT_SECONDS = 120;
 export const compileChecker: CheckerFn = async (ctx) => {
@@ -172,8 +138,6 @@ export const compileChecker: CheckerFn = async (ctx) => {
   }
 };
 
-/** FAIL details for a checker command: `<label> failed: <summary>`, plus the full-output
- *  log path when one was written. The path sits after the bounded summary so the cap never cuts it. */
 async function commandFailureDetails(
   ctx: CheckerContext,
   checker: string,
@@ -195,6 +159,8 @@ const TESTS_PASS_DETAILS = {
 
 const DEFAULT_TESTS_TIMEOUT_SECONDS = 300;
 
+const SHELL_COMMAND_NOT_FOUND_EXIT = 127;
+
 async function onPath(bin: string, env?: NodeJS.ProcessEnv): Promise<boolean> {
   const names = process.platform === 'win32' ? [bin, `${bin}.exe`] : [bin];
   for (const dir of (env?.PATH ?? process.env.PATH ?? '').split(delimiter)) {
@@ -209,11 +175,9 @@ const runFullTests: CheckerFn = async (ctx) => {
     const run = ctx.runCommand ?? runCommand;
     const timeoutSeconds = ctx.testsTimeoutSeconds ?? DEFAULT_TESTS_TIMEOUT_SECONDS;
     const timeoutMs = timeoutSeconds * 1000;
-    // Arrival-order tail: a script that fails after its tests is described by its failing step (#4018).
-    const combined = combinedOutputTail();
-    // A kill at the timeout must never read as a real test failure (#2299): lead with it.
+    const arrivalOrderTail = combinedOutputTail();
     const describeFailure = (r: CommandResult): string => {
-      const evidence = describeTestFailure(r, 500, combined.text());
+      const evidence = describeTestFailure(r, 500, arrivalOrderTail.text());
       if (!r.timedOut) return evidence;
       const head = `timed out after ${timeoutSeconds}s (raise timeouts.tests_seconds or FACTORY_TESTS_TIMEOUT)`;
       return evidence === 'timed out' ? head : `${head}\n${evidence}`;
@@ -225,8 +189,11 @@ const runFullTests: CheckerFn = async (ctx) => {
         result: 'FAIL',
         details:
           'verify.ps1 failed: pwsh (PowerShell 7) is not on PATH — scripts/verify.ps1 needs it. Install PowerShell: https://aka.ms/powershell (macOS: brew install --cask powershell; Linux: see the same page).',
-        // The command never ran: the shell's command-not-found exit, so base health reads it as inconclusive.
-        failedCommand: { command: cmd.argv.join(' '), exitCode: 127, timeoutSeconds },
+        failedCommand: {
+          command: cmd.argv.join(' '),
+          exitCode: SHELL_COMMAND_NOT_FOUND_EXIT,
+          timeoutSeconds,
+        },
       };
     }
     if (cmd.runner !== 'none') {
@@ -235,10 +202,9 @@ const runFullTests: CheckerFn = async (ctx) => {
         timeoutMs,
         env: ctx.env,
         onPgid: ctx.onPgid,
-        onOutput: combined.onOutput,
+        onOutput: arrivalOrderTail.onOutput,
       });
       if (r.ok) return { checker: 'tests', result: 'PASS', details: TESTS_PASS_DETAILS[cmd.runner] };
-      // For pytest, fail closed: a surface that cannot run (pytest missing, import error) is FAIL, never SKIP
       const marker = sandboxEnvMarkerLine(r);
       return {
         checker: 'tests',
@@ -272,22 +238,24 @@ const runFullTests: CheckerFn = async (ctx) => {
   }
 };
 
-/** Runs the rework round's affected-tests argv (#3260). A clean pass or a real failure is final; anything else (zero or unknown count, tool error) falls back to the full suite. */
-export const testsChecker: CheckerFn = async (ctx) => {
-  const sel = ctx.affectedTests;
-  if (sel?.kind !== 'affected') return runFullTests(ctx);
+async function runAffected(ctx: CheckerContext, argv: readonly string[]): Promise<CommandResult | undefined> {
   const timeoutSeconds = ctx.testsTimeoutSeconds ?? DEFAULT_TESTS_TIMEOUT_SECONDS;
-  let r: CommandResult | undefined;
   try {
-    r = await (ctx.runCommand ?? runCommand)(sel.argv, {
+    return await (ctx.runCommand ?? runCommand)(argv, {
       cwd: ctx.worktree,
       timeoutMs: timeoutSeconds * 1000,
       env: ctx.env,
       onPgid: ctx.onPgid,
     });
   } catch {
-    // a spawn error is a tool error: fall back below
+    return undefined;
   }
+}
+
+export const testsChecker: CheckerFn = async (ctx) => {
+  const sel = ctx.affectedTests;
+  if (sel?.kind !== 'affected') return runFullTests(ctx);
+  const r = await runAffected(ctx, sel.argv);
   if (r) {
     const output = `${r.stdout}\n${r.stderr}`;
     const counts = parseCommandCounts(output);
@@ -458,14 +426,12 @@ export const accessibilityChecker: CheckerFn = async (ctx) => {
   for (const rel of files) {
     const html = await readFile(join(ctx.worktree, rel), 'utf-8').catch(() => '');
 
-    // Images without alt
     const imgNoAlt = (html.match(/<img[^>]*>/g) ?? []).filter((t) => !t.includes('alt=')).length;
     if (imgNoAlt > 0) {
       issues += imgNoAlt;
       details.push(`${rel}: ${imgNoAlt} images without alt`);
     }
 
-    // Placeholder links
     const ph = countPlaceholderLinks(html);
     if (ph > 0) {
       issues += ph;
@@ -488,9 +454,6 @@ export const accessibilityChecker: CheckerFn = async (ctx) => {
   };
 };
 
-// ---------- Custom Checker (agent-based) ----------
-
-/** Trust boundary: LLM checker output is unvalidated JSON — accept only an exact-shape verdict. */
 function isCustomCheckerVerdict(
   value: unknown,
   checkerName: string,
@@ -536,7 +499,6 @@ Steps:
       env: ctx.env,
       onPgid: ctx.onPgid,
     });
-    // Extract the verdict: first balanced JSON object that carries a "checker" key
     const candidates = extractJsonObjects(result.output);
     const verdictCandidate = candidates.find(
       (c) =>
@@ -569,9 +531,6 @@ Steps:
   }
 }
 
-// ---------- Runner: run all checkers for a product ----------
-
-/** The unified registry: every checker — built-in, agent-backed, custom, unknown — runs through the same fail-closed path. */
 const BUILT_IN_CHECKERS: readonly (Checker & { description: string; optIn?: boolean })[] = [
   {
     name: WORKER_OUTPUT_CHECKER,
@@ -621,14 +580,12 @@ export interface BuiltInCheckerInfo {
   description: string;
 }
 
-/** Every built-in checker with a one-line description — the same registry CHECK runs, so it cannot drift. */
 export function listBuiltInCheckers(): BuiltInCheckerInfo[] {
   return BUILT_IN_CHECKERS.map(({ name, description }) => ({ name, description }));
 }
 
 export const STANDARD_CHECKER_NAMES = BUILT_IN_CHECKERS.map((c) => c.name);
 
-/** Fail closed: a declared standard we can't run must not vanish from the summary. */
 const UNKNOWN_CHECKER_PREFIX = 'unknown checker ';
 
 export function unknownCheckerOutput(name: string): CheckerOutput {
@@ -639,7 +596,6 @@ export function unknownCheckerOutput(name: string): CheckerOutput {
   };
 }
 
-/** True for the FAIL unknownCheckerOutput produces: a constitution names a checker the factory does not know. */
 export function isUnknownCheckerOutput(output: CheckerOutput): boolean {
   return output.result === 'FAIL' && output.details.startsWith(UNKNOWN_CHECKER_PREFIX);
 }
@@ -663,7 +619,6 @@ export function unfilledPlaceholderCheckerOutput(token: string): CheckerOutput {
   };
 }
 
-/** True for a config-validation FAIL: unknown checker, schema error or unfilled placeholder (#2581/#2582). */
 export function isConfigCheckerOutput(output: CheckerOutput): boolean {
   return (
     output.result === 'FAIL' &&
@@ -679,8 +634,6 @@ function describeType(v: unknown): string {
   return `a ${typeof v}`;
 }
 
-/** A declared checkers list selects the built-ins (registry order) plus worker_output, the empty-diff guard
- *  checkPhase parks on; no list (null or empty) runs every built-in. Declared non-built-ins follow in constitution order (#2455). */
 function buildCheckers(constitution: Constitution | null): Checker[] {
   const raw: unknown = constitution?.checkers;
   const invalid: CheckerOutput[] = [];
@@ -722,8 +675,14 @@ function buildCheckers(constitution: Constitution | null): Checker[] {
   return [...checkers.values()];
 }
 
-/** Invokes `ctx.onActivity`, logging and swallowing any rejection (#1326) — an
- *  observability side channel must never fail a checker run. */
+function crashedOutput(name: string, e: any): CheckerOutput {
+  return {
+    checker: name,
+    result: 'FAIL',
+    details: `checker crashed: ${(e?.message ?? String(e)).slice(0, 500)}`,
+  };
+}
+
 async function touchActivity(ctx: CheckerContext): Promise<void> {
   try {
     await ctx.onActivity?.();
@@ -732,8 +691,6 @@ async function touchActivity(ctx: CheckerContext): Promise<void> {
   }
 }
 
-/** A constitution checker that no model could run fails the phase instead of skipping, so a PR is
- *  never marked ready without its required checks (#2493). `optionalCheckers` opts a checker out. */
 export function requireRunnableChecker(
   output: CheckerOutput,
   constitution: Constitution | null,
@@ -755,7 +712,6 @@ export function requireRunnableChecker(
   };
 }
 
-/** `only` restricts the run to these checker names (the baseline re-run, #1925). Undefined runs every checker. */
 export async function runAllCheckers(
   ctx: CheckerContext,
   router: ModelRouter,
@@ -765,8 +721,6 @@ export async function runAllCheckers(
 ): Promise<CheckSummary> {
   const probe = ctx.probe ?? (await (ctx.probeWorktree ?? probeWorktree)(ctx.worktree));
 
-  // the constitution is the single source of truth for the standards body —
-  // custom checkers must be graded against the same text that declared them
   const runCtx: CheckerRunCtx = {
     ...ctx,
     probe,
@@ -785,13 +739,8 @@ export async function runAllCheckers(
     let output: CheckerOutput;
     try {
       output = await checker.run(runCtx);
-    } catch (e: any) {
-      // Fail closed: a checker that crashes must not vanish from the summary
-      output = {
-        checker: checker.name,
-        result: 'FAIL',
-        details: `checker crashed: ${(e?.message ?? String(e)).slice(0, 500)}`,
-      };
+    } catch (e: unknown) {
+      output = crashedOutput(checker.name, e);
     }
     output = requireRunnableChecker(output, constitution, ctx.log);
     ctx.log?.('checker_completed', `checker ${checker.name} completed (${output.result})`, {
@@ -804,14 +753,12 @@ export async function runAllCheckers(
   return summarizeCheckerOutputs(results);
 }
 
-/** Folds checker outputs into the CheckSummary shape every review/report consumes. */
 const FINDING_EVIDENCE_MAX = 300;
 
 function oneLine(text: string): string {
   return text.replace(/\s*[\r\n]+\s*/g, ' ');
 }
 
-/** One markdown bullet per regression finding — the single formatter the check summary and evidence pack share. */
 export function renderCheckerFindings(findings: readonly RegressionFinding[]): string[] {
   if (findings.length === 0) return ['- no findings'];
   return findings.map((f) => {

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
   coreFakes,
@@ -10,6 +10,7 @@ import {
   logged,
   paths,
   runMain,
+  runMainWith,
 } from './test-support/cli-commands-harness.js';
 
 installCliCommandsHarness();
@@ -77,10 +78,17 @@ describe('cli commands (via main dispatch)', () => {
         sandbox: { ...h.factoryConfig.sandbox, codexSandbox: 'workspace-write' },
       };
       h.routerRun = async () => ({ model: 'gpt-5.6-terra-high', output: 'app 5\n' });
-      await runMain('triage');
-      expect(vi.mocked(coreFakes.ModelRouter).mock.results.at(-1)?.value.setCodexSandbox).toHaveBeenCalledWith(
-        'workspace-write',
-      );
+      const sandboxes: unknown[] = [];
+      function RecordingRouter(...a: any[]) {
+        const r = new (coreFakes.ModelRouter as any)(...a);
+        r.setCodexSandbox = (m: unknown) => {
+          sandboxes.push(m);
+        };
+        return r;
+      }
+      process.argv = ['node', 'factory', 'triage'];
+      await runMainWith({ ModelRouter: RecordingRouter as any }, 'triage');
+      expect(sandboxes).toContain('workspace-write');
     });
 
     it('passes --model to the router as the model override', async () => {

@@ -205,8 +205,7 @@ describe('acquireLaneEnvironment', () => {
 
       env.recordPgid(1234);
       expect(tracker.pgids).toContain(1234);
-      const fireAndForgetPgidPersistTickMs = 20;
-      await new Promise((r) => setTimeout(r, fireAndForgetPgidPersistTickMs));
+      await new Promise((r) => setTimeout(r, 20));
       const leaseAfterRecord = readPortLeases(registryFile).find((l) => l.worktreeId === '/wt/lane-a');
       expect(leaseAfterRecord?.pgids).toContain(1234);
 

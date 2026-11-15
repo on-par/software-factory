@@ -27,16 +27,16 @@ export function phaseSnapshotFile(runsDir: string, key: WorkKey): string {
   return resolve(runsDir, `issue-${key}.phase.json`);
 }
 
-const serialWriteChainByFile = new Map<string, Promise<void>>();
+const fileChains = new Map<string, Promise<void>>();
 
 function serializedPerFile(file: string, op: () => Promise<void>): Promise<void> {
-  const prev = serialWriteChainByFile.get(file) ?? Promise.resolve();
+  const prev = fileChains.get(file) ?? Promise.resolve();
   const next = prev.catch(() => undefined).then(op);
-  serialWriteChainByFile.set(file, next);
+  fileChains.set(file, next);
   void next
     .catch(() => undefined)
     .finally(() => {
-      if (serialWriteChainByFile.get(file) === next) serialWriteChainByFile.delete(file);
+      if (fileChains.get(file) === next) fileChains.delete(file);
     });
   return next;
 }

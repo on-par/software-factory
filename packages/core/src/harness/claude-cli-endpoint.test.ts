@@ -60,7 +60,7 @@ describe('ClaudeCliHarness intermediary endpoint (#2906)', () => {
 
   afterEach(() => vi.unstubAllEnvs());
 
-  it('scopes ANTHROPIC_* env to the endpoint model when both run through one CliModelExecutor', async () => {
+  it('scopes ANTHROPIC_* env to the endpoint model and unsets the inherited ANTHROPIC_API_KEY', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-test-123');
     const rec = recordingExec({ stdout: envelope() });
     const executor = new CliModelExecutor(rec.fn as any);

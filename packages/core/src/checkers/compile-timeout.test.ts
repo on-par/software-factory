@@ -22,8 +22,7 @@ async function makeWorktree(files: Record<string, string>): Promise<string> {
 
 const BUILD_PKG = JSON.stringify({ scripts: { build: 'x' } });
 
-/** Fake runner simulating a 3s build: times out when given less than 3s, else succeeds. */
-function slowRunner() {
+function threeSecondBuildRunner() {
   return vi.fn(async (argv: string[], o: { timeoutMs?: number }): Promise<CommandResult> => {
     const timedOut = (o.timeoutMs ?? 0) < 3000;
     return {
@@ -38,14 +37,14 @@ function slowRunner() {
   });
 }
 
-function ctxFor(worktree: string, run: ReturnType<typeof slowRunner>, extra: Partial<CheckerContext> = {}) {
+function ctxFor(worktree: string, run: ReturnType<typeof threeSecondBuildRunner>, extra: Partial<CheckerContext> = {}) {
   return { worktree, specPath: join(worktree, 'none.md'), runCommand: run as never, ...extra };
 }
 
 describe('compileChecker timeout (#3185)', () => {
   it('compileChecker: a build slower than compileTimeoutSeconds FAILs naming timeouts.compile_seconds and FACTORY_COMPILE_TIMEOUT', async () => {
     const worktree = await makeWorktree({ 'package.json': BUILD_PKG });
-    const run = slowRunner();
+    const run = threeSecondBuildRunner();
     const result = await compileChecker(ctxFor(worktree, run, { compileTimeoutSeconds: 1 }));
     expect(result.result).toBe('FAIL');
     expect(result.details).toContain('timed out after 1s');
@@ -57,14 +56,14 @@ describe('compileChecker timeout (#3185)', () => {
 
   it('defaults to 120s for npm run build', async () => {
     const worktree = await makeWorktree({ 'package.json': BUILD_PKG });
-    const run = slowRunner();
+    const run = threeSecondBuildRunner();
     await compileChecker(ctxFor(worktree, run));
     expect(run.mock.calls[0][1].timeoutMs).toBe(120_000);
   });
 
   it('passes the configured timeout to make', async () => {
     const worktree = await makeWorktree({ Makefile: 'all:\n\ttrue\n' });
-    const run = slowRunner();
+    const run = threeSecondBuildRunner();
     await compileChecker(ctxFor(worktree, run, { compileTimeoutSeconds: 600 }));
     expect(run.mock.calls[0][0]).toEqual(['make']);
     expect(run.mock.calls[0][1].timeoutMs).toBe(600_000);
@@ -72,7 +71,7 @@ describe('compileChecker timeout (#3185)', () => {
 
   it('passes the configured timeout to cargo build', async () => {
     const worktree = await makeWorktree({ 'Cargo.toml': '[package]\nname = "x"\n' });
-    const run = slowRunner();
+    const run = threeSecondBuildRunner();
     await compileChecker(ctxFor(worktree, run, { compileTimeoutSeconds: 600 }));
     expect(run.mock.calls[0][0]).toEqual(['cargo', 'build']);
     expect(run.mock.calls[0][1].timeoutMs).toBe(600_000);

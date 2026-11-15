@@ -27,10 +27,8 @@ export function workerOutputTail(output: string, opts: { lines?: number; maxChar
     .filter((line) => line.trim() !== '')
     .slice(-lines);
   if (kept.length === 0) return '';
-  const redactedBeforeTruncating = redactText(kept.join('\n'));
-  return redactedBeforeTruncating.length > maxChars
-    ? redactedBeforeTruncating.slice(-maxChars)
-    : redactedBeforeTruncating;
+  const redacted = redactText(kept.join('\n'));
+  return redacted.length > maxChars ? redacted.slice(-maxChars) : redacted;
 }
 
 export function renderNoDiffDetail(input: {

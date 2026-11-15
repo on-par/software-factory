@@ -1,5 +1,3 @@
-// src/checkers/command-output.ts — runner-output parsing shared by CHECK and summarizeCommandRun
-
 import { StringDecoder } from 'node:string_decoder';
 
 import type { CommandResult } from '../utils/command-runner.js';
@@ -16,26 +14,30 @@ function stripIncidentalCommanderNoise(text: string): string {
     .join('\n');
 }
 
-/** Where a failing test announces itself, per runner, and how many lines of its message to keep.
- *  Checked in order, so a vitest FAIL line wins over a vitest suite summary. */
+const VITEST_FAIL_LINE = { pattern: /\bFAIL\s+.+\s+>/, lines: 12 };
+const VITEST_SUITE_SUMMARY = { pattern: /^\s*\S+\s+.+\(\d+ tests?\s+\|\s+\d+ failed\)/, lines: 8 };
+const DOTNET_TESTING_PLATFORM_FAILED = {
+  pattern: /^\s*failed\s+\S+\s+\((?:\d+(?:\.\d+)?\s*(?:ms|s|m)\s*)+\)\s*$/,
+  lines: 12,
+};
+const DOTNET_VSTEST_FAILED = { pattern: /^\s*Failed\s+\S+\s+\[[^\]]+\]\s*$/, lines: 12 };
+const GO_TEST_FAIL = { pattern: /^\s*--- FAIL:\s+\S+/, lines: 12 };
+const PYTEST_SHORT_SUMMARY_FAILED = { pattern: /^FAILED\s+\S+::\S+/, lines: 8 };
+const VITEST_COVERAGE_THRESHOLD_MISSED = {
+  pattern: /Coverage for \w+ \([\d.]+%\) does not meet .*threshold/,
+  lines: 8,
+};
+
 export const FAILED_TEST_MARKERS: readonly { pattern: RegExp; lines: number }[] = [
-  // vitest: " FAIL  file > suite > test"
-  { pattern: /\bFAIL\s+.+\s+>/, lines: 12 },
-  // vitest suite summary: " > file (6 tests | 1 failed) 15ms"
-  { pattern: /^\s*\S+\s+.+\(\d+ tests?\s+\|\s+\d+ failed\)/, lines: 8 },
-  // .NET Microsoft.Testing.Platform: "failed Namespace.Class.Test (46ms)"
-  { pattern: /^\s*failed\s+\S+\s+\((?:\d+(?:\.\d+)?\s*(?:ms|s|m)\s*)+\)\s*$/, lines: 12 },
-  // .NET VSTest: "  Failed Namespace.Class.Test [46 ms]"
-  { pattern: /^\s*Failed\s+\S+\s+\[[^\]]+\]\s*$/, lines: 12 },
-  // go test: "--- FAIL: TestName (0.00s)"
-  { pattern: /^\s*--- FAIL:\s+\S+/, lines: 12 },
-  // pytest short summary: "FAILED tests/test_x.py::test_y - AssertionError"
-  { pattern: /^FAILED\s+\S+::\S+/, lines: 8 },
-  // vitest coverage thresholds: "ERROR: Coverage for statements (96.83%) does not meet "glob" threshold (96.9%)"
-  { pattern: /Coverage for \w+ \([\d.]+%\) does not meet .*threshold/, lines: 8 },
+  VITEST_FAIL_LINE,
+  VITEST_SUITE_SUMMARY,
+  DOTNET_TESTING_PLATFORM_FAILED,
+  DOTNET_VSTEST_FAILED,
+  GO_TEST_FAIL,
+  PYTEST_SHORT_SUMMARY_FAILED,
+  VITEST_COVERAGE_THRESHOLD_MISSED,
 ];
 
-/** npm echoes the script it runs at column 0 (`> node -e "..."`); that text is the command, not its output. */
 const NPM_SCRIPT_ECHO = /^> /;
 
 export function extractFailedTestEvidence(output: string): string | null {
@@ -52,28 +54,21 @@ export function extractFailedTestEvidence(output: string): string | null {
   return null;
 }
 
-/** Bounded tail of command output. Runners print banners first and failures and summaries
- *  last, so a head slice keeps the banner and drops the error. */
 export function outputTail(text: string, maxChars: number): string {
   const clean = stripAnsi(text).trim();
   if (clean.length <= maxChars) return clean;
   const tail = clean.slice(-maxChars);
-  // Drop the partial first line, unless that would throw away most of the tail.
   const lineStart = tail.indexOf('\n');
   return `…${lineStart >= 0 && lineStart < maxChars / 2 ? tail.slice(lineStart + 1) : tail}`;
 }
 
-/** vitest's header for one test's own console output: `stderr | file > suite > test` (or `stdout | …`). */
-const TEST_CONSOLE_HEADER = /^(?:stdout|stderr) \| \S/;
+const VITEST_TEST_CONSOLE_HEADER = /^(?:stdout|stderr) \| \S/;
 
-/** Drops vitest's per-test console blocks (the header line through the next blank line). They are what a test
- *  printed, passing or not, never the run's failure report. Left in, the last warning a passing test wrote to
- *  stderr became the whole evidence of a verify that failed in a later step (#4018, #4011). */
 export function stripTestConsoleBlocks(text: string): string {
   const kept: string[] = [];
   let inBlock = false;
   for (const line of stripAnsi(text).split(/\r?\n/)) {
-    if (TEST_CONSOLE_HEADER.test(line)) inBlock = true;
+    if (VITEST_TEST_CONSOLE_HEADER.test(line)) inBlock = true;
     else if (inBlock) inBlock = line.trim() !== '';
     else kept.push(line);
   }
@@ -86,11 +81,8 @@ export function describeCommandFailureTail(r: CommandResult, maxChars: number): 
   return outputTail(output, maxChars) || (r.timedOut ? 'timed out' : `exit code ${r.exitCode}`);
 }
 
-/** Characters of interleaved output combinedOutputTail keeps: room for the failing step after test console noise. */
 export const COMBINED_TAIL_CHARS = 64 * 1024;
 
-/** The end of a command's stdout and stderr together, in arrival order (#4018). A multi-step script such as
- *  `verify.sh` stops at its failing step, so that step's message is what it printed last, whichever stream it used. */
 export function combinedOutputTail(maxChars: number = COMBINED_TAIL_CHARS): {
   onOutput: (stream: 'stdout' | 'stderr', chunk: Buffer) => void;
   text: () => string;
@@ -106,11 +98,6 @@ export function combinedOutputTail(maxChars: number = COMBINED_TAIL_CHARS): {
   };
 }
 
-/** Failed-test evidence when a known runner format is found on stdout or stderr, else the output's tail.
- *  Test console blocks never count as evidence; after a stdout marker, stderr contributes its own marker block
- *  when it has one (vitest prints the FAIL details there), else what is left of it. With no marker, `combined`
- *  (combinedOutputTail's text, when the runner streamed output) supplies the tail, so a script that failed after
- *  its tests is described by its failing step rather than by the last warning a test wrote to stderr. */
 export function describeTestFailure(r: CommandResult, maxChars: number, combined?: string): string {
   const stderr = stripTestConsoleBlocks(r.stderr);
   const stderrEvidence = extractFailedTestEvidence(stderr);
@@ -126,18 +113,16 @@ export function describeTestFailure(r: CommandResult, maxChars: number, combined
   return tail || describeCommandFailureTail(r, maxChars);
 }
 
+const DEFAULT_SUMMARY_MAX_CHARS = 4000;
+
 export interface SummarizeCommandRunOptions {
-  /** Hard cap on the summary length. Default 4000. */
   maxChars?: number;
-  /** Path to the full log; rendered as the last line `full log: <path>`. */
   logPath?: string;
-  /** Wall-clock duration; rendered in the header when given. */
   durationMs?: number;
 }
 
 export interface CommandRunCounts {
   format: 'vitest' | 'jest' | 'pytest' | 'tsc' | 'eslint';
-  /** Rendered counts line, e.g. `2 failed | 300 passed`. */
   line: string;
   failed?: number;
   passed?: number;
@@ -168,7 +153,6 @@ function countParts(text: string): { line: string; counts: Partial<CommandRunCou
   return parts.length > 0 ? { line: parts.join(' | '), counts } : null;
 }
 
-/** Pass/fail counts from vitest, jest, pytest, tsc or eslint output; null when no format matches. */
 export function parseCommandCounts(output: string): CommandRunCounts | null {
   const lines = output.split(/\r?\n/);
 
@@ -216,11 +200,10 @@ export function parseCommandCounts(output: string): CommandRunCounts | null {
   return null;
 }
 
-/** Every failing test or error in the output, each with its following lines. */
 function collectFailureBlocks(clean: string): string[] {
   const lines = clean.split(/\r?\n/);
-  const vitestMode = lines.some((l) => !NPM_SCRIPT_ECHO.test(l) && FAILED_TEST_MARKERS[0]!.pattern.test(l));
-  const markers = vitestMode ? FAILED_TEST_MARKERS.slice(0, 1) : FAILED_TEST_MARKERS;
+  const vitestMode = lines.some((l) => !NPM_SCRIPT_ECHO.test(l) && VITEST_FAIL_LINE.pattern.test(l));
+  const markers = vitestMode ? [VITEST_FAIL_LINE] : FAILED_TEST_MARKERS;
   const markerLines = (line: string): number | null =>
     NPM_SCRIPT_ECHO.test(line) ? null : (markers.find((m) => m.pattern.test(line))?.lines ?? null);
   const isStart = (line: string): boolean =>
@@ -247,7 +230,6 @@ function collectFailureBlocks(clean: string): string[] {
     for (let j = i + 1; j < lines.length && body.length < keep; j++) {
       const next = lines[j]!;
       if (isStart(next)) break;
-      // tsc and eslint continuation lines are indented; marker blocks take whatever follows.
       if (markerLines(line) === null && !/^\s/.test(next)) break;
       body.push(next);
     }
@@ -270,10 +252,8 @@ function renderHeader(result: CommandResult, options: SummarizeCommandRunOptions
   return `$ ${command}${suffix}`;
 }
 
-/** Short summary of a test, typecheck or lint run: header, counts, every failure with its lines,
- *  and the full-log path, never longer than `maxChars`. */
 export function summarizeCommandRun(result: CommandResult, options: SummarizeCommandRunOptions = {}): string {
-  const maxChars = options.maxChars ?? 4000;
+  const maxChars = options.maxChars ?? DEFAULT_SUMMARY_MAX_CHARS;
   const clean = stripAnsi(`${result.stdout}\n${result.stderr}`);
   const counts = parseCommandCounts(clean);
   const fixed = [renderHeader(result, options, maxChars), ...(counts ? [counts.line] : [])];

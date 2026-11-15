@@ -1,9 +1,7 @@
-// src/checkers/command-output.test.ts — summarizeCommandRun and parseCommandCounts
-
 import { describe, expect, it } from 'vitest';
 
 import type { CommandResult } from '../utils/command-runner.js';
-import { parseCommandCounts, summarizeCommandRun } from './command-output.js';
+import { extractFailedTestEvidence, parseCommandCounts, summarizeCommandRun } from './command-output.js';
 
 function result(
   fields: { stdout?: string; stderr?: string; exitCode?: number; timedOut?: boolean; command?: string[] } = {},
@@ -96,6 +94,22 @@ describe('summarizeCommandRun', () => {
     expect(eslint).toContain('/repo/src/b.ts:8:1');
   });
 
+  it('continues a tsc error block only through indented lines', () => {
+    const out = summarizeCommandRun(
+      result({
+        command: ['npx', 'tsc'],
+        stdout: [
+          "src/a.ts(1,5): error TS2322: Type 'string' is not assignable to type 'number'.",
+          "  The expected type comes from property 'n'.",
+          'unrelated trailing line',
+          'Found 1 error in 1 file.',
+        ].join('\n'),
+      }),
+    );
+    expect(out).toContain("The expected type comes from property 'n'.");
+    expect(out).not.toContain('unrelated trailing line');
+  });
+
   it('drops failure blocks from the end with a count when 200 tests fail', () => {
     let stdout = '';
     for (let i = 1; i <= 200; i++) stdout += vitestFail(`src/t${i}.test.ts`, `case ${i}`, String(i));
@@ -152,5 +166,18 @@ describe('summarizeCommandRun', () => {
 
   it('returns null counts for plain text', () => {
     expect(parseCommandCounts('hello world')).toBeNull();
+  });
+});
+
+describe('extractFailedTestEvidence', () => {
+  it('quotes the vitest FAIL line over an earlier suite summary line', () => {
+    const output = [
+      ' ❯ src/a.test.ts (2 tests | 1 failed) 12ms',
+      '   × adds 3ms',
+      '',
+      ' FAIL  src/a.test.ts > adds',
+      'AssertionError: boom',
+    ].join('\n');
+    expect(extractFailedTestEvidence(output)).toBe('FAIL  src/a.test.ts > adds\nAssertionError: boom');
   });
 });

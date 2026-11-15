@@ -1,15 +1,9 @@
-// src/harness/codex-error.ts — pure Codex CLI limit-message adapter (#3227).
-// Codex words its ChatGPT-plan usage limit two ways: `try again in 1 days 2 hours 5 minutes` and
-// `try again at 3:05 PM`. Parsing is a bounded token scan (indexOf + short slice + lookup tables), not a
-// regex over the input, because CodeQL flagged regex-based parsing (js/polynomial-redos).
-
 import { MAX_REPORTED_COOLDOWN_MS } from '../router/breaker.js';
 import { zoneParts, zonedToUtc } from './claude-error.js';
 import type { HarnessFailureReason } from './index.js';
 import { failureKindFor, type ProviderFailure } from './provider-failure.js';
 
 const DETAIL_LIMIT = 400;
-/** Max characters examined after a phrase. */
 const WINDOW = 80;
 
 const UNIT_MS: Record<string, number> = {
@@ -61,7 +55,6 @@ function parseAbsolute(lower: string, start: number, now: number, timeZone: stri
   return new Date(t).toISOString();
 }
 
-/** ISO instant Codex says the limit resets, from `try again in …` or `try again at h:mm AM|PM`. */
 export function parseCodexResetAt(text: string, now: number, timeZone: string): string | undefined {
   try {
     const lower = text.toLowerCase();
@@ -69,13 +62,10 @@ export function parseCodexResetAt(text: string, now: number, timeZone: string): 
     if (i >= 0) return parseRelative(lower, i + RELATIVE.length, now);
     const j = lower.indexOf(ABSOLUTE);
     if (j >= 0) return parseAbsolute(lower, j + ABSOLUTE.length, now, timeZone);
-  } catch {
-    // unknown IANA zone
-  }
+  } catch {}
   return undefined;
 }
 
-/** Kind, reset time (usage_cap / rate_limit only) and detail for one Codex failure. */
 export function classifyCodexFailure(
   reason: HarnessFailureReason,
   text: string,
@@ -87,9 +77,6 @@ export function classifyCodexFailure(
   return { kind, ...(resetAt ? { resetAt } : {}), reason, detail: text.trim().slice(0, DETAIL_LIMIT) };
 }
 
-/** Error text codex emits on stdout under `--json`. Only error-bearing events are
- *  included — the agent transcript is excluded so that prose or command output
- *  mentioning a limit cannot manufacture a rate_limit/usage_cap verdict (#425). */
 export function extractCodexErrorText(stdout: string): string {
   const messages: string[] = [];
   for (const line of stdout.split('\n')) {

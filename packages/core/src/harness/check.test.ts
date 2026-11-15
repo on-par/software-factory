@@ -45,8 +45,6 @@ beforeAll(() => {
   };
   script('ok.sh', 'echo ok');
   script('silent.sh', 'exit 0');
-  // The commit fixtures act only on the commit prompt, like a real agent. Committing on the probe
-  // prompts too would fail in the probe repo on a host with no git identity (CI).
   const onCommitPrompt = (cmd: string) => `case "$(cat)" in *HARNESS_CHECK*) ${cmd} ;; esac; echo ok`;
   script(
     'commit.sh',
@@ -54,7 +52,6 @@ beforeAll(() => {
   );
   script('edit.sh', "printf 'ok\\n' > HARNESS_CHECK.txt; echo ok");
   script('other.sh', onCommitPrompt('printf ok > other.txt && git add other.txt && git commit -q -m x'));
-  // Still running when the timeout case's 1ms timer fires; every other case waits it out, so keep it short.
   script('slow.sh', 'sleep 0.2; echo ok');
 });
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -165,8 +162,6 @@ describe('runHarnessCheck', () => {
   });
 
   it('times out a fast script even when the timer fires after it exits', async () => {
-    // Blocking the event loop right after spawn lets `echo ok` exit before the 1ms timer runs,
-    // as on a fast Linux CI host under parallel test load.
     const lateTimerExec: ExecFn = (cmd, o) => {
       const run = defaultExecFn(cmd, o);
       const until = Date.now() + 50;

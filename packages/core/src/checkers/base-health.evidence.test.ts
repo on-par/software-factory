@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { describeBaseHealthEvidence } from './base-health.js';
 
-// describeBaseHealthEvidence renders the evidence the lane-paused event, base hold and status quote.
-describe('describeBaseHealthEvidence tail rendering', () => {
+describe('describeBaseHealthEvidence tail rendering quoted by the lane-paused event, base hold and status', () => {
   const line = (tail: string) => describeBaseHealthEvidence([{ checker: 'tests', exitCode: 1, tail }]);
 
   it('joins lines with a single separator, dropping blank lines and indentation', () => {

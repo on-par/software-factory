@@ -183,7 +183,7 @@ describe('run/state', () => {
       startedAt: '2026-01-01T00:00:00.000Z',
     };
 
-    it('fills defaults on the first write and omits absent keys', () => {
+    it('fills defaults on the first write, recording route claude before PLAN picks one, and omits absent keys', () => {
       const next = nextIssueRunState(undefined, base, { status: 'planning' }, '2026-01-01T00:00:01.000Z');
       expect(next).toMatchObject({
         status: 'planning',

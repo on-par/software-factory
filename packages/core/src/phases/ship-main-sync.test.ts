@@ -26,7 +26,7 @@ const run = async (command: string, options?: { cwd?: string }) => ({
   stderr: '',
 });
 
-function laneAndMainBothAddingChangelogBullets(): { lane: string; checked: string } {
+function conflictingLane(): { lane: string; checked: string } {
   const root = tempDirs.makeSync('ship-main-sync-');
   const origin = join(root, 'origin.git');
   const main = join(root, 'main');
@@ -53,9 +53,9 @@ function laneAndMainBothAddingChangelogBullets(): { lane: string; checked: strin
   return { lane, checked: git(lane, 'rev-parse', 'HEAD') };
 }
 
-describe('syncShipBranchWithMain', () => {
+describe('syncShipBranchWithMain merges origin/main before SHIP pushes, because GitHub runs no pull_request CI on a PR left conflicting by sibling merges, so syncing first opens it mergeable and CI runs', () => {
   it('merges origin/main into a branch whose only conflict is CHANGELOG Unreleased, keeping both bullets', async () => {
-    const { lane, checked } = laneAndMainBothAddingChangelogBullets();
+    const { lane, checked } = conflictingLane();
     const log = vi.fn();
     const result = await syncShipBranchWithMain({ run, worktree: lane, branch: 'factory/3-topic', log });
     expect(result.checkedSha).toBe(checked);

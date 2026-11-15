@@ -80,6 +80,14 @@ describe('in-place checkout', () => {
     expect(log).toHaveBeenCalledWith('worktree-base', expect.stringContaining('in-place: switched'));
   });
 
+  it('setup re-checks readiness, refusing a checkout dirtied after the preflight', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    expect(await checkInPlaceCheckout(repoRoot)).toBeNull();
+    await writeFile(join(repoRoot, 'README.md'), 'changed\n');
+    await expect(setupInPlaceCheckout(repoRoot, 'factory/3-z')).rejects.toThrow('M README.md');
+    expect(await git(repoRoot, 'branch', '--show-current')).toBe('main');
+  });
+
   it('refuses when the factory branch already exists locally and deletes nothing', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     await git(repoRoot, 'branch', 'factory/1-x');

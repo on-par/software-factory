@@ -40,7 +40,6 @@ const readFixture = (name: string) =>
 const jsonFixture = readFixture('run-json.jsonl');
 const emptyFinalStepFixture = readFixture('truncated-empty-final-step.jsonl');
 
-// Returns each stdout in turn and records the prompt file each call received.
 function sequenceExec(stdouts: string[]) {
   const calls: { cmd: string; stdin?: string }[] = [];
   const fn = async (cmd: string) => {

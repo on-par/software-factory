@@ -52,9 +52,16 @@ describe('triageCheckFailure (#3371)', () => {
   });
 
   it.each([['AssertionError: expected 1 to be 2'], ["Cannot find module 'left-pad'"], [''], ['read econnreset']])(
-    'classes %j as code',
+    'classes %j as code (Cannot find module is an undeclared dependency, not infra)',
     (details) => {
       expect(triageCheckFailure(fail(details))).toEqual({ class: 'code' });
+    },
+  );
+
+  it.each(['connect ECONNREFUSED 127.0.0.1:3100', 'Error: write EPIPE'])(
+    "classes %s as code, since it is often the lane's own app not starting",
+    (line) => {
+      expect(triageCheckFailure(fail(line))).toEqual({ class: 'code' });
     },
   );
 

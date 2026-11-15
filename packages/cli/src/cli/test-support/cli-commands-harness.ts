@@ -25,8 +25,12 @@ import {
   savedEnv,
   trackEnv,
 } from './cli-commands-state.js';
+import { captureConsole } from './console-capture.js';
 
 export * from './cli-commands-state.js';
+
+let logLines: string[] = [];
+let errLines: string[] = [];
 
 export let exitSpy: any;
 export let logSpy: any;
@@ -212,8 +216,8 @@ export function installCliCommandsHarness(): void {
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
       throw new ExitError(code ?? 0);
     }) as any);
-    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ({ spy: logSpy, lines: logLines } = captureConsole('log'));
+    ({ spy: errSpy, lines: errLines } = captureConsole('error'));
   });
 
   afterEach(async () => {
@@ -231,8 +235,8 @@ export function installCliCommandsHarness(): void {
 }
 
 export function logged(): string {
-  return logSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+  return logLines.join('\n');
 }
 export function errored(): string {
-  return errSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+  return errLines.join('\n');
 }

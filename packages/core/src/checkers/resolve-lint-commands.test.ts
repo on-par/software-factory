@@ -60,7 +60,7 @@ describe('resolveLintCommands', () => {
     expect(await resolveLintCommands(makeContext(worktree))).toEqual([]);
   });
 
-  it('accepts a bare { worktree } source', async () => {
+  it('accepts a bare { worktree } source so BUILD and doctor can resolve without a full CheckerContext', async () => {
     const worktree = await makeWorktree({ 'package.json': lintPkg });
 
     expect(await resolveLintCommands({ worktree })).toEqual([{ label: 'lint', argv: ['npm', 'run', 'lint'] }]);

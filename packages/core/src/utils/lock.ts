@@ -73,7 +73,7 @@ function observeLock(lockDir: string): LockObservation | null {
 
 const STEAL_ARBITER_SUFFIX = '.steal';
 
-function reapArbiterOfDeadStealer(arbiterDir: string, graceMs: number): void {
+function reapStaleArbiter(arbiterDir: string, graceMs: number): void {
   const arbiter = observeLock(arbiterDir);
   if (arbiter !== null && Date.now() - arbiter.mtimeMs > graceMs) {
     rmSync(arbiterDir, { recursive: true, force: true });
@@ -87,7 +87,7 @@ function stealStaleLock(lockDir: string, observed: LockObservation, graceMs: num
     mkdirSync(arbiterDir);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    reapArbiterOfDeadStealer(arbiterDir, graceMs);
+    reapStaleArbiter(arbiterDir, graceMs);
     return false;
   }
 

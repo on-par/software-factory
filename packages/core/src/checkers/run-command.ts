@@ -2,8 +2,6 @@ import { checkerParentEnv } from '../environment/checker-env.js';
 import { openCommandCapture } from '../command-output/capture.js';
 import { type CommandResult, runCommand, type RunCommandOptions } from '../utils/command-runner.js';
 
-/** Orchestration-only variables: the run-config snapshot plus the supervisor's merge/ship flags.
- * They must never change a repo's verification result (#3428). */
 export const VERIFICATION_SCRUBBED_ENV_VARS = [
   'FACTORY_RUN_CONFIG_JSON',
   'FACTORY_RUN_CONFIG_ORIGIN',
@@ -13,9 +11,6 @@ export const VERIFICATION_SCRUBBED_ENV_VARS = [
   'FACTORY_SKIP_CI',
 ] as const;
 
-/** Checker commands start from the env allow-list (#1590), so host secrets never reach agent-written scripts.
- * The accepted snapshot and merge flags belong to orchestration, not the repository being checked.
- * An explicit undefined survives the command runner's parent-env merge as a deletion. */
 export async function runVerificationCommand(
   argv: readonly string[],
   options: RunCommandOptions,

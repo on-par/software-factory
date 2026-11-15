@@ -32,7 +32,6 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
   return (await execFile('git', args, { cwd })).stdout.trim();
 }
 
-/** Repo with commit A (base) then commit B (head) and an uncommitted file. */
 async function makeRepo(): Promise<{ repo: string; shaA: string; shaB: string }> {
   const repo = await mkdtemp(join(tmpdir(), 'baseline-repo-'));
   tempDirs.add(repo);
@@ -175,7 +174,7 @@ describe('compareBaseline', () => {
 });
 
 describe('runBaselineCheckers', () => {
-  it('runs in an isolated detached worktree at the base SHA and cleans up', async () => {
+  it('runs in an isolated detached worktree at the base SHA, never changes the lane worktree, and cleans up', async () => {
     const { repo, shaA, shaB } = await makeRepo();
     const seen: any = {};
     let parent = '';
@@ -265,7 +264,6 @@ describe('runBaselineCheckers', () => {
     expect(report.checkers.map((c) => c.verdict)).toEqual(['not-run']);
   });
   describe('dependency install (#2576)', () => {
-    /** Repo whose base commit is an npm package with a lockfile. */
     async function makeJsRepo(): Promise<{ repo: string; sha: string }> {
       const repo = await mkdtemp(join(tmpdir(), 'baseline-js-'));
       tempDirs.add(repo);
@@ -279,7 +277,6 @@ describe('runBaselineCheckers', () => {
       return { repo, sha: await git(repo, 'rev-parse', 'HEAD') };
     }
 
-    /** Real git; any other command is recorded and answered with `exitCode`. */
     function stubInstall(exitCode: number) {
       const installs: Array<{ argv: string[]; cwd?: string; env?: NodeJS.ProcessEnv }> = [];
       const order: string[] = [];
@@ -323,7 +320,7 @@ describe('runBaselineCheckers', () => {
       expect(installs[0].env).toBe(env);
     });
 
-    it('reports an error, runs no checker and caches nothing when the install fails', async () => {
+    it('reports an error, runs no checker and caches nothing when the install fails, since that says nothing about the base code', async () => {
       const { repo, sha } = await makeJsRepo();
       const { runCommandStub } = stubInstall(1);
       const dir = await mkdtemp(join(tmpdir(), 'baseline-cache-'));
@@ -353,14 +350,13 @@ describe('runBaselineCheckers', () => {
     });
   });
 
-  describe('cache (#1926)', () => {
+  describe('cache (#1926): issues sharing a base SHA reuse its base results instead of re-running slow checkers', () => {
     const cacheFilePath = async () => {
       const dir = await mkdtemp(join(tmpdir(), 'baseline-cache-'));
       tempDirs.add(dir);
       return join(dir, 'baseline-cache.json');
     };
 
-    /** Records runCheckers filters and git commands; runCheckers returns FAIL for every filter. */
     function recorder() {
       const filters: string[][] = [];
       const commands: string[][] = [];

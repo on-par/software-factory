@@ -47,18 +47,13 @@ const CONTRACT_MODELS_CONFIG: ModelsConfig = {
 
 export interface HarnessContractScenario {
   harness: CodingHarness;
-  /** Optional overrides merged over the kit's default request. */
   request?: Partial<HarnessRequest>;
 }
 
 export interface HarnessContractScenarios {
-  /** Must resolve with non-empty output. */
   success(): HarnessContractScenario;
-  /** Must reject with HarnessError reason 'timeout'. */
   timeout(): HarnessContractScenario;
-  /** Must reject with HarnessError reason 'empty_response'. */
   emptyOutput(): HarnessContractScenario;
-  /** Must reject with a HarnessError carrying any valid classified reason. */
   failure(): HarnessContractScenario;
 }
 
@@ -67,9 +62,6 @@ export interface HarnessContractCase {
   run(): Promise<void>;
 }
 
-/** Builds a default HarnessRequest against a minimal single-model registry.
- *  Real-harness suites (#184+) will need to point `model` at their own
- *  stubbed registry via `overrides`. */
 export function makeContractRequest(overrides: Partial<HarnessRequest> = {}): HarnessRequest {
   return {
     model: 'contract-model',

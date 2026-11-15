@@ -68,9 +68,7 @@ async function runCodex(
   );
   try {
     await harness.run(makeContractRequest({ model: 'codex-model', registry, ...overrides }));
-  } catch {
-    // exec failure is the point of one test
-  }
+  } catch {}
   return run;
 }
 

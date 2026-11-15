@@ -108,11 +108,11 @@ describe('BUILD prompt lint surfaces (#2830)', () => {
 
   it('drift guard: BUILD renders exactly the argv lintChecker runs', async () => {
     const worktree = await fixture({ 'package.json': lintPkg, 'tsconfig.json': '{}' });
-    const argvRecordingShimsBin = await mkdtemp(join(tmpdir(), 'build-surfaces-bin-'));
-    tempDirs.add(argvRecordingShimsBin);
-    const log = join(argvRecordingShimsBin, 'argv.log');
+    const bin = await mkdtemp(join(tmpdir(), 'build-surfaces-bin-'));
+    tempDirs.add(bin);
+    const log = join(bin, 'argv.log');
     for (const tool of ['npm', 'npx']) {
-      const shim = join(argvRecordingShimsBin, tool);
+      const shim = join(bin, tool);
       await writeFile(shim, `#!/bin/sh\necho "${tool} $*" >> "${log}"\n`);
       await chmod(shim, 0o755);
     }
@@ -120,7 +120,7 @@ describe('BUILD prompt lint surfaces (#2830)', () => {
       worktree,
       specPath: join(worktree, 'x.md'),
       constitutionBody: '',
-      env: { PATH: `${argvRecordingShimsBin}:${process.env.PATH ?? ''}` },
+      env: { PATH: `${bin}:${process.env.PATH ?? ''}` },
     });
     const checkerCmds = (await readFile(log, 'utf8')).trim().split('\n');
     const prompt = await runPrompt(worktree);

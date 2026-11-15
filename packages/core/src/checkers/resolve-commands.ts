@@ -1,6 +1,3 @@
-// src/checkers/resolve-commands.ts — the build/test/lint commands CHECK runs for a worktree. A command the repo
-// declares under `checks` in its config file wins; otherwise each resolver falls back to file-based guesses.
-
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -17,18 +14,14 @@ export interface PackageJson {
   [k: string]: unknown;
 }
 
-/** Worktree facts the lint and compile resolvers read — a subset of CheckerContext so BUILD and doctor can call them with just `{ worktree }`. */
 export interface LintCommandSource {
   worktree: string;
   packageJson?: PackageJson | null;
   probe?: WorktreeProbe;
-  /** Test seam; when undefined, the resolvers read `checks` from the worktree's repo config file. */
   checks?: ChecksConfig | null;
 }
-/** Source label for a command declared under `checks`: the repo config file, relative to the repo root. */
 export type ChecksConfigSource = `.factory/${string}`;
 
-/** The repo-declared command for one check kind, or null. Throws on an invalid config file. */
 function declaredCheck(ctx: LintCommandSource, kind: CheckKind): { argv: string[]; source: ChecksConfigSource } | null {
   if (ctx.checks !== undefined) {
     const argv = checkCommandArgv(ctx.checks, kind);
@@ -36,13 +29,10 @@ function declaredCheck(ctx: LintCommandSource, kind: CheckKind): { argv: string[
   }
   const argv = checkCommandArgv(loadRepoConfig(ctx.worktree)?.checks, kind);
   if (!argv) return null;
-  // A run config snapshot is read instead of the worktree's file (#3600): label the file it came from.
   const file = runConfigSource() === undefined ? getFactoryPaths(ctx.worktree).config : runConfigOrigin();
   return { argv, source: `.factory/${file === undefined ? 'config (run config snapshot)' : basename(file)}` };
 }
 
-/** Where the resolvers look for `checks`, for SKIP details (#3600): the run config snapshot, or the
- *  config file under `ctx.worktree` (`checkout` names that directory: the worktree for CHECK, the source checkout for doctor). */
 export function describeChecksProbe(ctx: LintCommandSource, checkout = 'worktree'): string {
   if (ctx.checks !== undefined) return 'the checks passed to CHECK';
   if (runConfigSource() !== undefined) {
@@ -74,17 +64,13 @@ export async function resolveCompileCommand(ctx: LintCommandSource): Promise<Com
 }
 export type TestsRunner = 'config' | 'verify' | 'verify-ps1' | 'npm' | 'pytest' | 'none';
 
-/** The command the `tests` checker runs for a worktree; argv is [] when runner is 'none'. */
 export interface TestsCommand {
   runner: TestsRunner;
   argv: string[];
-  /** Label used in FAIL details and the output-log name (`checks.test`, `verify.sh`, `verify.ps1`, `npm test`, `pytest`, `''` for none). */
   label: string;
-  /** Config file the command was declared in; set only for runner 'config'. */
   source?: ChecksConfigSource;
 }
 
-/** The CHECK command for a repo whose gate is scripts/verify.ps1; BUILD renders the same argv (#3471). */
 export const VERIFY_PS1_ARGV = ['pwsh', '-NoProfile', '-NonInteractive', '-File', 'scripts/verify.ps1'] as const;
 
 export async function resolveTestsCommand(ctx: LintCommandSource): Promise<TestsCommand> {
@@ -107,16 +93,12 @@ export async function resolveTestsCommand(ctx: LintCommandSource): Promise<Tests
   };
 }
 
-/** One lint-family command the `lint` checker runs; label names it in details and the log file. */
 export interface LintCommand {
   label: 'checks.lint' | 'lint' | 'tsc';
   argv: string[];
-  /** Config file the command was declared in; set only for label 'checks.lint'. */
   source?: ChecksConfigSource;
 }
 
-/** Lint commands that apply, in run order. A declared `checks.lint` replaces the guesses; otherwise
- *  `npm run lint` (package.json lint script), then `npx tsc --noEmit` (tsconfig.json). */
 export async function resolveLintCommands(ctx: LintCommandSource): Promise<LintCommand[]> {
   const declared = declaredCheck(ctx, 'lint');
   if (declared) return [{ label: 'checks.lint', ...declared }];
@@ -133,7 +115,7 @@ async function loadPackageJson(worktree: string): Promise<PackageJson | null> {
   try {
     raw = await readFile(join(worktree, 'package.json'), 'utf-8');
   } catch (e: any) {
-    if (e?.code === 'ENOENT') return null; // no package.json is a legitimate skip, not an error
+    if (e?.code === 'ENOENT') return null;
     throw e;
   }
   return JSON.parse(raw) as PackageJson;

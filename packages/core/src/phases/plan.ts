@@ -595,8 +595,7 @@ async function planPhaseImpl(opts: {
   const adrReader = createFsReader({
     root: worktree,
     onDegrade: (event) => {
-      const repoHasNoAdrDir = event.reason === 'not-found';
-      if (repoHasNoAdrDir) return;
+      if (event.reason === 'not-found') return;
       log('adr_read_degraded', `adr read degraded: ${event.operation} ${event.path} (${event.reason})`);
     },
   });
@@ -699,8 +698,7 @@ async function planPhaseImpl(opts: {
         };
       }
 
-      const plannerWroteNoSpecFile = !existsSync(specPath);
-      if (plannerWroteNoSpecFile) {
+      if (!existsSync(specPath)) {
         await writeSpec(specPath, { body: result.output });
       }
 

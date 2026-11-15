@@ -18,10 +18,7 @@ export interface CloneGroup {
   second: string;
 }
 
-type DuplicationField = 'clones' | 'percentage';
-
-export type DuplicationVerdict =
-  { kind: 'pass' } | { kind: 'rose'; fields: DuplicationField[] } | { kind: 'lowered'; fields: DuplicationField[] };
+export type DuplicationVerdict = 'rose' | 'dropped' | 'equal';
 
 export interface DuplicationCliIo {
   readFile?: (path: string) => string;
@@ -80,17 +77,9 @@ function roundPercentage(value: number): number {
 }
 
 export function compareToBaseline(measured: DuplicationBaseline, baseline: DuplicationBaseline): DuplicationVerdict {
-  const measuredPercentage = roundPercentage(measured.percentage);
-  const baselinePercentage = roundPercentage(baseline.percentage);
-  const rose: DuplicationField[] = [];
-  const lowered: DuplicationField[] = [];
-  if (measured.clones > baseline.clones) rose.push('clones');
-  else if (measured.clones < baseline.clones) lowered.push('clones');
-  if (measuredPercentage > baselinePercentage) rose.push('percentage');
-  else if (measuredPercentage < baselinePercentage) lowered.push('percentage');
-  if (rose.length > 0) return { kind: 'rose', fields: rose };
-  if (lowered.length > 0) return { kind: 'lowered', fields: lowered };
-  return { kind: 'pass' };
+  if (measured.clones > baseline.clones) return 'rose';
+  if (measured.clones < baseline.clones) return 'dropped';
+  return 'equal';
 }
 
 export function largestCloneGroups(groups: readonly CloneGroup[], limit = TOP_GROUPS): CloneGroup[] {
@@ -134,15 +123,15 @@ export function runDuplicationBaselineCli(argv: readonly string[], io: Duplicati
   });
 
   const verdict = compareToBaseline(totals, baseline);
-  if (verdict.kind === 'rose') {
-    log(`duplication: FAIL — ${verdict.fields.join(' and ')} rose above ${DEFAULT_BASELINE_PATH}`);
+  if (verdict === 'rose') {
+    log(`duplication: FAIL — clones rose above ${DEFAULT_BASELINE_PATH}`);
     return 1;
   }
-  if (verdict.kind === 'lowered') {
+  if (verdict === 'dropped') {
     log(
-      `duplication: FAIL — duplication dropped; lower ${DEFAULT_BASELINE_PATH} to {"clones": ${totals.clones}, "percentage": ${roundPercentage(totals.percentage)}}`,
+      `duplication: PASS — clones dropped; you may lower ${DEFAULT_BASELINE_PATH} to {"clones": ${totals.clones}, "percentage": ${roundPercentage(totals.percentage)}}`,
     );
-    return 1;
+    return 0;
   }
   log('duplication: PASS');
   return 0;

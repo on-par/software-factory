@@ -29,7 +29,7 @@ The factory's own CHECK phase runs `bash scripts/verify.sh --no-e2e` in the buil
 7. `npm run typecheck`
 8. `npm run lint` — Oxlint, type-aware, `--deny-warnings`
 9. `npm run knip` — dead code and unused dependencies (default and `--production` runs) against the shrink-only `knip-baseline.json`; `npm run knip:raw` shows the human-readable report
-10. `npm run duplication` — jscpd clones against the shrink-only `duplication-baseline.json`
+10. `npm run duplication` — jscpd clones against `duplication-baseline.json`; fails only when clones rise, a drop prints suggested lower numbers and passes, percentage is informational
 11. Tests:
     - full path: `npm run test` (Vitest with coverage thresholds), then `npm run coverage-ratchet`
     - `--no-e2e`: `npm run test` (Vitest with coverage thresholds), no ratchet
@@ -102,7 +102,7 @@ Local `verify.sh` does not enforce this.
 | `lint`                                    | Fix the code. Warnings fail the build too.                                                                                                    |
 | `lint` / test: `max-lines`                | See [Max-lines guard](#max-lines-guard).                                                                                                      |
 | `knip`                                    | Fix the finding. If you fixed a baselined one, delete its key from knip-baseline.json. Never add keys for new findings.                       |
-| `duplication`                             | rose: deduplicate, preferring existing test-support or shared harness helpers; dropped: set duplication-baseline.json to the printed numbers. |
+| `duplication`                             | Clones rose: deduplicate via existing test or harness helpers. A drop passes and prints suggested lower numbers; percentage is informational. |
 | `test` threshold                          | Add tests for the uncovered lines the report names.                                                                                           |
 | `coverage-ratchet`                        | Raise the named threshold in `vitest.config.ts` to the suggested value.                                                                       |
 | `eval --stub`                             | See the `run-evals` skill.                                                                                                                    |

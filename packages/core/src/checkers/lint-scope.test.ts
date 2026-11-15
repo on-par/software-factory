@@ -1,5 +1,3 @@
-// src/checkers/lint-scope.test.ts — lint scoping: profiles, file lists, findings, diff and merge-base worktree (#1898)
-
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -137,7 +135,6 @@ afterEach(() => dirs.cleanup());
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
 
-/** A repo with origin/main at the first commit and one later change set. */
 async function makeRepo(): Promise<string> {
   const dir = await dirs.make('lint-scope-');
   git(dir, 'init', '-q', '-b', 'main');

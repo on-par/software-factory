@@ -48,7 +48,6 @@ const PASS: CheckSummary = { results: [], failures: 0, passes: 0, skips: 0, tota
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' });
 
-/** A worktree plus a host whose global git config sets init.defaultBranch=main. */
 async function setup() {
   const host = await tempDirs.make('hermetic-git-host-');
   const globalConfig = join(host, 'gitconfig');
@@ -63,7 +62,6 @@ async function setup() {
   return { worktree, specPath, host };
 }
 
-/** Runs CHECK with an injected checker that runs `argv` under ctx.env and records its stdout. */
 async function runUnderCheck(
   hermeticGit: boolean | undefined,
   argv: string[],
@@ -96,7 +94,7 @@ async function runUnderCheck(
 }
 
 describe('hermetic git for checker commands (#3272)', () => {
-  it('checker commands do not see the host global git config (#1886, PR #3265)', async () => {
+  it('checker commands do not see the host global git config, so a bare init without -b defaults to master (#1886, PR #3265)', async () => {
     const { worktree, specPath, host } = await setup();
     const { outputs, logs } = await runUnderCheck(
       undefined,
@@ -107,7 +105,6 @@ describe('hermetic git for checker commands (#3272)', () => {
     expect(outputs).toEqual(['']);
     expect(logs.filter((m) => m.startsWith('hermetic git: on'))).toHaveLength(1);
 
-    // The #1886 fixture: `git init --bare` without -b, then push main and clone.
     const origin = join(host, 'origin.git');
     const src = join(host, 'src');
     const clone = join(host, 'clone');

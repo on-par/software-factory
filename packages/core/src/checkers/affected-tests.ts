@@ -1,15 +1,11 @@
-// src/checkers/affected-tests.ts — opt-in affected-test selection for CHECK rework rounds (#3260)
-
 import type { TestsAffectedConfig } from '../config/tests-section.js';
 import { globToRegExp } from '../review/floor.js';
 import type { Constitution } from '../types/index.js';
 import { defaultDiffRunner, type DiffRunner } from './design-smells.js';
 import { tokenizeEvidenceCommand } from './evidence-allowlist.js';
 
-/** More changed files than this and the affected list is too broad to be worth narrowing. */
 export const MAX_AFFECTED_FILES = 200;
 
-/** Manifest, lockfile, test-runner config, CI and migration paths: any change here runs the full suite. */
 export const AFFECTED_TESTS_BUILTIN_TRIGGERS: readonly string[] = [
   '**/package.json',
   '**/package-lock.json',
@@ -52,7 +48,6 @@ export type AffectedTestsResolution =
   | { kind: 'affected'; command: string; argv: string[]; fileCount: number }
   | { kind: 'full'; reason: AffectedFullReason; trigger?: string; fileCount: number };
 
-/** Always single-quotes `path` for POSIX shells; an embedded `'` becomes `'\''`. */
 export function shellQuotePath(path: string): string {
   return `'${path.replaceAll("'", "'\\''")}'`;
 }
@@ -91,7 +86,6 @@ export function resolveAffectedTestsCommand(input: {
   };
 }
 
-/** Files changed since `diffBase`: committed, uncommitted and untracked. Null when git cannot list them. */
 export async function listChangedFiles(
   worktree: string,
   diffBase: string,
@@ -112,7 +106,6 @@ export async function listChangedFiles(
   return [...paths].sort();
 }
 
-/** The `affected_tests` event message for one selection. */
 export function describeAffectedResolution(r: AffectedTestsResolution, round: number): string {
   const head = `affected tests (round ${round}):`;
   if (r.kind === 'affected') return `${head} affected — ${r.command} (${r.fileCount} files)`;
