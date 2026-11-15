@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { isDeepStrictEqual } from 'node:util';
+
+import { describe, expect, it } from 'vitest';
 
 import {
   classifyHeadChecks,
@@ -98,34 +100,39 @@ describe('fetchRequiredChecksVerdict', () => {
     protection?: unknown;
     rules?: unknown;
     runs?: Array<ReturnType<typeof run> & { check_suite?: { id: number } | null }>;
-    workflowRuns?: Array<{
-      check_suite_id?: number;
-      name?: string | null;
-      status?: string;
-      conclusion?: string | null;
-    }>;
+    workflowRuns?: Array<Record<string, unknown>> | Error;
   }) {
     const settle = (v: unknown) => async () => {
       if (v instanceof Error) throw v;
       return { data: v };
     };
-    const listForRef = vi.fn(settle({ check_runs: opts.runs ?? [] }));
-    const listWorkflowRunsForRepo = vi.fn(settle({ workflow_runs: opts.workflowRuns ?? [] }));
     const octokit = {
       rest: {
         repos: {
-          getStatusChecksProtection: vi.fn(settle(opts.protection ?? httpError(404))),
-          getBranchRules: vi.fn(settle(opts.rules ?? httpError(404))),
+          getStatusChecksProtection: settle(opts.protection ?? httpError(404)),
+          getBranchRules: settle(opts.rules ?? httpError(404)),
         },
-        checks: { listForRef },
-        actions: { listWorkflowRunsForRepo },
+        checks: {
+          listForRef: async (params: unknown) => {
+            const expected = { owner: 'o', repo: 'r', ref: args.sha, per_page: 100, filter: 'latest' };
+            return { data: { check_runs: isDeepStrictEqual(params, expected) ? (opts.runs ?? []) : [] } };
+          },
+        },
+        actions: {
+          listWorkflowRunsForRepo: async (p: { head_sha?: string; event?: string }) => {
+            if (opts.workflowRuns instanceof Error) throw opts.workflowRuns;
+            return {
+              data: { workflow_runs: p.head_sha === args.sha && p.event === 'push' ? (opts.workflowRuns ?? []) : [] },
+            };
+          },
+        },
       },
     } as never;
-    return { octokit, listForRef, listWorkflowRunsForRepo };
+    return { octokit };
   }
 
   it('unions ruleset contexts when protection is 404', async () => {
-    const { octokit, listForRef } = fake({
+    const { octokit } = fake({
       rules: [
         { type: 'deletion' },
         { type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'ci' }] } },
@@ -133,7 +140,6 @@ describe('fetchRequiredChecksVerdict', () => {
       runs: [run('ci', 'completed', 'success')],
     });
     expect((await fetchRequiredChecksVerdict(octokit, args)).green).toBe(true);
-    expect(listForRef).toHaveBeenCalledWith({ owner: 'o', repo: 'r', ref: args.sha, per_page: 100, filter: 'latest' });
   });
 
   it('uses protection contexts and checks when rulesets are 404', async () => {
@@ -176,7 +182,7 @@ describe('fetchRequiredChecksVerdict', () => {
     });
 
     it('is green on push-suite runs only, ignoring a failed schedule run', async () => {
-      const { octokit, listWorkflowRunsForRepo } = fake({
+      const { octokit } = fake({
         runs: [
           inSuite('ci', 'success', 1),
           inSuite('gitleaks', 'success', 1),
@@ -189,9 +195,6 @@ describe('fetchRequiredChecksVerdict', () => {
         reason: 'all 2 push-triggered checks succeeded',
         basis: 'push checks: ci, gitleaks',
       });
-      expect(listWorkflowRunsForRepo).toHaveBeenCalledWith(
-        expect.objectContaining({ head_sha: args.sha, event: 'push' }),
-      );
     });
 
     it('is not green when a push-suite run failed', async () => {
@@ -228,25 +231,24 @@ describe('fetchRequiredChecksVerdict', () => {
         runs: [inSuite('drift', 'success', 1), inSuite('ios', 'success', 1), inSuite('release', 'failure', 2)],
         workflowRuns: [done('CI', 1, 'success'), done('Release', 2, 'failure')],
       });
-      const spy = vi.fn();
+      const failures: unknown[] = [];
       const verdict = await fetchRequiredChecksVerdict(octokit, args, {
         pushFallback: true,
-        onPushWorkflowFailed: spy,
+        onPushWorkflowFailed: (f) => failures.push(f),
       });
       expect(verdict.green).toBe(true);
-      expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy).toHaveBeenCalledWith({ workflow: 'Release', conclusion: 'failure', sha: args.sha });
+      expect(failures).toEqual([{ workflow: 'Release', conclusion: 'failure', sha: args.sha }]);
     });
 
     it('an explicit baseHealth.checks allowlist decides the verdict and names a failed contract run', async () => {
-      const { octokit, getProtection } = (() => {
-        const f = fake({ runs: [inSuite('contract', 'failure', 1), inSuite('ios', 'success', 1)] });
-        return { octokit: f.octokit, getProtection: (f.octokit as any).rest.repos.getStatusChecksProtection };
-      })();
+      const { octokit } = fake({
+        protection: httpError(500),
+        rules: httpError(500),
+        runs: [inSuite('contract', 'failure', 1), inSuite('ios', 'success', 1)],
+      });
       expect(
         await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true, checks: ['contract', 'ios'] }),
       ).toMatchObject({ green: false, reason: 'contract failure' });
-      expect(getProtection).not.toHaveBeenCalled();
       const ok = fake({ runs: [inSuite('contract', 'success', 1), inSuite('ios', 'success', 1)] });
       expect(
         (await fetchRequiredChecksVerdict(ok.octokit, args, { pushFallback: true, checks: ['contract', 'ios'] })).basis,
@@ -259,14 +261,13 @@ describe('fetchRequiredChecksVerdict', () => {
         runs: [inSuite('ci', 'success', 1), inSuite('release', 'failure', 2)],
         workflowRuns: [done('CI', 1, 'success'), done('Release', 2, 'failure')],
       });
-      const spy = vi.fn();
+      const failures: unknown[] = [];
       const verdict = await fetchRequiredChecksVerdict(octokit, args, {
         pushFallback: true,
-        onPushWorkflowFailed: spy,
+        onPushWorkflowFailed: (f) => failures.push(f),
       });
       expect(verdict.green).toBe(true);
-      expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ workflow: 'Release' }));
+      expect(failures).toMatchObject([{ workflow: 'Release' }]);
     });
 
     it('fails closed naming the missing code-health checks when there is no allowlist, no required checks and no CI push workflow', async () => {
@@ -291,34 +292,29 @@ describe('fetchRequiredChecksVerdict', () => {
           done('Deploy', 5, 'timed_out'),
         ],
       });
-      const spy = vi.fn();
+      const failures: unknown[] = [];
       const verdict = await fetchRequiredChecksVerdict(octokit, args, {
         pushFallback: true,
-        onPushWorkflowFailed: spy,
+        onPushWorkflowFailed: (f) => failures.push(f),
       });
       expect(verdict.green).toBe(true);
-      expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ workflow: 'Deploy', conclusion: 'timed_out' }));
+      expect(failures).toEqual([{ workflow: 'Deploy', conclusion: 'timed_out', sha: args.sha }]);
     });
 
     it('without pushFallback still reports no required checks and skips the workflow-run lookup', async () => {
-      const { octokit, listWorkflowRunsForRepo } = fake({
-        runs: [inSuite('ci', 'success', 1)],
-        workflowRuns: [{ check_suite_id: 1 }],
-      });
+      const { octokit } = fake({ runs: [inSuite('ci', 'success', 1)], workflowRuns: httpError(500) });
       expect((await fetchRequiredChecksVerdict(octokit, args)).reason).toBe('no required checks configured');
-      expect(listWorkflowRunsForRepo).not.toHaveBeenCalled();
     });
 
     it('uses required checks when configured, even with pushFallback', async () => {
-      const { octokit, listWorkflowRunsForRepo } = fake({
+      const { octokit } = fake({
         protection: { contexts: ['ci'] },
         runs: [inSuite('ci', 'success', 2)],
+        workflowRuns: httpError(500),
       });
       expect((await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).basis).toBe(
         'required checks: ci',
       );
-      expect(listWorkflowRunsForRepo).not.toHaveBeenCalled();
     });
   });
 });
@@ -453,12 +449,15 @@ describe('classifyHeadChecks and warnNoBranchProtectionOnce (#3208)', () => {
       basis: 'all-on-head',
     });
 
-    const warn = vi.fn();
+    const warnings: string[] = [];
+    const warn = (m: string) => void warnings.push(m);
     expect(warnNoBranchProtectionOnce('acme/once', 'main', warn)).toBe(true);
     expect(warnNoBranchProtectionOnce('acme/once', 'main', warn)).toBe(false);
     expect(warnNoBranchProtectionOnce('acme/other', 'main', warn)).toBe(true);
-    expect(warn).toHaveBeenCalledTimes(2);
-    expect(warn).toHaveBeenNthCalledWith(1, 'no branch protection on acme/once@main; using all checks on head');
+    expect(warnings).toEqual([
+      'no branch protection on acme/once@main; using all checks on head',
+      'no branch protection on acme/other@main; using all checks on head',
+    ]);
   });
 
   it('is pending with zero runs and failed on any non-passing completed run', () => {

@@ -957,10 +957,14 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       data: { state: 'open', labels: [] },
     }),
   ) {
-    const pullsList = vi.fn(async (_params: unknown) => result());
-    const issuesGet = vi.fn(async (_params: unknown) => issueResult());
-    const octokit = asSweepOctokit({ rest: { pulls: { list: pullsList }, issues: { get: issuesGet } } });
-    return { octokit, pullsList, issuesGet };
+    const [pullsParams, issueParams]: unknown[][] = [[], []];
+    const octokit = asSweepOctokit({
+      rest: {
+        pulls: { list: async (p: unknown) => (pullsParams.push(p), result()) },
+        issues: { get: async (p: unknown) => (issueParams.push(p), issueResult()) },
+      },
+    });
+    return { octokit, pullsParams, issueParams };
   }
 
   it('removes a worktree whose branch has a merged PR on GitHub with zero local push evidence', async () => {
@@ -968,7 +972,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const wtName = `${basename(root)}-factory-ship-it-21`;
     const wt = makeWorktree(wtName);
 
-    const { octokit, pullsList } = fakeOctokit(async () => ({
+    const { octokit, pullsParams } = fakeOctokit(async () => ({
       data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
     }));
     const commands: string[] = [];
@@ -998,12 +1002,9 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     );
     expect(report.removed).toHaveLength(1);
     expect(report.removed[0].reason).toBe('merged');
-    expect(pullsList).toHaveBeenCalledWith({
-      owner: 'owner',
-      repo: 'example-app',
-      state: 'all',
-      head: 'owner:factory/21-merged',
-    });
+    expect(pullsParams).toEqual([
+      { owner: 'owner', repo: 'example-app', state: 'all', head: 'owner:factory/21-merged' },
+    ]);
     expect(
       commands.some(
         (c) =>
@@ -1302,7 +1303,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const wtName = `${basename(root)}-factory-ship-it-28c`;
     const wt = makeWorktree(wtName);
 
-    const { octokit, pullsList } = fakeOctokit(async () => ({
+    const { octokit, pullsParams } = fakeOctokit(async () => ({
       data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
     }));
     const runCommand = async (cmd: string) => {
@@ -1324,7 +1325,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     };
 
     const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand, octokit });
-    expect(pullsList).not.toHaveBeenCalled();
+    expect(pullsParams).toEqual([]);
     expect(report.removed).toHaveLength(1);
     expect(report.removed[0].reason).toBe('merged');
   });
@@ -1366,7 +1367,9 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const wtName = `${basename(root)}-factory-ship-it-8`;
     const wt = makeWorktree(wtName);
 
-    const runCommand = vi.fn(async (cmd: string) => {
+    const order: string[] = [];
+    const runCommand = async (cmd: string) => {
+      order.push(cmd);
       if (cmd === 'git worktree list --porcelain') {
         return {
           stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/8-feature\n\n`,
@@ -1382,25 +1385,21 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         return { stdout: 'bbb\n' };
       }
       return { stdout: '' };
-    });
-    const sbxExec = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
+    };
     const sandbox = {
       runtime: 'docker-sandbox' as const,
       authPaths: [],
       allowHosts: [],
-      exec: sbxExec,
+      exec: async (cmd: string) => (order.push(`sbx:${cmd}`), { stdout: '', stderr: '' }),
       isAvailable: () => true,
     };
 
     const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand, sandbox });
     expect(report.removed).toHaveLength(1);
-    expect(sbxExec).toHaveBeenCalledWith(expect.stringContaining('sbx rm --force'), expect.anything());
-
-    const sbxRmOrder = sbxExec.mock.invocationCallOrder[0];
-    const worktreeRemoveCall = runCommand.mock.calls.findIndex(([cmd]) => cmd.includes('worktree remove'));
-    const worktreeRemoveOrder = runCommand.mock.invocationCallOrder[worktreeRemoveCall];
-    expect(worktreeRemoveCall).toBeGreaterThan(-1);
-    expect(sbxRmOrder).toBeLessThan(worktreeRemoveOrder);
+    const sbxRm = order.findIndex((c) => c.startsWith('sbx:') && c.includes('sbx rm --force'));
+    const wtRemove = order.findIndex((c) => !c.startsWith('sbx:') && c.includes('worktree remove'));
+    expect(sbxRm).toBeGreaterThan(-1);
+    expect(wtRemove).toBeGreaterThan(sbxRm);
   });
 
   it('never touches the sandbox when no sandbox descriptor is injected', async () => {
@@ -1439,7 +1438,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-41`);
 
-      const { octokit, issuesGet } = fakeOctokit(
+      const { octokit, issueParams } = fakeOctokit(
         () => ({ data: [{ number: 9, state: 'open' }] }),
         () => ({ data: { state: 'open', labels: [{ name: 'factory:parked' }] } }),
       );
@@ -1460,7 +1459,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       expect(report.removed[0].reason).toBe('issue-parked');
       expect(report.removed[0].branchDeleted).toBe(true);
       expect(commands).toContain("git branch -D 'factory/41-parked'");
-      expect(issuesGet).toHaveBeenCalledWith({ owner: 'owner', repo: 'example-app', issue_number: 41 });
+      expect(issueParams).toEqual([{ owner: 'owner', repo: 'example-app', issue_number: 41 }]);
     });
 
     it('reaps a clean closed-issue worktree but keeps its never-pushed branch', async () => {
@@ -1549,7 +1548,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const legacy = makeWorktree(`${basename(root)}-ship-it-9`);
       const manual = makeWorktree(`${basename(root)}-manual-x`);
 
-      const { octokit, issuesGet } = fakeOctokit(
+      const { octokit, issueParams } = fakeOctokit(
         () => ({ data: [{ number: 3, state: 'open' }] }),
         () => ({ data: { state: 'open', labels: [{ name: 'factory:parked' }] } }),
       );
@@ -1574,7 +1573,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       expect(report.removed[0].reason).toBe('issue-parked');
       expect(report.kept).toBe(0);
       expect(existsSync(manual)).toBe(true);
-      expect(issuesGet).toHaveBeenCalledTimes(1);
+      expect(issueParams).toHaveLength(1);
     });
 
     it('warns and falls back to the PR-state rules when the issue query throws', async () => {
@@ -1758,7 +1757,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const wtA = makeWorktree(`${basename(root)}-factory-ship-it-46`);
       const wtB = makeWorktree(`${basename(root)}-ship-it-46`);
 
-      const { octokit, issuesGet } = fakeOctokit(
+      const { octokit, issueParams } = fakeOctokit(
         () => ({ data: [{ number: 9, state: 'open' }] }),
         () => ({ data: { state: 'closed', labels: [] } }),
       );
@@ -1779,14 +1778,14 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         { runCommand, octokit },
       );
       expect(report.removed).toHaveLength(2);
-      expect(issuesGet).toHaveBeenCalledTimes(1);
+      expect(issueParams).toHaveLength(1);
     });
 
     it('honors a custom branch prefix when parsing lane issue numbers', async () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-lane-47`);
 
-      const { octokit, issuesGet } = fakeOctokit(
+      const { octokit, issueParams } = fakeOctokit(
         () => ({ data: [{ number: 9, state: 'open' }] }),
         () => ({ data: { state: 'closed', labels: [] } }),
       );
@@ -1803,7 +1802,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       );
       expect(report.removed).toHaveLength(1);
       expect(report.removed[0].reason).toBe('issue-closed');
-      expect(issuesGet).toHaveBeenCalledWith({ owner: 'owner', repo: 'example-app', issue_number: 47 });
+      expect(issueParams).toEqual([{ owner: 'owner', repo: 'example-app', issue_number: 47 }]);
     });
   });
 
@@ -1828,7 +1827,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-50`);
 
-      const { octokit, issuesGet } = fakeOctokit(
+      const { octokit, issueParams } = fakeOctokit(
         () => ({ data: [] }),
         () => {
           throw Object.assign(new Error('Not Found'), { status: 404 });
@@ -1845,7 +1844,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       expect(report.issueUnverifiable).toEqual([]);
       expect(report.removed).toEqual([]);
       expect(commands.some((c) => c.includes('worktree remove'))).toBe(false);
-      expect(issuesGet).toHaveBeenCalledWith({ owner: 'owner', repo: 'example-app', issue_number: 50 });
+      expect(issueParams).toEqual([{ owner: 'owner', repo: 'example-app', issue_number: 50 }]);
     });
 
     it('does not flag a worktree whose lane issue exists', async () => {
@@ -2136,7 +2135,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-65`);
 
-      const { octokit, issuesGet } = fakeOctokit(
+      const { octokit, issueParams } = fakeOctokit(
         () => ({ data: [{ number: 6, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
         () => ({ data: { state: 'open', labels: [] } }),
       );
@@ -2151,7 +2150,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       expect(report.removed).toHaveLength(1);
       expect(report.removed[0].reason).toBe('merged');
       expect(report.removed[0].action).toBe('remove');
-      expect(issuesGet).toHaveBeenCalledTimes(1);
+      expect(issueParams).toHaveLength(1);
     });
   });
 

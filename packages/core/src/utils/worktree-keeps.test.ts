@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { findWorktreeKeep, readWorktreeKeeps, removeWorktreeKeep, upsertWorktreeKeep } from './worktree-keeps.js';
 import { createTempDirs } from '../harness/temp-dir.js';
@@ -18,9 +18,9 @@ describe('worktree-keeps store', () => {
 
   it('reads a missing file as empty with no log', () => {
     const file = setup();
-    const log = vi.fn();
-    expect(readWorktreeKeeps(file, log)).toEqual([]);
-    expect(log).not.toHaveBeenCalled();
+    const logs: string[][] = [];
+    expect(readWorktreeKeeps(file, (...args: string[]) => void logs.push(args))).toEqual([]);
+    expect(logs).toEqual([]);
   });
 
   it('upserts, then replaces by issue without duplicating', () => {
@@ -49,10 +49,9 @@ describe('worktree-keeps store', () => {
     const file = setup();
     upsertWorktreeKeep(file, keep(1));
     writeFileSync(file, content);
-    const log = vi.fn();
-    expect(readWorktreeKeeps(file, log)).toEqual([]);
-    expect(log).toHaveBeenCalledTimes(1);
-    expect(log.mock.calls[0][0]).toBe('warn');
+    const logs: string[][] = [];
+    expect(readWorktreeKeeps(file, (...args: string[]) => void logs.push(args))).toEqual([]);
+    expect(logs.map(([level]) => level)).toEqual(['warn']);
   });
 
   it('drops entries with bad fields', () => {
