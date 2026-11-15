@@ -146,7 +146,7 @@ function requestProxy(
         path: '/hello',
         method: 'GET',
         ...options,
-        headers: { host: hostHeader, ...options.headers },
+        headers: Object.assign({ host: hostHeader }, options.headers),
       },
       (res) => {
         let body = '';

@@ -14,7 +14,7 @@
     "prepare": "[ -n \"$CI\" ] || lefthook install",
     "build": "tsc -b && npm run copy-assets --workspace @on-par/factory-config",
     "dev": "npm run dev --workspace @on-par/factory-cli",
-    "lint": "oxlint --type-aware --deny-warnings .",
+    "lint": "oxlint --type-aware --deny-warnings --report-unused-disable-directives-severity=error .",
     "typecheck": "tsc -b && npm run typecheck --workspaces",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

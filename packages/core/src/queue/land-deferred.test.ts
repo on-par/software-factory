@@ -96,7 +96,7 @@ describe('land-deferred file', () => {
     await upsertLandDeferred(file, rec({ issue: 2 }));
     await upsertLandDeferred(file, rec({ issue: 1, deferrals: 2 }));
     const all = await readLandDeferred(file);
-    expect(all.map((r) => [r.issue, r.deferrals]).sort()).toEqual([
+    expect(all.map((r) => [r.issue, r.deferrals]).sort((a, b) => Number(a[0]) - Number(b[0]))).toEqual([
       [1, 2],
       [2, 1],
     ]);

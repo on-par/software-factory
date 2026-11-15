@@ -68,7 +68,7 @@ process.stdout.write(JSON.stringify(lease.port));
       expect(leases).toHaveLength(5);
       expect(new Set(leases.map((l) => l.port)).size).toBe(5);
       expect(new Set(leases.map((l) => l.worktreeId)).size).toBe(5);
-      expect(leases.map((l) => l.port).sort()).toEqual([...printed].sort());
+      expect(leases.map((l) => l.port).sort((x, y) => x - y)).toEqual([...printed].sort((x, y) => x - y));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
