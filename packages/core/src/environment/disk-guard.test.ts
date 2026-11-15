@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { defaultFactoryConfig } from '@on-par/factory-config';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { DiskGuardPolicy } from '../config/disk-policy.js';
 import { FactoryConfigSchema } from '../config/index.js';
@@ -90,7 +90,11 @@ describe('createDiskGuard', () => {
 
   it('FACTORY_MIN_FREE_GB=0 disables the guard even at 0 bytes free', async () => {
     const root = await tmp.make('disk-');
-    const statfs = vi.fn(fake(0));
+    const probed: string[] = [];
+    const statfs = (p: string) => {
+      probed.push(p);
+      return fake(0)();
+    };
     const guard = createDiskGuard(config, {
       repoRoot: root,
       ghRepo: 'o/r',
@@ -99,7 +103,8 @@ describe('createDiskGuard', () => {
       statfs,
     });
     expect(guard.check()).toEqual({ kind: 'claim' });
-    expect(statfs).not.toHaveBeenCalled();
+    const probedByCheck = probed.length;
+    expect(probedByCheck).toBe(0);
     expect(guard.status()?.low).toBe(false);
   });
 

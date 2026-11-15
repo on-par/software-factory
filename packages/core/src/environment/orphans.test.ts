@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { ExecFn } from '../utils/exec.js';
 import type { PortLease, ReapedLease } from './index.js';
 import { defaultFindPortListeners, reapOrphanProcesses } from './orphans.js';
 
@@ -18,9 +19,22 @@ function reaped(overrides: Partial<PortLease> = {}): ReapedLease {
   return { lease: lease(overrides), reason: 'dead-pid' };
 }
 
+function recordingKillGroup() {
+  const killed: number[] = [];
+  const killGroup = async (pgid: number) => {
+    killed.push(pgid);
+    return { pgid, terminated: true, forced: false };
+  };
+  return { killed, killGroup };
+}
+
 describe('reapOrphanProcesses', () => {
   it('kills and reports a listener whose pgid matches the recorded lease pgids', async () => {
-    const killGroup = vi.fn(async (pgid: number) => ({ pgid, terminated: true, forced: false }));
+    const killed: Array<{ pgid: number; graceMs: number | undefined }> = [];
+    const killGroup = async (pgid: number, opts?: { graceMs?: number }) => {
+      killed.push({ pgid, graceMs: opts?.graceMs });
+      return { pgid, terminated: true, forced: false };
+    };
     const findListeners = vi.fn(async () => [{ pid: 1, pgid: 100, command: 'node server.js' }]);
     const events: any[] = [];
 
@@ -31,8 +45,7 @@ describe('reapOrphanProcesses', () => {
       onEvent: (e) => events.push(e),
     });
 
-    expect(killGroup).toHaveBeenCalledTimes(1);
-    expect(killGroup).toHaveBeenCalledWith(100, { graceMs: undefined });
+    expect(killed).toEqual([{ pgid: 100, graceMs: undefined }]);
     expect(result).toEqual([
       { action: 'killed', worktreeId: '/wt/dead', port: 3500, pid: 1, pgid: 100, command: 'node server.js' },
     ]);
@@ -40,7 +53,7 @@ describe('reapOrphanProcesses', () => {
   });
 
   it('reports without killing when the pgid does not match', async () => {
-    const killGroup = vi.fn();
+    const { killed, killGroup } = recordingKillGroup();
     const findListeners = vi.fn(async () => [{ pid: 1, pgid: 999, command: 'some-other-proc' }]);
 
     const result = await reapOrphanProcesses({
@@ -49,14 +62,14 @@ describe('reapOrphanProcesses', () => {
       killGroup,
     });
 
-    expect(killGroup).not.toHaveBeenCalled();
+    expect(killed).toEqual([]);
     expect(result).toEqual([
       { action: 'reported', worktreeId: '/wt/dead', port: 3500, pid: 1, pgid: 999, command: 'some-other-proc' },
     ]);
   });
 
   it('reports only for leases without pgids (old-format leases)', async () => {
-    const killGroup = vi.fn();
+    const { killed, killGroup } = recordingKillGroup();
     const findListeners = vi.fn(async () => [{ pid: 1, pgid: 100, command: 'anything' }]);
 
     const result = await reapOrphanProcesses({
@@ -65,7 +78,7 @@ describe('reapOrphanProcesses', () => {
       killGroup,
     });
 
-    expect(killGroup).not.toHaveBeenCalled();
+    expect(killed).toEqual([]);
     expect(result[0].action).toBe('reported');
   });
 
@@ -78,10 +91,15 @@ describe('reapOrphanProcesses', () => {
 
 describe('defaultFindPortListeners', () => {
   it('parses lsof + ps output into PortListener rows', async () => {
-    const execFn = vi
-      .fn()
-      .mockResolvedValueOnce({ stdout: '111\n222\n', stderr: '' })
-      .mockResolvedValueOnce({ stdout: '111  55  node server.js\n222  66  node other.js\n', stderr: '' });
+    const commands: Array<{ cmd: string; opts: unknown }> = [];
+    const outputs = [
+      { stdout: '111\n222\n', stderr: '' },
+      { stdout: '111  55  node server.js\n222  66  node other.js\n', stderr: '' },
+    ];
+    const execFn = (async (cmd: string, opts: unknown) => {
+      commands.push({ cmd, opts });
+      return outputs[commands.length - 1];
+    }) as ExecFn;
 
     const listeners = await defaultFindPortListeners(3000, execFn);
 
@@ -89,7 +107,8 @@ describe('defaultFindPortListeners', () => {
       { pid: 111, pgid: 55, command: 'node server.js' },
       { pid: 222, pgid: 66, command: 'node other.js' },
     ]);
-    expect(execFn).toHaveBeenNthCalledWith(1, 'lsof -nP -tiTCP:3000 -sTCP:LISTEN', { timeoutMs: 5000 });
+    expect(commands[0]).toEqual({ cmd: 'lsof -nP -tiTCP:3000 -sTCP:LISTEN', opts: { timeoutMs: 5000 } });
+    expect(commands[1].cmd).toBe('ps -o pid=,pgid=,command= -p 111,222');
   });
 
   it('resolves to [] when lsof finds no listeners (rejects)', async () => {
