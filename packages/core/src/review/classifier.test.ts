@@ -65,14 +65,15 @@ const VALID = JSON.stringify({
 });
 
 function makeRouter(output: string | Error) {
-  const run = vi.fn(async () => {
+  const calls: { task: string; prompt: string; options: Record<string, unknown> }[] = [];
+  const router = new ModelRouter(MODELS, ROUTES, false, new StubModelExecutor({ scripts: {} }));
+  vi.spyOn(router, 'run').mockImplementation(async (task, prompt, options) => {
+    calls.push({ task, prompt, options: { ...options } });
     if (output instanceof Error) throw output;
     return { model: 'm-1', output, exitCode: 0, attempts: [] };
   });
-  const router = new ModelRouter(MODELS, ROUTES, false, new StubModelExecutor({ scripts: {} }));
-  vi.spyOn(router, 'run').mockImplementation(run);
   vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue({ cost: 0.01, cachedRateMissing: false });
-  return { router, run };
+  return { router, calls };
 }
 
 function input(router: ModelRouter, extra: Partial<PrShadowInput> = {}): PrShadowInput {
@@ -103,7 +104,7 @@ const deps = {
 
 describe('classifyPrShadow', () => {
   it('records a cited verdict with versions, sha, adrs and cost; final class is the floor', async () => {
-    const { router, run } = makeRouter(VALID);
+    const { router, calls } = makeRouter(VALID);
     const v = await classifyPrShadow(input(router), deps);
     expect(v.modelClass).toBe('C');
     expect(v.floorClass).toBe('A');
@@ -117,7 +118,7 @@ describe('classifyPrShadow', () => {
     expect(v.diffSha).toMatch(/^[0-9a-f]{64}$/);
     expect(v.adrIds).toEqual(['ADR-0121']);
     expect(v.costUsd).toBe(0.01);
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(1);
     expect(toClassificationRecord(v)).toEqual(v);
   });
 
@@ -132,9 +133,14 @@ describe('classifyPrShadow', () => {
     router.setCostSink((entry) => rows.push(entry));
     const lines: string[] = [];
     const sandbox = { runtime: 'none' } as SandboxPolicy;
-    const run = vi.spyOn(router, 'run');
+    const seen: unknown[] = [];
+    const realRun = router.run.bind(router);
+    vi.spyOn(router, 'run').mockImplementation(async (task, prompt, options) => {
+      seen.push(options);
+      return realRun(task, prompt, options);
+    });
     await classifyPrShadow(input(router, { onLog: (m) => lines.push(m), sandbox }), deps);
-    expect(run.mock.calls[0][2]?.sandbox).toBe(sandbox);
+    expect(seen[0]).toMatchObject({ sandbox });
     expect(rows).toHaveLength(1);
     expect(phaseOfCostEntry({ ...(rows[0] as Omit<CostEntry, 'issue' | 'ts'>), issue: '1', ts: '' })).toBe('ship');
     expect(lines.length).toBeGreaterThan(0);
@@ -143,15 +149,11 @@ describe('classifyPrShadow', () => {
   it('passes the pin as modelOverride and omits it otherwise', async () => {
     const pinned = makeRouter(VALID);
     await classifyPrShadow(input(pinned.router, { modelPin: 'pin-model' }), deps);
-    expect(pinned.run).toHaveBeenCalledWith(
-      'classify_pr',
-      expect.any(String),
-      expect.objectContaining({ modelOverride: 'pin-model' }),
-    );
+    expect(pinned.calls[0]).toMatchObject({ task: 'classify_pr', options: { modelOverride: 'pin-model' } });
+    expect(typeof pinned.calls[0].prompt).toBe('string');
     const plain = makeRouter(VALID);
     await classifyPrShadow(input(plain.router), deps);
-    const opts = (plain.run.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
-    expect('modelOverride' in opts).toBe(false);
+    expect('modelOverride' in plain.calls[0].options).toBe(false);
   });
 
   it.each([
@@ -193,12 +195,12 @@ describe('classifyPrShadow', () => {
       collectDiff: (async () => ({ text: '', baseRef: 'x', truncated: false })) as typeof collectDesignDiff,
     });
     expect(v2.reason).toBe('no diff to classify');
-    expect(skip.run).not.toHaveBeenCalled();
-    expect(empty.run).not.toHaveBeenCalled();
+    expect(skip.calls).toEqual([]);
+    expect(empty.calls).toEqual([]);
   });
 
   it('survives unexpected failures and falls back when spec/ADRs are unreadable', async () => {
-    const { router, run } = makeRouter(VALID);
+    const { router, calls } = makeRouter(VALID);
     const v = await classifyPrShadow(input(router), {
       ...deps,
       readFile: async () => {
@@ -210,7 +212,7 @@ describe('classifyPrShadow', () => {
     });
     expect(v.modelClass).toBe('C');
     expect(v.adrIds).toEqual([]);
-    expect((run.mock.calls[0] as unknown[])[1]).toContain('(no spec)');
+    expect(calls[0].prompt).toContain('(no spec)');
 
     const boom = await classifyPrShadow(input(router), {
       ...deps,
@@ -233,12 +235,12 @@ describe('classifyPrShadow', () => {
       if (sub === 'diff') return { ok: true, stdout: DIFF };
       return { ok: true, stdout: '' };
     };
-    const { router, run } = makeRouter(VALID);
+    const { router, calls } = makeRouter(VALID);
     await classifyPrShadow(input(router), {
       ...deps,
       collectDiff: (w, _r, o) => collectDesignDiff(w, runner, o),
     });
-    const prompt = (run.mock.calls[0] as unknown[])[1] as string;
+    const prompt = calls[0].prompt;
     for (const s of ['DIFF-BODY-SENTINEL', 'ISSUE-TITLE-SENTINEL', 'ISSUE-BODY-SENTINEL', 'SPEC-SENTINEL']) {
       expect(prompt).toContain(s);
     }

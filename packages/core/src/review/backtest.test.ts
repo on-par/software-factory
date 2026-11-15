@@ -1,6 +1,6 @@
 // packages/core/src/review/backtest.test.ts — classifier backtest over merged PRs (#1728)
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { MAX_DIFF_CHARS } from '../checkers/design-smells.js';
 import { classifierOutcomeBucket } from '../kpis/classifier-outcomes.js';
@@ -15,6 +15,7 @@ import {
   runClassifierBacktest,
   selectBacktestPrs,
   type BacktestPorts,
+  type BacktestRecord,
 } from './backtest.js';
 import type { classifyPrShadow, PrShadowVerdict } from './classifier.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from './floor.js';
@@ -108,10 +109,10 @@ describe('runClassifierBacktest', () => {
       Array.from({ length: 25 }, (_, i) => src(100 + i, `2026-08-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`)),
       { since: '2026-08-01', limit: 20 },
     );
-    const onRecord = vi.fn();
-    const res = await run(sources, ports({ onRecord }));
+    const streamed: BacktestRecord[] = [];
+    const res = await run(sources, ports({ onRecord: streamed.push.bind(streamed) }));
     expect(res.records).toHaveLength(20);
-    expect(onRecord).toHaveBeenCalledTimes(20);
+    expect(streamed).toEqual(res.records);
     expect(res.candidates).toBe(20);
     expect(res.budgetReached).toBe(false);
   });
