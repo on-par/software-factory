@@ -70,6 +70,7 @@ export default defineConfig({
         : [
             'packages/*/src/**/*.test.{ts,tsx}',
             'scripts/**/*.test.ts',
+            'tools/oxlint/anti-slop/rules/no-call-assertions.test.ts',
             'tools/oxlint/anti-slop/rules/no-direct-tmpdir-mkdtemp.test.ts',
           ],
     exclude: realCliOnly
