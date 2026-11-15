@@ -73,7 +73,7 @@ describe('settlePlanRoute command route (#2872)', () => {
     expect(await readFile(specPath, 'utf8')).toContain('route: command');
   });
 
-  it('treats a planner-written command with no pin as no choice and rewrites the spec', async () => {
+  it('treats an unrunnable planner-written command with no pin as no choice and rewrites the spec to the route used', async () => {
     const specPath = await tempSpec('b.md', 'command');
     const route = await settlePlanRoute({ ...base, parsedRoute: 'command', specPath });
     expect(route).toBe('claude');

@@ -11,7 +11,7 @@ export const LINT_RULES_CAP = 40;
 
 const LINTER_NAMES: Record<LintConfigProbe['linter'], string> = { oxlint: 'oxlint', eslint: 'ESLint', biome: 'Biome' };
 
-const OXLINT_ALLOW_WARN_DENY_ERROR_VALUES = new Set<unknown>(['error', 'deny', 2]);
+const ERROR_SEVERITIES = new Set<unknown>(['error', 'deny', 2]);
 const SAFE_RULE_NAME = /^[A-Za-z0-9@_./-]{1,200}$/;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -25,7 +25,7 @@ export function collectOxlintErrorRules(config: unknown): { rules: string[]; uns
   for (const [name, value] of Object.entries(config.rules)) {
     const head = Array.isArray(value) ? value[0] : value;
     const severity = typeof head === 'string' ? head.toLowerCase() : head;
-    if (!OXLINT_ALLOW_WARN_DENY_ERROR_VALUES.has(severity)) continue;
+    if (!ERROR_SEVERITIES.has(severity)) continue;
     if (SAFE_RULE_NAME.test(name)) rules.push(name);
     else unsafe++;
   }

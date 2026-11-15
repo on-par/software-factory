@@ -159,7 +159,7 @@ const TESTS_PASS_DETAILS = {
 
 const DEFAULT_TESTS_TIMEOUT_SECONDS = 300;
 
-const NEVER_RAN_SHELL_COMMAND_NOT_FOUND_EXIT_READ_AS_INCONCLUSIVE = 127;
+const SHELL_COMMAND_NOT_FOUND_EXIT = 127;
 
 async function onPath(bin: string, env?: NodeJS.ProcessEnv): Promise<boolean> {
   const names = process.platform === 'win32' ? [bin, `${bin}.exe`] : [bin];
@@ -176,7 +176,7 @@ const runFullTests: CheckerFn = async (ctx) => {
     const timeoutSeconds = ctx.testsTimeoutSeconds ?? DEFAULT_TESTS_TIMEOUT_SECONDS;
     const timeoutMs = timeoutSeconds * 1000;
     const arrivalOrderTail = combinedOutputTail();
-    const describeFailureLeadingWithTimeout = (r: CommandResult): string => {
+    const describeFailure = (r: CommandResult): string => {
       const evidence = describeTestFailure(r, 500, arrivalOrderTail.text());
       if (!r.timedOut) return evidence;
       const head = `timed out after ${timeoutSeconds}s (raise timeouts.tests_seconds or FACTORY_TESTS_TIMEOUT)`;
@@ -191,7 +191,7 @@ const runFullTests: CheckerFn = async (ctx) => {
           'verify.ps1 failed: pwsh (PowerShell 7) is not on PATH — scripts/verify.ps1 needs it. Install PowerShell: https://aka.ms/powershell (macOS: brew install --cask powershell; Linux: see the same page).',
         failedCommand: {
           command: cmd.argv.join(' '),
-          exitCode: NEVER_RAN_SHELL_COMMAND_NOT_FOUND_EXIT_READ_AS_INCONCLUSIVE,
+          exitCode: SHELL_COMMAND_NOT_FOUND_EXIT,
           timeoutSeconds,
         },
       };
@@ -209,7 +209,7 @@ const runFullTests: CheckerFn = async (ctx) => {
       return {
         checker: 'tests',
         result: 'FAIL',
-        details: await commandFailureDetails(ctx, 'tests', cmd.label, r, describeFailureLeadingWithTimeout(r)),
+        details: await commandFailureDetails(ctx, 'tests', cmd.label, r, describeFailure(r)),
         ...(r.timedOut ? { timedOut: true } : {}),
         ...(marker ? { sandboxEnv: marker } : {}),
         failedCommand: { command: cmd.argv.join(' '), exitCode: r.exitCode, timeoutSeconds },
@@ -238,10 +238,7 @@ const runFullTests: CheckerFn = async (ctx) => {
   }
 };
 
-async function runAffectedTreatingSpawnErrorAsToolError(
-  ctx: CheckerContext,
-  argv: readonly string[],
-): Promise<CommandResult | undefined> {
+async function runAffected(ctx: CheckerContext, argv: readonly string[]): Promise<CommandResult | undefined> {
   const timeoutSeconds = ctx.testsTimeoutSeconds ?? DEFAULT_TESTS_TIMEOUT_SECONDS;
   try {
     return await (ctx.runCommand ?? runCommand)(argv, {
@@ -258,7 +255,7 @@ async function runAffectedTreatingSpawnErrorAsToolError(
 export const testsChecker: CheckerFn = async (ctx) => {
   const sel = ctx.affectedTests;
   if (sel?.kind !== 'affected') return runFullTests(ctx);
-  const r = await runAffectedTreatingSpawnErrorAsToolError(ctx, sel.argv);
+  const r = await runAffected(ctx, sel.argv);
   if (r) {
     const output = `${r.stdout}\n${r.stderr}`;
     const counts = parseCommandCounts(output);
@@ -457,7 +454,7 @@ export const accessibilityChecker: CheckerFn = async (ctx) => {
   };
 };
 
-function isStrictVerdictFromUntrustedCheckerOutput(
+function isCustomCheckerVerdict(
   value: unknown,
   checkerName: string,
 ): value is { checker: string; result: 'PASS' | 'FAIL'; details: string } {
@@ -511,7 +508,7 @@ Steps:
         'checker' in (c.value as Record<string, unknown>),
     );
     if (verdictCandidate) {
-      if (isStrictVerdictFromUntrustedCheckerOutput(verdictCandidate.value, checkerName)) {
+      if (isCustomCheckerVerdict(verdictCandidate.value, checkerName)) {
         return { checker: checkerName, result: verdictCandidate.value.result, details: verdictCandidate.value.details };
       }
       return {
@@ -656,8 +653,7 @@ function buildCheckers(constitution: Constitution | null): Checker[] {
   const checkers = new Map<string, Checker>();
   for (const checker of BUILT_IN_CHECKERS) {
     if (!hasDeclaration && checker.optIn) continue;
-    const isEmptyDiffGuardCheckPhaseParksOn = checker.name === WORKER_OUTPUT_CHECKER;
-    if (hasDeclaration && !isEmptyDiffGuardCheckPhaseParksOn && !declared.includes(checker.name)) continue;
+    if (hasDeclaration && checker.name !== WORKER_OUTPUT_CHECKER && !declared.includes(checker.name)) continue;
     checkers.set(checker.name, checker);
   }
 
@@ -679,7 +675,7 @@ function buildCheckers(constitution: Constitution | null): Checker[] {
   return [...checkers.values()];
 }
 
-function crashedCheckerStaysInSummaryAsFail(name: string, e: any): CheckerOutput {
+function crashedOutput(name: string, e: any): CheckerOutput {
   return {
     checker: name,
     result: 'FAIL',
@@ -725,11 +721,10 @@ export async function runAllCheckers(
 ): Promise<CheckSummary> {
   const probe = ctx.probe ?? (await (ctx.probeWorktree ?? probeWorktree)(ctx.worktree));
 
-  const standardsTextThatDeclaredTheCheckers = constitution?.body ?? '';
   const runCtx: CheckerRunCtx = {
     ...ctx,
     probe,
-    constitutionBody: standardsTextThatDeclaredTheCheckers,
+    constitutionBody: constitution?.body ?? '',
     testsRequired: constitution?.requireTests === true,
     router,
     timeoutSeconds: customCheckerTimeoutSeconds,
@@ -745,7 +740,7 @@ export async function runAllCheckers(
     try {
       output = await checker.run(runCtx);
     } catch (e: unknown) {
-      output = crashedCheckerStaysInSummaryAsFail(checker.name, e);
+      output = crashedOutput(checker.name, e);
     }
     output = requireRunnableChecker(output, constitution, ctx.log);
     ctx.log?.('checker_completed', `checker ${checker.name} completed (${output.result})`, {

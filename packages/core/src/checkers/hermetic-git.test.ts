@@ -48,7 +48,7 @@ const PASS: CheckSummary = { results: [], failures: 0, passes: 0, skips: 0, tota
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' });
 
-async function setupWorktreeOnHostWhoseGlobalGitConfigSetsDefaultBranchMain() {
+async function setup() {
   const host = await tempDirs.make('hermetic-git-host-');
   const globalConfig = join(host, 'gitconfig');
   await writeFile(globalConfig, '[init]\n\tdefaultBranch = main\n');
@@ -94,8 +94,8 @@ async function runUnderCheck(
 }
 
 describe('hermetic git for checker commands (#3272)', () => {
-  it('checker commands do not see the host global git config (#1886, PR #3265)', async () => {
-    const { worktree, specPath, host } = await setupWorktreeOnHostWhoseGlobalGitConfigSetsDefaultBranchMain();
+  it('checker commands do not see the host global git config, so a bare init without -b defaults to master (#1886, PR #3265)', async () => {
+    const { worktree, specPath, host } = await setup();
     const { outputs, logs } = await runUnderCheck(
       undefined,
       ['git', 'config', '--global', '--get', 'init.defaultBranch'],
@@ -108,21 +108,21 @@ describe('hermetic git for checker commands (#3272)', () => {
     const origin = join(host, 'origin.git');
     const src = join(host, 'src');
     const clone = join(host, 'clone');
-    const bareInitWithoutBranchFlagThenPushMainAndClone = [
+    const script = [
       `git init --bare ${origin}`,
       `git init -b main ${src}`,
       `git -C ${src} -c user.name=T -c user.email=t@example.com commit --allow-empty -m init`,
       `git -C ${src} push ${origin} main`,
       `git clone ${origin} ${clone}`,
     ].join(' && ');
-    await runUnderCheck(undefined, ['sh', '-c', bareInitWithoutBranchFlagThenPushMainAndClone], worktree, specPath);
+    await runUnderCheck(undefined, ['sh', '-c', script], worktree, specPath);
     expect((await readdir(clone)).filter((f) => f !== '.git')).toEqual([]);
     const head = git(origin, 'symbolic-ref', 'HEAD').trim();
     expect(head).toBe('refs/heads/master');
   });
 
   it('hermeticGit false keeps the host global git config visible to checkers', async () => {
-    const { worktree, specPath } = await setupWorktreeOnHostWhoseGlobalGitConfigSetsDefaultBranchMain();
+    const { worktree, specPath } = await setup();
     const { outputs, logs } = await runUnderCheck(
       false,
       ['git', 'config', '--global', '--get', 'init.defaultBranch'],
@@ -134,7 +134,7 @@ describe('hermetic git for checker commands (#3272)', () => {
   });
 
   it('hermetic git still lists repo-local .git/config values', async () => {
-    const { worktree, specPath } = await setupWorktreeOnHostWhoseGlobalGitConfigSetsDefaultBranchMain();
+    const { worktree, specPath } = await setup();
     git(worktree, 'config', 'user.name', 'Local Tester');
     const { outputs } = await runUnderCheck(undefined, ['git', 'config', '--list'], worktree, specPath);
     expect(outputs[0]).toContain('user.name=Local Tester');

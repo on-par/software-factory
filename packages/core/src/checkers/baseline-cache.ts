@@ -88,7 +88,7 @@ export class BaselineCache {
     for (const output of storable) {
       data.entries[entryKey(baseSha, envHash, output.checker)] = { output, configHash, recordedAt };
     }
-    await this.writeLastWriterWinsSinceALostWriteOnlyCausesARerun(data);
+    await this.write(data);
   }
 
   async delete(baseSha: string, envHash: string, checker: string): Promise<boolean> {
@@ -96,7 +96,7 @@ export class BaselineCache {
     const key = entryKey(baseSha, envHash, checker);
     if (!(key in data.entries)) return false;
     delete data.entries[key];
-    await this.writeLastWriterWinsSinceALostWriteOnlyCausesARerun(data);
+    await this.write(data);
     return true;
   }
 
@@ -108,7 +108,7 @@ export class BaselineCache {
     );
     if (matches.length === 0) return 0;
     for (const key of matches) delete data.entries[key];
-    await this.writeLastWriterWinsSinceALostWriteOnlyCausesARerun(data);
+    await this.write(data);
     return matches.length;
   }
 
@@ -126,10 +126,10 @@ export class BaselineCache {
     }
   }
 
-  private async writeLastWriterWinsSinceALostWriteOnlyCausesARerun(data: BaselineCacheFile): Promise<void> {
+  private async write(data: BaselineCacheFile): Promise<void> {
     await mkdir(dirname(this.file), { recursive: true });
-    const tmpUniqueAcrossConcurrentLanes = `${this.file}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(tmpUniqueAcrossConcurrentLanes, `${JSON.stringify(data, null, 2)}\n`);
-    await rename(tmpUniqueAcrossConcurrentLanes, this.file);
+    const tmp = `${this.file}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);
+    await rename(tmp, this.file);
   }
 }

@@ -23,7 +23,7 @@ export interface RefusedProvider {
   models: string[];
 }
 
-const processWideLoggedRefusals = new Set<string>();
+const loggedRefusals = new Set<string>();
 
 export function subscriptionLogin(
   providerId: SubscriptionProviderId,
@@ -66,7 +66,7 @@ export function filterRefusedProviders(
     }
   }
   const refused = [...refusedBy.values()];
-  const logged = deps.logged ?? processWideLoggedRefusals;
+  const logged = deps.logged ?? loggedRefusals;
   for (const { provider, login } of refused) {
     if (logged.has(provider)) continue;
     logged.add(provider);

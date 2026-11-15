@@ -351,6 +351,15 @@ describe('detectLintConfig', () => {
     });
   });
 
+  it('reads a legacy extensionless .eslintrc as yaml, which also parses JSON', async () => {
+    expect(await detectLintConfig(await makeWorktree({ '.eslintrc': '{ "root": true }\n' }))).toEqual({
+      linter: 'eslint',
+      configPath: '.eslintrc',
+      format: 'yaml',
+      executable: false,
+    });
+  });
+
   it('detects biome.jsonc', async () => {
     expect(await detectLintConfig(await makeWorktree({ 'biome.jsonc': '{}' }))).toEqual({
       linter: 'biome',

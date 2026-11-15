@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { recordOwnedProcess } from '../daemon/process-ownership.js';
 
-const groupOwnerOutlivingShellScript = `
+const supervisor = `
 const { spawn } = require('node:child_process');
 const parent = Number(process.env.FACTORY_EXEC_PARENT);
 process.on('disconnect', () => process.kill(-process.pid, 'SIGKILL'));
@@ -21,7 +21,7 @@ export function spawnSupervisedCommand(
   cmd: string | readonly string[],
   options: { cwd?: string; env: NodeJS.ProcessEnv; ownershipFile: string },
 ): ChildProcess {
-  const child = spawn(process.execPath, ['-e', groupOwnerOutlivingShellScript, JSON.stringify(cmd)], {
+  const child = spawn(process.execPath, ['-e', supervisor, JSON.stringify(cmd)], {
     detached: true,
     shell: false,
     cwd: options.cwd,

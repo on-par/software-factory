@@ -198,13 +198,11 @@ export async function setupWorktree(
   await assertLaneReplaceable(repoRoot, branch, worktreePath, opts, log ?? (() => {}));
   await execGit(['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot }).catch(() => {});
   await execGit(['branch', '-D', branch], { cwd: repoRoot }).catch(() => {});
-  const branchCheckedOutElsewhere = await execGit(['rev-parse', '--verify', '-q', `refs/heads/${branch}`], {
-    cwd: repoRoot,
-  }).then(
+  const stuck = await execGit(['rev-parse', '--verify', '-q', `refs/heads/${branch}`], { cwd: repoRoot }).then(
     () => true,
     () => false,
   );
-  if (branchCheckedOutElsewhere)
+  if (stuck)
     await moveLaneBranchAside(repoRoot, branch, { remoteSha, prStatus, now: opts?.now, log: log ?? (() => {}) });
   mkdirSync(dirname(worktreePath), { recursive: true });
   await ensureWorktreeParentExcluded(repoRoot, dirname(worktreePath));

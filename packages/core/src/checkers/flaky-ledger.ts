@@ -33,16 +33,9 @@ export async function readFlakyLedger(file: string): Promise<FlakyLedger> {
   return ledger;
 }
 
-function tmpPathUniquePerWriterSinceLanesWriteConcurrently(file: string): string {
-  return `${file}.${process.pid}.${Date.now()}.tmp`;
-}
-
-async function writeFlakyLedgerUnlockedAsALostWriteOnlyDelaysTheThreshold(
-  file: string,
-  ledger: FlakyLedger,
-): Promise<void> {
+async function writeFlakyLedger(file: string, ledger: FlakyLedger): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
-  const tmp = tmpPathUniquePerWriterSinceLanesWriteConcurrently(file);
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(tmp, `${JSON.stringify(ledger, null, 2)}\n`);
   await rename(tmp, file);
 }
@@ -62,7 +55,7 @@ export async function recordFlakes(
     if (!entry.runs.includes(run)) entry.runs.push(run);
     entry.lastSeen = lastSeen;
   }
-  await writeFlakyLedgerUnlockedAsALostWriteOnlyDelaysTheThreshold(file, ledger);
+  await writeFlakyLedger(file, ledger);
   return unique
     .filter((test) => ledger[test].runs.length >= FLAKY_ISSUE_THRESHOLD)
     .map((test) => ({ test, ...ledger[test] }));
@@ -72,5 +65,5 @@ export async function setFlakyIssue(file: string, test: string, issue: number): 
   const ledger = await readFlakyLedger(file);
   if (!ledger[test]) return;
   ledger[test].issue = issue;
-  await writeFlakyLedgerUnlockedAsALostWriteOnlyDelaysTheThreshold(file, ledger);
+  await writeFlakyLedger(file, ledger);
 }

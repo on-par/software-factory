@@ -20,8 +20,6 @@ export const CI_EVIDENCE_LIMITS = {
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-const codeqlPullRequestAnalysisRef = (prNumber: number): string => `refs/pull/${prNumber}/merge`;
-
 export async function collectCiFailureEvidence(opts: {
   octokit: Octokit;
   owner: string;
@@ -63,7 +61,7 @@ export async function collectCiFailureEvidence(opts: {
       const { data } = await octokit.rest.codeScanning.listAlertsForRepo({
         owner,
         repo,
-        ref: codeqlPullRequestAnalysisRef(prNumber),
+        ref: `refs/pull/${prNumber}/merge`,
         state: 'open',
         per_page: 100,
       });

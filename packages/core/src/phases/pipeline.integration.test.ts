@@ -24,7 +24,7 @@ import { planPhase } from './plan.js';
 import { shipPhase } from './ship.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 
-function makeSameProviderTwoModelStubConfig(): ModelsConfig {
+function makeTwoModelStubConfig(): ModelsConfig {
   const base = makeStubModelsConfig().models['stub-model'];
   return {
     version: 1,
@@ -231,7 +231,7 @@ describe('pipeline integration', () => {
     },
   );
 
-  it('resets worktree state between a failed build attempt and its failover', { timeout: 120_000 }, async () => {
+  it('resets worktree state between a failed build and its same-provider failover', { timeout: 120_000 }, async () => {
     const title = 'Worktree reset between failover attempts';
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, issue);
@@ -264,7 +264,7 @@ describe('pipeline integration', () => {
         ],
       },
     });
-    const router = new ModelRouter(makeSameProviderTwoModelStubConfig(), makeStubRoutesConfig(), false, stub);
+    const router = new ModelRouter(makeTwoModelStubConfig(), makeStubRoutesConfig(), false, stub);
     const constitution = null;
 
     const plan = await planPhase({

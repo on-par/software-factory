@@ -266,9 +266,8 @@ npm run test`;
       });
       const specPath = join(worktree, 'brief-9000077.md');
       const logs: string[] = [];
-      const briefRunNumberInReserved9MillionRange = 9_000_077;
       const result = await planPhase({
-        issue: workKeyFromIssue(briefRunNumberInReserved9MillionRange),
+        issue: workKeyFromIssue(9_000_077),
         repo: 'on-par/software-factory',
         worktree,
         specPath,
@@ -318,7 +317,7 @@ npm run test`;
       expect(saved).toEqual([]);
     });
 
-    it('a brief slice is planned with no stand-in run number in its issue body or slice label', async () => {
+    it('a brief slice is planned with no stand-in run number (the reserved 9,000,000+ range) in its issue body or slice label', async () => {
       const { store } = memoryStore();
       await runBrief({ files: 13, store, mode: 'stack' });
       const { result, stub, specPath, logs } = await runBrief({ files: 3, store, mode: 'stack' });

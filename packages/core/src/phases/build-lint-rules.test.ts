@@ -154,6 +154,13 @@ describe('Lint rules in force', () => {
     expect(out).toEqual({ rules: ['a', 'b', 'z'], unsafe: 0 });
   });
 
+  it('collectOxlintErrorRules reads oxlint AllowWarnDeny "error", "deny" and 2 as error severity', () => {
+    const out = collectOxlintErrorRules({
+      rules: { a: 'error', b: 'deny', c: ['deny'], d: 2, e: 'warn', f: 'allow', g: 1, h: 0, i: 'off' },
+    });
+    expect(out).toEqual({ rules: ['a', 'b', 'c', 'd'], unsafe: 0 });
+  });
+
   it('drops unsafe rule names', async () => {
     const worktree = await fixture({
       '.oxlintrc.json': JSON.stringify({

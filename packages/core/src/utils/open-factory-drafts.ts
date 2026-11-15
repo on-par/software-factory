@@ -14,7 +14,7 @@ export interface OpenPrDraftSummary {
 }
 
 const PAGE_SIZE = 100;
-const MAX_PAGES_BEFORE_UNREADABLE = 50;
+const MAX_PAGES = 50;
 const HOUR_MS = 3_600_000;
 
 export function summarizeOpenFactoryDrafts(
@@ -40,7 +40,7 @@ export async function readOpenFactoryDrafts(opts: {
   const { octokit, owner, repo, prefix = resolveBranchPrefix(), now = () => Date.now() } = opts;
   try {
     const all: OpenPrDraftSummary[] = [];
-    for (let page = 1; page <= MAX_PAGES_BEFORE_UNREADABLE; page++) {
+    for (let page = 1; page <= MAX_PAGES; page++) {
       const { data } = await octokit.rest.pulls.list({ owner, repo, state: 'open', per_page: PAGE_SIZE, page });
       if (!Array.isArray(data)) return null;
       for (const pr of data) {

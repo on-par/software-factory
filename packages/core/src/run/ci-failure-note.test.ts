@@ -11,7 +11,7 @@ describe('renderCiFailureNote (#3998)', () => {
     expect(renderCiFailureNote({ failingChecks: [], alerts: [], truncated: false })).toBe('');
   });
 
-  it('renders url, attribution, flagged files and commits, and collection errors', () => {
+  it('renders url, attribution, flagged files, unredacted commit SHAs, and collection errors', () => {
     const ev: CiFailureEvidence = {
       failingChecks: [{ name: 'gitleaks', conclusion: 'failure', url: 'https://gh/run/1' }],
       alerts: [],

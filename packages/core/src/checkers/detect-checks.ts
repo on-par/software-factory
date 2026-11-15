@@ -50,10 +50,9 @@ async function nodeProposal(repoRoot: string, entries: readonly string[]): Promi
   const has = (k: string): boolean => typeof s[k] === 'string' && (s[k] as string).trim() !== '';
   const proposal: CheckProposal = {};
   if (has('build')) proposal.build = 'npm run build';
-  const checkPrefersVerifyScriptOverNpmTest =
+  const verify =
     (await fileExists(join(repoRoot, 'scripts/verify.sh'))) || (await fileExists(join(repoRoot, 'scripts/verify.ps1')));
-  if (has('test') && !NPM_PLACEHOLDER_TEST.test(s.test as string) && !checkPrefersVerifyScriptOverNpmTest)
-    proposal.test = 'npm test';
+  if (has('test') && !NPM_PLACEHOLDER_TEST.test(s.test as string) && !verify) proposal.test = 'npm test';
   if (has('lint')) proposal.lint = 'npm run lint';
   return proposal;
 }
@@ -72,10 +71,7 @@ async function guessEcosystems(
     const target = solutions[0] ?? (projects.length === 1 ? projects[0] : undefined);
     if (target) {
       const t = quoteToken(target);
-      const editorconfigStyleRulesEnforcedByDotnetFormat = entries.includes('.editorconfig');
-      const lint = editorconfigStyleRulesEnforcedByDotnetFormat
-        ? { lint: `dotnet format ${t} --verify-no-changes` }
-        : {};
+      const lint = entries.includes('.editorconfig') ? { lint: `dotnet format ${t} --verify-no-changes` } : {};
       found.push({ name: '.NET', proposal: { build: `dotnet build ${t}`, test: `dotnet test ${t}`, ...lint } });
     } else if (projects.length > 1) {
       ambiguities.push(`several project files at the root and no solution (${projects.join(', ')})`);
@@ -92,8 +88,7 @@ async function guessEcosystems(
   } else if (entries.includes('pom.xml')) {
     found.push({ name: 'Maven', proposal: { build: 'mvn -B compile', test: 'mvn -B test' } });
   }
-  const noOtherBuildSystemSoPackageJsonIsTheFallback = found.length === 0;
-  if (noOtherBuildSystemSoPackageJsonIsTheFallback) {
+  if (found.length === 0) {
     const node = await nodeProposal(repoRoot, entries);
     if (Object.keys(node).length > 0) found.push({ name: 'Node', proposal: node });
   }

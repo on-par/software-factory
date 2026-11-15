@@ -269,7 +269,7 @@ describe.skipIf(process.platform === 'win32')('runCommand GitHub credential isol
     vi.stubEnv('GITHUB_PAT', 'github-pat-opaque-value');
   }
 
-  async function fakeBinaryPrintingGitHubVars(name: string): Promise<string> {
+  async function fakeBinary(name: string): Promise<string> {
     const dir = await makeTmpDir();
     const bin = join(dir, name);
     await writeFile(bin, `#!/bin/sh\nexec "${process.execPath}" -e '${PRINT_GITHUB_VARS}'\n`);
@@ -296,8 +296,8 @@ describe.skipIf(process.platform === 'win32')('runCommand GitHub credential isol
   it.each(['gh', 'git'])("passes them to the factory's own %s calls", async (name) => {
     stubGitHubCredentials();
 
-    const attached = await runCommand([await fakeBinaryPrintingGitHubVars(name)]);
-    const detached = await runCommand([await fakeBinaryPrintingGitHubVars(name)], { onPgid: () => {} });
+    const attached = await runCommand([await fakeBinary(name)]);
+    const detached = await runCommand([await fakeBinary(name)], { onPgid: () => {} });
 
     expect(attached.stdout.trim()).toBe('GH_TOKEN,GITHUB_PAT,GITHUB_TOKEN|string');
     expect(detached.stdout.trim()).toBe('GH_TOKEN,GITHUB_PAT,GITHUB_TOKEN|string');
@@ -306,7 +306,7 @@ describe.skipIf(process.platform === 'win32')('runCommand GitHub credential isol
   it('honors an explicit githubAuth override in either direction', async () => {
     stubGitHubCredentials();
 
-    const gitWithout = await runCommand([await fakeBinaryPrintingGitHubVars('git')], { githubAuth: false });
+    const gitWithout = await runCommand([await fakeBinary('git')], { githubAuth: false });
     const nodeWith = await runCommand([process.execPath, '-e', PRINT_GITHUB_VARS], { githubAuth: true });
 
     expect(gitWithout.stdout.trim()).toBe('|string');

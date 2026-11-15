@@ -15,9 +15,6 @@ export async function runVerificationCommand(
   argv: readonly string[],
   options: RunCommandOptions,
 ): Promise<CommandResult> {
-  const explicitUndefinedSurvivesParentEnvMergeAsDeletion = Object.fromEntries(
-    VERIFICATION_SCRUBBED_ENV_VARS.map((name) => [name, undefined]),
-  );
   const capture = openCommandCapture();
   try {
     return await runCommand(argv, {
@@ -25,7 +22,7 @@ export async function runVerificationCommand(
       parentEnv: checkerParentEnv(options.parentEnv ?? process.env),
       env: {
         ...options.env,
-        ...explicitUndefinedSurvivesParentEnvMergeAsDeletion,
+        ...Object.fromEntries(VERIFICATION_SCRUBBED_ENV_VARS.map((name) => [name, undefined])),
       },
       onOutput:
         capture || options.onOutput

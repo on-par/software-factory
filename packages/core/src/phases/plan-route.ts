@@ -43,7 +43,6 @@ export async function settlePlanRoute(opts: {
     await updateSpecRoute(specPath, preferredRoute, 'repo-config-pin');
     return preferredRoute;
   }
-  const specStillNamesUnrunnableCommand = parsedRoute === 'command' && planned !== 'command';
-  if (specStillNamesUnrunnableCommand) await updateSpecRoute(specPath, planned, 'route-unavailable');
+  if (parsedRoute === 'command' && planned !== 'command') await updateSpecRoute(specPath, planned, 'route-unavailable');
   return planned;
 }
