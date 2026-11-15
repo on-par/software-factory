@@ -30,10 +30,23 @@ const events: FactoryEvent[] = [
 function setup() {
   const dir = tmp.makeSync('factory-tier-demotion-');
   const path = join(dir, 'state', 'tier-demotions.jsonl');
-  const comment = vi.fn(async (_issue: number, _body: string) => {});
-  const warn = vi.fn();
+  const comments: { issue: number; body: string }[] = [];
+  const attempts: number[] = [];
+  const warnings: string[] = [];
+  const failComment = { next: false };
+  const comment = async (issue: number, body: string) => {
+    attempts.push(issue);
+    if (failComment.next) {
+      failComment.next = false;
+      throw new Error('boom');
+    }
+    comments.push({ issue, body });
+  };
+  const warn = (m: string) => {
+    warnings.push(m);
+  };
   const record = () => recordTierDemotions({ path, events, now: NOW, comment, warn });
-  return { dir, path, comment, warn, record };
+  return { dir, path, comment, comments, attempts, warnings, failComment, warn, record };
 }
 
 const t2 = { version: 2 as const, classifier: { trustTier: 'T2' as const } };
@@ -63,17 +76,18 @@ describe('tier demotion (cli)', () => {
     const s = setup();
     await s.record();
     await s.record();
-    expect(s.comment).toHaveBeenCalledTimes(1);
-    expect(s.comment).toHaveBeenCalledWith(900, expect.stringContaining('<!-- factory:tier-demoted pr=42 -->'));
+    expect(s.comments).toHaveLength(1);
+    expect(s.comments[0]!.issue).toBe(900);
+    expect(s.comments[0]!.body).toContain('<!-- factory:tier-demoted pr=42 -->');
   });
 
   it('warns and does not retry when the comment fails', async () => {
     const s = setup();
-    s.comment.mockRejectedValueOnce(new Error('boom'));
+    s.failComment.next = true;
     await s.record();
     await s.record();
-    expect(s.warn).toHaveBeenCalledWith(expect.stringContaining('boom'));
-    expect(s.comment).toHaveBeenCalledTimes(1);
+    expect(s.warnings.join('\n')).toContain('boom');
+    expect(s.attempts).toHaveLength(1);
   });
 
   it('refuses to record over a malformed file and fails closed to T0', async () => {
@@ -81,33 +95,39 @@ describe('tier demotion (cli)', () => {
     mkdirSync(join(s.dir, 'state'), { recursive: true });
     writeFileSync(s.path, 'garbage\n');
     expect(await s.record()).toEqual([]);
-    expect(s.warn).toHaveBeenCalledWith(expect.stringContaining(s.path));
+    expect(s.warnings.join('\n')).toContain(s.path);
     expect(resolveEffectiveTrustTier(t2, s.path)).toBe('T0');
   });
 
   it('ack-demotion restores the configured tier', async () => {
     const s = setup();
     await s.record();
-    const log = vi.fn();
+    const lines: string[] = [];
+    const log = (m: string) => {
+      lines.push(m);
+    };
     const acked = cmdClassifierAckDemotion({ path: s.path, configured: 'T2', now: NOW, by: 'pat', log });
     expect(acked).toHaveLength(1);
-    expect(log).toHaveBeenCalledWith('acknowledged PR #42 T2→T1');
-    expect(log).toHaveBeenCalledWith('effective trust tier: T2');
+    expect(lines).toContain('acknowledged PR #42 T2→T1');
+    expect(lines).toContain('effective trust tier: T2');
     expect(resolveEffectiveTrustTier(t2, s.path)).toBe('T2');
   });
 
   it('ack-demotion with nothing open prints nothing to acknowledge', () => {
     const s = setup();
-    const log = vi.fn();
+    const lines: string[] = [];
+    const log = (m: string) => {
+      lines.push(m);
+    };
     expect(cmdClassifierAckDemotion({ path: s.path, configured: 'T2', now: NOW, by: 'pat', log })).toEqual([]);
-    expect(log).toHaveBeenCalledWith('No unacknowledged tier demotions.');
+    expect(lines).toContain('No unacknowledged tier demotions.');
   });
 
   it('ack-demotion refuses a malformed file', () => {
     const s = setup();
     mkdirSync(join(s.dir, 'state'), { recursive: true });
     writeFileSync(s.path, 'garbage\n');
-    const run = () => cmdClassifierAckDemotion({ path: s.path, configured: 'T2', now: NOW, by: 'pat', log: vi.fn() });
+    const run = () => cmdClassifierAckDemotion({ path: s.path, configured: 'T2', now: NOW, by: 'pat', log: () => {} });
     expect(run).toThrow(CliExitError);
     expect(run).toThrow(/T0/);
   });
@@ -119,7 +139,7 @@ describe('tier demotion (cli)', () => {
       { ts: events[1]!.ts, type: 'post-merge-defect', issue: '7', msg: 'revert commit abc1234 reverts PR #42' },
     ];
     await recordTierDemotions({ path: s.path, events: revert, now: NOW, comment: s.comment, warn: s.warn });
-    expect(s.comment).toHaveBeenCalledWith(7, expect.any(String));
+    expect(s.comments.map((c) => c.issue)).toEqual([7]);
   });
 
   it('counts an unreadable file as malformed', () => {
@@ -130,30 +150,43 @@ describe('tier demotion (cli)', () => {
 
   it('the kpis binding comments through octokit and prints a line per demotion', async () => {
     const s = setup();
-    const createComment = vi.fn(async (_args: unknown) => ({}));
+    const created: unknown[] = [];
+    const createComment = async (args: unknown) => {
+      created.push(args);
+      return {};
+    };
     const octokit: Octokit = { rest: { issues: { createComment } } } as never;
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errLines: string[] = [];
+    const err = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+      errLines.push(a.join(' '));
+    });
     await recordKpiTierDemotions(s.path, events, NOW, octokit, 'o', 'r');
-    expect(createComment).toHaveBeenCalledWith(expect.objectContaining({ owner: 'o', repo: 'r', issue_number: 900 }));
-    expect(err.mock.calls.join('\n')).toContain('trust tier demoted T2→T1 (PR #42)');
+    expect(created[0]).toMatchObject({ owner: 'o', repo: 'r', issue_number: 900 });
+    expect(errLines.join('\n')).toContain('trust tier demoted T2→T1 (PR #42)');
     err.mockRestore();
   });
 
   it('the kpis binding reports an unexpected failure instead of throwing', async () => {
     const s = setup();
     mkdirSync(join(s.dir, 'state', 'tier-demotions.jsonl'), { recursive: true });
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errLines: string[] = [];
+    const err = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+      errLines.push(a.join(' '));
+    });
     const octokit: Octokit = {} as never;
     await recordKpiTierDemotions(s.path, events, NOW, octokit, 'o', 'r');
-    expect(err.mock.calls.join('\n')).toContain('tier demotions not recorded');
+    expect(errLines.join('\n')).toContain('tier demotions not recorded');
     err.mockRestore();
   });
 
   it('runAckTierDemotion acknowledges for the repo root', async () => {
     const s = setup();
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logLines: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
+      logLines.push(a.join(' '));
+    });
     runAckTierDemotion(s.dir, null);
-    expect(log).toHaveBeenCalledWith('No unacknowledged tier demotions.');
+    expect(logLines).toContain('No unacknowledged tier demotions.');
     log.mockRestore();
   });
 });
