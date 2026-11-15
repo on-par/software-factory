@@ -16,8 +16,6 @@ import type { CommandResult } from '../utils/command-runner.js';
 import { appSmokeChecker, defaultStartApp, type AppSmokeDeps, type StartedApp } from './app-smoke.js';
 import { runAllCheckers, type CheckerContext } from './index.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 const tempDirs = createTempDirs();
 afterEach(() => tempDirs.cleanup());
 
@@ -239,7 +237,15 @@ describe('appSmokeChecker', () => {
 const models: ModelsConfig = {
   version: 1,
   models: {
-    'stub-model': { provider: 'custom', tier: 'boss', ...free, contextWindow: 1000, capabilities: [], envKey: null },
+    'stub-model': {
+      provider: 'custom',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
   },
   tiers: { boss: ['stub-model'] },
   failover: { triggers: ['error'], maxRetries: 1, cooldownMs: 0 },

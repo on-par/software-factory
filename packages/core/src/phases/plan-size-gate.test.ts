@@ -13,11 +13,18 @@ import { WorkSourceRegistry } from '../work/index.js';
 import { planPhase } from './plan.js';
 import { StubModelExecutor } from './plan-test-helpers.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
 const models: ModelsConfig = {
   version: 1,
   models: {
-    'stub-model': { provider: 'custom', tier: 'boss', ...free, contextWindow: 1000, capabilities: [], envKey: null },
+    'stub-model': {
+      provider: 'custom',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
   },
   tiers: { boss: ['stub-model'] },
   failover: {

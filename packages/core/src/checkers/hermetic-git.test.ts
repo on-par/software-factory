@@ -14,12 +14,18 @@ import type { CheckSummary } from '../types/index.js';
 import type { CheckerContext } from './index.js';
 import { runVerificationCommand } from './run-command.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 const models: ModelsConfig = {
   version: 1,
   models: {
-    'stub-model': { provider: 'openai', tier: 'boss', ...free, contextWindow: 1000, capabilities: [], envKey: null },
+    'stub-model': {
+      provider: 'openai',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
   },
   tiers: { boss: ['stub-model'] },
   failover: {

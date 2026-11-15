@@ -10,6 +10,7 @@ import { ModelRouter } from '../router/index.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 import { planPhase } from './plan.js';
 import { StubModelExecutor } from './plan-test-helpers.js';
+
 const models: ModelsConfig = {
   version: 1,
   models: {

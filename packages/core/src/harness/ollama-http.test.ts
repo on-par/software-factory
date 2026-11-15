@@ -7,8 +7,6 @@ import { HarnessError } from './index.js';
 import type { OllamaFetchFn } from './ollama-http.js';
 import { OllamaHttpHarness } from './ollama-http.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 function okFetch(json: unknown): OllamaFetchFn {
   return async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => '', json: async () => json });
 }
@@ -57,7 +55,15 @@ const modelsConfig: ModelsConfig = {
       providerModel: 'qwen2.5-coder:14b',
       providerOptions: { num_ctx: 16384, temperature: 0.2 },
     },
-    'ollama-plain': { provider: 'ollama', tier: 'boss', ...free, contextWindow: 1000, capabilities: [], envKey: null },
+    'ollama-plain': {
+      provider: 'ollama',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
   },
   tiers: { boss: ['ollama-model', 'ollama-plain'] },
   failover: {

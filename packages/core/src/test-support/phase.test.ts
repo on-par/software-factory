@@ -5,8 +5,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { RoutesConfig } from '../config/index.js';
 import { createPhaseTestSetup, fakeOctokit, stubModel, stubModelsConfig } from './phase.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 describe('fakeOctokit', () => {
   it('returns static responses and handler results per endpoint', async () => {
     const { octokit } = fakeOctokit({
@@ -73,7 +71,8 @@ describe('createPhaseTestSetup', () => {
     expect(stubModel()).toEqual({
       provider: 'custom',
       tier: 'boss',
-      ...free,
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
       contextWindow: 1000,
       capabilities: [],
       envKey: null,

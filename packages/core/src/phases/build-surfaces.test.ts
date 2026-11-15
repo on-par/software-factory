@@ -10,6 +10,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { buildClaudePrompt, buildCommitOnlyPrompt, buildPhase } from './build.js';
+
 const models: ModelsConfig = {
   version: 1,
   models: {

@@ -13,8 +13,6 @@ import {
 } from './decompose.js';
 import type { DecompositionOutput } from './decompose.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 const criterion = (name: string, tracesTo: string[]) => ({
   name,
   given: [],
@@ -150,7 +148,8 @@ describe('decomposeOversizedIssue parent coverage (#3105)', () => {
       'stub-model': {
         provider: 'custom',
         tier: 'triage',
-        ...free,
+        costPerMtokInput: 0,
+        costPerMtokOutput: 0,
         contextWindow: 1000,
         capabilities: [],
         envKey: null,

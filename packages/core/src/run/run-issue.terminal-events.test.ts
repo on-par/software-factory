@@ -20,8 +20,6 @@ import type { Workspace } from './ports.js';
 import type { reworkWorker as realReworkWorker } from '../phases/check.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 const planPhase = vi.fn<typeof realPlanPhase>();
 const buildPhase = vi.fn<typeof realBuildPhase>();
 const checkPhase = vi.fn<typeof realCheckPhase>();
@@ -141,7 +139,15 @@ describe('runIssue logs exactly one terminal event (#3435)', () => {
       const models: ModelsConfig = {
         ...MODELS,
         models: {
-          w: { provider: 'custom', tier: 'worker', ...free, contextWindow: 1000, capabilities: [], envKey: null },
+          w: {
+            provider: 'custom',
+            tier: 'worker',
+            costPerMtokInput: 0,
+            costPerMtokOutput: 0,
+            contextWindow: 1000,
+            capabilities: [],
+            envKey: null,
+          },
         },
         tiers: { worker: ['w'] },
       };

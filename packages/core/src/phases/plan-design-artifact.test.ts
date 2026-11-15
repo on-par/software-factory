@@ -11,11 +11,18 @@ import { StubModelExecutor } from '../router/stub.js';
 import { buildDesignArtifactRetryPrompt, MAX_DESIGN_ARTIFACT_RETRIES, planPhase } from './plan.js';
 import { DESIGN_ARTIFACT_LOSS, designArtifactInvalidMessage } from './plan-design-retry.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
 const models: ModelsConfig = {
   version: 1,
   models: {
-    'stub-model': { provider: 'custom', tier: 'boss', ...free, contextWindow: 1000, capabilities: [], envKey: null },
+    'stub-model': {
+      provider: 'custom',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
   },
   tiers: { boss: ['stub-model'] },
   failover: {

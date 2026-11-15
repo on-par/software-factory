@@ -6,15 +6,14 @@ import { StubModelExecutor } from '../router/stub.js';
 import { runEval } from './runner.js';
 import type { GoldenCase } from './types.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 const models: ModelsConfig = {
   version: 1,
   models: {
     'stub-model': {
       provider: 'custom',
       tier: ['boss', 'checker'],
-      ...free,
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
       contextWindow: 1000,
       capabilities: [],
       envKey: null,

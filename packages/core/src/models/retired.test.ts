@@ -4,12 +4,18 @@ import { applyRepoConfig, resolveEffectiveModelPins } from '../config/repo.js';
 import type { ModelsConfig } from '../config/index.js';
 import { ModelRegistry, resolveModelOverrides, retiredModelHint } from './index.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 const models: ModelsConfig = {
   version: 1,
   models: {
-    'stub-model': { provider: 'custom', tier: 'worker', ...free, contextWindow: 1000, capabilities: [], envKey: null },
+    'stub-model': {
+      provider: 'custom',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
   },
   tiers: { worker: ['stub-model'] },
   failover: {

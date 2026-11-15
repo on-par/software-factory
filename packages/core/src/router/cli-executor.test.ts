@@ -14,8 +14,6 @@ import { ModelRegistry } from '../models/index.js';
 import { CliModelExecutor, ModelRouter } from './index.js';
 import { resetOllamaProbeCache } from './ollama-probe.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 const modelsConfig: ModelsConfig = {
   version: 1,
   models: {
@@ -32,7 +30,8 @@ const modelsConfig: ModelsConfig = {
     'claude-no-flag': {
       provider: 'anthropic',
       tier: 'boss',
-      ...free,
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
       contextWindow: 1000,
       capabilities: [],
       envKey: null,

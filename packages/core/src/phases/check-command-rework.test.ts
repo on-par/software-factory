@@ -13,8 +13,6 @@ import { checkPhase, reworkWorker } from './check.js';
 import { runnableBuildRoutes } from './plan-routes.js';
 import { afterEach, describe, expect, it } from 'vitest';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 const failover: ModelsConfig['failover'] = {
   triggers: ['rate_limit', 'unavailable', 'auth'],
   maxRetries: 2,
@@ -68,7 +66,8 @@ const codexModels: ModelsConfig = {
     'claude-worker': {
       provider: 'anthropic',
       tier: 'boss',
-      ...free,
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
       contextWindow: 1000,
       capabilities: ['claude'],
       envKey: null,

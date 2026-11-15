@@ -9,8 +9,6 @@ import { ClaudeCliHarness } from './claude-cli.js';
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
 import { HarnessError } from './index.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 const sandboxPolicy: SandboxPolicy = {
   runtime: 'sandbox-exec',
   worktree: '/tmp/factory worktree',
@@ -55,7 +53,8 @@ const modelsConfig: ModelsConfig = {
     'claude-no-flag': {
       provider: 'anthropic',
       tier: 'boss',
-      ...free,
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
       contextWindow: 1000,
       capabilities: [],
       envKey: null,

@@ -19,12 +19,18 @@ import {
   type PrShadowInput,
 } from './classifier.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 const MODELS: ModelsConfig = {
   version: 1,
   models: {
-    'm-1': { provider: 'custom', tier: 'checker', ...free, contextWindow: 1000, capabilities: [], envKey: null },
+    'm-1': {
+      provider: 'custom',
+      tier: 'checker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
   },
   tiers: { checker: ['m-1'] },
   failover: {

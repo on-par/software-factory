@@ -9,6 +9,7 @@ import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { checkPhase } from './check.js';
+
 const models: ModelsConfig = {
   version: 1,
   models: {

@@ -5,8 +5,6 @@ import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { buildDecompositionPrompt, decomposeOversizedIssue, parseDecompositionOutput } from './decompose.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 const story = (n: number) => ({
   title: `Story ${n}`,
   role: 'operator',
@@ -28,7 +26,15 @@ const VALID_DECOMPOSITION_JSON = JSON.stringify({
 const models: ModelsConfig = {
   version: 1,
   models: {
-    'stub-model': { provider: 'custom', tier: 'triage', ...free, contextWindow: 1000, capabilities: [], envKey: null },
+    'stub-model': {
+      provider: 'custom',
+      tier: 'triage',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
   },
   tiers: { triage: ['stub-model'] },
   failover: {

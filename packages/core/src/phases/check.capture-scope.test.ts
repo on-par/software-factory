@@ -11,6 +11,7 @@ import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 import { checkPhase } from './check.js';
+
 const models: ModelsConfig = {
   version: 1,
   models: {

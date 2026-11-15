@@ -10,8 +10,6 @@ import { SLICE_PLAN_MARKER, renderSlicePlanComment, slicePlanFromDecomposition, 
 import type { SlicePlan } from './slice-plan.js';
 import type { SlicePlanStore } from './slice-plan-store.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 const BOT = 42;
 const repo = 'acme/widgets';
 const issue = 5;
@@ -19,7 +17,15 @@ const issue = 5;
 const models: ModelsConfig = {
   version: 1,
   models: {
-    'stub-model': { provider: 'custom', tier: 'triage', ...free, contextWindow: 1000, capabilities: [], envKey: null },
+    'stub-model': {
+      provider: 'custom',
+      tier: 'triage',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
   },
   tiers: { triage: ['stub-model'] },
   failover: {

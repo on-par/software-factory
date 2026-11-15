@@ -10,11 +10,18 @@ import { ModelRouter } from '../router/index.js';
 import { buildPlanPrompt, planPhase } from './plan.js';
 import { specWithDesign, StubModelExecutor } from './plan-test-helpers.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
 const models: ModelsConfig = {
   version: 1,
   models: {
-    'stub-model': { provider: 'custom', tier: 'boss', ...free, contextWindow: 1000, capabilities: [], envKey: null },
+    'stub-model': {
+      provider: 'custom',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
     'pinned-model': {
       provider: 'custom',
       tier: 'boss',

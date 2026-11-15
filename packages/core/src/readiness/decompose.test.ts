@@ -21,8 +21,6 @@ import {
 import type { DecompositionOutput } from './decompose.js';
 import { FACTORY_TASK_REQUIRED_FIELDS, scoreIssueReadiness } from './index.js';
 
-const free = { costPerMtokInput: 0, costPerMtokOutput: 0 };
-
 const VALID_DECOMPOSITION_JSON = `{
   "epic": {
     "title": "Harden the import queue",
@@ -101,7 +99,15 @@ const INVEST_FAILING_JSON = `{
 const models: ModelsConfig = {
   version: 1,
   models: {
-    'stub-model': { provider: 'custom', tier: 'triage', ...free, contextWindow: 1000, capabilities: [], envKey: null },
+    'stub-model': {
+      provider: 'custom',
+      tier: 'triage',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
   },
   tiers: { triage: ['stub-model'] },
   failover: {
