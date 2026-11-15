@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { ProviderOrder } from '../config/provider-order.js';
 import { createTempDirs } from '../harness/temp-dir.js';
+import { recordArgs } from '../test-support/recorders.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
@@ -157,10 +158,8 @@ async function run(setup: Setup = {}) {
     skipCalls.push(providers);
     original(providers);
   };
-  let planCalls = 0;
-  const planPhase = vi.fn<typeof realPlanPhase>(async (opts) => {
-    planCalls += 1;
-    if (setup.plan) return setup.plan(planCalls, opts);
+  const { calls: plans, fn: planPhase } = recordArgs<typeof realPlanPhase>(async (opts): Promise<PlanResult> => {
+    if (setup.plan) return setup.plan(plans.length, opts);
     return {
       ok: true,
       route: 'claude',
@@ -169,16 +168,12 @@ async function run(setup: Setup = {}) {
       designArtifact: null,
     } satisfies PlanResult;
   });
-  let buildCalls = 0;
-  const buildPhase = vi.fn<typeof realBuildPhase>(async (opts) => {
-    buildCalls += 1;
-    if (setup.build) return setup.build(buildCalls, opts);
+  const { calls: builds, fn: buildPhase } = recordArgs<typeof realBuildPhase>(async (opts): Promise<BuildResult> => {
+    if (setup.build) return setup.build(builds.length, opts);
     return { ok: true, model: opts.modelOverride ?? 'm', route: opts.route };
   });
-  let checkCalls = 0;
-  const checkPhase = vi.fn<typeof realCheckPhase>(async () => {
-    checkCalls += 1;
-    return setup.check ? setup.check(checkCalls, () => stageSkip) : CHECK_OK;
+  const { calls: checks, fn: checkPhase } = recordArgs<typeof realCheckPhase>(async (): Promise<CheckPhaseResult> => {
+    return setup.check ? setup.check(checks.length, () => stageSkip) : CHECK_OK;
   });
   const ports: RunPorts = {
     router,
@@ -196,7 +191,7 @@ async function run(setup: Setup = {}) {
     shipPhase: vi.fn<typeof realShipPhase>().mockResolvedValue({ ok: true, prNumber: 42 } satisfies ShipResult),
   };
   const outcome = await runIssue({ ...request, ...setup.request }, policy, ports);
-  return { outcome, events, failovers, planPhase, buildPhase, checkPhase, skipCalls, workspace: ports.workspace.path };
+  return { outcome, events, failovers, plans, builds, checks, skipCalls, workspace: ports.workspace.path };
 }
 
 const types = (events: Array<[string, string]>) => events.map(([t]) => t);
@@ -206,7 +201,7 @@ describe('runIssue — provider failover at the phase boundary (#3338)', () => {
     const repo = makeRepo();
     const startSha = git(repo, 'rev-parse', 'HEAD');
     const seen: Array<{ head: string; partial: boolean; model?: string; route: string }> = [];
-    const { outcome, failovers, buildPhase, events } = await run({
+    const { outcome, failovers, builds, events } = await run({
       workspace: repo,
       build: async (call, opts) => {
         seen.push({
@@ -225,16 +220,16 @@ describe('runIssue — provider failover at the phase boundary (#3338)', () => {
       },
     });
     expect(outcome.state).toBe('ready');
-    expect(buildPhase).toHaveBeenCalledTimes(2);
+    expect(builds).toHaveLength(2);
     expect(seen[0]).toMatchObject({ model: 'claude-worker', route: 'claude', partial: false });
     expect(seen[1]).toEqual({ head: startSha, partial: false, model: 'codex-worker', route: 'codex' });
-    expect(buildPhase.mock.calls.every(([o]) => o.crossProviderLadder === false)).toBe(true);
+    expect(builds.every(([o]) => o.crossProviderLadder === false)).toBe(true);
     expect(failovers).toEqual([{ stage: 'build', from: 'claude', to: 'codex', issue: 1 }]);
     expect(types(events).filter((t) => t === 'provider_failover')).toHaveLength(1);
   });
 
   it('a rate_limit mid-BUILD under a build pin on the primary reruns BUILD on the next configured provider', async () => {
-    const { outcome, buildPhase } = await run({
+    const { outcome, builds } = await run({
       request: { modelPins: { sources: {}, build: 'claude-worker' } },
       build: async (call, opts) => {
         if (call === 1) throw rateLimitError('claude-worker');
@@ -242,13 +237,13 @@ describe('runIssue — provider failover at the phase boundary (#3338)', () => {
       },
     });
     expect(outcome.state).toBe('ready');
-    expect(buildPhase).toHaveBeenCalledTimes(2);
-    expect(buildPhase.mock.calls[0]?.[0]).toMatchObject({ modelOverride: 'claude-worker', route: 'claude' });
-    expect(buildPhase.mock.calls[1]?.[0]).toMatchObject({ modelOverride: 'codex-worker', route: 'codex' });
+    expect(builds).toHaveLength(2);
+    expect(builds[0]?.[0]).toMatchObject({ modelOverride: 'claude-worker', route: 'claude' });
+    expect(builds[1]?.[0]).toMatchObject({ modelOverride: 'codex-worker', route: 'codex' });
   });
 
   it('a usage_cap mid-PLAN under a plan pin on the primary reruns PLAN on the next configured provider', async () => {
-    const { outcome, planPhase } = await run({
+    const { outcome, plans } = await run({
       request: { modelPins: { sources: {}, plan: 'claude-boss' } },
       plan: async (call, opts) => {
         if (call === 1) throw capError('claude-boss');
@@ -262,64 +257,64 @@ describe('runIssue — provider failover at the phase boundary (#3338)', () => {
       },
     });
     expect(outcome.state).toBe('ready');
-    expect(planPhase.mock.calls.map(([o]) => o.modelOverride)).toEqual(['claude-boss', 'codex-boss']);
+    expect(plans.map(([o]) => o.modelOverride)).toEqual(['claude-boss', 'codex-boss']);
   });
 
   it("a provider capped before PLAN runs PLAN on the next provider's boss model (#3338)", async () => {
-    const { planPhase, failovers, outcome } = await run({ openProviders: ['anthropic'] });
+    const { plans, failovers, outcome } = await run({ openProviders: ['anthropic'] });
     expect(outcome.state).toBe('ready');
-    expect(planPhase).toHaveBeenCalledTimes(1);
-    expect(planPhase.mock.calls[0]?.[0].modelOverride).toBe('codex-boss');
-    expect(planPhase.mock.calls[0]?.[0].modelFallbacks).toBeUndefined();
-    expect([...(planPhase.mock.calls[0]?.[0].skipProviders ?? [])]).toEqual(['anthropic']);
+    expect(plans).toHaveLength(1);
+    expect(plans[0]?.[0].modelOverride).toBe('codex-boss');
+    expect(plans[0]?.[0].modelFallbacks).toBeUndefined();
+    expect([...(plans[0]?.[0].skipProviders ?? [])]).toEqual(['anthropic']);
     expect(failovers).toEqual([]);
   });
 
   it('a non-cap BUILD failure parks with no rerun and no provider_failover (#3338)', async () => {
-    const { outcome, buildPhase, failovers } = await run({
+    const { outcome, builds, failovers } = await run({
       build: async () => {
         throw new ModelRouterError('x', 'error', [{ model: 'claude-worker', reason: 'error', ok: false }]);
       },
     });
     expect(outcome.state).toBe('parked');
-    expect(buildPhase).toHaveBeenCalledTimes(1);
+    expect(builds).toHaveLength(1);
     expect(failovers).toEqual([]);
   });
 
   it('a usage cap without a worktree snapshot is not rerun on a dirty tree (#3338)', async () => {
     const notARepo = join(dir, 'not-a-repo');
     execFileSync('mkdir', ['-p', notARepo]);
-    const { buildPhase, failovers } = await run({
+    const { builds, failovers } = await run({
       workspace: notARepo,
       build: async () => {
         throw capError('claude-worker');
       },
     });
-    expect(buildPhase).toHaveBeenCalledTimes(1);
+    expect(builds).toHaveLength(1);
     expect(failovers).toEqual([]);
   });
 
   it("a repo-pinned build route keeps today's BUILD path (ADR-0092, #3338)", async () => {
-    const { buildPhase, outcome } = await run({ request: { preferredRoute: 'codex' } });
+    const { builds, outcome } = await run({ request: { preferredRoute: 'codex' } });
     expect(outcome.state).toBe('ready');
-    expect(buildPhase.mock.calls[0]?.[0].crossProviderLadder).toBeUndefined();
-    expect(buildPhase.mock.calls[0]?.[0].route).toBe('codex');
+    expect(builds[0]?.[0].crossProviderLadder).toBeUndefined();
+    expect(builds[0]?.[0].route).toBe('codex');
   });
 
   it("providerOrder unset keeps today's phase options (#3338)", async () => {
-    const { planPhase, buildPhase, skipCalls, failovers } = await run({
+    const { plans, builds, skipCalls, failovers } = await run({
       request: {
         providerOrder: undefined,
         modelPins: { sources: {}, plan: 'claude-boss', planFallback: 'codex-boss' },
       },
     });
-    expect(planPhase.mock.calls[0]?.[0]).toMatchObject({
+    expect(plans[0]?.[0]).toMatchObject({
       modelOverride: 'claude-boss',
       modelFallbacks: ['codex-boss'],
       skipProviders: undefined,
     });
-    expect(buildPhase.mock.calls[0]?.[0].crossProviderLadder).toBeUndefined();
-    expect(buildPhase.mock.calls[0]?.[0].modelOverride).toBeUndefined();
+    expect(builds[0]?.[0].crossProviderLadder).toBeUndefined();
+    expect(builds[0]?.[0].modelOverride).toBeUndefined();
     expect(skipCalls).toEqual([]);
     expect(failovers).toEqual([]);
   });
@@ -329,7 +324,7 @@ describe('runIssue — provider failover at the phase boundary (#3338)', () => {
     const startSha = git(repo, 'rev-parse', 'HEAD');
     const heads: string[] = [];
     const skipsDuring: Array<ReadonlySet<string> | undefined> = [];
-    const { outcome, failovers, checkPhase, skipCalls } = await run({
+    const { outcome, failovers, checks, skipCalls } = await run({
       workspace: repo,
       check: async (call, skip) => {
         heads.push(git(repo, 'rev-parse', 'HEAD'));
@@ -344,7 +339,7 @@ describe('runIssue — provider failover at the phase boundary (#3338)', () => {
       },
     });
     expect(outcome.state).toBe('ready');
-    expect(checkPhase).toHaveBeenCalledTimes(2);
+    expect(checks).toHaveLength(2);
     expect(heads).toEqual([startSha, startSha]);
     expect(skipsDuring[0]?.size ?? 0).toBe(0);
     expect([...(skipsDuring[1] ?? [])]).toEqual(['anthropic']);

@@ -4,6 +4,7 @@ import type { Octokit } from '@octokit/rest';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { recordArgs } from '../test-support/recorders.js';
 import type { buildPhase as realBuildPhase } from '../phases/build.js';
 import type { checkPhase as realCheckPhase } from '../phases/check.js';
 import type { planPhase as realPlanPhase } from '../phases/plan.js';
@@ -77,19 +78,19 @@ afterAll(() => tempDirs.cleanup());
 type Log = ReturnType<RunPorts['events']>;
 
 function prOctokit() {
-  const createComment = vi.fn(async (_args: { issue_number: number; body: string }) => ({ data: { id: 1 } }));
-  const update = vi.fn(async (_args: { state: string }) => ({ data: {} }));
-  const deleteRef = vi.fn();
+  const comment = recordArgs(async (_a: { issue_number: number; body: string }) => ({ data: { id: 1 } }));
+  const update = recordArgs(async (_a: { state: string }) => ({ data: {} }));
+  const deleteRef = recordArgs(async (_a: unknown) => {});
   const octokit = Object.assign({} as Octokit, {
     graphql: vi.fn(async () => ({})),
     rest: {
       users: { getAuthenticated: vi.fn(async () => ({ data: { id: 9 } })) },
-      pulls: { list: vi.fn(async () => ({ data: [] })), get: vi.fn(), update },
-      issues: { listComments: vi.fn(async () => ({ data: [] })), createComment, updateComment: vi.fn() },
-      git: { deleteRef },
+      pulls: { list: vi.fn(async () => ({ data: [] })), get: vi.fn(), update: update.fn },
+      issues: { listComments: async () => ({ data: [] }), createComment: comment.fn, updateComment: vi.fn() },
+      git: { deleteRef: deleteRef.fn },
     },
   });
-  return { octokit, createComment, update, deleteRef };
+  return { octokit, posted: comment.calls, pulled: update.calls, refs: deleteRef.calls };
 }
 
 function ports(log: Log, octokit: Octokit): RunPorts {
@@ -123,21 +124,21 @@ beforeEach(() => {
 describe('runIssue — a park settles the run PR (#3551)', () => {
   it("a CI-failed park leaves the run's PR open and keeps the branch (#3998)", async () => {
     shipPhase.mockResolvedValue({ ok: false, prNumber: 42, reason: 'CI failed for PR #42', ciOutcome: 'failure' });
-    const { octokit, createComment, update, deleteRef } = prOctokit();
+    const { octokit, posted, pulled, refs } = prOctokit();
     const outcome = await runIssue(request, policy, ports(vi.fn<Log>(), octokit));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'ci-failed', prNumber: 42 });
-    const prComments = createComment.mock.calls.filter(([args]) => args.issue_number === 42);
+    const prComments = posted.filter(([c]) => c.issue_number === 42);
     expect(prComments).toHaveLength(0);
-    expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ state: 'closed' }));
-    expect(deleteRef).not.toHaveBeenCalled();
+    expect(pulled.some(([u]) => u.state === 'closed')).toBe(false);
+    expect(refs).toEqual([]);
   });
 
   it('a park before SHIP makes no pulls.update call', async () => {
     buildPhase.mockRejectedValue(new Error('build exploded'));
-    const { octokit, update } = prOctokit();
+    const { octokit, pulled } = prOctokit();
     const outcome = await runIssue(request, policy, ports(vi.fn<Log>(), octokit));
     expect(outcome.state).toBe('parked');
-    expect(shipPhase).not.toHaveBeenCalled();
-    expect(update).not.toHaveBeenCalled();
+    expect(outcome).not.toHaveProperty('prNumber');
+    expect(pulled).toEqual([]);
   });
 });

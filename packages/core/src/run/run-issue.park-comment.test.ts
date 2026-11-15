@@ -13,6 +13,7 @@ import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { ShipResult, shipPhase as realShipPhase } from '../phases/ship.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
+import { recordArgs } from '../test-support/recorders.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import { parkUnblockHint } from './park-comment.js';
@@ -112,15 +113,14 @@ beforeEach(() => {
 
 const overBudget: RunPolicy = { ...policy, budget: { perIssueCapUsd: 1 } };
 
-function commentOctokit(createComment = vi.fn(async (_args: { body: string }) => ({ data: { id: 1 } }))) {
-  const getAuthenticated = vi.fn(async () => ({ data: { id: 9 } }));
+function commentOctokit(createComment = recordArgs(async (_a: { body: string }) => ({ data: { id: 1 } }))) {
   const octokit = Object.assign({} as Octokit, {
     rest: {
-      users: { getAuthenticated },
-      issues: { listComments: vi.fn(async () => ({ data: [] })), createComment, updateComment: vi.fn() },
+      users: { getAuthenticated: async () => ({ data: { id: 9 } }) },
+      issues: { listComments: async () => ({ data: [] }), createComment: createComment.fn, updateComment: vi.fn() },
     },
   });
-  return { octokit, createComment, getAuthenticated };
+  return { octokit, comments: createComment.calls };
 }
 
 function parkingPorts(log: Log, octokit?: Octokit): RunPorts {
@@ -129,11 +129,11 @@ function parkingPorts(log: Log, octokit?: Octokit): RunPorts {
 
 describe('runIssue — issue park comment (#2314)', () => {
   it('posts one marked comment on a park', async () => {
-    const { octokit, createComment } = commentOctokit();
+    const { octokit, comments } = commentOctokit();
     const outcome = await runIssue(request, overBudget, parkingPorts(vi.fn<Log>(), octokit));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
-    expect(createComment).toHaveBeenCalledTimes(1);
-    const { body } = createComment.mock.calls[0][0];
+    expect(comments).toHaveLength(1);
+    const [{ body }] = comments[0] ?? [{ body: '' }];
     expect(body).toContain('issue:1 -->');
     expect(body).toContain('reason: fail');
     expect(body).not.toContain('Run logs:');
@@ -145,9 +145,9 @@ describe('runIssue — issue park comment (#2314)', () => {
       await opts.onWorkerResult?.({ model: 'plan-model', output: 'plan output', exitCode: 0, attempts: [] });
       return PLAN_OK;
     });
-    const { octokit, createComment } = commentOctokit();
+    const { octokit, comments } = commentOctokit();
     await runIssue({ ...request, logsDir }, overBudget, parkingPorts(vi.fn<Log>(), octokit));
-    expect(createComment.mock.calls[0][0].body).toContain(`Run logs: ${logsDir}/issue-1/run-`);
+    expect(comments[0]?.[0].body).toContain(`Run logs: ${logsDir}/issue-1/run-`);
   });
 
   it('keeps the parked outcome and omits the location when worker log writing fails', async () => {
@@ -159,11 +159,11 @@ describe('runIssue — issue park comment (#2314)', () => {
       return PLAN_OK;
     });
     const baseline = await runIssue(request, overBudget, parkingPorts(vi.fn<Log>()));
-    const log = vi.fn<Log>();
+    const { calls: logged, fn: log } = recordArgs<Log>(() => {});
     const outcome = await runIssue({ ...request, logsDir: logsPath }, overBudget, parkingPorts(log));
     expect(outcome).toEqual(baseline);
-    expect(log.mock.calls.some(([type, message]) => type === 'warn' && message.includes('write failed'))).toBe(true);
-    expect(log.mock.calls.some(([, message]) => message.includes('Run logs:'))).toBe(false);
+    expect(logged.some(([type, message]) => type === 'warn' && message.includes('write failed'))).toBe(true);
+    expect(logged.some(([, message]) => message.includes('Run logs:'))).toBe(false);
   });
 
   it('runIssue writes plan and build worker logs for a parked run', async () => {
@@ -182,10 +182,10 @@ describe('runIssue — issue park comment (#2314)', () => {
       return BUILD_OK;
     });
     vi.mocked(checkPhase).mockRejectedValueOnce(new Error('park after build'));
-    const log = vi.fn<Log>();
+    const { calls: logged, fn: log } = recordArgs<Log>(() => {});
     const outcome = await runIssue({ ...request, logsDir, localOnly: true }, policy, ports(log));
     expect(outcome.state).toBe('parked');
-    const terminal = log.mock.calls.find(([type, message]) => type === 'fail' && message.includes('Run logs:'))?.[1];
+    const terminal = logged.find(([type, message]) => type === 'fail' && message.includes('Run logs:'))?.[1];
     if (!terminal) throw new Error('expected the terminal event to include the written log path');
     const directory = /Run logs: (.+)$/.exec(terminal)?.[1];
     if (!directory) throw new Error('expected a run log directory');
@@ -199,32 +199,31 @@ describe('runIssue — issue park comment (#2314)', () => {
 
   it('a failing comment create leaves the parked outcome unchanged and logs environment_warning', async () => {
     const baseline = await runIssue(request, overBudget, parkingPorts(vi.fn<Log>()));
-    const log = vi.fn<Log>();
-    const { octokit } = commentOctokit(vi.fn().mockRejectedValue(new Error('403')));
+    const { calls: logged, fn: log } = recordArgs<Log>(() => {});
+    const { octokit } = commentOctokit(recordArgs(async (_a: { body: string }) => Promise.reject(new Error('403'))));
     const outcome = await runIssue(request, overBudget, parkingPorts(log, octokit));
     expect(outcome).toEqual(baseline);
-    const warnings = log.mock.calls.filter(
+    const warnings = logged.filter(
       ([type, message]) => type === 'environment_warning' && message.includes('park comment'),
     );
     expect(warnings).toHaveLength(1);
   });
 
   it('localOnly makes no octokit call', async () => {
-    const { octokit, createComment, getAuthenticated } = commentOctokit();
+    const { octokit, comments } = commentOctokit();
     await runIssue({ ...request, localOnly: true }, overBudget, parkingPorts(vi.fn<Log>(), octokit));
-    expect(createComment).not.toHaveBeenCalled();
-    expect(getAuthenticated).not.toHaveBeenCalled();
+    expect(comments).toEqual([]);
   });
 
   it('terminalParked logs a structured park payload with reason, decision, lane and blockedBehind (#3511)', async () => {
-    const log = vi.fn<Log>();
+    const { calls: logged, fn: log } = recordArgs<Log>(() => {});
     const outcome = await runIssue(
       { ...request, lane: 'app', blockedBehind: [2, 3] },
       overBudget,
       parkingPorts(log, commentOctokit().octokit),
     );
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
-    expect(log).toHaveBeenCalledWith(
+    expect(logged).toContainEqual([
       'fail',
       expect.any(String),
       expect.objectContaining({
@@ -235,7 +234,7 @@ describe('runIssue — issue park comment (#2314)', () => {
           blockedBehind: [2, 3],
         },
       }),
-    );
+    ]);
   });
 
   it('logs the design-smell finding on the park payload, comment and outcome (#1513)', async () => {
@@ -243,43 +242,43 @@ describe('runIssue — issue park comment (#2314)', () => {
     vi.mocked(buildPhase).mockRejectedValue(
       Object.assign(new Error('smell'), { outcome: { state: 'parked', reason: 'escalate', designSmell: F } }),
     );
-    const log = vi.fn<Log>();
-    const { octokit, createComment } = commentOctokit();
+    const { calls: logged, fn: log } = recordArgs<Log>(() => {});
+    const { octokit, comments } = commentOctokit();
     const outcome = await runIssue(request, policy, ports(log, octokit));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'escalate', designSmell: F });
-    expect(log).toHaveBeenCalledWith(
+    expect(logged).toContainEqual([
       'escalate',
       expect.any(String),
       expect.objectContaining({ park: expect.objectContaining({ designSmell: F }) }),
-    );
-    const body = createComment.mock.calls[0][0].body;
+    ]);
+    const body = comments[0]?.[0].body;
     expect(body).toContain('cache it');
     expect(body).toContain('stale reads');
     expect(body).toContain('split the module');
   });
 
   it("defaults the park payload lane to '' and blockedBehind to [] when the request has neither (#3511)", async () => {
-    const log = vi.fn<Log>();
+    const { calls: logged, fn: log } = recordArgs<Log>(() => {});
     await runIssue(request, overBudget, parkingPorts(log, commentOctokit().octokit));
-    expect(log).toHaveBeenCalledWith(
+    expect(logged).toContainEqual([
       'fail',
       expect.any(String),
       expect.objectContaining({
         park: { reason: 'fail', decision: parkUnblockHint('fail', workKeyFromIssue(1)), lane: '', blockedBehind: [] },
       }),
-    );
+    ]);
   });
 
   it('parks blocked with no failure signature when a phase throws a blocked marker (#2315)', async () => {
     vi.mocked(buildPhase).mockRejectedValue(Object.assign(new Error('waiting on #9'), { parkReason: 'blocked' }));
-    const log = vi.fn<Log>();
-    const { octokit, createComment } = commentOctokit();
+    const { calls: logged, fn: log } = recordArgs<Log>(() => {});
+    const { octokit, comments } = commentOctokit();
     const outcome = await runIssue(request, policy, ports(log, octokit));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'blocked' });
     expect(outcome).not.toHaveProperty('failureSignature');
     expect(outcome).not.toHaveProperty('failingChecks');
-    expect(log.mock.calls.map(([type]) => type)).toContain('blocked');
-    expect(createComment.mock.calls[0][0].body).toContain('reason: blocked');
+    expect(logged.map(([type]) => type)).toContain('blocked');
+    expect(comments[0]?.[0].body).toContain('reason: blocked');
   });
 });
 

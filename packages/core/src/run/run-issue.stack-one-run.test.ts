@@ -15,6 +15,7 @@ import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { fakeOctokit, stubModel } from '../test-support/index.js';
+import { recordArgs } from '../test-support/recorders.js';
 import type { RunOutcome } from './outcome.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
@@ -144,7 +145,7 @@ describe('run-issue --stack through the real slice gate, faking only GitHub, the
       budget: {},
       effective: {} as RunPolicy['effective'],
     };
-    const createSliceBranch = vi.fn(async (_o: { branch: string; startPoint: string }) => {});
+    const { calls: made, fn: createSliceBranch } = recordArgs(async (_: { branch: string; startPoint: string }) => {});
     let pr = 100;
     const shipPhase = vi.fn(async () => ({ ok: true, prNumber: ++pr }));
     let head = 0;
@@ -185,7 +186,7 @@ describe('run-issue --stack through the real slice gate, faking only GitHub, the
     expect(result.ok).toBe(true);
     const planned = executor.calls.filter((c) => c.task === 'plan').map((c) => /Problem (\d)/.exec(c.prompt)?.[1]);
     expect(planned).toEqual(['1', '2', '3']);
-    expect(createSliceBranch.mock.calls.map((c) => [c[0].branch, c[0].startPoint])).toEqual([
+    expect(made.map(([c]) => [c.branch, c.startPoint])).toEqual([
       [branch(1), 'origin/main'],
       [branch(2), branch(1)],
       [branch(3), branch(2)],

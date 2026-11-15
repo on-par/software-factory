@@ -14,6 +14,7 @@ import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import { scoreSpec } from '../eval/score.js';
 import { parseSpec, writeSpec } from '../spec/index.js';
+import { recordArgs } from '../test-support/recorders.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
@@ -111,12 +112,12 @@ async function run(opts: { openDuringPlan: boolean }) {
   const breaker = new ProviderBreaker(join(dir, `breaker-${counter}.json`));
   const events: Array<[string, string]> = [];
   let specAtBuild: string | undefined;
-  const planPhase = vi.fn<typeof realPlanPhase>().mockImplementation(async () => {
+  const { calls: planned, fn: planPhase } = recordArgs<typeof realPlanPhase>(async () => {
     await writeSpec(spec, { body: '# Spec\n', data: { route: 'codex' } });
     if (opts.openDuringPlan) await breaker.open('openai', 'usage_cap', 30 * 60_000);
     return { ok: true, route: 'codex', specPath: spec, model: 'm', designArtifact: null } satisfies PlanResult;
   });
-  const buildPhase = vi.fn<typeof realBuildPhase>().mockImplementation(async (o) => {
+  const { calls: built, fn: buildPhase } = recordArgs<typeof realBuildPhase>(async (o) => {
     specAtBuild = readFileSync(spec, 'utf8');
     return { ok: true, model: 'm', route: o.route } satisfies BuildResult;
   });
@@ -137,14 +138,14 @@ async function run(opts: { openDuringPlan: boolean }) {
     shipPhase: vi.fn<typeof realShipPhase>().mockResolvedValue({ ok: true, prNumber: 42 } satisfies ShipResult),
   };
   await runIssue({ ...request, specPath: spec }, policy, ports);
-  return { events, planPhase, buildPhase, spec, specAtBuild, call: buildPhase.mock.calls[0]?.[0] };
+  return { events, planned, built, spec, specAtBuild, call: built[0]?.[0] };
 }
 
 describe('runIssue — route stays truthful when the codex breaker opens mid-lane (#664)', () => {
   it('passes the same RouteCapabilities to planPhase and buildPhase when the breaker state does not change', async () => {
-    const { planPhase, call, events } = await run({ openDuringPlan: false });
+    const { planned, call, events } = await run({ openDuringPlan: false });
     expect(call?.route).toBe('codex');
-    expect(call?.routeCapabilities).toBe(planPhase.mock.calls[0]?.[0].routeCapabilities);
+    expect(call?.routeCapabilities).toBe(planned[0]?.[0].routeCapabilities);
     expect(events.filter(([t]) => t === 'route-degraded')).toHaveLength(0);
   });
 

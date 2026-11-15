@@ -172,7 +172,7 @@ describe('runIssue — stage-boundary provider gate (#3226)', () => {
   });
 
   it('every plan provider timed-open releases provider-cap before any model call', async () => {
-    const { outcome, called, events, planPhase, before, after } = await run({
+    const { outcome, called, events, before, after } = await run({
       open: { anthropic: 2 * HOUR, openai: 4 * HOUR },
     });
     expect(outcome).toMatchObject({ state: 'released', reason: 'provider-cap', providers: ['anthropic', 'openai'] });
@@ -180,7 +180,6 @@ describe('runIssue — stage-boundary provider gate (#3226)', () => {
     expect(resetAt).toBeGreaterThanOrEqual(before + 2 * HOUR - 1000);
     expect(resetAt).toBeLessThanOrEqual(after + 2 * HOUR + 1000);
     expect(called).toEqual([]);
-    expect(planPhase).not.toHaveBeenCalled();
     expect(types(events)).toContain('provider-cap-released');
     expect(types(events)).not.toContain('fail');
     expect(types(events)).not.toContain('escalate');
@@ -238,9 +237,8 @@ describe('runIssue — stage-boundary provider gate (#3226)', () => {
   });
 
   it('every plan provider auth-open parks all_providers_down before any model call', async () => {
-    const { outcome, called, events, extras, planPhase } = await run({ openAuth: ['anthropic', 'openai'] });
+    const { outcome, called, events, extras } = await run({ openAuth: ['anthropic', 'openai'] });
     expect(called).toEqual([]);
-    expect(planPhase).not.toHaveBeenCalled();
     expect(outcome).toMatchObject({
       state: 'parked',
       reason: 'all_providers_down',
@@ -297,7 +295,9 @@ describe('runIssue — stage-boundary provider gate (#3226)', () => {
       false,
       { runModel: async () => 'x' },
     );
-    const buildPhase = vi.fn<typeof realBuildPhase>();
+    const buildPhase: typeof realBuildPhase = async () => {
+      throw new Error('build must not run');
+    };
     const ports: RunPorts = {
       router,
       octokit: {} as Octokit,
@@ -318,6 +318,5 @@ describe('runIssue — stage-boundary provider gate (#3226)', () => {
       providers: ['anthropic'],
       route: 'claude',
     });
-    expect(buildPhase).not.toHaveBeenCalled();
   });
 });

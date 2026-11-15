@@ -6,6 +6,7 @@ import type { Octokit } from '@octokit/rest';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { recordArgs } from '../test-support/recorders.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
@@ -98,9 +99,9 @@ async function runWith(req: RunRequest): Promise<Parameters<typeof realBuildPhas
     model: 'm',
     designArtifact: null,
   } satisfies PlanResult);
-  const buildPhase = vi
-    .fn<typeof realBuildPhase>()
-    .mockResolvedValue({ ok: true, model: 'my-model', route: 'command' } satisfies BuildResult);
+  const { calls: built, fn: buildPhase } = recordArgs<typeof realBuildPhase>(
+    async () => ({ ok: true, model: 'my-model', route: 'command' }) satisfies BuildResult,
+  );
   const checkPhase = vi.fn<typeof realCheckPhase>().mockResolvedValue({
     passed: true,
     summary: { failures: 0, passes: 1, skips: 0, total: 1, results: [] },
@@ -120,7 +121,7 @@ async function runWith(req: RunRequest): Promise<Parameters<typeof realBuildPhas
     shipPhase,
   };
   await runIssue(req, policy, ports);
-  return buildPhase.mock.calls[0][0];
+  return built[0]?.[0];
 }
 
 describe('runIssue — routePinned for BUILD (#2885)', () => {
