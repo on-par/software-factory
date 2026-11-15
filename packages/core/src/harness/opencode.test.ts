@@ -159,7 +159,7 @@ describe('OpenCodeHarness command shape', () => {
 });
 
 describe('OpenCodeHarness prompt file', () => {
-  it('sends prompt + nudge on stdin for the retry after empty stdout', async () => {
+  it('retries an empty run once with a final-message nudge on stdin, then stops', async () => {
     const rec = recordingExec({ stdout: '' });
     const harness = new OpenCodeHarness(rec.fn);
 
@@ -193,7 +193,7 @@ describe('OpenCodeHarness large prompt delivery', () => {
   });
 
   it.skipIf(process.platform === 'win32')(
-    'delivers a 300 KB prompt to a fake opencode binary on stdin, not argv',
+    'delivers a 300 KB prompt on stdin from a file, not argv, and closes stdin at EOF',
     async () => {
       const root = mkdtempSync(join(tmpdir(), 'factory-opencode-test-'));
       dirs.push(root);
@@ -278,7 +278,6 @@ describe('OpenCode doctor auth probe', () => {
   };
   const doctorRegistry = new ModelRegistry(doctorConfig);
   const beforeReview = () => new Date('2026-10-01T00:00:00Z');
-  // Single-model registry so a probe-call assertion only sees the model under test.
   const diagnose = (id: string, p: Parameters<typeof diagnoseModels>[1], probes = { now: beforeReview, ...p }) =>
     diagnoseModels(new ModelRegistry({ ...doctorConfig, models: { [id]: doctorConfig.models[id] } }), probes, true)[0];
   const hasOpencode = (cmd: string) => cmd === 'opencode';
@@ -430,7 +429,6 @@ const readFixture = (name: string) =>
 const capFixture = readFixture('error-usage-cap.jsonl');
 const rateLimitFixture = readFixture('error-rate-limit.jsonl');
 
-// Shaped on the real `opencode run --format json` event stream (per-part id/messageID, one message per step).
 const narrationFixture = readFixture('run-narration-final.jsonl');
 const NARRATION_FINAL = 'VERDICT: PASS — the build script and tests are in place.';
 

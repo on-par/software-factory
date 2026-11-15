@@ -39,7 +39,7 @@ describe('loadInjectionFixtures', () => {
     }
   });
 
-  it('throws a clear error when a manifest file is missing', () => {
+  it('throws a clear error when a manifest file is missing, so a rename cannot silently drop an attack vector', () => {
     const readFile = () => {
       throw new Error('ENOENT: no such file or directory');
     };

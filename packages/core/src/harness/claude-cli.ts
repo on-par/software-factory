@@ -1,5 +1,3 @@
-// src/harness/claude-cli.ts — CodingHarness adapter for the Claude CLI.
-
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -17,11 +15,6 @@ import { withTempDir } from './temp-dir.js';
 
 export type ClaudeExecFn = ExecFn;
 
-/** Parses the `claude -p --output-format json` result envelope. Falls back to
- *  raw stdout as output when it isn't the expected JSON shape — usage capture
- *  must never cause a run to fail. `isError`/`subtype` surface the CLI's own
- *  error signal (e.g. max-turns exceeded) so a truncated error response isn't
- *  mistaken for a completed result (#424 code review). */
 export function parseResultEnvelope(stdout: string): {
   output: string;
   usage?: HarnessUsage;
@@ -117,8 +110,6 @@ function stripClaudeStreamMetadata(text: string): string {
   return diagnostics !== undefined ? diagnostics : text;
 }
 
-/** Per-call env that points the claude CLI at a model's approved intermediary (#2906, ADR-0163). Empty when the
- *  model has no endpoint. ANTHROPIC_API_KEY is an explicit undefined so ExecFn's merge removes the parent's copy. */
 export function claudeEndpointEnv(
   def: { endpoint?: string; envKey: string | null; claudeFlag?: string } | undefined,
   source: Record<string, string | undefined> = process.env,
@@ -143,10 +134,6 @@ export function claudeEndpointEnv(
   return { ANTHROPIC_BASE_URL: def.endpoint, ANTHROPIC_AUTH_TOKEN: token, ANTHROPIC_API_KEY: undefined, ...modelEnv };
 }
 
-/** Runs a model via the Claude CLI:
- *  claude -p [--model <claudeFlag>] --output-format stream-json --verbose --safe-mode --permission-mode bypassPermissions < prompt-file
- *  A model with an approved `endpoint` also gets that call's ANTHROPIC_* env (base URL, bearer token from its envKey).
- *  Its usage omits `costUsd` (Claude Code prices it at Claude rates) so callers price it from the registry (#2907). */
 export class ClaudeCliHarness implements CodingHarness {
   readonly id = 'claude-cli';
   readonly agentic = true;
@@ -156,7 +143,6 @@ export class ClaudeCliHarness implements CodingHarness {
     private now: () => number = () => Date.now(),
   ) {}
 
-  /** Re-classifies a thrown error from its diagnostic text; an error this harness already tagged keeps its kind. */
   classifyError(err: unknown): ProviderFailure {
     if (err instanceof HarnessError && err.details.kind !== undefined) return defaultClassifyError(err);
     const d = (err as { details?: { diagnostic?: unknown; stderr?: unknown; stdout?: unknown } } | null)?.details;
@@ -217,7 +203,6 @@ export class ClaudeCliHarness implements CodingHarness {
     });
 
     const { output, usage: parsedUsage, isError, subtype } = parseResultEnvelope(stdout);
-    // An endpoint model is not Claude; total_cost_usd prices it at Claude rates, so callers use registry prices (#2907).
     let usage = parsedUsage;
     if (usage && registry.getEndpoint(model)) {
       const { costUsd: _claudeRate, ...rest } = usage;

@@ -50,7 +50,6 @@ function recordingExec() {
   return { fn, calls };
 }
 
-/** The host keys of the `features.network_proxy.domains` table in a rendered command, sorted. */
 function domainKeys(text: string): string[] {
   const table = text.match(/features\.network_proxy\.domains=\{([^}]*)\}/);
   if (!table) return [];

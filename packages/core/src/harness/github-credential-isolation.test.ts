@@ -1,7 +1,3 @@
-// The agent CLIs run with bypassed permissions; none of them may inherit the
-// factory's GitHub credentials. Drives each real harness through the real
-// defaultExecFn against stand-in `claude` / `codex` / `opencode` binaries that
-// report which GitHub credential variables they were spawned with.
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

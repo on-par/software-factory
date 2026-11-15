@@ -6,7 +6,6 @@ export type StubHarnessStep = { output: string } | { fail: HarnessFailureReason;
 export interface StubCodingHarnessOptions {
   id?: string;
   agentic?: boolean;
-  /** Fallback output when no scripted steps remain. */
   defaultOutput?: string;
 }
 

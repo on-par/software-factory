@@ -24,9 +24,7 @@ describe('createTempDirs', () => {
     const dirs = [await tmp.make('temp-dir-test-'), tmp.makeSync('temp-dir-test-')];
     try {
       throw new Error('test body failed');
-    } catch {
-      // the body failed; afterEach still cleans up
-    }
+    } catch {}
     await tmp.cleanup();
     expect(dirs.some((dir) => existsSync(dir))).toBe(false);
   });

@@ -49,7 +49,7 @@ describe('NON_RETRYABLE_FAILURE_REASONS', () => {
 
 describe('isRetryableFailure', () => {
   it.each(['schema_invalid', 'apply_failed', 'verify_failed', 'permission_denied'] as const)(
-    'returns false for %s',
+    'returns false for deterministic %s, so the router does not fail over',
     (reason) => {
       expect(isRetryableFailure(reason)).toBe(false);
     },

@@ -1,11 +1,7 @@
-// src/harness/ollama-http.ts — CodingHarness adapter for Ollama's native HTTP chat API.
-
 import { classifyFailure } from './classify.js';
 import type { CodingHarness, HarnessRequest, HarnessResult } from './index.js';
 import { HarnessError } from './index.js';
 
-/** Structurally identical to the router's FetchFn — defined here so the harness
- *  does not import from ../router (avoids an import cycle). */
 export type OllamaFetchFn = (
   input: string,
   init?: {
@@ -22,9 +18,6 @@ export type OllamaFetchFn = (
   json(): Promise<unknown>;
 }>;
 
-/** Prompt-only harness for Ollama's native HTTP chat API. Not agentic:
- *  it never edits files in the worktree — `worktree`/`task` on the
- *  request are ignored. Build routes must not select it. */
 export class OllamaHttpHarness implements CodingHarness {
   readonly id = 'ollama-http';
   readonly agentic = false;

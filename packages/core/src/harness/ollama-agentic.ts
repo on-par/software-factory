@@ -1,8 +1,3 @@
-// src/harness/ollama-agentic.ts — CodingHarness adapter that asks Ollama for a
-// schema-bound patch proposal (via /api/chat `format`), applies it deterministically,
-// and runs the proposal's verify command. Malformed output gets exactly one repair
-// attempt before a trace artifact is written and the run fails with a classified reason.
-
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
@@ -27,8 +22,6 @@ export interface OllamaAgenticProposal {
   verifyCommand: string;
 }
 
-/** JSON-Schema passed as the Ollama chat body's `format` field so decoding is
- *  constrained by the model runtime, not enforced by prose instructions. */
 export const PATCH_PROPOSAL_SCHEMA = {
   type: 'object',
   required: ['summary', 'changes', 'verifyCommand'],
@@ -52,11 +45,6 @@ export const PATCH_PROPOSAL_SCHEMA = {
 
 const MAX_CHANGES = 4;
 
-/** Explicit allowlist of safe verification command prefixes. A verify command
- *  must equal one of these exactly or start with `<prefix> ` (space-delimited,
- *  so 'true' does not match 'truely'). Keep this list intentionally small:
- *  verification is limited to known project checks and simple file-existence
- *  probes — it is not a general shell. */
 export const ALLOWED_VERIFY_COMMAND_PREFIXES = [
   'npm test',
   'npm run test',
@@ -69,9 +57,6 @@ export const ALLOWED_VERIFY_COMMAND_PREFIXES = [
   'true',
 ] as const;
 
-// Character allowlist: letters, digits, dot, underscore, slash, dash, equals,
-// colon, and single spaces. Rejects by construction: ; & | < > ` $ ( ) { } quotes,
-// backslash, newlines, globs — i.e. every shell-metacharacter escape hatch.
 const VERIFY_COMMAND_CHARS = /^[A-Za-z0-9._/:=-]+(?: [A-Za-z0-9._/:=-]+)*$/;
 
 export type VerifyCommandCheck = { ok: true } | { ok: false; detail: string };
@@ -110,8 +95,6 @@ type ApplyResult =
   | { ok: true; proposal: OllamaAgenticProposal; raw: string }
   | { ok: false; malformedReason: MalformedReason; detail: string };
 
-/** Asks Ollama's /api/chat for a schema-bound patch proposal, validates and
- *  applies it deterministically, then runs its verify command. */
 export class OllamaAgenticHarness implements CodingHarness {
   readonly id = 'ollama-agentic';
   readonly agentic = true;

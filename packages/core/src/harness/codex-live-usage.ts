@@ -26,7 +26,6 @@ export function codexThreadIdFromStdout(stdout: string): string | undefined {
 export interface CodexLiveUsageOptions {
   onUsage: (cumulative: HarnessLiveUsage) => void;
   codexHome?: string;
-  /** Poll interval; default 5000. */
   intervalMs?: number;
   locate: (threadId: string, codexHome?: string) => Promise<string | undefined>;
   read: (path: string) => Promise<CodexRolloutUsage | undefined>;
@@ -47,7 +46,6 @@ function sumUsage(usage: CodexRolloutUsage): HarnessLiveUsage {
   };
 }
 
-/** Poll the live Codex session rollout and report cumulative usage whenever new calls appear (#3319). */
 export function startCodexLiveUsage(options: CodexLiveUsageOptions): {
   onStdout: (chunk: string) => void;
   stop: () => void;
@@ -82,7 +80,6 @@ export function startCodexLiveUsage(options: CodexLiveUsageOptions): {
       reported = usage.calls.length;
       onUsage(sumUsage(usage));
     } catch {
-      // missing rollout, failed read or throwing callback: skip this tick
     } finally {
       inFlight = false;
     }
