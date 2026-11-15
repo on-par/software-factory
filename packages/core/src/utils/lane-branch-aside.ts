@@ -1,5 +1,3 @@
-// src/utils/lane-branch-aside.ts — move a lane branch name that survived `git branch -D` out of the way (#3651)
-
 import type { EventKind } from '../events/kinds.js';
 import type { PrLookup } from '../phases/ship.js';
 import { execGit } from './git-exec.js';
@@ -11,7 +9,6 @@ function gitStderr(err: unknown): string {
   return String(e?.stderr || e?.message || err).trim();
 }
 
-/** `<branch>.bak-YYYYMMDD` (UTC), or the first free `-2`, `-3`, ... variant when that name is taken. */
 export function bakBranchName(branch: string, now: Date, taken: (name: string) => boolean): string {
   const base = `${branch}.bak-${now.toISOString().slice(0, 10).replace(/-/g, '')}`;
   if (!taken(base)) return base;
@@ -33,10 +30,6 @@ async function takenRefNames(repoRoot: string): Promise<Set<string>> {
   );
 }
 
-/**
- * Renames the local lane branch to a dated `.bak` name. Origin is moved too, but only when
- * origin/<branch> exists and no open PR owns it (deleting an open PR's head ref would close it).
- */
 export async function moveLaneBranchAside(
   repoRoot: string,
   branch: string,

@@ -1,4 +1,3 @@
-// packages/core/src/utils/green-prs.test.ts
 import { describe, expect, it, vi } from 'vitest';
 
 import {

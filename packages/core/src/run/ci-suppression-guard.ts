@@ -1,5 +1,3 @@
-// packages/core/src/run/ci-suppression-guard.ts — mechanical suppression guard for SHIP CI rework diffs (#2818)
-
 import type { CiSuppressionFinding } from '../types/index.js';
 import { execGit } from '../utils/git-exec.js';
 
@@ -13,7 +11,6 @@ interface CommentRule {
   test: (line: string) => boolean;
 }
 
-/** True when an eslint-disable directive in `line` is blanket or names a security rule. */
 function eslintDisablesSecurity(line: string): boolean {
   const m = /eslint-disable(?:-next-line|-line)?(?![\w-])([^\n]*)/.exec(line);
   if (!m) return false;
@@ -26,7 +23,6 @@ function eslintDisablesSecurity(line: string): boolean {
   return rules.length === 0 || rules.some((r) => /security/i.test(r));
 }
 
-/** Added-line rules; the single owner of the known suppression comment forms. */
 const SUPPRESSION_COMMENT_RULES: CommentRule[] = [
   { rule: 'codeql-comment', test: (l) => /\bcodeql\[/i.test(l) },
   { rule: 'lgtm-comment', test: (l) => /(?:\/\/|#|\/\*|\*|<!--|--).*\blgtm\b/i.test(l) },
@@ -54,10 +50,6 @@ function thresholds(text: string): [string, number][] {
   return [...text.matchAll(THRESHOLD)].map((m) => [m[1], Number(m[2])]);
 }
 
-/**
- * Scans a unified git diff for suppression comments (added lines), protected paths (any file header)
- * and ratchet tampering: a raised max-lines-baseline.json ceiling or a lowered vitest coverage threshold (#3537).
- */
 export function scanReworkDiff(diff: string): CiSuppressionFinding[] {
   const findings: CiSuppressionFinding[] = [];
   const seen = new Set<string>();
@@ -186,7 +178,6 @@ export function scanReworkDiff(diff: string): CiSuppressionFinding[] {
   return findings;
 }
 
-/** Reads the worktree's current HEAD SHA. */
 export async function readWorktreeHead(worktree: string): Promise<string> {
   const { stdout } = await execGit(['rev-parse', 'HEAD'], { cwd: worktree });
   const sha = stdout.trim();
@@ -194,7 +185,6 @@ export async function readWorktreeHead(worktree: string): Promise<string> {
   return sha;
 }
 
-/** Reads the committed diff from `fromSha` to HEAD (SHIP re-entry pushes HEAD, not the working tree). */
 export async function readReworkDiff(worktree: string, fromSha: string): Promise<string> {
   const { stdout } = await execGit(['diff', '--no-color', '--no-ext-diff', '--unified=0', fromSha, 'HEAD'], {
     cwd: worktree,
@@ -202,7 +192,6 @@ export async function readReworkDiff(worktree: string, fromSha: string): Promise
   return stdout;
 }
 
-/** One-line summary of guard findings for park messages and logs. */
 export function describeSuppression(findings: readonly CiSuppressionFinding[]): string {
   const items = findings.slice(0, MAX_LISTED).map((f) => {
     if (f.kind === 'comment') return `${f.rule} at ${f.file}${f.line !== undefined ? `:${f.line}` : ''}`;
@@ -219,10 +208,6 @@ export type BaseMergeResult =
 
 const gitMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/**
- * Fetches origin/<baseRef> and merges it into the worktree branch without pushing (#3537). A conflict
- * is aborted and reported with its paths; any other failure is reported as a message. Never throws.
- */
 export async function mergeBaseIntoWorktree(worktree: string, baseRef: string): Promise<BaseMergeResult> {
   const opts = { cwd: worktree };
   let before: string;
@@ -241,9 +226,7 @@ export async function mergeBaseIntoWorktree(worktree: string, baseRef: string): 
     try {
       const { stdout } = await execGit(['diff', '--name-only', '--diff-filter=U'], opts);
       paths = stdout.split('\n').filter(Boolean);
-    } catch {
-      // fall through to a non-conflict failure
-    }
+    } catch {}
     if (paths.length === 0) return { ok: false, conflict: false, message: gitMessage(err) };
     await execGit(['merge', '--abort'], opts).catch(() => undefined);
     return { ok: false, conflict: true, paths };

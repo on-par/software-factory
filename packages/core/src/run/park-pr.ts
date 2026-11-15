@@ -1,5 +1,3 @@
-// src/run/park-pr.ts — settle a parked run's PR: close it with the park reason, or mark it ready
-
 import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
@@ -16,8 +14,6 @@ export type ParkedPrDisposition = {
   detail?: string;
 };
 
-/** What a park does to its PR: the PR itself is the problem (close), the cause is outside a green PR (ready), or nothing.
- *  A ci-failed PR stays open for the steward and the park note carries the diagnosis (#3998). */
 export function parkedPrAction(reason: ParkReason, greenAndChecked: boolean): 'close' | 'ready' | 'leave' {
   switch (reason) {
     case 'ci-infra':

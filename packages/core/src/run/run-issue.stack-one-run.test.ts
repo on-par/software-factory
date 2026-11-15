@@ -1,5 +1,3 @@
-// packages/core/src/run/run-issue.stack-one-run.test.ts — a 3-slice stack builds in one run through the real
-// PLAN slice gate; only GitHub, the model executor and BUILD/CHECK/SHIP are faked (#3798).
 import { join } from 'node:path';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
@@ -62,7 +60,6 @@ const freshPlan = (): SlicePlan => ({
 });
 const branch = (k: number) => stackSliceBranch(ISSUE, k);
 
-/** GitHub as the gate sees it: one issue whose comments are read back as they are written. */
 function fakeGitHub() {
   const comments = [{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(freshPlan()) }];
   const { octokit } = fakeOctokit({
@@ -121,7 +118,7 @@ function request(parentBaseRef: string | undefined): RunRequest {
   };
 }
 
-describe('run-issue --stack through the real slice gate (#3798)', () => {
+describe('run-issue --stack through the real slice gate, faking only GitHub, the model executor and BUILD/CHECK/SHIP', () => {
   it("builds slices 1, 2 and 3 in one run, each on the previous slice's branch, never released", async () => {
     const github = fakeGitHub();
     const models = {

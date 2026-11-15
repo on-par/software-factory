@@ -661,7 +661,6 @@ describe('gitFetch / setupWorktree', () => {
       await execFile('git', ['commit', '-m', 'test: fresh remote commit'], { cwd: otherClone });
       await execFile('git', ['push', 'origin', 'main'], { cwd: otherClone });
 
-      // repoRoot's refs/remotes/origin/main is now stale; setupWorktree must fetch.
       const worktree = kit.trackWorktree(repoRoot, 204);
       await setupWorktree(repoRoot, 'factory/204-stale-main', worktree);
 

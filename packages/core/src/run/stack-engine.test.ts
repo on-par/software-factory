@@ -1,4 +1,3 @@
-// packages/core/src/run/stack-engine.test.ts — the shared stack engine (#3798)
 import { describe, expect, it, vi } from 'vitest';
 
 import { runStack, type SliceOutcome, type StackLogLevel, type StackSlice } from './stack-engine.js';

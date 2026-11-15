@@ -92,10 +92,8 @@ const policy: RunPolicy = {
 
 interface Setup {
   open?: Record<string, number>;
-  /** Providers opened until credentials change: an untimed `auth` entry (#3232). */
   openAuth?: string[];
   failClaude?: HarnessError | Error;
-  /** Rejects planPhase itself, as a router that exhausted its runnable models does. */
   failPlan?: Error;
   request?: Partial<RunRequest>;
 }

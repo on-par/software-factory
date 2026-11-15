@@ -1,5 +1,3 @@
-// packages/core/src/utils/open-factory-drafts.test.ts — open factory draft PR count (#3553)
-
 import { describe, expect, it, vi } from 'vitest';
 
 import {

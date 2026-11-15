@@ -315,8 +315,6 @@ describe('listIssueRuns', () => {
   });
 
   it('writes a numeric-key record that a pre-#3890 binary (0.9.27) still accepts', async () => {
-    // The validity rule 0.9.27 applies: integer `issue` equal to the file name's number,
-    // string `startedAt` and `updatedAt`. A record that fails it is skipped by that binary.
     const pre3890Valid = (raw: Record<string, unknown>, fileNumber: number): boolean =>
       Number.isInteger(raw.issue) &&
       raw.issue === fileNumber &&

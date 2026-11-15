@@ -103,8 +103,7 @@ describe('kept lane branch name collision (#3651)', () => {
     return stdout.trim();
   }
 
-  /** A kept lane branch with one extra commit, optionally pushed, and held by a second worktree so -D fails. */
-  async function stuckBranch(push: boolean) {
+  async function laneBranchHeldByHolderWorktree(push: boolean) {
     const { repoRoot, origin } = await kit.makeThrowawayRepo();
     await git(repoRoot, 'branch', branch, 'origin/main');
     const holder = `${repoRoot}-holder-3325`;
@@ -119,7 +118,7 @@ describe('kept lane branch name collision (#3651)', () => {
   }
 
   it('kept factory/<n>-* branch with no open PR does not fail setupWorktree with already exists', async () => {
-    const { repoRoot, oldTip, worktree } = await stuckBranch(false);
+    const { repoRoot, oldTip, worktree } = await laneBranchHeldByHolderWorktree(false);
     const res = await setupWorktree(repoRoot, branch, worktree, undefined, undefined, undefined, {
       findOpenPr: async () => ({ status: 'absent' }),
       now,
@@ -130,7 +129,7 @@ describe('kept lane branch name collision (#3651)', () => {
   });
 
   it('renames a kept branch with a closed PR aside locally and on origin, then creates a fresh lane worktree from the base', async () => {
-    const { repoRoot, origin, worktree } = await stuckBranch(true);
+    const { repoRoot, origin, worktree } = await laneBranchHeldByHolderWorktree(true);
     const log = vi.fn();
     const res = await setupWorktree(repoRoot, branch, worktree, undefined, undefined, log, {
       findOpenPr: async () => ({ status: 'absent' }),
@@ -143,7 +142,7 @@ describe('kept lane branch name collision (#3651)', () => {
   });
 
   it('open PR owning a stuck lane branch continues on origin/<branch> and leaves origin untouched', async () => {
-    const { repoRoot, origin, worktree } = await stuckBranch(true);
+    const { repoRoot, origin, worktree } = await laneBranchHeldByHolderWorktree(true);
     const originSha = await git(origin, 'rev-parse', branch);
     const res = await setupWorktree(repoRoot, branch, worktree, undefined, undefined, undefined, {
       findOpenPr: async () => ({ status: 'found', prNumber: 42 }),
@@ -156,7 +155,7 @@ describe('kept lane branch name collision (#3651)', () => {
   });
 
   it('a second rename on the same day uses -2', async () => {
-    const { repoRoot, worktree } = await stuckBranch(false);
+    const { repoRoot, worktree } = await laneBranchHeldByHolderWorktree(false);
     await git(repoRoot, 'branch', bak, 'origin/main');
     await setupWorktree(repoRoot, branch, worktree, undefined, undefined, undefined, { now });
     expect(await git(repoRoot, 'rev-parse', '--verify', `${bak}-2`)).not.toBe('');

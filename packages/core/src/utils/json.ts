@@ -1,17 +1,17 @@
-// src/utils/json.ts — string-aware balanced-brace JSON object extraction from free-form text
-
 export interface JsonObjectCandidate {
-  /** Raw source text of the balanced object, exactly as it appeared in the output */
   text: string;
-  /** The JSON.parse result */
   value: unknown;
 }
 
-/**
- * Scan free-form model output for top-level balanced JSON objects and return
- * every candidate that parses, in order of appearance. String-aware: braces
- * inside JSON string values (and escaped quotes) do not affect brace depth.
- */
+function tryParseJson(text: string): { value: unknown } | undefined {
+  try {
+    const value: unknown = JSON.parse(text);
+    return { value };
+  } catch {
+    return undefined;
+  }
+}
+
 export function extractJsonObjects(output: string): JsonObjectCandidate[] {
   const candidates: JsonObjectCandidate[] = [];
 
@@ -42,12 +42,10 @@ export function extractJsonObjects(output: string): JsonObjectCandidate[] {
 
       if (depth === 0) {
         const candidate = output.slice(start, i + 1);
-        try {
-          const value: unknown = JSON.parse(candidate);
-          candidates.push({ text: candidate, value });
+        const parsed = tryParseJson(candidate);
+        if (parsed) {
+          candidates.push({ text: candidate, value: parsed.value });
           start = i;
-        } catch {
-          // Keep scanning for the next balanced JSON object.
         }
         break;
       }

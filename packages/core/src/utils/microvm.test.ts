@@ -84,14 +84,14 @@ describe('microVmName', () => {
 });
 
 describe('createMicroVm', () => {
-  it('issues sbx create with the worktree as writable root plus one --mount per auth path', async () => {
+  it('issues a pre-clean sbx rm, then sbx create with the worktree as writable root plus one --mount per auth path', async () => {
     const exec = makeExec(async () => ({ stdout: '', stderr: '' }));
     const log = vi.fn();
 
     const created = await createMicroVm(baseOpts({ exec, log }));
 
     expect(created).toBe(true);
-    expect(exec).toHaveBeenCalledTimes(2); // pre-clean rm + create
+    expect(exec).toHaveBeenCalledTimes(2);
     const createCall = (exec as any).mock.calls.find(([cmd]: [string]) => cmd.includes('sbx create'))[0];
     const name = microVmName('/repo/.worktrees/653');
     expect(createCall).toBe(

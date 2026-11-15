@@ -1,4 +1,3 @@
-// packages/core/src/utils/lane-removal.test.ts — reapLaneWorktree holds a parked worktree with untracked files (#3318)
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 

@@ -1,4 +1,3 @@
-// packages/core/src/utils/command-runner.ts — shared argv-based command runner (no shell)
 import { spawn } from 'node:child_process';
 
 import { execa } from 'execa';
@@ -11,45 +10,25 @@ import { spawnSupervisedCommand } from './supervised-exec.js';
 
 export interface RunCommandOptions {
   cwd?: string;
-  /** Milliseconds. Always ms — call sites must not pass seconds. */
   timeoutMs?: number;
   maxBuffer?: number;
-  /** Undefined values explicitly remove inherited variables. */
   env?: NodeJS.ProcessEnv;
-  /** Environment the child inherits before `env` is merged over it. Defaults to `process.env`;
-   *  checker commands pass the allow-listed `checkerParentEnv()` (#1590). */
   parentEnv?: Record<string, string | undefined>;
-  /** When set, the child is spawned detached (its own process group) and
-   *  its pid is reported here so a lane can track and later kill the
-   *  whole group. */
   onPgid?: (pgid: number) => void;
-  /** Grace period before SIGKILL when sweeping the group after termination. */
   killGraceMs?: number;
-  /** Defaults to `process.platform`. Used only on the `onPgid` path. */
   platform?: NodeJS.Platform;
-  /** Test seam; defaults to `killProcessGroup`. */
   killGroup?: typeof killProcessGroup;
-  /** Pass the parent's GitHub credentials (GITHUB_TOKEN, GH_TOKEN, …) to the
-   *  child. Defaults to true only when argv[0] is `gh` or `git` (the factory's
-   *  own GitHub calls); every other command — checkers running agent-written
-   *  code, repo scripts — gets an environment without them. */
   githubAuth?: boolean;
-  /** Called with each raw output chunk as it arrives, tagged with its stream. Must not throw; errors are swallowed. Does not change CommandResult (#3994). */
   onOutput?: (stream: 'stdout' | 'stderr', chunk: Buffer) => void;
 }
 
 export interface CommandResult {
-  /** The argv that ran, for diagnostics. */
   command: readonly string[];
   stdout: string;
   stderr: string;
-  /** -1 when the process produced no exit code (spawn failure or killed). */
   exitCode: number;
-  /** True when the process was terminated by a signal (incl. timeout kill). */
   killed: boolean;
-  /** True when terminated because timeoutMs elapsed. */
   timedOut: boolean;
-  /** exitCode === 0 && !killed && !timedOut */
   ok: boolean;
 }
 
@@ -58,21 +37,9 @@ const DEFAULT_MAX_BUFFER = 1000 * 1000 * 100;
 function safeOutput(options: RunCommandOptions, stream: 'stdout' | 'stderr', chunk: Buffer): void {
   try {
     options.onOutput?.(stream, chunk);
-  } catch {
-    // an output observer must never change the command's result
-  }
+  } catch {}
 }
 
-/** argv-based (no shell) detached run for the `onPgid` path. Resolves on the
- *  child's own `exit`, not on its piped stdio closing: a backgrounded
- *  grandchild (e.g. a dev server the checker command starts) would
- *  otherwise keep the inherited pipe open past the direct child's own exit,
- *  hanging execa's stream-aware result past any timeout. After settling, a
- *  timeout or any signal-based termination triggers a `killProcessGroup`
- *  sweep so such grandchildren don't outlive the check. On win32 there are no
- *  process groups and `child.kill()` ends only the root (after which taskkill
- *  can't find the tree), so timeout/maxBuffer kills start the `taskkill /T`
- *  tree kill while the root is alive and the sweep reuses it. */
 async function runCommandDetached(
   argv: readonly string[],
   options: RunCommandOptions,
@@ -206,7 +173,6 @@ export async function runCommand(argv: readonly string[], options: RunCommandOpt
   };
 }
 
-/** `gh` and `git` are the only binaries that get GitHub credentials by default. */
 function isGitHubClient(bin: string): boolean {
   const name = basename(bin.trim());
   return name === 'gh' || name === 'git';

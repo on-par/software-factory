@@ -29,7 +29,6 @@ describe('sweepWorktrees in-flight lanes, claims and zero-commit branches (#2964
     if (parentDir) rmSync(parentDir, { recursive: true, force: true });
   });
 
-  /** The only endpoints sweepWorktrees reaches; a structural supertype so one assertion suffices. */
   interface SweepOctokitDouble {
     rest: {
       pulls: { list: (args: any) => Promise<any> };
@@ -136,7 +135,6 @@ describe('sweepWorktrees in-flight lanes, claims and zero-commit branches (#2964
       { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
       { runCommand, octokit },
     );
-    // Never 'merged'/'remote-gone' (the unclaimed heuristic quarantine tier is unchanged).
     expect(report.removed.map((c) => c.reason)).not.toContain('merged');
     expect(report.removed.map((c) => c.reason)).not.toContain('remote-gone');
     expect(removedCmds()).toEqual([]);

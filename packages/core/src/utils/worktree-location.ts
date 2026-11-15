@@ -1,4 +1,3 @@
-// packages/core/src/utils/worktree-location.ts — where lane worktrees live (#1758).
 import { existsSync, mkdirSync, readFileSync, appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -7,8 +6,6 @@ import type { WorkKey } from '../work/work-key.js';
 import { execGit } from './git-exec.js';
 import { legacyWorktreeDirName, worktreeDirName } from './worktree-name.js';
 
-/** Root directory lane worktrees are created under. A `~` or absolute parent is a shared
- *  root and is namespaced `<owner>/<repo>`; a repo-relative parent is used as-is. */
 export function resolveWorktreeRoot(opts: { repoRoot: string; parent: string; repo: string; home?: string }): string {
   const { repoRoot, parent, repo, home = homedir() } = opts;
   let base: string;
@@ -25,8 +22,6 @@ export function resolveWorktreeRoot(opts: { repoRoot: string; parent: string; re
   return owner && name ? join(base, owner, name) : join(base, basename(resolve(repoRoot)));
 }
 
-/** Absolute lane worktree path. The basename comes from worktreeDirName (#2763); an existing
- *  old-name (repeated segment) or legacy-sibling checkout is reused so in-flight lanes keep theirs. */
 export function laneWorktreePath(opts: {
   repoRoot: string;
   parent: string;
@@ -47,20 +42,21 @@ export function laneWorktreePath(opts: {
   return fallbacks.find((p) => p !== primary && exists(p)) ?? primary;
 }
 
-/** Adds an in-repo worktree parent to the repo's info/exclude. Returns true when a line was
- *  written; false when the parent is outside the repo or already covered. */
+function readExcludeFileOrEmpty(file: string): string {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
 export async function ensureWorktreeParentExcluded(repoRoot: string, worktreeParent: string): Promise<boolean> {
   const rel = relative(resolve(repoRoot), resolve(worktreeParent));
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return false;
   const { stdout } = await execGit(['rev-parse', '--git-path', 'info/exclude'], { cwd: repoRoot });
   const file = resolve(repoRoot, stdout.trim());
   const line = `/${rel.split(sep).join('/')}/`;
-  let existing = '';
-  try {
-    existing = readFileSync(file, 'utf8');
-  } catch {
-    // no exclude file yet
-  }
+  const existing = readExcludeFileOrEmpty(file);
   const lines = new Set(existing.split(/\r?\n/).map((l) => l.trim()));
   if (lines.has(line) || lines.has('/.factory/') || lines.has('.factory/')) return false;
   mkdirSync(dirname(file), { recursive: true });

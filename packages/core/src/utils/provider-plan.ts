@@ -1,20 +1,11 @@
-// src/utils/provider-plan.ts — the billing plan (flat subscription vs metered API) per failover provider.
-// A leaf: imports only the claude and codex config modules.
-
 import { detectClaudePlan, type ClaudeLoginEvidenceDeps, type ProviderPlan } from './claude-config.js';
 import { codexHasApiKey, hasCodexLoginEvidence, type CodexLoginEvidenceDeps } from './codex-config.js';
 
-// The internal surface for #3214 (reached through config/provider-order-exports.ts).
 export { detectClaudePlan, codexHasApiKey };
 export type { ProviderPlan };
 
 export type ProviderPlanDeps = ClaudeLoginEvidenceDeps & CodexLoginEvidenceDeps;
 
-/** The billing plan for a failover provider (#3214, for #3234). `id` is a provider id
- *  ('anthropic' | 'claude' | 'codex' | 'openai' | 'opencode-go') or an OpenCode provider-model id.
- *  Any API key counts as metered. OpenCode Go is a flat subscription even though its auth.json entry
- *  is {"type":"api"}; Zen (opencode/) is metered. Anything else is 'unknown'. Matching is
- *  case-sensitive. Never throws. */
 export function detectProviderPlan(id: string, deps: ProviderPlanDeps = {}): ProviderPlan {
   try {
     const key = id.trim();
@@ -31,17 +22,12 @@ export function detectProviderPlan(id: string, deps: ProviderPlanDeps = {}): Pro
   }
 }
 
-/** The registry fields providerPlan reads. Never a credential. */
 export interface ProviderPlanModel {
   harness?: string;
   providerModel?: string;
   endpoint?: string;
 }
 
-/** The billing plan of one routed model (#3234). The harness wins; with no harness, provider
- *  'anthropic' means claude-cli and 'openai' means codex-cli. Zen (opencode/) is 'api', opencode-go/
- *  is 'subscription', a claude-cli model with an endpoint and any other harness (pi, ollama, command)
- *  is 'unknown'. Never throws, never reads a credential value into a return or log. */
 export function providerPlan(
   provider: string | undefined,
   model: ProviderPlanModel | undefined,
@@ -60,7 +46,6 @@ export function providerPlan(
   }
 }
 
-/** One `metered_primary_route:` line per pinned plan/build route whose model is not on a subscription (#3234). */
 export function meteredPrimaryRouteWarnings(
   pins: { plan?: string; build?: string },
   lookup: (model: string) => (ProviderPlanModel & { provider?: string }) | undefined,

@@ -23,15 +23,12 @@ import type { BaseHealthEvidence } from '../checkers/base-health.js';
 
 export type BuildRoute = BuildRoutePin;
 
-/** Which model, provider and effort planned and built a run, stamped on its terminal events (#3321). */
 export interface RunAttribution {
   plan?: { model: string; provider: string; effort?: string | boolean };
   build?: { model: string; provider: string; effort?: string | boolean };
   endedIn?: 'plan' | 'build' | 'check' | 'ship';
 }
 
-/** CHECK/CI rework reruns on the route BUILD completed on, `command` included (#2873):
- *  reworkWorker keeps it when its model can run and reroutes otherwise. */
 export function reworkRouteFor(
   route: BuildRoute,
   model: string | undefined,
@@ -39,10 +36,6 @@ export function reworkRouteFor(
   return { reworkRoute: route, reworkModel: model };
 }
 
-/** A run's terminal outcome. `parked` is produced by the CLI's LaneParkError and `released`
- *  by an environment-caused CHECK failure (#1928, not a park); `shipped` / `ready` /
- *  `escalated` are defined here for later stories (#4, #5) that re-point the CLI
- *  supervisor and the sim onto this union. */
 export type RunOutcome =
   | {
       state: 'shipped';
@@ -58,30 +51,22 @@ export type RunOutcome =
       branch: string;
       reworkRounds: number;
       prNumber?: number;
-      /** SHIP stopped at a draft PR (#3449); lanes must not merge it. */
       draft?: boolean;
-      /** SHIP's CI watch timed out (#3569); the PR was left as draft. */
       ciPending?: boolean;
-      /** Why SHIP left the PR as a draft (#3932). */
       draftReason?: ShipDraftReason;
-      /** the ADR-0147 slice this run shipped */
       slice?: { index: number; count: number };
       attribution?: RunAttribution;
     }
   | {
       state: 'parked';
       reason: ParkReason;
-      /** Set only on a design-smell park (#1513). */
       designSmell?: DesignSmellFinding;
       route?: BuildRoute;
       branch?: string;
       reworkRounds?: number;
       prNumber?: number;
-      /** CHECK failure signature (same value recorded in rework-history.json) — set only when CHECK parked the run (#1917). */
       failureSignature?: string;
-      /** Names of the checkers that FAILed in that CHECK — set only alongside failureSignature. */
       failingChecks?: string[];
-      /** Set on an `all_providers_down` park (#3235): the breaker-open providers the lane watches (metered ones excluded). */
       providersDown?: {
         stage: 'plan' | 'build' | 'check';
         providers: string[];
@@ -95,24 +80,17 @@ export type RunOutcome =
       route?: BuildRoute;
       branch?: string;
       reworkRounds: number;
-      /** Base SHA every failing checker also failed on (#1928). */
       baseSha: string;
       failingChecks: string[];
-      /** Red only because a base compile timeout awaits green CI (#3186). */
       awaitingCi?: boolean;
-      /** Red because a fresh local re-run confirmed a cached FAIL that CI calls green (#3287). */
       confirmedLocally?: boolean;
-      /** Pre-PLAN base health evidence; failingChecks is empty when every entry is inconclusive (could not run). */
       baseEvidence?: BaseHealthEvidence[];
-      /** Pre-PLAN base checks could not run (timeout, environment, setup): not a test failure; failingChecks is empty. */
       baseInconclusive?: true;
       failureSignature?: string;
-      /** BUILD output was kept and a check-resume record written (#2564). */
       buildPreserved?: boolean;
       attribution?: RunAttribution;
     }
   | {
-      /** #3576: PLAN touched `file`, which in-flight issue `holder` still claims; the issue goes back to queued, not parked. */
       state: 'released';
       reason: 'file-overlap';
       holder: number;
@@ -123,17 +101,13 @@ export type RunOutcome =
       attribution?: RunAttribution;
     }
   | {
-      /** #3226: every provider of the stage is capped; the issue goes back to queued (not parked) and the lane waits for `resetAt`. */
       state: 'released';
       reason: 'provider-cap';
       route?: BuildRoute;
       branch?: string;
       reworkRounds: number;
-      /** Open providers of the blocked stage. */
       providers: string[];
-      /** Earliest timed reset, ISO. */
       resetAt: string;
-      /** #3340: the `all_providers_down` alert the lane emits once per transition into all-down. */
       allProvidersDown?: AllProvidersDownPayload;
       attribution?: RunAttribution;
     }
@@ -146,16 +120,12 @@ export type RunOutcome =
       attribution?: RunAttribution;
     };
 
-/** What redesign/spike learned when a design smell could not be resolved (#1513). */
 export interface DesignSmellFinding {
   approachTried: string;
   whyItStinks: string;
   recommendation: string;
 }
 
-/** Core classifies structurally — via a parked RunOutcome on `err.outcome` or a
- *  `parkReason` marker property — rather than `instanceof`, because core cannot import
- *  the CLI's error classes (LaneParkError, LandConflictError, CiFailedError). */
 export function parkReasonFor(err: unknown): ParkReason {
   const outcome = (err as { outcome?: RunOutcome } | null | undefined)?.outcome;
   if (outcome && outcome.state === 'parked') return outcome.reason;
@@ -165,7 +135,6 @@ export function parkReasonFor(err: unknown): ParkReason {
   return 'fail';
 }
 
-/** The design-smell finding carried on a parked `err.outcome` or an `err.designSmell` marker; undefined unless all three fields are non-blank strings (#1513). */
 export function designSmellFindingFor(err: unknown): DesignSmellFinding | undefined {
   const outcome = (err as { outcome?: RunOutcome } | null | undefined)?.outcome;
   const candidate: unknown =
@@ -181,10 +150,6 @@ export function designSmellFindingFor(err: unknown): DesignSmellFinding | undefi
   return { approachTried, whyItStinks, recommendation };
 }
 
-/** Terminal events to emit when a run parks. A timeout park additionally emits
- *  an explicit 'stuck' event so stuckRate observes runs that exceeded their
- *  phase timeout (#428). The other stuck condition — identical checker failures
- *  across consecutive rework rounds — is emitted by the check phase itself. */
 export function parkEvents(err: unknown): { type: EventKind; msg: string; designSmell?: DesignSmellFinding }[] {
   const reason = parkReasonFor(err);
   const msg = err instanceof Error ? err.message : String(err);
@@ -198,7 +163,6 @@ export function parkEvents(err: unknown): { type: EventKind; msg: string; design
   return events;
 }
 
-/** The draft fields a ready outcome carries from SHIP's result; each is present only when set. */
 export function readyDraftFields(ship: Pick<ShipResult, 'draft' | 'ciPending' | 'draftReason'>): {
   draft?: true;
   ciPending?: true;

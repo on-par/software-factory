@@ -47,8 +47,7 @@ describe('formatEventLine — plain mode', () => {
 
   it.each(['plan', 'ready', 'warn', 'fail', 'router', 'worktree-gc'])('contains no ANSI escape for type=%s', (type) => {
     const line = formatEventLine(type, 1, 'hello');
-    // oxlint-disable-next-line no-control-regex -- the pattern deliberately matches control characters
-    expect(line).not.toMatch(/\x1b\[/);
+    expect(line).not.toContain('\x1b[');
   });
 });
 
@@ -70,8 +69,6 @@ describe('formatEventLine — color mode', () => {
     ['fail', '✗', `${BOLD}${RED}`, 'error'],
     ['escalate', '✗', `${BOLD}${RED}`, 'error'],
     ['ship_denied', '✗', `${BOLD}${RED}`, 'error'],
-    // Regression (#663): 'ci-failed' used to fall into the 'other' bucket (dim, info)
-    // because it was absent from the old hand-maintained ERROR_TYPES set.
     ['ci-failed', '✗', `${BOLD}${RED}`, 'error'],
     ['router', '→', DIM, 'router'],
     ['worktree-gc', '•', DIM, 'other'],
@@ -162,7 +159,6 @@ describe('levelForType', () => {
     ['escalate', 'error'],
     ['ship_denied', 'error'],
     ['parked', 'error'],
-    // Regression (#663): see the formatEventLine color-mode case above.
     ['ci-failed', 'error'],
     ['plan', 'info'],
     ['ready', 'info'],

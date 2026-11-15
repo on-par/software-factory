@@ -1,4 +1,3 @@
-// Already-quarantined worktrees are never moved again, and still drain on hard evidence (#3966).
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 
@@ -8,7 +7,6 @@ import { createTempDirs } from '../harness/temp-dir.js';
 import type { SweepDeps } from './worktree-gc.js';
 import { quarantineDestination, sweepWorktrees } from './worktree-gc.js';
 
-/** The only endpoints sweepWorktrees reaches; a structural supertype of Pick<Octokit,'rest'>. */
 interface SweepOctokitDouble {
   rest: {
     pulls: { list: (args: any) => Promise<any> };
@@ -53,7 +51,6 @@ describe('already-quarantined worktrees (#3966)', () => {
     throw Object.assign(new Error('Not Found'), { status: 404 });
   };
 
-  /** `merged` answers like a branch whose HEAD is behind main; otherwise a live, pushed branch. */
   function runner(root: string, wt: string, branch: string, merged = false) {
     const commands: string[] = [];
     const runCommand = async (cmd: string) => {

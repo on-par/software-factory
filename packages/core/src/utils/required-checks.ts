@@ -1,16 +1,11 @@
-// src/utils/required-checks.ts — strict "every required check succeeded" verdict for a commit (#3186); #3195 adds an opt-in push-event fallback when no checks are required; #3206 adds a three-way classifier and the shared required-contexts lookup; #3290 limits the verdict to code-health checks
-
 import type { Octokit } from '@octokit/rest';
 
 export interface RequiredChecksVerdict {
   green: boolean;
   state?: 'green' | 'pending' | 'failed';
   reason: string;
-  /** Set when green; what the verdict was based on. */
   basis?: string;
-  /** Set when not green because nothing decides code health (no deciding set); a moved base can never turn green (#3620). */
   noCodeHealthChecks?: true;
-  /** Set on a pending verdict whose only non-green cause is required contexts with zero runs on the commit (#3870). */
   missing?: string[];
 }
 
@@ -20,13 +15,10 @@ interface CheckRunLike {
   conclusion: string | null;
 }
 
-// Mirrors ci-watch's isPassingConclusion allow-list (ADR-0014); ci-watch imports this module, so it cannot be imported here.
 const PASSING_HEAD_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
 
-/** A completed run whose conclusion GitHub accepts for a required check: success, neutral or skipped (ADR-0014). */
 const passed = (r: CheckRunLike): boolean => PASSING_HEAD_CONCLUSIONS.has(r.conclusion ?? '');
 
-/** Green only when every required context has a completed run with a passing conclusion (success, neutral or skipped); fails closed otherwise. */
 export function evaluateRequiredChecks(
   required: readonly string[],
   runs: readonly CheckRunLike[],
@@ -61,7 +53,6 @@ export function evaluateRequiredChecks(
   };
 }
 
-/** Green only when there is at least one push-triggered check run and every one completed with a passing conclusion (success, neutral or skipped) (#3195). */
 export function evaluatePushChecks(runs: readonly CheckRunLike[]): RequiredChecksVerdict {
   if (runs.length === 0) return { green: false, state: 'pending', reason: 'no push-triggered checks' };
   const failed = runs.find((r) => r.status === 'completed' && !passed(r));
@@ -82,18 +73,11 @@ function httpStatus(err: unknown): number | undefined {
 
 export interface RequiredChecksState {
   state: 'green' | 'pending' | 'failed';
-  /** Required contexts with no run yet. */
   missing: string[];
-  /** Required contexts with a run that is not completed. */
   pending: string[];
-  /** Required contexts with a completed run whose conclusion is not passing (success, neutral, skipped). */
   failed: string[];
 }
 
-/**
- * Three-way view of the required contexts: failed beats pending beats green. Green means what
- * `evaluateRequiredChecks(...).green` means. An empty list returns `pending`, so callers must check emptiness themselves.
- */
 export function classifyRequiredChecks(
   required: readonly string[],
   runs: readonly CheckRunLike[],
@@ -112,10 +96,6 @@ export function classifyRequiredChecks(
   return result;
 }
 
-/**
- * Verdict on a head commit (#3208). With required contexts it is classifyRequiredChecks. With none, every check run on the
- * head counts as required: zero runs or any incomplete run is pending, any non-passing completed run is failed, else green.
- */
 export function classifyHeadChecks(
   required: readonly string[],
   runs: readonly CheckRunLike[],
@@ -134,7 +114,6 @@ export function classifyHeadChecks(
 
 const warnedNoProtection = new Set<string>();
 
-/** Logs the no-branch-protection fallback warning the first time per repo in this process; returns whether it warned. */
 export function warnNoBranchProtectionOnce(repo: string, branch: string, warn: (msg: string) => void): boolean {
   if (warnedNoProtection.has(repo)) return false;
   warnedNoProtection.add(repo);
@@ -142,7 +121,6 @@ export function warnNoBranchProtectionOnce(repo: string, branch: string, warn: (
   return true;
 }
 
-/** Required check contexts from branch protection plus rulesets (deduped). Throws on unexpected API errors. */
 export async function fetchRequiredContexts(
   octokit: Octokit,
   args: { owner: string; repo: string; branch: string },
@@ -176,11 +154,6 @@ export interface PushWorkflowFailure {
 const CODE_HEALTH_WORKFLOW = 'ci';
 const NON_FAILURE_CONCLUSIONS = new Set(['success', 'skipped', 'neutral']);
 
-/**
- * Code-health verdict for a commit (#3290). The deciding set is, in order: `opts.checks`, the branch-protection/ruleset
- * required contexts, then (with `pushFallback`) the check runs of the push workflow named `CI`. Other failed push
- * workflows are only reported through `onPushWorkflowFailed` and never change the verdict. Throws on unexpected API errors.
- */
 export async function fetchRequiredChecksVerdict(
   octokit: Octokit,
   args: { owner: string; repo: string; branch: string; sha: string },

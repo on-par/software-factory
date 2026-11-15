@@ -1,5 +1,3 @@
-// src/run/attribution.ts — plan/build model attribution stamped on a run's terminal events (#3321).
-
 import type {
   AllProvidersDownPayload,
   EventKind,

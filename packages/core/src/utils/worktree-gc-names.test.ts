@@ -1,4 +1,3 @@
-// packages/core/src/utils/worktree-gc-names.test.ts — GC ownership of deduped lane names (#2763).
 import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';

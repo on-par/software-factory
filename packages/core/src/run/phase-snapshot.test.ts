@@ -249,7 +249,6 @@ describe('run/phase-snapshot', () => {
     it('a failed touch does not block the next one on the same file', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'phase-snapshot-'));
       const file = join(dir, 'issue-9.phase.json');
-      // No snapshot yet: touches are no-ops, and a later real one must still apply.
       await Promise.all([touchLastEvent(file, 'noop 1'), touchLastEvent(file, 'noop 2')]);
       writeFileSync(
         file,

@@ -95,10 +95,9 @@ const policy: RunPolicy = {
 const SUMMARY: CheckSummary = { failures: 1, passes: 0, skips: 0, total: 1, results: [] };
 const PLAN_OK: PlanResult = { ok: true, route: 'codex', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null };
 
-/** The model each router task resolves to; the router spy answers with it. */
-type Resolve = Record<string, string>;
+type ModelByRouterTask = Record<string, string>;
 
-function setup(resolve: Resolve) {
+function setup(resolve: ModelByRouterTask) {
   const router = new ModelRouter(MODELS, ROUTES);
   vi.spyOn(router, 'run').mockImplementation(async (task) => ({
     model: resolve[task] ?? 'claude-opus-5-5',
@@ -153,10 +152,9 @@ describe('runIssue — plan/build attribution on terminal events (#3321)', () =>
       build: { model: 'gpt-6-luna-high', provider: 'openai', effort: 'xhigh' },
       endedIn: 'check',
     };
-    const fails = callsOf(log, 'fail');
-    // The phase's own 'fail' is demoted to a non-terminal 'check' event; runIssue logs the only terminal (#3435).
-    expect(fails).toHaveLength(1);
-    for (const call of fails) expect(call[2].attribution).toEqual(expected);
+    const runIssueOnlyTerminalFails = callsOf(log, 'fail');
+    expect(runIssueOnlyTerminalFails).toHaveLength(1);
+    for (const call of runIssueOnlyTerminalFails) expect(call[2].attribution).toEqual(expected);
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail', attribution: expected });
   });
 

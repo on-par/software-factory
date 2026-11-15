@@ -1,4 +1,3 @@
-// packages/core/src/run/park-comment.app-token.test.ts — own marker comments under a GitHub App installation token
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
 

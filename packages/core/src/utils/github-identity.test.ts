@@ -1,4 +1,3 @@
-// src/utils/github-identity.test.ts — self identity for user tokens and GitHub App installation tokens
 import { describe, expect, it } from 'vitest';
 
 import { createSimOctokit, type SimOctokitStep } from '../fakes/octokit.js';
@@ -45,7 +44,6 @@ describe('resolveSelfIdentity', () => {
     expect(query).not.toMatch(/\bon Bot\b|__typename/);
   });
 
-  // Both viewer login shapes are confirmed through REST GET /users/{login}[bot]; neither is taken on GraphQL's word.
   const VIEWER_LOGINS = [
     ['a [bot] viewer login', 'octo[bot]'],
     ['a suffix-less viewer login', 'octo'],

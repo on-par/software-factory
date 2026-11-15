@@ -76,7 +76,6 @@ const ROUTES: RoutesConfig = {
   },
 };
 
-/** Minimal real router; structural typing forbids a partial class double. */
 function fakeRouter(modelDefs: Record<string, { provider: string; codex?: boolean }> = {}): ModelRouter {
   const models: ModelsConfig = {
     version: 1,
@@ -126,7 +125,6 @@ function basePolicy(overrides: Partial<RunPolicy> = {}): RunPolicy {
   };
 }
 
-// Breaker files live in a private, unpredictable temp dir, never at a fixed /tmp path.
 const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-'));
 afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
 
@@ -269,8 +267,7 @@ describe('runIssue — constitution checker preflight (#2585)', () => {
     }
   });
 
-  it('reaches PLAN when every checker is a built-in or custom_*', async () => {
-    // File must not retain scaffold tokens — token preflight (#2586) parks those before PLAN.
+  it('reaches PLAN when every checker is a built-in or custom_* and the file has no scaffold tokens', async () => {
     const { dir, constitution } = setup(
       ['compile', 'custom_docs'],
       '---\nproduct: acme\nversion: 1\ncheckers:\n  - compile\n  - custom_docs\n---\nbody',
@@ -1248,7 +1245,6 @@ describe('runIssue — #1367: a pinned build model determines the build route', 
     expect(vi.mocked(planPhase).mock.calls[0][0].preferredRoute).toBeUndefined();
     expect(events.some(([t, m]) => t === 'model-override' && m.includes('codex is disabled'))).toBe(true);
     expect(events.some(([t, m]) => t === 'model-override' && m.includes('derived from'))).toBe(false);
-    // PLAN's route stands and the codex pin is incompatible with it, as on main.
     expect(vi.mocked(buildPhase).mock.calls[0][0]).toMatchObject({
       route: 'claude',
       modelOverride: undefined,
@@ -1390,8 +1386,6 @@ describe('runIssue — #1515: same-file lane guard', () => {
       })
       .mockResolvedValue(BUILD_OK);
 
-    // Run A (#100) claims src/shared.ts and hangs in BUILD, simulating an in-flight lane
-    // whose claim has not been released yet.
     const runA = runIssue(baseRequest({ issue: 100, repo: 'o/r' }), basePolicy(), basePorts({ laneFileGuard: guard }));
     await vi.waitFor(() => expect(vi.mocked(buildPhase)).toHaveBeenCalledTimes(1));
 
@@ -1411,7 +1405,6 @@ describe('runIssue — #1515: same-file lane guard', () => {
       ),
     ).toBe(true);
 
-    // Run C (#300) touches a disjoint file and is unaffected — reaches its stubbed BUILD.
     const outcomeC = await runIssue(
       baseRequest({ issue: 300, repo: 'o/r' }),
       basePolicy(),

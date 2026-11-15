@@ -1,7 +1,3 @@
-// packages/core/src/run/provider-order-stages.ts — runIssue's seams for models.providerOrder (#3338).
-// Per-pick PLAN/BUILD/CHECK options, the worktree restore that precedes a rerun, and the CHECK
-// stage wrapper. The picker and rerun loop live in provider-breaker-gate.ts.
-
 import type { ModelRegistry } from '../models/index.js';
 import { subscriptionProviderOf, type ProviderOrder } from '../config/provider-order.js';
 import { routeForBuildModel, type EffectiveModelPins } from '../config/repo.js';
@@ -29,7 +25,6 @@ export type StageRunner = <T>(
   hooks?: { beforeRerun?: () => Promise<boolean> },
 ) => Promise<T>;
 
-/** Runs a stage through the provider failover loop when `order` is set; otherwise just once with no pick (today's call). */
 export function providerStageRunner(
   deps: { router: ModelRouter; breaker: ProviderBreaker; probe?: ProviderProbe; log: StageLog; issue: WorkKey },
   order: ProviderOrder | undefined,
@@ -38,7 +33,6 @@ export function providerStageRunner(
     order ? runWithProviderFailover({ ...deps, order }, stage, attempt, hooks) : attempt(undefined);
 }
 
-/** The repo pin when it runs on the picked provider, else the pick's model; the pin itself when nothing was picked. */
 function modelForPick(
   pick: ProviderPick | undefined,
   pin: string | undefined,
@@ -48,7 +42,6 @@ function modelForPick(
   return pin !== undefined && subscriptionProviderOf(pin, registry.get(pin)) === pick.provider ? pin : pick.model;
 }
 
-/** PLAN's model, fallbacks and skip set for a pick; without a pick, today's pin, planFallback and stage-gate skip. */
 export function planPickOptions(
   pick: ProviderPick | undefined,
   pins: EffectiveModelPins,
@@ -69,7 +62,6 @@ export function planPickOptions(
   };
 }
 
-/** BUILD's route and model for a pick; the route follows the model's harness (the pre-BUILD fallback route if it has none). */
 export function buildTargetForPick(
   pick: ProviderPick,
   pin: string | undefined,
@@ -81,7 +73,6 @@ export function buildTargetForPick(
   return route ? { route, model } : { route: fallbackRoute, model: undefined };
 }
 
-/** BUILD's route, model and pin flag for a pick; without a pick, the already-resolved today's target. */
 export function buildPickOptions(
   pick: ProviderPick | undefined,
   current: { route: BuildRoute; model: string | undefined },
@@ -97,7 +88,6 @@ export function buildPickOptions(
   };
 }
 
-/** Snapshots the worktree now and returns the `beforeRerun` hook that restores it; the hook refuses (false) without a snapshot. */
 export async function worktreeRestorer(
   gitExec: ExecFn,
   worktree: string,
@@ -117,11 +107,6 @@ export async function worktreeRestorer(
   };
 }
 
-/**
- * CHECK under providerOrder (#3338): every router call in an attempt skips the providers passed over ahead of the pick,
- * and the rework worker moves to the worker pick when the built model's provider was passed over. The stage skip set
- * is always cleared afterwards so it never leaks into SHIP's CI rework.
- */
 export async function runCheckStage<O extends { reworkRoute?: BuildRoute; reworkModel?: string }, R>(
   run: StageRunner,
   deps: { router: ModelRouter; breaker: ProviderBreaker; probe?: ProviderProbe; log?: StageLog; order: ProviderOrder },

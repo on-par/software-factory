@@ -1,6 +1,3 @@
-// packages/core/src/run/prerequisite-restack.ts — cross-issue stacks (#3916): rebase a stacked PR onto main after its
-// prerequisite squash-merged, or onto the prerequisite's new head after it moved. Reuses ADR-0161's rebase/push.
-
 import type { Octokit } from '@octokit/rest';
 
 import { prerequisiteStackOrder, renderPrerequisiteStackLine, replaceStackOrderLine } from '../phases/stack-order.js';
@@ -9,22 +6,15 @@ import { execGit } from '../utils/git-exec.js';
 import { gitErrorDetail, rebaseAndPushStack } from './stack-rebase.js';
 
 export interface PrerequisiteRestackOptions {
-  /** Main checkout; a short-lived detached worktree is added from it. */
   repoRoot: string;
   octokit: Octokit;
-  /** owner/name */
   repo: string;
-  /** The stacked PR. */
   prNumber: number;
   branch: string;
-  /** The stacked branch head the factory last saw; the push lease and the ownership check. */
   recordedHead: string;
-  /** The prerequisite PR and head the stacked branch was built on (from the PR body marker). */
   stackedOn: PrerequisiteStackTarget;
   onto: { kind: 'main'; mergedHead: string } | { kind: 'prerequisite'; newHead: string };
-  /** Default 'origin'. */
   remote?: string;
-  /** Default 'main'. */
   baseBranch?: string;
 }
 
@@ -37,7 +27,6 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
   return (await execGit(args, { cwd })).stdout.trim();
 }
 
-/** Rebases the stacked branch `--onto` main (prerequisite merged) or the prerequisite's new head, then updates the PR. */
 export async function restackOnPrerequisite(opts: PrerequisiteRestackOptions): Promise<PrerequisiteRestackOutcome> {
   const { repoRoot, octokit, prNumber, branch, recordedHead, stackedOn, onto } = opts;
   const remote = opts.remote ?? 'origin';
