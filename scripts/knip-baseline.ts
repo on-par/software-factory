@@ -30,15 +30,13 @@ export interface KnipCliIo {
 }
 
 function asRecord(value: unknown, what: string): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error(`${what} is not an object`);
-  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${what} is not an object`);
   return Object.fromEntries(Object.entries(value));
 }
 
 function asString(value: unknown, what: string): string {
-  if (typeof value !== 'string') throw new Error(`${what} is missing or not a string`);
-  return value;
+  if (typeof value === 'string') return value;
+  throw new Error(`${what} is missing or not a string`);
 }
 
 function itemName(item: unknown): string {
