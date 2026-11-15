@@ -29,14 +29,15 @@ The factory's own CHECK phase runs `bash scripts/verify.sh --no-e2e` in the buil
 7. `npm run typecheck`
 8. `npm run lint` — Oxlint, type-aware, `--deny-warnings`
 9. `npm run knip` — dead code and unused dependencies
-10. Tests:
+10. `npm run duplication` — jscpd clones against the shrink-only `duplication-baseline.json`
+11. Tests:
     - full path: `npm run test` (Vitest with coverage thresholds), then `npm run coverage-ratchet`
     - `--no-e2e`: `npm run test` (Vitest with coverage thresholds), no ratchet
     - after the tests, `npm run slowest-tests` prints the 5 slowest files and `npm run test-budget` compares the test-step wall-clock time against `TEST_BUDGET_SECONDS` in `scripts/test-budget.ts` (450s; override for one run with `FACTORY_TEST_BUDGET_SECONDS`). It prints `test-budget: PASS` within budget, a warning plus the slowest files when over locally, and fails verify in CI (`CI` set, e.g. `CI=true`) with `test-budget: FAIL` plus the slowest files
-11. `npm run eval -- --stub`
-12. Shell-script tests: `auto-merge-sweep`, `filter-green-prs`, `repo-merge-settings`, `repo-about`, `repo-issue-optics`, `ruleset-copilot-review`, `launchd/install-sweep-plist`, `publish-workspaces` (guards the publish list `scripts/publish-workspaces.txt` against the workspace graph)
+12. `npm run eval -- --stub`
+13. Shell-script tests: `auto-merge-sweep`, `filter-green-prs`, `repo-merge-settings`, `repo-about`, `repo-issue-optics`, `ruleset-copilot-review`, `launchd/install-sweep-plist`, `publish-workspaces` (guards the publish list `scripts/publish-workspaces.txt` against the workspace graph)
 
-CI (`.github/workflows/ci.yml`) runs the same checks as the full path, split into parallel jobs: `static` (format, build, guards, typecheck, lint, knip) and `test (1/3)`…`test (3/3)` (Vitest shards that write blob reports with raw coverage and no thresholds, via `FACTORY_COVERAGE_SHARD=1`). The required `ci` job fails unless all of them succeeded, then merges the shard reports (`vitest --merge-reports`) and enforces the coverage thresholds, the ratchet, and the stub eval on the merged result. A red `ci` names the failing job; read that job's log. CI also runs `scripts/quickstart-smoke.sh` in a separate job. It does not run the `install-sweep-plist` test.
+CI (`.github/workflows/ci.yml`) runs the same checks as the full path, split into parallel jobs: `static` (format, build, guards, typecheck, lint, knip, Duplication) and `test (1/3)`…`test (3/3)` (Vitest shards that write blob reports with raw coverage and no thresholds, via `FACTORY_COVERAGE_SHARD=1`). The required `ci` job fails unless all of them succeeded, then merges the shard reports (`vitest --merge-reports`) and enforces the coverage thresholds, the ratchet, and the stub eval on the merged result. A red `ci` names the failing job; read that job's log. CI also runs `scripts/quickstart-smoke.sh` in a separate job. It does not run the `install-sweep-plist` test.
 
 The pre-commit hook (`lefthook.yml`) auto-fixes staged files with `oxlint --fix` and `prettier --write`. A direct `mkdtemp(tmpdir())` in a test fails `npm run lint` via `anti-slop/no-direct-tmpdir-mkdtemp`; the fix is `createTempDirs` (per-file allowances live in `tmpdir-mkdtemp-baseline.json` and can only shrink).
 
@@ -91,17 +92,18 @@ Local `verify.sh` does not enforce this.
 
 ## Fixing common failures
 
-| Failing step                              | Fix                                                                                                                                       |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `cli-help-baseline`                       | `npm run build && bash scripts/cli-help-baseline.sh --update`, commit the fixture.                                                        |
-| `format:check`                            | `npm run format`, then re-run.                                                                                                            |
-| `adr:index --check`                       | `npm run adr:index`, commit the README change. If it names an unparseable ADR, fix that file's `# ADR-NNNN:` heading or `- Status:` line. |
-| `check-config-json`                       | Move the data into `packages/config/src/defaults.ts` as typed TS. Delete the JSON file.                                                   |
-| `check-oxlint-plugin…`                    | Bump `oxlint` and `@oxlint/plugins` to the same version in `package.json`, then `npm install`.                                            |
-| `lint`                                    | Fix the code. Warnings fail the build too.                                                                                                |
-| `lint` / test: `max-lines`                | See [Max-lines guard](#max-lines-guard).                                                                                                  |
-| `knip`                                    | Delete the unused export, file, or dependency.                                                                                            |
-| `test` threshold                          | Add tests for the uncovered lines the report names.                                                                                       |
-| `coverage-ratchet`                        | Raise the named threshold in `vitest.config.ts` to the suggested value.                                                                   |
-| `eval --stub`                             | See the `run-evals` skill.                                                                                                                |
-| Tests pass in root, fail inside a package | Expected. Run from the repo root. Do not change `packages/core/package.json`'s `test` script.                                             |
+| Failing step                              | Fix                                                                                                                                           |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cli-help-baseline`                       | `npm run build && bash scripts/cli-help-baseline.sh --update`, commit the fixture.                                                            |
+| `format:check`                            | `npm run format`, then re-run.                                                                                                                |
+| `adr:index --check`                       | `npm run adr:index`, commit the README change. If it names an unparseable ADR, fix that file's `# ADR-NNNN:` heading or `- Status:` line.     |
+| `check-config-json`                       | Move the data into `packages/config/src/defaults.ts` as typed TS. Delete the JSON file.                                                       |
+| `check-oxlint-plugin…`                    | Bump `oxlint` and `@oxlint/plugins` to the same version in `package.json`, then `npm install`.                                                |
+| `lint`                                    | Fix the code. Warnings fail the build too.                                                                                                    |
+| `lint` / test: `max-lines`                | See [Max-lines guard](#max-lines-guard).                                                                                                      |
+| `knip`                                    | Delete the unused export, file, or dependency.                                                                                                |
+| `duplication`                             | rose: deduplicate, preferring existing test-support or shared harness helpers; dropped: set duplication-baseline.json to the printed numbers. |
+| `test` threshold                          | Add tests for the uncovered lines the report names.                                                                                           |
+| `coverage-ratchet`                        | Raise the named threshold in `vitest.config.ts` to the suggested value.                                                                       |
+| `eval --stub`                             | See the `run-evals` skill.                                                                                                                    |
+| Tests pass in root, fail inside a package | Expected. Run from the repo root. Do not change `packages/core/package.json`'s `test` script.                                                 |
