@@ -47,14 +47,15 @@ function plan(count = 3, issue = 5): SlicePlan {
 
 function fake(body: string | undefined) {
   const comments = body === undefined ? [] : [{ id: 77, user: { id: BOT }, body }];
-  const updateComment = vi.fn().mockResolvedValue({ data: {} });
+  const updated: { comment_id: number; body: string }[] = [];
+  const updateComment = async (a: (typeof updated)[number]) => updated.push(a) && { data: {} };
   const octokit = Object.assign({} as Octokit, {
     rest: {
       users: { getAuthenticated: vi.fn().mockResolvedValue({ data: { id: BOT } }) },
       issues: { listComments: vi.fn().mockResolvedValue({ data: comments }), updateComment },
     },
   });
-  return { octokit, updateComment };
+  return { octokit, updated };
 }
 
 const base = { repo: 'acme/widgets', issue: 5 };
@@ -121,8 +122,8 @@ describe('recordSliceMerged', () => {
     const f = fake(renderSlicePlanComment(p));
     const result = await recordSliceMerged({ octokit: f.octokit, ...base, prNumber: 21 });
     expect(result).toEqual({ status: 'recorded', commentId: 77, index: 1 });
-    expect(f.updateComment).toHaveBeenCalledTimes(1);
-    const arg = f.updateComment.mock.calls[0]?.[0] as { comment_id: number; body: string };
+    expect(f.updated).toHaveLength(1);
+    const arg = f.updated[0]!;
     expect(arg.comment_id).toBe(77);
     const parsed = parseSlicePlanComment(arg.body);
     expect(parsed?.ok && parsed.plan.slices[0]).toMatchObject({ state: 'merged', prNumber: 21, branch: 'factory/5-x' });
@@ -142,7 +143,7 @@ describe('recordSliceMerged', () => {
       const f = fake(body);
       const result = await recordSliceMerged({ octokit: f.octokit, ...base, prNumber });
       expect(result.status).toBe(status);
-      expect(f.updateComment).not.toHaveBeenCalled();
+      expect(f.updated).toEqual([]);
     }
   });
 });
