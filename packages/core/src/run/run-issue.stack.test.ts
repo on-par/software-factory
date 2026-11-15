@@ -121,7 +121,6 @@ const freshPlan = (): SlicePlan => ({
 });
 const branch = (k: number) => stackSliceBranch(1, k);
 
-/** One slice per run (#3367): the nth planPhase call plans slice n, with slices 1..n-1 recorded below it. */
 function stackSetup(opts: { recordBranches?: boolean; pulls?: unknown; lower?: 'pr-open' | 'merged' } = {}) {
   const recordBranches = opts.recordBranches ?? true;
   const bodies: string[] = [];

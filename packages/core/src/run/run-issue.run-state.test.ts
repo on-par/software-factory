@@ -1,4 +1,3 @@
-// run-issue.run-state.test.ts — runIssue persists its run state through ports.recordRunState (#3194)
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';

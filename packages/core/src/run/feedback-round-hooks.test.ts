@@ -1,4 +1,3 @@
-// packages/core/src/run/feedback-round-hooks.test.ts — runIssue's feedback-round hooks: prepare, idle exit, re-plan note, publish (#3910)
 import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
 

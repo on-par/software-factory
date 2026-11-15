@@ -62,12 +62,11 @@ describe('inPlaceWorkspace', () => {
 });
 
 describe('simWorkspace', () => {
-  it('wraps a SimWorkspace as a Workspace, delegating dispose to the sim', async () => {
+  it('wraps a SimWorkspace as a Workspace, delegating dispose to the sim, which tolerates a second dispose', async () => {
     const sim = await createSimWorkspace();
     const ws: Workspace = simWorkspace(sim);
     expect(ws.path).toBe(sim.repoRoot);
     await ws.dispose();
-    // Idempotent: disposing a second time (directly through the sim) must not throw.
     await expect(sim.dispose()).resolves.toBeUndefined();
   });
 });
@@ -206,8 +205,8 @@ describe('acquireLaneEnvironment', () => {
 
       env.recordPgid(1234);
       expect(tracker.pgids).toContain(1234);
-      // recordLeasePgid persists fire-and-forget; give the microtask queue a tick.
-      await new Promise((r) => setTimeout(r, 20));
+      const fireAndForgetPgidPersistTickMs = 20;
+      await new Promise((r) => setTimeout(r, fireAndForgetPgidPersistTickMs));
       const leaseAfterRecord = readPortLeases(registryFile).find((l) => l.worktreeId === '/wt/lane-a');
       expect(leaseAfterRecord?.pgids).toContain(1234);
 

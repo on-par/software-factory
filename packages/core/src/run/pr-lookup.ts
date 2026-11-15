@@ -1,23 +1,18 @@
-// packages/core/src/run/pr-lookup.ts — the one open-PR lookup: same-repo head guard, found/none/ambiguous/error (#3439, ADR-0035)
-
 import type { Octokit } from '@octokit/rest';
 import type { WorkKey } from '../work/work-key.js';
 
-/** One open same-repo PR that matched a lookup. */
 export interface OpenPrMatch {
   prNumber: number;
   branch: string;
   headSha: string;
 }
 
-/** ADR-0035: callers branch on every status; only `none` means "no PR exists". */
 export type OpenPrLookup =
   | ({ status: 'found' } & OpenPrMatch)
   | { status: 'none' }
   | { status: 'ambiguous'; prs: OpenPrMatch[] }
   | { status: 'error'; detail: string };
 
-/** The fields of a `pulls.list` item the lookups read. Payloads may omit any of them. */
 export interface OpenPullSummary {
   number: number;
   body?: string | null;
@@ -26,10 +21,6 @@ export interface OpenPullSummary {
 
 const PER_PAGE = 100;
 
-/**
- * Lists open PRs (paginated up to `maxPages`) and keeps the same-repo ones that satisfy `matches`. A PR whose head
- * repo is a fork, or was deleted, is never returned. Fails closed with `error` when the list is longer than the cap.
- */
 export async function lookupOpenPrs(opts: {
   octokit: Pick<Octokit, 'rest'>;
   repo: string;
@@ -69,7 +60,6 @@ export async function lookupOpenPrs(opts: {
   return { status: 'ambiguous', prs: found };
 }
 
-/** The open same-repo PR whose body says `closes #<issue>`. */
 export function lookupOpenPrByIssue(opts: {
   octokit: Pick<Octokit, 'rest'>;
   repo: string;
@@ -85,7 +75,6 @@ export function lookupOpenPrByIssue(opts: {
   });
 }
 
-/** The open same-repo PR whose head branch is exactly `branch`. */
 export function lookupOpenPrByBranch(opts: {
   octokit: Pick<Octokit, 'rest'>;
   repo: string;

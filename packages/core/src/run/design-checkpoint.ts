@@ -1,5 +1,3 @@
-// src/run/design-checkpoint.ts — opt-in post-PLAN design checkpoint (#3621)
-
 import type { Octokit } from '@octokit/rest';
 
 import type { RunLogFn } from './attribution.js';
@@ -8,14 +6,12 @@ import { issueNumberOf, workKeyFromIssue, type WorkKey } from '../work/work-key.
 import type { RunPorts, RunRequest } from './run-issue.js';
 import { issueBodyHash, type PlanReuseRecord } from './resume-context.js';
 
-/** Issue label that parks a run for a human design review right after a successful PLAN. */
 export const NEEDS_DESIGN_LABEL = 'factory:needs-design';
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Whether the issue carries the needs-design label (trimmed, case-insensitive). A read failure reports `error`. */
 export async function readNeedsDesignLabel(
   octokit: Octokit,
   repo: string,
@@ -33,7 +29,6 @@ export async function readNeedsDesignLabel(
   }
 }
 
-/** The park message: why the run paused, where the plan is, and how to approve. */
 export function designCheckpointMessage(input: { key: WorkKey; specPath: string; branch: string }): string {
   return (
     `design checkpoint: issue #${input.key} is labeled ${NEEDS_DESIGN_LABEL}, so the run paused after PLAN for a human design review. ` +
@@ -43,10 +38,6 @@ export function designCheckpointMessage(input: { key: WorkKey; specPath: string;
   );
 }
 
-/**
- * The receipt to park with when a github-issue run is labeled needs-design (after recording the plan for reuse),
- * else undefined. Local-brief and localOnly runs skip the gate; a label-read failure fails open.
- */
 export async function designCheckpointPark(
   request: Pick<RunRequest, 'repo' | 'issue' | 'work' | 'specPath' | 'branch' | 'localOnly'>,
   ports: Pick<RunPorts, 'octokit' | 'workspace' | 'planReuse' | 'readWorktreeHead'>,

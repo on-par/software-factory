@@ -9,7 +9,6 @@ import { codexBuildBlocked } from './provider-breaker-gate.js';
 
 type Log = (type: EventKind, msg: string) => void;
 
-/** The lane's RouteCapabilities, built once before PLAN (#664). The breaker is probed only when failover is on. */
 export async function laneRouteCapabilities(
   request: { codexDisabled: boolean; localOnly?: boolean; failover: { enabled: boolean } },
   ports: { router: ModelRouter; breaker: ProviderBreaker },
@@ -22,7 +21,6 @@ export async function laneRouteCapabilities(
   };
 }
 
-/** Tracks the route the frozen spec currently names and rewrites it whenever the route in use differs. */
 export function specRouteTracker(specPath: string, initial: BuildRoutePin, log: Log) {
   let current = initial;
   return async (actual: BuildRoutePin, reason: RouteDegradeReason): Promise<void> => {
@@ -31,7 +29,6 @@ export function specRouteTracker(specPath: string, initial: BuildRoutePin, log: 
         current = actual;
       }
     } catch (err) {
-      // A spec that cannot be rewritten must not stop the build; the next sync retries against the same route.
       log(
         'warn',
         `could not update spec route to ${actual} (${reason}): ${err instanceof Error ? err.message : String(err)}`,
@@ -40,7 +37,6 @@ export function specRouteTracker(specPath: string, initial: BuildRoutePin, log: 
   };
 }
 
-/** Degrade the frozen route for BUILD: a breaker that opened after PLAN flips codex to claude and is persisted. */
 export async function beginBuildRoute(
   request: { failover: { enabled: boolean }; specPath: string },
   ports: { router: ModelRouter; breaker: ProviderBreaker; events: (phase: 'build') => Log },
@@ -56,7 +52,6 @@ export async function beginBuildRoute(
   return { buildCaps, syncSpecRoute, route: resolved.route };
 }
 
-/** Drop a build model whose harness does not match the route that will run it (a pin cannot force the route). */
 export function compatibleBuildModel(
   registry: Parameters<typeof routeForBuildModel>[0],
   model: string | undefined,

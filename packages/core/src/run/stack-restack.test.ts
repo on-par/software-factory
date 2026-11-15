@@ -1,5 +1,3 @@
-// packages/core/src/run/stack-restack.test.ts — ADR-0161 (#3368): restack open slices after a squash merge, on a real git fixture.
-
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,6 +25,12 @@ function commit(cwd: string, file: string, content: string, msg: string): void {
   writeFileSync(join(cwd, file), content);
   git(cwd, 'add', file);
   git(cwd, 'commit', '-m', msg);
+}
+
+function configureRepoIdentityIndependentOfHostGitConfig(cwd: string): void {
+  git(cwd, 'config', 'user.name', 'T');
+  git(cwd, 'config', 'user.email', 't@example.com');
+  git(cwd, 'config', 'commit.gpgsign', 'false');
 }
 
 const story = {} as never;
@@ -93,11 +97,7 @@ describe('restackAfterSquashMerge', () => {
     baseRef = {};
     git(dir, 'init', '--bare', '-b', 'main', remote);
     git(dir, 'clone', remote, root);
-    // The restack's own rebase runs without the -c identity above; give the fixture repo one so it
-    // does not depend on the host's global git config (CI runners have none).
-    git(root, 'config', 'user.name', 'T');
-    git(root, 'config', 'user.email', 't@example.com');
-    git(root, 'config', 'commit.gpgsign', 'false');
+    configureRepoIdentityIndependentOfHostGitConfig(root);
     git(root, 'checkout', '-b', 'main');
     commit(root, 'a.txt', 'base\n', 'base');
     git(root, 'push', 'origin', 'main');
@@ -114,7 +114,6 @@ describe('restackAfterSquashMerge', () => {
     commit(root, 's3.txt', '3\n', 's3 only');
     const head3 = git(root, 'rev-parse', 'HEAD');
     git(root, 'push', 'origin', 'factory/9-slice-3');
-    // Squash slice 1 onto main and delete its branch.
     git(root, 'checkout', 'main');
     git(root, 'merge', '--squash', 'factory/9-slice-1');
     git(root, 'commit', '-m', 'squash slice 1');
@@ -200,13 +199,12 @@ describe('restackAfterSquashMerge', () => {
     commit(root, 'a.txt', 'main edit\n', 'main edits a');
     git(root, 'push', 'origin', 'main');
     const out = await run({ plan: withSliceState(plan, 3, 'pending') });
-    // The helper's conflict reason, prefixed by restack's slice/PR label.
     expect(out.status === 'park' && out.reason).toMatch(
       /^restack of slice 2\/3 PR #102 onto origin\/main conflicted in: a\.txt; nothing was pushed$/,
     );
   });
 
-  it('pushes nothing when a higher slice conflicts', async () => {
+  it('pushes nothing when a higher slice built on an older lower-slice head conflicts with the rewritten one', async () => {
     git(root, 'checkout', 'factory/9-slice-3');
     commit(root, 's2.txt', 'slice three edit\n', 's3 edits s2 file');
     git(root, 'push', 'origin', 'factory/9-slice-3');
@@ -215,7 +213,6 @@ describe('restackAfterSquashMerge', () => {
     commit(root, 's2.txt', 'slice two rewrite\n', 's2 rewrite');
     git(root, 'push', 'origin', 'factory/9-slice-2');
     plan = withSliceState(plan, 2, 'pr-open', 102, 'factory/9-slice-2', remoteHead('factory/9-slice-2'));
-    // slice 3 was built on the older slice 2 head, so replaying it onto the rewritten one conflicts.
     const before2 = remoteHead('factory/9-slice-2');
     const out = await run();
     expect(out).toMatchObject({ status: 'park', index: 3 });
@@ -245,8 +242,7 @@ describe('restackAfterSquashMerge', () => {
     expect(out.status === 'park' && out.reason).toContain('no recorded head SHA');
   });
 
-  it('skips the restack when an open slice without a recorded head SHA no longer holds the merged head', async () => {
-    // Slice 2 was rebuilt from current main after the squash merge, so it no longer carries slice 1's commits.
+  it('skips the restack when an open slice without a recorded head SHA was rebuilt on main and no longer holds the merged head', async () => {
     git(root, 'checkout', '-B', 'factory/9-slice-2', 'main');
     commit(root, 's2.txt', '2\n', 's2 rebuilt on main');
     git(root, 'push', '-f', 'origin', 'factory/9-slice-2');

@@ -1,12 +1,8 @@
-// src/run/run-state-record.ts — RunStateUpdate builders and the swallow-and-log writer runIssue uses (#3194)
-
 import type { EventKind } from '../events/kinds.js';
 import type { CheckerOutput, CheckSummary } from '../types/index.js';
 import type { RunOutcome } from './outcome.js';
 import { terminalRunStatus, type RunStateUpdate } from './state.js';
 
-/** Writes one update. A rejection is logged as `run_state_failed` and swallowed:
- *  the run state is an observability side channel, never a run invariant. */
 export async function safeRecordRunState(
   record: ((update: RunStateUpdate) => void | Promise<void>) | undefined,
   log: (type: EventKind, msg: string) => void,
@@ -26,7 +22,6 @@ function failingResults(summary: CheckSummary | undefined): CheckerOutput[] {
   return summary?.results.filter((r) => r.result === 'FAIL') ?? [];
 }
 
-/** The terminal update for a returned outcome; `failures` only when the run parked. */
 export function terminalRunStateUpdate(outcome: RunOutcome, summary: CheckSummary | undefined): RunStateUpdate {
   const status = terminalRunStatus(outcome);
   const failures = failingResults(summary);
@@ -41,7 +36,6 @@ export function terminalRunStateUpdate(outcome: RunOutcome, summary: CheckSummar
   };
 }
 
-/** The terminal update when `runIssueOnce` threw: always a failure, carrying the failing checks. */
 export function thrownRunStateUpdate(branch: string, summary: CheckSummary | undefined): RunStateUpdate {
   const failures = failingResults(summary);
   return {

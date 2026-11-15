@@ -130,7 +130,7 @@ const CHECK_OK: CheckPhaseResult = {
   reworkRounds: 0,
 };
 
-const CAPPED_UNTIL = '2026-10-20T12:00:00.000Z'; // 07:00 CT
+const CAPPED_UNTIL_0700 = '2026-10-20T12:00:00.000Z';
 const T_0630 = Date.parse('2026-10-20T11:30:00Z');
 const T_0705 = Date.parse('2026-10-20T12:05:00Z');
 
@@ -145,7 +145,7 @@ async function run(setup: Setup) {
   const restored: ProviderRestoredPayload[] = [];
   const file = join(dir, `breaker-${counter}.json`);
   const breaker = new ProviderBreaker(file, () => t, { onClose: (r) => restored.push(r) });
-  await breaker.open('anthropic', 'usage_cap', 30 * 60_000, { cappedUntil: CAPPED_UNTIL });
+  await breaker.open('anthropic', 'usage_cap', 30 * 60_000, { cappedUntil: CAPPED_UNTIL_0700 });
   const events: Array<[string, string]> = [];
   const router = new ModelRouter(MODELS, ROUTES);
   let stageSkip: ReadonlySet<string> | undefined;
@@ -165,7 +165,7 @@ async function run(setup: Setup) {
       }) satisfies PlanResult,
   );
   const buildPhase = vi.fn<typeof realBuildPhase>(async (opts) => {
-    t = T_0705; // BUILD runs past the cap's reset
+    t = T_0705;
     return { ok: true, model: opts.modelOverride ?? 'm', route: opts.route };
   });
   let checkSkip: ReadonlySet<string> | undefined;

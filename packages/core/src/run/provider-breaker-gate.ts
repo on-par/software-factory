@@ -27,7 +27,6 @@ type GateLog = (
 
 type GateDeps = { router: ModelRouter; breaker: ProviderBreaker; log: GateLog };
 
-/** The fallback model when the primary's provider breaker is open, else the primary (logs provider_breaker_skip). */
 async function preferFallbackWhenProviderIsOpen(
   deps: GateDeps,
   primary: string | undefined,
@@ -64,12 +63,6 @@ export type OpencodeBreakerGate =
     }
   | { kind: 'blocked'; reason: FailoverReason; resetAt: string; message: string };
 
-/**
- * Pre-BUILD breaker gate for the opencode route (#2891, #3035). Unpinned: returns a swap to the first
- * build_claude (else build_codex) worker, with the breaker reason (also logged as worker_failover), when the opencode model's provider breaker
- * is open. Pinned by the repo (ADR-0092): never swaps; returns a blocked result carrying the cap reason and
- * reset time so BUILD fails fast instead of starting on a capped provider.
- */
 export async function gateOpencodeBuildOnBreaker(
   deps: GateDeps,
   opts: { opencodeModel: string | undefined; routePinned: boolean; codexDisabled: boolean; now?: number },
@@ -122,14 +115,10 @@ export const STAGE_ROLE: Record<FailoverStage, ProviderOrderRole> = {
 
 export interface ProviderPick {
   provider: SubscriptionProviderId;
-  /** The role's model for that provider. */
   model: string;
-  /** Registry provider keys (breaker keys) of the order entries passed over: excluded or breaker-open. */
   skipped: Set<string>;
 }
 
-/** The first entry of `order` for the stage's role whose provider is not excluded and whose breaker is closed (#3338).
- *  A provider whose cap has passed is probed first and, when the probe passes, is the pick (#3339). */
 export async function pickOrderedProvider(
   deps: { router: Pick<ModelRouter, 'registryRef'>; breaker: ProviderBreaker; probe?: ProviderProbe; log?: GateLog },
   order: ProviderOrder,
@@ -162,12 +151,6 @@ export async function pickOrderedProvider(
   return undefined;
 }
 
-/**
- * Runs a stage's attempt on the first uncapped provider of `deps.order`. A usage_cap or rate_limit failure reruns the
- * stage from its start on the next uncapped provider (after `beforeRerun` restores the worktree), logging one
- * provider_failover per rerun (#3338, #3977). Any other error, no provider left, or a `beforeRerun` that returns false
- * rethrows the original error.
- */
 export async function runWithProviderFailover<T>(
   deps: {
     router: Pick<ModelRouter, 'registryRef'>;
@@ -209,7 +192,6 @@ export async function runWithProviderFailover<T>(
   }
 }
 
-/** Whether the breaker of any provider serving build_codex is open (#2891); logs the skip. */
 export async function codexBuildBlocked(
   router: ModelRouter,
   breaker: ProviderBreaker,
@@ -226,11 +208,6 @@ export async function codexBuildBlocked(
   return (await gateBuildOnBreaker({ breaker, providers, log })).codexBlocked;
 }
 
-/**
- * Pre-BUILD breaker gate when `models.providerOrder` is unset: swaps an opencode or claude build target to the
- * fallback worker when its provider breaker is open (#2891, #3035). `blocked` carries the escalation message when a
- * repo-pinned opencode route is capped.
- */
 export async function gateBuildTarget(
   deps: GateDeps,
   target: { route: BuildRoute; model: string | undefined },

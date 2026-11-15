@@ -1,5 +1,3 @@
-// packages/core/src/run/stack-restack.ts — ADR-0161 (#3368): rebase open stack slices above a squash-merged slice.
-
 import type { Octokit } from '@octokit/rest';
 
 import { renderStackOrderLine, replaceStackOrderLine, retargetedStackPosition } from '../phases/stack-order.js';
@@ -8,20 +6,14 @@ import { execGit } from '../utils/git-exec.js';
 import { gitErrorDetail, rebaseAndPushStack } from './stack-rebase.js';
 
 export interface StackRestackOptions {
-  /** Main checkout; a short-lived detached worktree is added from it. */
   repoRoot: string;
   octokit: Octokit;
-  /** owner/name */
   repo: string;
-  /** Current trusted slice plan. */
   plan: SlicePlan;
-  /** The slice that was squash-merged. */
   mergedIndex: number;
   mergedPrNumber: number;
   savePlan: (plan: SlicePlan) => Promise<void>;
-  /** Default 'origin'. */
   remote?: string;
-  /** Default 'main'. */
   baseBranch?: string;
 }
 
@@ -57,8 +49,6 @@ async function succeeds(cwd: string, ...args: string[]): Promise<boolean> {
   }
 }
 
-/** Rebases every open slice above a squash-merged slice, bottom-up with `--onto`, and pushes them in one leased atomic push.
- *  The recorded head SHA is required per layer that will be pushed, so an open slice already on current main is skipped. */
 export async function restackAfterSquashMerge(opts: StackRestackOptions): Promise<StackRestackOutcome> {
   const { repoRoot, octokit, plan, mergedIndex, mergedPrNumber, savePlan } = opts;
   const remote = opts.remote ?? 'origin';
@@ -124,7 +114,6 @@ export async function restackAfterSquashMerge(opts: StackRestackOptions): Promis
   }
 
   const remoteRef = (c: Candidate): string => `refs/remotes/${remote}/${c.branch}`;
-  // Contiguous run starting at the lowest slice that still holds the merged head.
   let holdsMerged = true;
   try {
     await git(repoRoot, 'merge-base', '--is-ancestor', mergedHead, remoteRef(candidates[0]!));
@@ -144,14 +133,14 @@ export async function restackAfterSquashMerge(opts: StackRestackOptions): Promis
       reason: `slice ${candidates[0]!.index} no longer holds slice ${mergedIndex}'s commits`,
     };
   }
-  const run: Candidate[] = [];
+  const contiguousRun: Candidate[] = [];
   for (const c of candidates) {
-    if (c.index !== candidates[0]!.index + run.length) break;
-    run.push(c);
+    if (c.index !== candidates[0]!.index + contiguousRun.length) break;
+    contiguousRun.push(c);
   }
 
   const oldHeads: string[] = [];
-  for (const c of run) {
+  for (const c of contiguousRun) {
     const label = `slice ${c.index}/${n}`;
     if (c.recorded === undefined) {
       return park(`${label} PR #${c.prNumber} has no recorded head SHA; refusing to force-push`, c.index, c.prNumber);
@@ -176,20 +165,20 @@ export async function restackAfterSquashMerge(opts: StackRestackOptions): Promis
     repoRoot,
     remote,
     startBase: `${remote}/${base}`,
-    layers: run.map((c, at) => ({
+    layers: contiguousRun.map((c, at) => ({
       branch: c.branch,
       recordedHead: oldHeads[at]!,
       upstream: at === 0 ? mergedHead : oldHeads[at - 1]!,
     })),
   });
   if (!rebased.ok) {
-    const c = run[rebased.at]!;
+    const c = contiguousRun[rebased.at]!;
     const label = `slice ${c.index}/${n}`;
     if (rebased.phase === 'setup') {
       return park(
         `restack of slices above slice ${mergedIndex} failed: ${rebased.reason}`,
-        run[0]!.index,
-        run[0]!.prNumber,
+        contiguousRun[0]!.index,
+        contiguousRun[0]!.prNumber,
       );
     }
     if (rebased.phase === 'rebase') {
@@ -199,9 +188,9 @@ export async function restackAfterSquashMerge(opts: StackRestackOptions): Promis
   }
   const newHeads = rebased.newHeads;
 
-  const first = run[0]!;
+  const first = contiguousRun[0]!;
   let next = plan;
-  for (const [at, c] of run.entries())
+  for (const [at, c] of contiguousRun.entries())
     next = withSliceState(next, c.index, 'pr-open', c.prNumber, c.branch, newHeads[at]);
   let retargeted = false;
   try {
@@ -239,7 +228,12 @@ export async function restackAfterSquashMerge(opts: StackRestackOptions): Promis
   return {
     status: 'restacked',
     plan: next,
-    slices: run.map((c, at) => ({ index: c.index, prNumber: c.prNumber, branch: c.branch, headSha: newHeads[at]! })),
+    slices: contiguousRun.map((c, at) => ({
+      index: c.index,
+      prNumber: c.prNumber,
+      branch: c.branch,
+      headSha: newHeads[at]!,
+    })),
     retargeted,
   };
 }

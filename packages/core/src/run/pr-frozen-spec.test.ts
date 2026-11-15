@@ -1,4 +1,3 @@
-// packages/core/src/run/pr-frozen-spec.test.ts — the frozen spec comment round-trips and rejects forged, tampered and oversized blocks (#4025)
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it } from 'vitest';
 

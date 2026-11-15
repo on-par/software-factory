@@ -1,4 +1,3 @@
-// packages/core/src/run/flaky-tests.ts — files or updates flaky-test issues for tests that flaked in a run.
 import type { Octokit } from '@octokit/rest';
 
 import { recordFlakes, setFlakyIssue, type FlakyThresholdEntry } from '../checkers/flaky-ledger.js';
@@ -34,8 +33,6 @@ function renderFlakyComment(entry: FlakyThresholdEntry, run: string, baseSha: st
   ].join('\n');
 }
 
-/** Records passing-flake tests in the ledger and files or updates a flaky-test issue for those at
- *  the threshold. Never throws: every ledger or GitHub failure is logged. */
 export async function fileFlakyTests(args: {
   request: Pick<RunRequest, 'issue' | 'repo' | 'localOnly' | 'noPr'>;
   octokit: Octokit;
@@ -87,7 +84,6 @@ export async function fileFlakyTests(args: {
   }
 }
 
-/** Logs CHECK's serial flake re-run verdict and files the tests that passed on re-run (#2303). */
 export async function reportFlakeRerun(
   check: CheckPhaseResult,
   request: Pick<RunRequest, 'issue' | 'repo' | 'localOnly' | 'noPr' | 'flakyLedgerPath'>,

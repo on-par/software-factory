@@ -1,9 +1,3 @@
-// packages/core/src/run/pr-run-state.ts — a run's resumable state in a factory-owned PR comment (#3909, ADR-0174)
-//
-// A disposable host loses `.factory/state` with the container. The run persists the state it needs to resume
-// (rework counters, handled review ids, status, spec summary) in one hidden comment on its open PR. Anyone can post
-// the marker, so only a comment by the authenticated identity whose sha256 digest matches is trusted.
-
 import { createHash } from 'node:crypto';
 
 import type { Octokit } from '@octokit/rest';
@@ -23,7 +17,6 @@ import { upsertMarkerComment } from './park-comment.js';
 export const PR_RUN_STATE_VERSION = 'v1';
 export const PR_RUN_STATUSES = ['building', 'awaiting-ci', 'awaiting-review', 'parked'] as const;
 export type PrRunStatus = (typeof PR_RUN_STATUSES)[number];
-/** Why SHIP left the PR as a draft (#3932): 'ci-pending' lets the sweep land it, 'requested' is intentional. */
 export const PR_DRAFT_REASONS = ['ci-pending', 'requested'] as const;
 
 export const SPEC_SUMMARY_MAX = 1000;
@@ -105,7 +98,6 @@ const sha256 = (text: string): string => createHash('sha256').update(text).diges
 const clampCount = (n: number): number => (Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0);
 const uniqueSorted = (ids: readonly number[]): number[] => [...new Set(ids.map(clampCount))].sort((a, b) => a - b);
 
-/** Allow-list step: rebuilds the state from known fields only, redacts the summary and bounds every list. */
 export function sanitizePrRunState(state: PrRunState, maxIds = MAX_HANDLED_IDS, maxRounds = MAX_ROUNDS): PrRunState {
   return {
     version: 1,
@@ -137,7 +129,6 @@ function render(state: PrRunState): string {
   ].join('\n');
 }
 
-/** The hidden marker block for a state; halves rounds and handled ids until it fits one comment. */
 export function encodePrRunState(state: PrRunState): string {
   let ids = MAX_HANDLED_IDS;
   let rounds = MAX_ROUNDS;
@@ -173,10 +164,6 @@ export function decodePrRunState(
   return { ok: true, state: { ...checked.data, key } };
 }
 
-/**
- * Picks the state to trust: only a comment by `self` (the authenticated identity) is decoded. Lowest comment id
- * wins, as in `readParkState`. An unknown identity fails closed: every marker comment is ignored.
- */
 export function selectTrustedPrRunState(
   comments: readonly PrStateComment[],
   self: SelfIdentity | undefined,
@@ -208,12 +195,6 @@ function mergeRounds(a: readonly PrRunRound[], b: readonly PrRunRound[]): PrRunR
   return [...seen.values()].sort((x, y) => x.at.localeCompare(y.at));
 }
 
-/**
- * Monotonic merge of local and remote state. `used` counters take the max (a restore can only raise them, never
- * reset a cap), `cap` comes from local because local config is current, handled ids and rounds are unioned (rounds
- * deduped by kind+id+headSha, sorted by `at`), and `status`, `spec` and `prNumber` come from the side with the
- * later `updatedAt`. One missing side returns the other.
- */
 export function reconcilePrRunState(local: PrRunState | null, remote: PrRunState | null): PrRunState | null {
   if (local === null) return remote;
   if (remote === null) return local;
@@ -260,7 +241,6 @@ export function prRunStatusFor(status: RunStatus, ciPending?: boolean): PrRunSta
   }
 }
 
-/** Every comment on the PR, all pages, reduced to the fields the trust checks need (#4025). */
 export async function listPrStateComments(
   octokit: SelfIdentityOctokit,
   repo: string,

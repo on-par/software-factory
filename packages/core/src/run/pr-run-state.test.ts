@@ -1,4 +1,3 @@
-// packages/core/src/run/pr-run-state.test.ts — PR-persisted run state: encode/decode, trust, reconcile, save/load (#3909)
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it } from 'vitest';
 

@@ -1,5 +1,3 @@
-// packages/core/src/run/ci-rework.ts — attribution, budget and feedback for SHIP CI rework (#2816)
-
 import type { Octokit } from '@octokit/rest';
 
 import { isPassingConclusion, listAllCheckRuns } from '../utils/ci-watch.js';
@@ -33,7 +31,6 @@ export const CI_CHECK_REWORK_INSTRUCTIONS =
   'Suppression is forbidden: do not raise any max-lines-baseline.json ceiling, do not lower coverage thresholds in vitest.config.ts, ' +
   'do not skip, delete or weaken failing tests, do not edit .github/workflows, and do not add eslint-disable or @ts-ignore comments.';
 
-/** Non-negative integer from FACTORY_MAX_CI_REWORK_ROUNDS (0 disables CI rework); anything else falls back to the default. */
 export function resolveMaxCiReworkRounds(env: NodeJS.ProcessEnv = process.env): number {
   const value = (env[CI_REWORK_ENV] ?? '').trim();
   return /^\d+$/.test(value) ? Number(value) : MAX_CI_REWORK_ROUNDS;
@@ -46,21 +43,18 @@ function alertPath(location: string): string | undefined {
   return path === '' ? undefined : path;
 }
 
-/** Open CodeQL alerts on the PR base branch (#3712). `refs` holds "ruleId at location" for alerts without a number. */
 export interface BaseCodeqlAlerts {
   baseRef: string;
   numbers: number[];
   refs: string[];
 }
 
-/** True when a failing CodeQL check's summary says the PR introduced new alerts (#3712). */
 export function codeqlReportsNewAlerts(evidence: CiFailureEvidence | undefined): boolean {
   return (
     !!evidence && evidence.failingChecks.some((c) => /codeql/i.test(c.name) && CODEQL_NEW_ALERTS.test(c.summary ?? ''))
   );
 }
 
-/** True when some alert sits in a file the PR did not change (or at an unknown location), so base alerts matter. */
 export function needsBaseAlerts(evidence: CiFailureEvidence | undefined, changedFiles: readonly string[]): boolean {
   if (!evidence) return false;
   const changed = new Set(changedFiles);
@@ -91,7 +85,6 @@ function classifyAlert(
   return { attributable: false, reason: 'file not changed by this PR' };
 }
 
-/** Alerts the PR introduced: in a changed file, or in an unchanged file but not open on base (or CodeQL says new). */
 export function attributableCodeqlAlerts(
   evidence: CiFailureEvidence | undefined,
   changedFiles: readonly string[],
@@ -103,19 +96,16 @@ export function attributableCodeqlAlerts(
   return evidence.alerts.filter((alert) => classifyAlert(alert, changed, baseAlerts, reportsNew).attributable);
 }
 
-/** Failing check names on the PR base branch's latest commit (#2817). */
 export interface BaseFailingChecks {
   baseRef: string;
   baseSha: string;
   failing: string[];
 }
 
-/** True when a failing check is attributed on its own (not through CodeQL alerts). */
 export function needsBaseChecks(evidence: CiFailureEvidence | undefined): boolean {
   return !!evidence && evidence.failingChecks.some((c) => !(/codeql/i.test(c.name) && evidence.alerts.length > 0));
 }
 
-/** Attributes each failing item to the PR: alerts by changed file, then base alerts (#3712); other checks by the base commit (#2817). */
 export function attributeCiFailure(
   evidence: CiFailureEvidence | undefined,
   changedFiles: readonly string[],
@@ -152,10 +142,6 @@ export function attributeCiFailure(
   return { baseline, ...(base ? { baseRef: base.baseRef, baseSha: base.baseSha } : {}), items };
 }
 
-/**
- * Flips a non-CodeQL check that also fails on base to attributable when its job log names a file this PR
- * changed (#3998), then recomputes `baseline`. Returns the input unchanged when nothing flips.
- */
 export function attributeByJobLogs(
   attribution: CiAttribution,
   jobLogs: readonly CiJobLogExcerpt[],
@@ -176,7 +162,6 @@ export function attributeByJobLogs(
   return { ...attribution, baseline, items };
 }
 
-/** Failing check names on the latest commit of the PR's base branch. Errors propagate to the caller. */
 export async function listBaseFailingChecks(
   octokit: Octokit,
   owner: string,
@@ -195,7 +180,6 @@ export async function listBaseFailingChecks(
   return { baseRef, baseSha, failing: [...failing] };
 }
 
-/** Open CodeQL alerts on the latest base branch of the PR. Errors propagate; a list that may be partial throws. */
 export async function listBaseCodeqlAlerts(
   octokit: Octokit,
   owner: string,
@@ -226,7 +210,6 @@ export async function listBaseCodeqlAlerts(
   throw new Error(`base CodeQL alert list exceeds ${BASE_ALERTS_PAGE_SIZE * BASE_ALERTS_MAX_PAGES} alerts`);
 }
 
-/** The same CheckSummary shape local CHECK rework consumes, with one FAIL `ci_codeql` result. */
 export function ciReworkSummary(alerts: readonly CiCodeScanningAlert[]): CheckSummary {
   const lines = alerts.map((a) => `- ${a.ruleId} at ${a.location} — ${a.message}`);
   const details = ['CodeQL alerts this PR introduced:', ...lines].join('\n');
@@ -239,7 +222,6 @@ export function ciReworkSummary(alerts: readonly CiCodeScanningAlert[]): CheckSu
   };
 }
 
-/** The same CheckSummary shape, with one FAIL `ci_checks` result listing failing jobs and their log tails (#3537). */
 export function ciCheckReworkSummary(
   checks: readonly CiFailingCheck[],
   jobLogs: readonly CiJobLogExcerpt[],

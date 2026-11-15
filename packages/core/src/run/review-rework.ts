@@ -1,4 +1,3 @@
-// packages/core/src/run/review-rework.ts — review rework: BUILD rework on the PR branch from one review's comments, then CHECK (#3564)
 import type { Octokit } from '@octokit/rest';
 
 import { reworkWorker, type checkPhase } from '../phases/check.js';
@@ -12,26 +11,19 @@ export interface ReviewReworkTarget {
   prNumber: number;
   reviewId: number;
   reviewer: string;
-  /** `'comment'`: `reviewId` is a `/factory rework` issue-comment id (#3882). */
   source?: 'comment';
 }
 
-/** #3625: a trusted `/factory iterate` comment; the run re-runs CHECK/rework on the PR branch. */
 export interface IterateTarget {
   prNumber: number;
   commentId: number;
   actor: string;
 }
 
-/** The rework triggers a RunRequest can carry; either one skips PLAN/BUILD (#3564, #3625). */
 export interface ReworkRequestFields {
-  /** Review rework (#3564): skip PLAN/BUILD, rework this review on the adopted PR branch, then CHECK. */
   reviewRework?: ReviewReworkTarget;
-  /** #3625: a /factory iterate comment — skip PLAN/BUILD and re-run CHECK/rework on the PR branch. */
   iterate?: IterateTarget;
-  /** #3910: a feedback round — read every unhandled trusted PR feedback item, triage, then rework or re-plan. */
   feedbackRound?: FeedbackRoundTarget;
-  /** Logins trusted to give feedback (intake.trustedApprovers); absent falls back to repo permission (ADR-0128). */
   trustedApprovers?: readonly string[];
 }
 
@@ -58,7 +50,6 @@ export const REVIEW_REWORK_INSTRUCTIONS =
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/** Review R's body plus only the inline comments that belong to R (filtered by pull_request_review_id). */
 export async function fetchReviewFeedback(
   octokit: Pick<Octokit, 'rest' | 'paginate'>,
   opts: { owner: string; repo: string; prNumber: number; reviewId: number },
@@ -93,7 +84,6 @@ export async function fetchReviewFeedback(
   };
 }
 
-/** The feedback of one `/factory rework` comment, re-read from GitHub so only the text after the command is used. */
 export async function fetchCommentFeedback(
   octokit: Pick<Octokit, 'rest'>,
   opts: { owner: string; repo: string; prNumber: number; commentId: number },
@@ -137,7 +127,6 @@ export function renderReviewFeedback(feedback: ReviewFeedback): string {
   return `${UNTRUSTED_REVIEW_FEEDBACK_NOTICE}\n${wrapUntrustedReviewFeedback(inner)}`;
 }
 
-/** The review as a one-result CheckSummary, the same shape ciReworkSummary gives the rework worker. */
 export function reviewReworkSummary(feedback: ReviewFeedback): CheckSummary {
   return {
     failures: 1,
@@ -148,7 +137,6 @@ export function reviewReworkSummary(feedback: ReviewFeedback): CheckSummary {
   };
 }
 
-/** A synthetic CHECK resume: skips PLAN and BUILD for a review-rework run. */
 export function reviewReworkResume(
   request: Pick<RunRequest, 'reviewRework' | 'iterate' | 'feedbackRound' | 'preferredRoute' | 'modelPins'>,
   feedbackPlan?: Pick<FeedbackRoundPlan, 'replan'>,
@@ -163,7 +151,6 @@ export function reviewReworkResume(
   };
 }
 
-/** Fails closed unless the PR is open with `branch` as head, so a rework can never ship to a different PR. */
 async function assertOpenPrHead(
   octokit: Pick<Octokit, 'rest'>,
   opts: { owner: string; repo: string; prNumber: number; branch: string },
@@ -180,7 +167,6 @@ async function assertOpenPrHead(
   }
 }
 
-/** One rework worker call on the PR branch for `summary`; throws when the worker never ran. */
 async function runReworkWorker(
   checkOpts: Parameters<typeof checkPhase>[0],
   summary: CheckSummary,
@@ -255,7 +241,6 @@ export async function runReviewReworkBuild(opts: {
   return { feedback };
 }
 
-/** Iterate fails closed unless the PR is still open with the run branch as head, so SHIP can never open a new PR. */
 async function guardIterateTarget(
   target: IterateTarget,
   request: Pick<RunRequest, 'repo' | 'branch'>,
@@ -280,7 +265,6 @@ async function guardIterateTarget(
   );
 }
 
-/** runIssue's hook before the first CHECK: reworks the requested review unless a CHECK resume was asked for. */
 export async function runRequestedReviewRework(
   request: Pick<RunRequest, 'reviewRework' | 'iterate' | 'feedbackRound' | 'resumeFrom' | 'repo' | 'branch'>,
   ports: Pick<RunPorts, 'octokit' | 'reworkWorker'>,

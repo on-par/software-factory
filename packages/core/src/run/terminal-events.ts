@@ -1,10 +1,8 @@
-// packages/core/src/run/terminal-events.ts — runIssue owns a run's single terminal event (#3435).
 import { eventTraitsFor, type EventKind } from '../events/kinds.js';
 import type { RunPorts } from './run-issue.js';
 
 const PHASE_KINDS = new Set<EventKind>(['plan', 'build', 'check', 'ship']);
 
-/** Phase-scoped loggers (events(phase)) log terminal kinds as their phase kind; only runIssue's unscoped logger ends a run. */
 export function withSingleTerminalEvent(ports: RunPorts): RunPorts {
   const events: RunPorts['events'] = (phase) => {
     const log = ports.events(phase);

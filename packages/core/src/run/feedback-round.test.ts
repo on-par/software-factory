@@ -1,4 +1,3 @@
-// packages/core/src/run/feedback-round.test.ts — a feedback round reads trusted PR feedback, triages it and answers each item (#3910)
 import { describe, expect, it, vi } from 'vitest';
 
 import type { reworkWorker as realReworkWorker } from '../phases/check.js';

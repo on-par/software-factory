@@ -1,5 +1,3 @@
-// src/run/previous-attempt.ts — the "## Previous attempt" note for a re-dispatched issue's PLAN/BUILD prompts (#3373)
-
 import type { IssueRunState } from '../types/index.js';
 import { UNTRUSTED_CHECKER_OUTPUT_NOTICE, wrapUntrustedCheckerOutput } from '../utils/untrusted-input.js';
 
@@ -26,7 +24,6 @@ function failureBlock(checker: string, result: string, details: string): string 
   return `- ${checker} (${result}):\n${wrapUntrustedCheckerOutput(shown)}`;
 }
 
-/** Append the closing line; as a last guard hard-slice the body (never the closing line) to the cap. */
 function capNote(body: string): string {
   const tail = `\n\n${CLOSING_LINE}`;
   return body.length + tail.length <= PREVIOUS_ATTEMPT_MAX_CHARS
@@ -34,7 +31,6 @@ function capNote(body: string): string {
     : body.slice(0, PREVIOUS_ATTEMPT_MAX_CHARS - tail.length) + tail;
 }
 
-/** Pure and total: returns '' when there is nothing to say; never throws. */
 export function renderPreviousAttempt(prior: IssueRunState | null | undefined): string {
   if (!prior) return '';
   const phase = MID_PHASE[prior.status];

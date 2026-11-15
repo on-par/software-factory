@@ -1,4 +1,3 @@
-// packages/core/src/run/review-rework-cap.ts — cap review-rework runs per issue and park with one comment naming the cap (#3565)
 import { defaultFactoryConfig } from '@on-par/factory-config';
 
 import type { FactoryConfig } from '../config/index.js';
@@ -11,7 +10,6 @@ export function resolveMaxReviewReworkRuns(config: Pick<FactoryConfig, 'queue'>)
   return config.queue?.max_review_rework_runs ?? defaultFactoryConfig.queue.max_review_rework_runs;
 }
 
-/** A record counts as a run once a lane stamped `startedAt`; the store file persists across runs. */
 export function countReviewReworkRuns(store: Pick<ReviewReworkStore, 'list'>, issue: WorkKey): number {
   return store.list().filter((r) => String(r.issue) === issue && r.startedAt).length;
 }

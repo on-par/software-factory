@@ -1,4 +1,3 @@
-// packages/core/src/run/feedback-round.ts — a feedback round on a factory PR: collect unhandled trusted feedback, triage it, rework or re-plan, then answer each item and resolve what was fixed (#3910)
 import { z } from 'zod';
 
 import type { EventKind } from '../events/kinds.js';
@@ -18,7 +17,6 @@ export interface FeedbackItem {
   path?: string;
   line?: number;
   threadId?: string;
-  /** The top-level comment of the thread an inline item replies to; GitHub only accepts replies to that one. */
   inReplyTo?: number;
 }
 
@@ -45,7 +43,6 @@ export interface FeedbackRoundPlan {
   dispositions: FeedbackDisposition[];
   replan: boolean;
   reviewers: string[];
-  /** Undefined when nothing is actionable. */
   summary: CheckSummary | undefined;
 }
 
@@ -72,7 +69,6 @@ function handledKeys(bodies: readonly string[]): Set<string> {
   return handled;
 }
 
-/** Trusted, unhandled feedback on the PR, oldest id first. Factory-authored, empty and marker-handled items are dropped. */
 export async function collectFeedbackItems(opts: {
   github: FeedbackRoundGitHub;
   prNumber: number;
@@ -140,7 +136,6 @@ function renderItem(item: FeedbackItem): string {
   return `- ${item.kind} ${item.id} ${where}(@${item.author}):\n  ${item.body}`;
 }
 
-/** One model call over every item; any parse failure, or a missing or unknown id, falls back to actionable. */
 export async function triageFeedback(opts: {
   items: readonly FeedbackItem[];
   spec: string;
@@ -176,9 +171,7 @@ export async function triageFeedback(opts: {
       const d = DispositionSchema.safeParse(entry);
       if (d.success) byKey.set(itemKey(d.data), d.data);
     }
-  } catch {
-    // unparsable or failed triage reads as no dispositions, so every item fails closed
-  }
+  } catch {}
   return items.map((item) => byKey.get(itemKey(item)) ?? failClosed(item));
 }
 
@@ -187,7 +180,6 @@ const dispositionFor = (
   item: FeedbackItem,
 ): FeedbackDisposition | undefined => dispositions.find((d) => d.kind === item.kind && d.id === item.id);
 
-/** The actionable items as a one-result CheckSummary for the rework worker; undefined when nothing is actionable. */
 export function feedbackReworkSummary(
   items: readonly FeedbackItem[],
   dispositions: readonly FeedbackDisposition[],
@@ -211,7 +203,6 @@ export function feedbackReworkSummary(
   };
 }
 
-/** Reads, triages and plans one round; throws ReviewReworkError unless the PR is open. */
 export async function prepareFeedbackRound(opts: {
   github: FeedbackRoundGitHub;
   target: FeedbackRoundTarget;
@@ -245,7 +236,6 @@ export async function prepareFeedbackRound(opts: {
   };
 }
 
-/** The reply posted where the item was left, ending in the handled marker. */
 export function renderFeedbackReply(
   item: FeedbackItem,
   disposition: FeedbackDisposition,
@@ -277,7 +267,6 @@ function withRevisedSpec(body: string, summary: string): string {
   return body === '' ? block : `${body}\n\n${block}`;
 }
 
-/** Replies to every item, records a revised spec, resolves fixed threads and re-requests review; GitHub errors warn and continue. */
 export async function publishFeedbackRound(opts: {
   github: FeedbackRoundGitHub;
   plan: FeedbackRoundPlan;

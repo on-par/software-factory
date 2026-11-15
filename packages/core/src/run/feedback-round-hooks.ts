@@ -1,4 +1,3 @@
-// packages/core/src/run/feedback-round-hooks.ts — runIssue's two hooks for a feedback round: prepare before PLAN, publish after SHIP (#3910)
 import { readFileSync } from 'node:fs';
 
 import { createOctokitCollaboratorPermissionClient, isTrustedApprover } from '../queue/approval.js';
@@ -34,7 +33,6 @@ function readSpec(request: Pick<RunRequest, 'specPath' | 'work'>): string {
   }
 }
 
-/** Reads and triages the PR's unhandled trusted feedback; undefined when this run is not a fresh feedback round. */
 export async function prepareFeedbackForRun(
   request: HookRequest,
   ports: HookPorts,
@@ -62,7 +60,6 @@ export async function prepareFeedbackForRun(
   return plan;
 }
 
-/** The actionable feedback, appended to PLAN's previous-attempt note on a re-plan. */
 export function feedbackReplanNote(previous: string, plan: FeedbackRoundPlan | undefined): string {
   if (!plan?.replan) return previous;
   const details = plan.summary?.results[0]?.details ?? '';
@@ -82,7 +79,6 @@ function section(spec: string, heading: RegExp): string {
   return [lines[start], ...(end < 0 ? rest : rest.slice(0, end))].join('\n').trim();
 }
 
-/** The new spec's goal and acceptance sections, for the PR body's revised-spec block. */
 export function revisedSpecSummary(specPath: string): string | undefined {
   let spec: string;
   try {
@@ -94,7 +90,6 @@ export function revisedSpecSummary(specPath: string): string | undefined {
   return text === '' ? undefined : text;
 }
 
-/** Answers every item of the round; GitHub failures warn inside publishFeedbackRound and never fail the run. */
 export async function publishFeedbackForRun(
   request: Pick<RunRequest, 'repo' | 'specPath'>,
   ports: Pick<RunPorts, 'octokit' | 'workspace' | 'gitExec'>,
@@ -123,7 +118,6 @@ export async function publishFeedbackForRun(
   });
 }
 
-/** With nothing actionable the round only answers its items; the run then ends without CHECK or SHIP. */
 export async function idleFeedbackRound(
   plan: FeedbackRoundPlan | undefined,
   request: Pick<RunRequest, 'repo' | 'specPath' | 'branch'>,
@@ -136,7 +130,6 @@ export async function idleFeedbackRound(
   return { state: 'ready', route: route ?? 'claude', branch: request.branch, reworkRounds: 0, prNumber: plan.prNumber };
 }
 
-/** How many unhandled trusted feedback items the PR carries, under the config's trusted approvers. */
 export async function countPendingFeedback(
   octokit: RunPorts['octokit'],
   repo: string,

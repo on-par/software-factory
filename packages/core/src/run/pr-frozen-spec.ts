@@ -1,5 +1,3 @@
-// packages/core/src/run/pr-frozen-spec.ts — the frozen spec of an in-place run in a factory-owned PR comment, so a fresh clone skips PLAN (#4025)
-
 import { createHash } from 'node:crypto';
 
 import type { Octokit } from '@octokit/rest';
@@ -33,9 +31,7 @@ export function prFrozenSpecMarker(key: WorkKey): string {
 export interface PrFrozenSpec {
   version: 1;
   key: WorkKey;
-  /** issueBodyHash of the brief the spec was planned from (64-hex sha256). */
   bodyHash: string;
-  /** The full spec file text. */
   spec: string;
 }
 
@@ -54,7 +50,6 @@ const schema = z
 
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
 
-/** The hidden marker block for a frozen spec, or null when it does not fit one comment. */
 export function encodePrFrozenSpec(state: PrFrozenSpec): string | null {
   const json = JSON.stringify({ ...state, spec: redactSecrets(state.spec) });
   const body = [
@@ -88,7 +83,6 @@ export function decodePrFrozenSpec(
   return { ok: true, state: { ...checked.data, key } };
 }
 
-/** Same trust rules as `selectTrustedPrRunState`: own identity only, lowest comment id wins, unknown identity fails closed. */
 export function selectTrustedPrFrozenSpec(
   comments: readonly PrStateComment[],
   self: SelfIdentity | undefined,
@@ -130,7 +124,6 @@ export async function loadPrFrozenSpec(deps: {
   return selectTrustedPrFrozenSpec(await listPrStateComments(octokit, repo, prNumber), self, key);
 }
 
-/** Saves the frozen spec to the PR; null (nothing posted) when it exceeds one comment. */
 export async function savePrFrozenSpec(deps: {
   octokit: Octokit;
   repo: string;
