@@ -40,6 +40,8 @@ CI (`.github/workflows/ci.yml`) runs the same checks as the full path, split int
 
 The pre-commit hook (`lefthook.yml`) auto-fixes staged files with `oxlint --fix` and `prettier --write`. A direct `mkdtemp(tmpdir())` in a test fails `npm run lint` via `anti-slop/no-direct-tmpdir-mkdtemp`; the fix is `createTempDirs` (per-file allowances live in `tmpdir-mkdtemp-baseline.json` and can only shrink).
 
+`toHaveBeenCalled*`, `toBeCalled*`, `toHaveReturned*` and `toHaveResolved*` matchers, and reads of `fn.mock.calls|results|lastCall|instances|contexts|invocationCallOrder`, fail `npm run lint` via `anti-slop/no-call-assertions`; the fix is to assert observable behaviour (return value, resulting state, output, emitted event). To shrink `call-assertions-baseline.json`, remove assertions from a file, then lower its entry to the new count, or delete the entry at 0; lint reports a stale allowance until you do. Never add or raise an entry; the CI guard fails it. The rule cannot be disabled inline.
+
 ## Coverage gate and ratchet
 
 - Thresholds live in `vitest.config.ts`: one global set plus one set per package. Read the file for the current numbers.
