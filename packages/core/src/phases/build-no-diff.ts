@@ -1,4 +1,3 @@
-// src/phases/build-no-diff.ts — no-diff BUILD cause and worker output tail (#3273)
 import { redactText } from '../filing/redact.js';
 
 export type NoDiffCause = 'sandbox' | 'open-questions' | 'unknown';
@@ -28,9 +27,10 @@ export function workerOutputTail(output: string, opts: { lines?: number; maxChar
     .filter((line) => line.trim() !== '')
     .slice(-lines);
   if (kept.length === 0) return '';
-  // Redact before truncating so a cut cannot leave a partial token the patterns miss.
-  const redacted = redactText(kept.join('\n'));
-  return redacted.length > maxChars ? redacted.slice(-maxChars) : redacted;
+  const redactedBeforeTruncating = redactText(kept.join('\n'));
+  return redactedBeforeTruncating.length > maxChars
+    ? redactedBeforeTruncating.slice(-maxChars)
+    : redactedBeforeTruncating;
 }
 
 export function renderNoDiffDetail(input: {

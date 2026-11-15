@@ -1,4 +1,3 @@
-// Planner size-gate verdict and ESCALATE classification (#3275).
 import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 

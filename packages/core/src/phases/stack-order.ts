@@ -1,5 +1,3 @@
-// src/phases/stack-order.ts — stack mode (ADR-0161): where a slice PR sits in its stack, as a marked body line.
-
 import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
@@ -11,12 +9,9 @@ export const STACK_ORDER_MARKER = '<!-- factory:stack-order -->';
 const STACK_BASE_BRANCH = 'main';
 
 export interface StackPosition {
-  /** 1-based slice index. */
   index: number;
   count: number;
-  /** Branch the PR opens against: the parent base ref (slice 1's `--base-branch`, or the parent slice branch), else `main`. */
   base: string;
-  /** PR number of the parent slice, when the slice plan records one. */
   basePr?: number;
   next?: { branch: string; prNumber?: number };
 }
@@ -38,7 +33,6 @@ export function stackPositionFor(plan: SlicePlan, index: number, parentBaseRef: 
   };
 }
 
-/** The position of slice `index` once its parent is squash-merged: stacked on `main` with no parent PR (#3368). */
 export function retargetedStackPosition(plan: SlicePlan, index: number): StackPosition {
   const { basePr: _basePr, ...position } = stackPositionFor(plan, index, undefined);
   const nextPr = plan.slices.find((s) => s.index === index + 1)?.prNumber;
@@ -55,7 +49,6 @@ export function renderStackOrderLine(p: StackPosition): string {
   return `${STACK_ORDER_MARKER}\n**Stack:** slice ${p.index}/${p.count} — stacked on ${stackedOn}${next}`;
 }
 
-/** Stack-order line for an issue stacked on its prerequisite's PR (#3916); `base` is `main` once the prerequisite merged. */
 export function renderPrerequisiteStackLine(p: {
   prerequisite: PrerequisiteStackTarget;
   issue: number;
@@ -66,7 +59,6 @@ export function renderPrerequisiteStackLine(p: {
   return `${STACK_ORDER_MARKER}\n**Stack:** #${b.issue} PR #${b.prNumber} (\`${b.branch}\`), then #${p.issue} ${tail}`;
 }
 
-/** The PR-body stack section for a prerequisite stack: the order line plus the recovery marker (#3916). */
 export function prerequisiteStackOrder(
   prerequisite: PrerequisiteStackTarget | undefined,
   issue: number | string,
@@ -76,7 +68,6 @@ export function prerequisiteStackOrder(
   return `${renderPrerequisiteStackLine({ prerequisite, issue: Number(issue), base })}\n${renderPrerequisiteStackMarker(prerequisite)}`;
 }
 
-/** Replaces the marker line and the line after it; without a marker, inserts after the Summary paragraph or appends. */
 export function replaceStackOrderLine(body: string, line: string): string {
   const lines = body.split('\n');
   const at = lines.indexOf(STACK_ORDER_MARKER);
@@ -94,7 +85,6 @@ export function replaceStackOrderLine(body: string, line: string): string {
   return `${body.trimEnd()}\n\n${line}\n`;
 }
 
-/** Rewrites slice k-1's PR so it names slice k's PR as next. Best-effort: never throws. */
 export async function updateParentStackOrder(opts: {
   octokit: Octokit;
   repo: string;

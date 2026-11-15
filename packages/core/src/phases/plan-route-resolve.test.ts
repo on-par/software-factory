@@ -1,5 +1,3 @@
-// src/phases/plan-route-resolve.test.ts — resolveRunnableBuildRoute, split out of plan.test.ts
-
 import { describe, expect, it } from 'vitest';
 
 import { resolveRunnableBuildRoute } from './plan.js';

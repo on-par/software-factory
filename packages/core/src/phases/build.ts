@@ -1,5 +1,3 @@
-// src/phases/build.ts — BUILD phase: worker model implements the frozen spec
-
 import { type WorkKey } from '../work/work-key.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -42,26 +40,14 @@ export interface BuildResult {
   model: string;
   route: BuildRoutePin;
   escalate?: string;
-  /** Set on a non-escalation build failure; 'no_diff' = worker produced no diff,
-   *  'junk_only_diff' = worker changed only generated/cache files, 'budget_exceeded' = the
-   *  budget guard stopped the worker mid-session (#3320). */
   reason?: 'no_diff' | 'junk_only_diff' | 'budget_exceeded' | 'sandbox_env';
-  /** Park message when the worker printed an ENV-ERROR: line (#3332). */
   sandboxEnv?: string;
-  /** Why an empty-diff build produced nothing (#3273); set only with reason 'no_diff'. */
   noDiffCause?: NoDiffCause;
-  /** Rendered cause, open questions and redacted worker tail for the fail event and park message (#3273). */
   noDiffDetail?: string;
-  /** Run-start HEAD SHA captured before the worker ran (#1162) — checkPhase's
-   *  fallback diff base for remote-less checkouts (#1211). */
   diffBase?: string;
-  /** Why the build ran on a model other than the one first tried (cross-harness or in-tier
-   *  failover), so a summary can say a pin was not used (#2511). */
   failoverReason?: FailoverReason;
 }
 
-/** Instruction files that every model `route`'s BUILD task can run on auto-loads (#1600). Any model on a
- *  harness without the file, no models, or a failed lookup → [] (keep the full text). */
 function autoLoadedBy(router: ModelRouter, route: BuildRoutePin, pin?: string): readonly string[] {
   try {
     const models = [...(pin ? [pin] : []), ...router.resolveAll(`build_${route}`)];
@@ -132,29 +118,18 @@ async function buildPhaseImpl(opts: {
   ) => void;
   timeoutSeconds?: number;
   skipCI?: boolean;
-  /** Local-only workspace runs (#508): use the commit-only prompt on every
-   *  route — never instruct the worker to push, open a PR, or watch CI.
-   *  Forces commit-only even when publishFromBuild is set. */
   disablePublish?: boolean;
-  /** Opt-in (#1867, build.publishFromBuild): the claude route sends the publishing prompt (push, open PR, wait for CI). Default false = commit-only on every route. Ignored when disablePublish is set. */
   publishFromBuild?: boolean;
-  /** false when runIssue drives provider failover from models.providerOrder (#3338): a usage cap rethrows to the phase boundary instead of entering the cross-harness ladder. Default true. */
   crossProviderLadder?: boolean;
   modelOverride?: string;
-  /** modelOverride is the user's build pin (#367, #2510). A pinned build crosses harnesses only on
-   *  usage_cap or rate_limit; any other failure (local_auth included) parks like a pinned plan. */
   pinnedModel?: boolean;
-  /** The repo pinned the build route in .factory/config.json (ADR-0092); the opencode route never crosses harnesses then (#2885). */
   routePinned?: boolean;
-  /** Cross-provider Codex fallback used when a Claude worker is capped or unavailable. */
   codexFallbackModel?: string;
   onProviderFailure?: (info: ProviderFailureInfo) => void | Promise<void>;
   sandbox?: SandboxPolicy;
   steering?: ConsumedSteering;
   appPort?: number;
-  /** Stable lane URL from the factory proxy (e.g. http://<lane>.factory.localhost), when running. */
   appBaseUrl?: string;
-  /** The lane's route capabilities (#664); BUILD runs `route` as given and only reads this for failover targets. */
   routeCapabilities?: RouteCapabilities;
   autoFailover?: {
     enabled: boolean;
@@ -162,25 +137,15 @@ async function buildPhaseImpl(opts: {
     onQuotaExhausted?: (info: { provider: string; reason: FailoverReason }) => void | Promise<void>;
   };
   onPgid?: (pgid: number) => void;
-  /** Per-issue budget guard (#3320); passed to every BUILD router call. */
   budgetGuard?: BudgetGuard;
-  /** Local-only mode: use the compact local-small prompt on the codex route. */
   localOnly?: boolean;
-  /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
   laneId?: string;
-  /** The plan's open questions (#3273); a no-diff build with any is classed open-questions. */
   openQuestions?: readonly string[];
-  /** Rendered "## Previous attempt" note (#3373); empty or absent = first run. */
   previousAttempt?: string;
-  /** Per-run id minted by runIssue; becomes SharedCompilationId=factory-<runId> for .NET lanes (#1910). */
   runId?: string;
-  /** Parent ref of a stacked slice (#2717); the no-diff check diffs against it instead of origin/main. Absent = default base. */
   parentBaseRef?: string;
-  /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
   bus?: LifecycleBus;
-  /** Injectable for tests; defaults to collectDesignDiff. */
   collectDiff?: typeof collectDesignDiff;
-  /** Injectable for tests; defaults to captureDiffBase. */
   captureBase?: typeof captureDiffBase;
   onWorkerResult?: (result: RouterResult) => Promise<void>;
 }): Promise<BuildResult> {
@@ -216,9 +181,7 @@ async function buildPhaseImpl(opts: {
   const spec = await readFile(specPath, 'utf-8').catch(() => '');
   const designArtifact = await readDesignArtifact(specPath);
   const designGrounding = designArtifact ? renderDesignGrounding(designArtifact) : '';
-  // BUILD names the lint checker's commands only when verify.sh does not already cover them (#2829).
   const hasVerifySh = await fileExists(join(worktree, 'scripts/verify.sh'));
-  // A verify.ps1-only repo is verified with the pwsh command CHECK runs (#3471).
   const verifyCommand =
     !hasVerifySh && (await fileExists(join(worktree, 'scripts/verify.ps1'))) ? VERIFY_PS1_ARGV.join(' ') : undefined;
   const lintCommands = hasVerifySh ? [] : await resolveLintCommands({ worktree }).catch(() => []);
@@ -250,7 +213,6 @@ async function buildPhaseImpl(opts: {
   }
   const localOnly = opts.localOnly ?? false;
 
-  // Commit-only unless the repo opts in (#1867); local-only always stays commit-only (#508).
   const claudeRoutePrompt = (): string =>
     publishFromBuild && !disablePublish
       ? buildClaudePrompt({
@@ -309,8 +271,6 @@ async function buildPhaseImpl(opts: {
     onContextCeiling: (n: ContextCeilingNotice) => log('context_ceiling', formatContextCeilingNotice(n)),
   };
 
-  // Captured before the worker runs so the post-build diff has a correct base
-  // even in checkouts with no origin/main or origin/master (#1162).
   const fallbackBaseRef = await (opts.captureBase ?? captureDiffBase)(worktree);
 
   let result: RouterResult;
@@ -322,8 +282,6 @@ async function buildPhaseImpl(opts: {
     const reason = routerFailure?.reason;
     if (opts.crossProviderLadder === false && (reason === 'usage_cap' || reason === 'rate_limit')) throw err;
     const attempts = routerFailure?.attempts;
-    // These all indicate a provider problem rather than a bad task. Preserve
-    // the frozen spec and continue on the other provider when one is available.
     const providerFailure =
       reason === 'usage_cap' ||
       reason === 'rate_limit' ||
@@ -339,9 +297,6 @@ async function buildPhaseImpl(opts: {
         `pinned build model ${modelOverride} failed (${reason}); a pin only fails over on usage_cap or rate_limit (#367)`,
       );
     }
-    // Only swap when we actually ran the codex route and it was exhausted on a
-    // quota reason. The router only throws after trying every eligible codex
-    // worker, so reaching here already means "no Codex-harness worker remains".
     if (taskType === 'build_claude' && crossHarnessOk) {
       if (opts.autoFailover && !opts.autoFailover.enabled) throw err;
       const fallback = codexFallbackModel ?? router.resolveAll('build_codex')[0];
@@ -388,9 +343,6 @@ async function buildPhaseImpl(opts: {
       try {
         await opts.autoFailover?.onQuotaExhausted?.({ provider, reason });
       } catch (breakerErr) {
-        // Best-effort circuit-breaker bookkeeping — a write failure here must
-        // never turn a successful codex→claude failover into a hard build
-        // failure.
         log('warn', `provider breaker callback failed (non-fatal): ${(breakerErr as Error).message}`);
       }
       route = 'claude';
@@ -422,8 +374,6 @@ async function buildPhaseImpl(opts: {
     return { ok: false, model: result.model, route, escalate: escalateLine };
   }
 
-  // Second positional arg stays undefined so injected test stubs with the old
-  // 1-arg shape still typecheck against `typeof collectDesignDiff`.
   const diff = await (opts.collectDiff ?? collectDesignDiff)(worktree, undefined, {
     fallbackBaseRef,
     ...(parentBaseRef !== undefined ? { baseRefOverride: parentBaseRef } : {}),

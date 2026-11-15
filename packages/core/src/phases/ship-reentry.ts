@@ -1,5 +1,3 @@
-// packages/core/src/phases/ship-reentry.ts — SHIP re-entry push after a CI rework round
-
 import { shellEscape } from '../utils/index.js';
 import { type CommandRunner, describePushFailure, shortDetail, verifyRemoteHead } from './ship-git.js';
 import type { ShipPhaseOptions } from './ship-options.js';

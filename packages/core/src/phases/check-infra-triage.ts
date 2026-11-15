@@ -10,12 +10,6 @@ function describeTriage(failures: ReturnType<typeof triageLaneFailures>): string
     .join(', ');
 }
 
-/**
- * Infra triage (#3371). When every lane-owned FAIL (`laneOwned` drops base-failing checkers) is infrastructure,
- * re-run the checkers once with no model call. Returns the summary to carry on with, plus `infra` (the
- * park message) when a network or missing-tool failure repeated. A timeout-only repeat or any code
- * failure leaves `infra` unset so the caller falls through to rework with the re-run summary.
- */
 export async function infraTriage(
   summary: CheckSummary,
   laneOwned: (s: CheckSummary) => CheckSummary,

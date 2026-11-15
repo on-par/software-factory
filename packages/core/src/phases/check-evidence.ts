@@ -67,7 +67,6 @@ async function touchActivity(ctx: CheckerContext): Promise<void> {
   }
 }
 
-/** Append or refresh the phase-owned frozen evidence-plan gate in a CHECK summary. */
 export async function appendEvidencePlanStep(
   summary: CheckSummary,
   ctx: CheckerContext,

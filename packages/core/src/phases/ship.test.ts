@@ -13,7 +13,6 @@ import { findMergedPR, findOpenPR, shipPhase } from './ship.js';
 interface ShipOctokitOptions {
   prDraft?: boolean;
   prList?: unknown[];
-  /** Check-run sequence: each checks.listForRef call returns the next entry, repeating the last. */
   checks?: any[][];
 }
 
@@ -51,9 +50,6 @@ const oneFailure = [
 
 const STUB_HEAD_SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
 
-/** stdout for the two remote-head verification commands the recovery path runs before opening a
- *  PR (#735); returns undefined for any other command so callers keep their own handling. The
- *  branch is pulled out of the `git ls-remote --heads origin '<branch>'` command text, so callers don't pass it. */
 function remoteHeadStub(command: string, remoteSha = STUB_HEAD_SHA): { stdout: string } | undefined {
   if (command === 'git rev-parse HEAD') return { stdout: `${STUB_HEAD_SHA}\n` };
   const match = /^git ls-remote --heads origin '(.+)'$/.exec(command);
@@ -1093,7 +1089,7 @@ describe('shipPhase CI watch', () => {
       expect(logs).not.toContainEqual(['ready', 'PR #123 ready for review']);
       expect(calls.some(([name]) => name === 'pulls.get')).toBe(false);
       expect(calls.some(([name]) => name === 'graphql')).toBe(false);
-      expect(callCount()).toBe(4); // 2 watch polls + rescue re-list (#2365) + evidence re-list (#2814)
+      expect(callCount()).toBe(4);
     } finally {
       vi.useRealTimers();
     }
@@ -1184,7 +1180,7 @@ describe('shipPhase CI watch', () => {
       expect(logs.some(([, msg]) => msg.includes('CI failed'))).toBe(false);
       expect(logs).toContainEqual(['ready', 'PR #123 left as draft (CI pending)']);
       expect(callCount()).toBeGreaterThan(0);
-      expect(callCount()).toBeLessThanOrEqual(15); // backoff → far fewer polls than fixed 15s (~40)
+      expect(callCount()).toBeLessThanOrEqual(15);
     } finally {
       vi.useRealTimers();
     }
@@ -1459,12 +1455,10 @@ describe('shipPhase approval gate', () => {
         checkSummary,
       }),
     );
-    // git diff --stat runs exactly once, for the approval gate; the PR body has no diff stat.
     expect(diffStatCalls).toHaveLength(1);
     const shipIdx = logs.findIndex(([type]) => type === 'ship');
     const requestedIdx = logs.findIndex(([type]) => type === 'approval_requested');
     const grantedIdx = logs.findIndex(([type]) => type === 'approval_granted');
-    // phase_started (#1321) precedes every phase-domain event, including 'ship'.
     expect(logs[0][0]).toBe('phase_started');
     expect(shipIdx).toBe(1);
     expect(requestedIdx).toBeGreaterThan(shipIdx);
@@ -1474,7 +1468,7 @@ describe('shipPhase approval gate', () => {
     expect(body).not.toContain('ship.ts | 12');
   });
 
-  it('denies: gate resolving approved:false stops before push/PR and logs ship_denied with the reason', async () => {
+  it('denies: gate resolving approved:false stops before push/PR, logs ship_denied with the reason, and reports SHIP (not CHECK/BUILD) as the failed phase', async () => {
     const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const commands: string[] = [];
@@ -1508,8 +1502,6 @@ describe('shipPhase approval gate', () => {
     expect(calls).toEqual([]);
     expect(commands).toEqual(['git diff --stat origin/main...HEAD']);
     expect(logs).toContainEqual(['ship_denied', 'ship denied for ship-it/23-self-heal: not today']);
-    // A 'ship'-typed event fires first (right after phase_started, #1321) so a denial
-    // doesn't misreport the TUI's failed phase as CHECK/BUILD.
     expect(logs[0][0]).toBe('phase_started');
     expect(logs[1]).toEqual(['ship', 'Starting ship phase for ship-it/23-self-heal']);
   });
@@ -2181,9 +2173,8 @@ describe('shipPhase stale remote branch leased push (#1869)', () => {
   const RECORDED = 'b'.repeat(40);
   const LS_REMOTE = `git ls-remote --heads origin '${BRANCH}'`;
 
-  /** `before` is what ls-remote returns until a push command is seen; STUB_HEAD_SHA after. */
   function staleRun(
-    before: { stdout: string } | Error,
+    lsRemoteBeforePush: { stdout: string } | Error,
     state: { commands: string[]; pushed: boolean },
     pushError?: Error,
   ) {
@@ -2195,8 +2186,8 @@ describe('shipPhase stale remote branch leased push (#1869)', () => {
         return { stdout: '' };
       }
       if (command === LS_REMOTE && !state.pushed) {
-        if (before instanceof Error) throw before;
-        return before;
+        if (lsRemoteBeforePush instanceof Error) throw lsRemoteBeforePush;
+        return lsRemoteBeforePush;
       }
       const remote = remoteHeadStub(command);
       if (remote) return remote;

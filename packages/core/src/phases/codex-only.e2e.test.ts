@@ -1,6 +1,3 @@
-// Codex-only end to end: a fake `codex` CLI drives PLAN, BUILD, CHECK (with one rework round) and
-// SHIP through the real ModelRouter and CliModelExecutor, on a machine where claude cannot run.
-// A fake `claude` on PATH records any invocation so the test proves it is never spawned (#2406).
 import { exec as execCb } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -60,8 +57,6 @@ function codexOnlyModels(): ModelsConfig {
   };
 }
 
-// Fake codex: answers PLAN with a spec that asks for the claude route, makes the first BUILD
-// leave a failing verify script and the rework fix it, and answers anything else with PASS.
 const FAKE_CODEX = `#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
@@ -148,7 +143,6 @@ describe('Codex-only pipeline with a fake codex CLI (#2406, #2635)', () => {
       const log = (type: string, msg: string) => events.push([type, msg]);
 
       const router = new ModelRouter(codexOnlyModels(), loadRoutesConfig());
-      // Codex-only machine: codex is the only runnable CLI.
       router.skipMissingHarnessClis((cmd) => cmd === 'codex');
       const costs: string[] = [];
       router.setCostSink((e) => costs.push(e.model));
@@ -214,7 +208,6 @@ describe('Codex-only pipeline with a fake codex CLI (#2406, #2635)', () => {
       expect(spawned).not.toContain('claude');
       expect(existsSync(join(worktree, 'feature.txt'))).toBe(true);
 
-      // No attempt is ever made on a Claude model (#2635).
       expect(events.some(([type, msg]) => type === 'router' && msg.includes('Trying fake-gpt'))).toBe(true);
       expect(events.filter(([, msg]) => msg.includes('Trying fake-claude'))).toEqual([]);
       expect(events.filter(([type, msg]) => type === 'failover' && msg.includes('fake-claude'))).toEqual([]);

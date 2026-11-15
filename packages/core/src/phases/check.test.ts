@@ -1138,7 +1138,6 @@ describe('checkPhase auto rework', () => {
     "skips the rework loop entirely and reports crossRunStuck when round one matches a prior run's failure signature (#740)",
     { timeout: 120_000 },
     async () => {
-      // First run establishes what signature this fixture produces (no priorFailureSignature yet).
       const first = await makeFailingWorktree();
       const baseline = await checkPhase({
         issue: workKeyFromIssue(77),
@@ -1151,8 +1150,6 @@ describe('checkPhase auto rework', () => {
       });
       expect(baseline.failureSignature).toBeDefined();
 
-      // A fresh "run" (fresh worktree, fresh router/stub) hits the identical failure
-      // on round one — simulates a watchdog relaunch walking back into the same lane.
       const second = await makeFailingWorktree();
       const { router, stub } = makeRouter();
       const logCalls: Array<[string, string, ({ rework?: ReworkInfo } | undefined)?]> = [];
@@ -1173,7 +1170,6 @@ describe('checkPhase auto rework', () => {
       expect(check.stuck).toBe(true);
       expect(check.crossRunStuck).toBe(true);
       expect(check.reworkRounds).toBe(0);
-      // No rework budget burned: the worker was never invoked this run.
       expect(stub.calls).toHaveLength(0);
 
       const heldCalls = logCalls.filter(([type]) => type === 'held');
@@ -1459,7 +1455,6 @@ describe('checkPhase auto rework', () => {
   );
 });
 
-/** A tests-only FAIL summary, the shape a failing `npm test` checker returns. */
 const failingTestsSummary: CheckSummary = {
   failures: 1,
   passes: 0,
@@ -1468,9 +1463,6 @@ const failingTestsSummary: CheckSummary = {
   results: [{ checker: 'tests', result: 'FAIL', details: 'npm test exited 1' }],
 };
 
-/** Runs one rework round over a failing tests checker and returns every router.run prompt and options object.
- *  The checkers and the flaky re-run are faked, so no `npm test` is spawned; the real-command
- *  paths are covered by the auto rework tests above. */
 async function captureReworkOptions(issue: number, extra: Partial<Parameters<typeof checkPhase>[0]> = {}) {
   const { worktree, specPath } = await makeFailingWorktree();
   const captured: any[] = [];
@@ -2068,7 +2060,6 @@ describe('checkPhase success paths', () => {
     expect(check.passed).toBe(true);
     expect(check.reworkRounds).toBe(0);
     expect(check.summary.failures).toBe(0);
-    // Worker is never invoked when nothing fails.
     expect(stub.calls).toHaveLength(0);
     expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (6 skipped)' });
   });
@@ -2117,7 +2108,6 @@ describe('checkPhase success paths', () => {
     expect(check.passed).toBe(true);
     expect(stub.calls).toHaveLength(0);
     expect(logs.some((l) => l.type === 'check' && l.msg.startsWith('SKIPPED: tests'))).toBe(true);
-    // compile and tests both skipped: the summary must not read green (#3566).
     expect(logs.find((l) => l.msg.startsWith('Nothing was built or tested — '))?.msg).toContain('checkers ran');
     expect(logs.some((l) => l.msg.includes('All checkers passed'))).toBe(false);
   });
@@ -2155,16 +2145,12 @@ describe('checkPhase success paths', () => {
       const testsFailure = check.summary.results.find((r) => r.checker === 'tests');
       expect(testsFailure?.result).toBe('FAIL');
       expect(testsFailure?.details).toContain('no verification command was run');
-      // Each failing checker is named individually — the parked outcome carries only an
-      // aggregate count, so this is the operator's only view of WHY a run parked (#675).
       expect(logs.some((l) => l.type === 'check' && l.msg.startsWith('FAILED: tests — '))).toBe(true);
     },
   );
 
   it('exits the rework loop early once a round repairs the failing check', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();
-    // The scripted worker "fixes" the repo the first time it is invoked by
-    // rewriting the failing test script to pass, so the next check round is clean.
     const { router, stub } = setup.router(models, routes, {
       build_claude: [
         {
@@ -2190,10 +2176,8 @@ describe('checkPhase success paths', () => {
 
     expect(check.passed).toBe(true);
     expect(check.reworkRounds).toBe(1);
-    // Only one rework round was needed, so the worker was invoked exactly once.
     expect(stub.calls).toHaveLength(1);
     expect(logs).toContainEqual({ type: 'check', msg: 'Rework round 1: 0 failures remaining' });
-    // worker_output, compile, lint and design_smells skip in this non-git temp worktree.
     expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (6 skipped)' });
   });
 });
@@ -2384,7 +2368,6 @@ async function makeFailingWorktree(): Promise<{ worktree: string; specPath: stri
   return { worktree, specPath };
 }
 
-/** Only the compile checker fails (build script exits 1; no test script): the baselined, non-test failure (#4029). */
 async function makeCompileFailingWorktree(): Promise<{ worktree: string; specPath: string }> {
   const worktree = await setup.worktree('check-phase-compile-fail-');
   await writeFixture(worktree, 'package.json', JSON.stringify({ scripts: { build: 'exit 1', test: 'exit 0' } }));
@@ -2407,8 +2390,6 @@ async function makeCleanGitWorktree(): Promise<{ worktree: string; specPath: str
   return { worktree, specPath };
 }
 
-/** makeCleanGitWorktree without the origin/main ref — a remote-less checkout whose only
- *  usable diff base is the run-start SHA buildPhase captured (#1211). */
 async function makeRemoteLessGitWorktree(): Promise<{ worktree: string; specPath: string; baseSha: string }> {
   const worktree = await setup.worktree('check-phase-remoteless-git-');
   const specPath = join(worktree, 'issue-1211.md');
@@ -2452,7 +2433,6 @@ async function makeLintFailingWorktree(): Promise<{ worktree: string; specPath: 
   return { worktree, specPath };
 }
 
-/** Worktree whose package.json `test` script exits 0 only when PORT/FACTORY_APP_PORT/FACTORY_BASE_URL were forwarded into its process env. */
 function lensSummary(details: string, result: 'FAIL' | 'PASS' = 'FAIL'): CheckSummary {
   return {
     failures: result === 'FAIL' ? 1 : 0,

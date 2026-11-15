@@ -266,9 +266,9 @@ npm run test`;
       });
       const specPath = join(worktree, 'brief-9000077.md');
       const logs: string[] = [];
+      const briefRunNumberInReserved9MillionRange = 9_000_077;
       const result = await planPhase({
-        // A brief's run number is a stand-in in the reserved 9,000,000+ range.
-        issue: workKeyFromIssue(9_000_077),
+        issue: workKeyFromIssue(briefRunNumberInReserved9MillionRange),
         repo: 'on-par/software-factory',
         worktree,
         specPath,

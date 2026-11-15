@@ -1,4 +1,3 @@
-/** Return whether a frozen spec has substantive content in a Files / approach section. */
 export function specHasImplementation(body: string): boolean {
   const lines = stripHtmlComments(body).split(/\r?\n/);
   let fence: { marker: '`' | '~'; length: number } | null = null;
@@ -33,9 +32,6 @@ export function specHasImplementation(body: string): boolean {
   return inSection && sectionHasContent;
 }
 
-/** Remove every `<!-- ... -->` comment, including multi-line ones. An unclosed `<!--` hides the
- *  rest of the text, as it does when Markdown renders it. Uses indexOf, not a regex, so a nested
- *  or overlapping `<!--` can't survive a single replacement pass. */
 function stripHtmlComments(text: string): string {
   let out = '';
   let pos = 0;

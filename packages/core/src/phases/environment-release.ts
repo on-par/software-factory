@@ -1,7 +1,6 @@
 import type { EnvironmentFailure } from './check.js';
 import type { CheckSummary } from '../types/index.js';
 
-/** Full-output log files named by round-1 FAIL results, then the base-run log dir; deduped, first-seen order. */
 export function environmentLogPaths(summary: CheckSummary, baseLogDir: string | undefined): string[] {
   const paths: string[] = [];
   for (const r of summary.results.filter((x) => x.result === 'FAIL')) {

@@ -1,7 +1,3 @@
-// Factory prompts are self-contained: a rendered prompt references only its own text and repo
-// files it names by path — never a leading slash-command token or a user-level Claude Code
-// skill. Constitutions (#721) are the per-repo extension point; skills are not.
-
 import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
@@ -11,13 +7,8 @@ import { READ_BEFORE_EDIT_RULE } from './build-lint-rules.js';
 import { REWORK_READ_RULE, reworkWorker } from './check.js';
 import { buildPlanPrompt } from './plan.js';
 
-// Known Claude Code skills that live under ~/.claude/skills and must never be
-// referenced from a factory prompt. Add real skill names here as they appear.
-const SKILL_NAMES = ['ship-it'];
+const USER_LEVEL_SKILL_NAMES = ['ship-it'];
 
-// A skill *reference* is a slash-command token (`/ship-it`), a possessive
-// (`ship-it's`), or a "<name> skill" phrase — NOT the `ship-it/<issue>` git
-// branch prefix (slash *after* the name, followed by a digit).
 function skillReference(name: string): RegExp {
   return new RegExp(String.raw`(^|\s)/${name}\b|\b${name}['’]s\b|\b${name}\s+skill\b`);
 }
@@ -84,7 +75,7 @@ describe('factory prompt builders are self-contained', () => {
 
     it(`${name} references no user-level skill`, () => {
       const prompt = render();
-      for (const skill of SKILL_NAMES) {
+      for (const skill of USER_LEVEL_SKILL_NAMES) {
         expect(prompt, `${name} references the user-level '${skill}' skill`).not.toMatch(skillReference(skill));
       }
     });

@@ -1,20 +1,12 @@
-// src/phases/ship-leftover.ts — commit build output left after a green CHECK, split out of ship.ts
-
 import type { EventKind } from '../events/kinds.js';
 import { shellEscape } from '../utils/index.js';
 import type { WorkKey } from '../work/work-key.js';
 import { type CommandRunner, shortDetail } from './ship-git.js';
 
-/**
- * Commit the dirt a build agent left after a green CHECK onto the ship-it branch — the working
- * tree is byte-for-byte what the checkers verified, so committing it is what ships the green
- * artifact instead of parking it (#1164/#1172).
- */
 export async function commitLeftoverBuildOutput(o: {
   run: CommandRunner;
   worktree: string;
   branch: string;
-  /** Tracker issue the commit refers to; undefined for brief-driven work, whose run number is not an issue. */
   issue?: WorkKey;
   statusLines: string[];
   log: (type: EventKind, msg: string) => void;

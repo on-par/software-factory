@@ -1,5 +1,3 @@
-// src/phases/check-mark-flaky.test.ts — markTestsFlaky, split out of check.test.ts
-
 import { describe, expect, it } from 'vitest';
 
 import type { CheckSummary } from '../types/index.js';
