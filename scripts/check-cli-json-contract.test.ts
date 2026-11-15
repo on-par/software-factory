@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { compareCliJsonSchemas, diffCliJsonSchemas, runCliJsonContractCheck } from './check-cli-json-contract.js';
 
@@ -26,19 +26,21 @@ const integerVersion = (version: number) => ({
 function runWithGit(responses: Map<string, string>) {
   const lines: string[] = [];
   const errors: string[] = [];
-  const git = vi.fn((args: readonly string[]) => {
+  const calls: string[] = [];
+  const git = (args: readonly string[]) => {
     const key = args.join(' ');
+    calls.push(key);
     const value = responses.get(key);
     if (value === undefined) throw new Error(`unexpected git call: ${key}`);
     return value;
-  });
+  };
   const code = runCliJsonContractCheck(['--base', 'base-sha'], {
     cwd: '/repo',
     git,
     log: (line) => lines.push(line),
     error: (line) => errors.push(line),
   });
-  return { code, lines, errors, git };
+  return { code, lines, errors, calls };
 }
 
 function tree(paths: string[]): string {
@@ -223,9 +225,13 @@ describe('runCliJsonContractCheck', () => {
   it.each([[], ['--base'], ['--base', ' '], ['--base', '-main'], ['--unknown', 'main'], ['--base', 'main', 'extra']])(
     'rejects invalid args %j without invoking Git',
     (argv) => {
-      const git = vi.fn(() => '');
+      const calls: string[] = [];
+      const git = (args: readonly string[]) => {
+        calls.push(args.join(' '));
+        return '';
+      };
       expect(runCliJsonContractCheck(argv, { git, error: () => undefined })).toBe(2);
-      expect(git).not.toHaveBeenCalled();
+      expect(calls).toEqual([]);
     },
   );
 
@@ -235,20 +241,12 @@ describe('runCliJsonContractCheck', () => {
       [`base-sha:${path}`]: schema({ x: stringField }),
       [`HEAD:${path}`]: schema({ x: stringField }),
     });
-    const { code, lines, git } = runWithGit(responses);
+    const { code, lines, calls } = runWithGit(responses);
     expect(code).toBe(0);
     expect(lines).toEqual(['check-cli-json-contract: OK']);
-    expect(git.mock.calls[0]?.[0]).toEqual([
-      'ls-tree',
-      '-r',
-      '--name-only',
-      '-z',
-      'base-sha',
-      '--',
-      'packages/cli/schemas',
-    ]);
-    expect(git.mock.calls).toContainEqual([['show', `base-sha:${path}`]]);
-    expect(git.mock.calls).toContainEqual([['show', `HEAD:${path}`]]);
+    expect(calls[0]).toBe('ls-tree -r --name-only -z base-sha -- packages/cli/schemas');
+    expect(calls).toContain(`show base-sha:${path}`);
+    expect(calls).toContain(`show HEAD:${path}`);
   });
 
   it('allows new schemas, deleted schemas fail, and an empty base allows first introduction', () => {
