@@ -3,7 +3,7 @@
 import type { EvidencePack } from '../types/index.js';
 
 // Unicode format chars (zero-width, bidi, tag, soft hyphen) plus C0/C1 controls except \t \n \r.
-// eslint-disable-next-line no-control-regex
+// eslint-disable-next-line no-control-regex -- the pattern deliberately matches control characters
 const INVISIBLE_RE = /[\p{Cf}\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu;
 
 /** Remove HTML comments with linear scans; an unterminated `<!--` hides to end of text. */

@@ -423,7 +423,7 @@ describe('reconstructKpiEvents (#2342)', () => {
   });
 
   it('stringifies a non-Error rejection', async () => {
-    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the test rejects with a non-Error on purpose
     const res = await reconstructKpiEvents([], () => Promise.reject('nope'));
     expect(res.partial).toBe(true);
     expect(res.error).toBe('nope');
