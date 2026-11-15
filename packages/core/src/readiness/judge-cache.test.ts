@@ -2,7 +2,7 @@
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import { judgeReadiness } from './judge.js';
@@ -67,9 +67,10 @@ describe('readiness cache', () => {
   it('treats an unreadable cache directory as a miss and judgeReadiness still returns a verdict', async () => {
     const file = join(dir, 'not-a-dir');
     writeFileSync(file, 'x');
-    const run = vi.fn(async (_p: string) => ({ model: 'm', output: JSON.stringify(verdict), cost: 0 }));
+    const prompts: string[] = [];
+    const run = async (p: string) => (prompts.push(p), { model: 'm', output: JSON.stringify(verdict), cost: 0 });
     const r = await judgeReadiness({ title: 't', body: 'b', run, cache: { dir: file } });
     expect(r.kind).toBe('verdict');
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(prompts).toHaveLength(1);
   });
 });
