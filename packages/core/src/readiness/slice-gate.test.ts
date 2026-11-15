@@ -75,18 +75,31 @@ function planOf(count: number): SlicePlan {
   return built.plan;
 }
 
-function fake(comments: { id: number; user: { id: number } | null; body?: string }[], opts?: { listThrows?: boolean }) {
+function fake(
+  comments: { id: number; user: { id: number } | null; body?: string }[],
+  opts?: { listThrows?: boolean; createThrows?: boolean },
+) {
   const getAuthenticated = vi.fn().mockResolvedValue({ data: { id: BOT } });
   const listComments = vi.fn(async () => {
     if (opts?.listThrows) throw new Error('github down');
     return { data: comments };
   });
-  const createComment = vi.fn().mockResolvedValue({ data: { id: 9999 } });
-  const updateComment = vi.fn().mockResolvedValue({ data: {} });
+  const [created, updated]: { body: string }[][] = [[], []];
+  const createComment = async (args: { body: string }) => {
+    if (opts?.createThrows) throw new Error('403');
+    created.push(args);
+    return { data: { id: 9999 } };
+  };
+  const updateComment = async (a: { body: string }) => updated.push(a) && { data: {} };
   const octokit = Object.assign({} as Octokit, {
-    rest: { users: { getAuthenticated }, issues: { listComments, createComment, updateComment } },
+    rest: { users: { getAuthenticated }, issues: { createComment, listComments, updateComment } },
   });
-  return { octokit, createComment, updateComment };
+  return { octokit, created, updated };
+}
+
+function memStore(find: SlicePlanStore['find'], where = 'mem') {
+  const saved: SlicePlan[] = [];
+  return { saved, store: { find, save: async (p: SlicePlan) => (saved.push(p), { where }) } };
 }
 
 function setup(
@@ -129,8 +142,8 @@ describe('resolveSliceGate', () => {
 
     expect(outcome).toMatchObject({ kind: 'slice', created: false });
     expect(outcome.kind === 'slice' && outcome.slice.index).toBe(2);
+    expect(f.created).toEqual([]);
     expect(stub.calls).toEqual([]);
-    expect(f.createComment).not.toHaveBeenCalled();
   });
 
   it('parks when the trusted marker comment is unreadable', async () => {
@@ -252,9 +265,9 @@ describe('resolveSliceGate', () => {
     expect(outcome).toMatchObject({ kind: 'slice', created: true });
     expect(outcome.kind === 'slice' && outcome.slice.index).toBe(1);
     expect(stub.calls.map((c) => c.task)).toEqual(['decompose']);
-    expect(f.createComment).toHaveBeenCalledTimes(1);
-    expect(f.createComment.mock.calls[0][0].body.startsWith(SLICE_PLAN_MARKER)).toBe(true);
-    expect(f.createComment.mock.calls[0][0].body).not.toContain('## Proposed epic');
+    expect(f.created).toHaveLength(1);
+    expect(f.created[0]?.body.startsWith(SLICE_PLAN_MARKER)).toBe(true);
+    expect(f.created[0]?.body).not.toContain('## Proposed epic');
     expect(events.map((e) => e.type)).toContain('size-gate-sliced');
   });
 
@@ -263,9 +276,8 @@ describe('resolveSliceGate', () => {
     const { events, run } = setup([decompositionJson(6)], f, true, 5);
     const outcome = await run();
     expect(outcome).toMatchObject({ kind: 'over-cap', reason: expect.stringContaining('--max-slices 6') });
-    expect(f.createComment).toHaveBeenCalledTimes(1);
-    const body = f.createComment.mock.calls[0][0].body as string;
-    expect(body.startsWith(SLICE_PLAN_MARKER)).toBe(true);
+    expect(f.created).toHaveLength(1);
+    expect(f.created[0]?.body.startsWith(SLICE_PLAN_MARKER)).toBe(true);
     expect(outcome.kind === 'over-cap' && outcome.plan.slices.every((s) => s.state === 'pending')).toBe(true);
     expect(events.map((e) => e.type)).not.toContain('size-gate-sliced');
   });
@@ -274,8 +286,7 @@ describe('resolveSliceGate', () => {
     const f = fake([]);
     const { run } = setup([decompositionJson(21)], f, true, 5);
     expect(await run()).toMatchObject({ kind: 'unsliceable', reason: expect.stringContaining('ceiling of 20') });
-    expect(f.createComment).not.toHaveBeenCalled();
-    expect(f.updateComment).not.toHaveBeenCalled();
+    expect([f.created, f.updated]).toEqual([[], []]);
   });
 
   it('parks a found all-pending plan over the cap without decomposing or rewriting', async () => {
@@ -283,8 +294,7 @@ describe('resolveSliceGate', () => {
     const { stub, run } = setup([], f, true, 5);
     expect(await run()).toMatchObject({ kind: 'over-cap', reason: expect.stringContaining('cap 5') });
     expect(stub.calls).toEqual([]);
-    expect(f.createComment).not.toHaveBeenCalled();
-    expect(f.updateComment).not.toHaveBeenCalled();
+    expect([f.created, f.updated]).toEqual([[], []]);
   });
 
   it('plans slice 1 of a found plan once the cap covers it', async () => {
@@ -315,7 +325,7 @@ describe('resolveSliceGate', () => {
       kind: 'unsliceable',
       reason: expect.stringMatching(/slice decomposition failed.*INVEST/),
     });
-    expect(f.createComment).not.toHaveBeenCalled();
+    expect(f.created).toEqual([]);
   });
 
   it('returns unsliceable with the parse error when the slicer output is not JSON', async () => {
@@ -325,12 +335,11 @@ describe('resolveSliceGate', () => {
       kind: 'unsliceable',
       reason: expect.stringContaining('no JSON object found in the model output'),
     });
-    expect(f.createComment).not.toHaveBeenCalled();
+    expect(f.created).toEqual([]);
   });
 
   it('parks when posting the plan throws', async () => {
-    const f = fake([]);
-    f.createComment.mockRejectedValue(new Error('403'));
+    const f = fake([], { createThrows: true });
     const { run } = setup([decompositionJson(2)], f);
     expect(await run()).toEqual({ kind: 'park', reason: 'posting the slice plan failed: 403' });
   });
@@ -343,8 +352,7 @@ describe('resolveSliceGate', () => {
     const outcome = await run();
 
     expect(outcome.kind).toBe('cohesive');
-    expect(f.createComment).not.toHaveBeenCalled();
-    expect(f.updateComment).not.toHaveBeenCalled();
+    expect([f.created, f.updated]).toEqual([[], []]);
     const cohesive = events.find((e) => e.type === 'size_gate_cohesive');
     expect(cohesive?.msg).toContain('3 slice');
     expect(cohesive?.msg).toContain('src/list.ts');
@@ -363,45 +371,38 @@ describe('resolveSliceGate', () => {
 
     expect(outcome.kind).toBe('slice');
     if (outcome.kind === 'slice') expect(outcome.created).toBe(true);
-    expect(f.createComment).toHaveBeenCalledTimes(1);
+    expect(f.created).toHaveLength(1);
     expect(events.map((e) => e.type)).toContain('size-gate-sliced');
   });
 
   it('uses an injected store: a found plan selects a slice without touching GitHub', async () => {
     const f = fake([]);
-    const store: SlicePlanStore = {
-      find: async () => ({ status: 'found', plan: planOf(2), where: 'mem' }),
-      save: vi.fn(),
-    };
+    const { saved, store } = memStore(async () => ({ status: 'found', plan: planOf(2), where: 'mem' }));
     const { stub, run } = setup([], f, true, 10, undefined, store);
 
     const outcome = await run();
 
     expect(outcome).toMatchObject({ kind: 'slice', created: false });
     expect(stub.calls).toEqual([]);
-    expect(store.save).not.toHaveBeenCalled();
-    expect(f.createComment).not.toHaveBeenCalled();
+    expect([saved, f.created]).toEqual([[], []]);
   });
 
   it('uses an injected store: an oversized issue with no plan saves there, not as a comment', async () => {
     const f = fake([]);
-    const save = vi.fn(async () => ({ where: 'mem-file' }));
-    const store: SlicePlanStore = { find: async () => ({ status: 'not-found' }), save };
+    const { saved, store } = memStore(async () => ({ status: 'not-found' }), 'mem-file');
     const { events, run } = setup([decompositionJson(2)], f, true, 10, undefined, store);
 
     const outcome = await run();
 
     expect(outcome).toMatchObject({ kind: 'slice', created: true });
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(f.createComment).not.toHaveBeenCalled();
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.slices).toHaveLength(2);
+    expect(f.created).toEqual([]);
     expect(events.find((e) => e.type === 'size-gate-sliced')?.msg).toContain('slice plan mem-file');
   });
 
   it('parks with the store label when an injected store holds unreadable data', async () => {
-    const store: SlicePlanStore = {
-      find: async () => ({ status: 'invalid', where: 'plan.md', error: 'bad' }),
-      save: vi.fn(),
-    };
+    const { store } = memStore(async () => ({ status: 'invalid', where: 'plan.md', error: 'bad' }));
     const { run } = setup([], fake([]), true, 10, undefined, store);
     expect(await run()).toEqual({ kind: 'park', reason: 'slice plan plan.md is unreadable (bad) — parked' });
   });
@@ -411,6 +412,6 @@ describe('resolveSliceGate', () => {
     expect(await setup([], found).run()).toMatchObject({ kind: 'slice', created: false });
     const empty = fake([]);
     expect(await setup([decompositionJson(2)], empty).run()).toMatchObject({ kind: 'slice', created: true });
-    expect(empty.createComment).toHaveBeenCalledTimes(1);
+    expect(empty.created).toHaveLength(1);
   });
 });

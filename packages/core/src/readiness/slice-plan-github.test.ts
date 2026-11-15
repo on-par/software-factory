@@ -40,15 +40,17 @@ const noise = (count: number): FakeComment[] =>
 
 function fake(comments: FakeComment[]) {
   const getAuthenticated = vi.fn().mockResolvedValue({ data: { id: BOT } });
-  const listComments = vi.fn(async (args: { page: number; per_page: number }) => ({
-    data: comments.slice((args.page - 1) * args.per_page, args.page * args.per_page),
-  }));
-  const createComment = vi.fn().mockResolvedValue({ data: { id: 9999 } });
-  const updateComment = vi.fn().mockResolvedValue({ data: {} });
+  const listed: { owner: string; repo: string; issue_number: number; page: number; per_page: number }[] = [];
+  const created: { owner: string; repo: string; issue_number: number; body: string }[] = [];
+  const updated: { owner: string; repo: string; comment_id: number; body: string }[] = [];
+  const listComments = async (a: (typeof listed)[number]) =>
+    listed.push(a) && { data: comments.slice((a.page - 1) * a.per_page, a.page * a.per_page) };
+  const createComment = async (a: (typeof created)[number]) => created.push(a) && { data: { id: 9999 } };
+  const updateComment = async (a: (typeof updated)[number]) => updated.push(a) && { data: {} };
   const octokit = Object.assign({} as Octokit, {
     rest: { users: { getAuthenticated }, issues: { listComments, createComment, updateComment } },
   });
-  return { octokit, getAuthenticated, listComments, createComment, updateComment };
+  return { octokit, getAuthenticated, listed, created, updated };
 }
 
 const base = { repo: 'acme/widgets', issue: 5 };
@@ -59,14 +61,8 @@ describe('findSlicePlanComment', () => {
     const f = fake([...noise(150), { id: 555, user: { id: BOT }, body }]);
     const result = await findSlicePlanComment({ octokit: f.octokit, ...base });
     expect(result).toEqual({ status: 'found', commentId: 555, plan: plan(5) });
-    expect(f.listComments.mock.calls.map(([a]) => a.page)).toEqual([1, 2]);
-    expect(f.listComments).toHaveBeenCalledWith({
-      owner: 'acme',
-      repo: 'widgets',
-      issue_number: 5,
-      per_page: 100,
-      page: 1,
-    });
+    expect(f.listed.map((a) => a.page)).toEqual([1, 2]);
+    expect(f.listed[0]).toEqual({ owner: 'acme', repo: 'widgets', issue_number: 5, per_page: 100, page: 1 });
   });
 
   it('ignores marker comments from other users', async () => {
@@ -110,7 +106,7 @@ describe('findSlicePlanComment', () => {
   it('requests the empty next page after exactly one full page', async () => {
     const f = fake(noise(100));
     expect(await findSlicePlanComment({ octokit: f.octokit, ...base })).toEqual({ status: 'not-found' });
-    expect(f.listComments).toHaveBeenCalledTimes(2);
+    expect(f.listed.map((a) => a.page)).toEqual([1, 2]);
   });
 
   it('propagates a getAuthenticated rejection', async () => {
@@ -133,11 +129,11 @@ describe('findSlicePlanComment with a GitHub App installation token', () => {
     f.getAuthenticated.mockRejectedValue(
       Object.assign(new Error('Resource not accessible by integration'), { status: 403 }),
     );
-    const graphql = vi.fn().mockResolvedValue({
-      viewer: { login: 'factory-app[bot]', databaseId: APP_BOT },
-    });
+    const queries: string[] = [];
+    const graphql = async (query: string) =>
+      queries.push(query) && { viewer: { login: 'factory-app[bot]', databaseId: APP_BOT } };
     Object.assign(f.octokit.rest.users, { getByUsername: vi.fn().mockResolvedValue({ data: appBot }) });
-    return { ...f, octokit: Object.assign(f.octokit, { graphql }), graphql };
+    return { ...f, octokit: Object.assign(f.octokit, { graphql }), queries };
   }
 
   it("finds the plan posted by the App's bot account", async () => {
@@ -147,7 +143,7 @@ describe('findSlicePlanComment with a GitHub App installation token', () => {
       commentId: 77,
       plan: plan(5),
     });
-    expect(f.graphql).toHaveBeenCalledTimes(1);
+    expect(f.queries).toHaveLength(1);
   });
 
   it('ignores an identical marker comment from a different bot and from a human', async () => {
@@ -171,7 +167,7 @@ describe('findSlicePlanComment with a GitHub App installation token', () => {
     const f = appTokenFake([{ id: 77, user: appBot, body }]);
     f.getAuthenticated.mockRejectedValue(Object.assign(new Error('Bad credentials'), { status: 401 }));
     await expect(findSlicePlanComment({ octokit: f.octokit, ...base })).rejects.toThrow('Bad credentials');
-    expect(f.graphql).not.toHaveBeenCalled();
+    expect(f.queries).toEqual([]);
   });
 });
 
@@ -182,9 +178,8 @@ describe('upsertSlicePlanComment', () => {
     const f = fake([]);
     const result = await upsertSlicePlanComment({ octokit: f.octokit, ...base, plan: plan(5) });
     expect(result).toEqual({ commentId: 9999, created: true });
-    expect(f.createComment).toHaveBeenCalledOnce();
-    expect(f.createComment).toHaveBeenCalledWith({ owner: 'acme', repo: 'widgets', issue_number: 5, body });
-    expect(f.updateComment).not.toHaveBeenCalled();
+    expect(f.created).toEqual([{ owner: 'acme', repo: 'widgets', issue_number: 5, body }]);
+    expect(f.updated).toEqual([]);
   });
 
   it('updates the trusted comment in place, never a foreign one', async () => {
@@ -194,23 +189,23 @@ describe('upsertSlicePlanComment', () => {
     ]);
     const result = await upsertSlicePlanComment({ octokit: f.octokit, ...base, plan: plan(5) });
     expect(result).toEqual({ commentId: 2, created: false });
-    expect(f.updateComment).toHaveBeenCalledOnce();
-    expect(f.updateComment).toHaveBeenCalledWith({ owner: 'acme', repo: 'widgets', comment_id: 2, body });
-    expect(f.createComment).not.toHaveBeenCalled();
+    expect(f.updated).toEqual([{ owner: 'acme', repo: 'widgets', comment_id: 2, body }]);
+    expect(f.created).toEqual([]);
   });
 
   it('creates a new comment when only a foreign marker comment exists', async () => {
     const f = fake([{ id: 1, user: { id: OTHER }, body }]);
     const result = await upsertSlicePlanComment({ octokit: f.octokit, ...base, plan: plan(5) });
     expect(result.created).toBe(true);
-    expect(f.updateComment).not.toHaveBeenCalled();
+    expect(f.updated).toEqual([]);
+    expect(f.created).toHaveLength(1);
   });
 
   it('repairs an invalid trusted comment by updating its id', async () => {
     const f = fake([{ id: 8, user: { id: BOT }, body: `${SLICE_PLAN_MARKER}\ngarbled` }]);
     const result = await upsertSlicePlanComment({ octokit: f.octokit, ...base, plan: plan(5) });
     expect(result).toEqual({ commentId: 8, created: false });
-    expect(f.updateComment).toHaveBeenCalledWith(expect.objectContaining({ comment_id: 8 }));
-    expect(f.createComment).not.toHaveBeenCalled();
+    expect(f.updated).toEqual([{ owner: 'acme', repo: 'widgets', comment_id: 8, body }]);
+    expect(f.created).toEqual([]);
   });
 });

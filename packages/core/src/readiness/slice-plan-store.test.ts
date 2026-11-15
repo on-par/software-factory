@@ -62,17 +62,20 @@ describe('issueCommentSlicePlanStore', () => {
   it('reads and upserts the slice plan comment', async () => {
     const body = renderSlicePlanComment(plan(5));
     const listComments = vi.fn().mockResolvedValue({ data: [{ id: 55, user: { id: 1 }, body }] });
-    const updateComment = vi.fn().mockResolvedValue({ data: {} });
+    const updated: { owner: string; repo: string; comment_id: number; body: string }[] = [];
+    const updateComment = async (a: (typeof updated)[number]) => updated.push(a) && { data: { id: 55 } };
     const octokit = Object.assign({} as Octokit, {
       rest: {
         users: { getAuthenticated: vi.fn().mockResolvedValue({ data: { id: 1 } }) },
-        issues: { listComments, updateComment, createComment: vi.fn() },
+        issues: { createComment: vi.fn(), listComments, updateComment },
       },
     });
     const store = issueCommentSlicePlanStore({ octokit, repo: 'acme/widgets', issue: 5 });
     expect(await store.find()).toEqual({ status: 'found', plan: plan(5), where: 'comment 55 on #5' });
     expect(await store.save(plan(5))).toEqual({ where: 'comment 55' });
-    expect(updateComment).toHaveBeenCalledTimes(1);
+    expect(updated).toEqual([
+      { owner: 'acme', repo: 'widgets', comment_id: 55, body: renderSlicePlanComment(plan(5)) },
+    ]);
   });
 
   it('maps an unreadable comment to invalid and a missing one to not-found', async () => {
