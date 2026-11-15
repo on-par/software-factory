@@ -102,14 +102,18 @@ describe('createDefaultWorkSourceRegistry', () => {
   });
 
   it('builds the default registry without calling fetch or reading LINEAR_API_KEY', () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const fetchCalls: unknown[][] = [];
+    vi.stubGlobal('fetch', (...args: unknown[]) => {
+      fetchCalls.push(args);
+      return Promise.reject(new Error('no fetch'));
+    });
     vi.stubEnv('LINEAR_API_KEY', '');
     try {
       const octokit: any = { rest: { issues: {} } };
       expect(() => createDefaultWorkSourceRegistry({ octokit })).not.toThrow();
-      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(fetchCalls).toEqual([]);
     } finally {
-      fetchSpy.mockRestore();
+      vi.unstubAllGlobals();
       vi.unstubAllEnvs();
     }
   });

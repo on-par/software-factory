@@ -1,5 +1,5 @@
 import type { Octokit } from '@octokit/rest';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { laneLabel, PARKED_LABEL, QUEUED_LABEL, type QueueGitHubClient } from '../queue/github-queue.js';
 import { runUnpark } from '../queue/unpark.js';
@@ -12,21 +12,26 @@ import {
   createOctokitBlockedParkStore,
   isFleetLeader,
   MAX_AUTO_UNPARKS,
+  type PollBlockedParksOptions,
   pollBlockedParks,
 } from './poller.js';
 import { fakeIssueComments } from '../queue/fake-issue-comments.js';
 
 function fakeClient(labels: Map<number, string[]>) {
-  const addLabels = vi.fn(async ({ issue_number, labels: add }: { issue_number: number; labels: string[] }) => {
-    const have = labels.get(issue_number) ?? [];
-    labels.set(issue_number, [...have, ...add.filter((l) => !have.includes(l))]);
-  });
-  const removeLabel = vi.fn(async ({ issue_number, name }: { issue_number: number; name: string }) => {
+  const added: Array<{ issue_number: number; labels: string[] }> = [];
+  const removed: Array<{ issue_number: number; name: string }> = [];
+  const addLabels = async (input: { issue_number: number; labels: string[] }) => {
+    added.push(input);
+    const have = labels.get(input.issue_number) ?? [];
+    labels.set(input.issue_number, [...have, ...input.labels.filter((l) => !have.includes(l))]);
+  };
+  const removeLabel = async (input: { issue_number: number; name: string }) => {
+    removed.push(input);
     labels.set(
-      issue_number,
-      (labels.get(issue_number) ?? []).filter((l) => l !== name),
+      input.issue_number,
+      (labels.get(input.issue_number) ?? []).filter((l) => l !== input.name),
     );
-  });
+  };
   const client: QueueGitHubClient = {
     listOpenIssuesWithLabels: async ({ labels: want }) =>
       [...labels.entries()]
@@ -38,7 +43,15 @@ function fakeClient(labels: Map<number, string[]>) {
     ...fakeIssueComments(),
     ensureLabel: async () => false,
   };
-  return { client, addLabels, removeLabel };
+  return { client, added, removed };
+}
+
+function eventSink() {
+  const events: Array<[string, number, string]> = [];
+  const logEvent: NonNullable<PollBlockedParksOptions['logEvent']> = (kind, issue, message) => {
+    events.push([kind, issue, message]);
+  };
+  return { events, logEvent };
 }
 
 const base = { owner: 'o', repo: 'r' };
@@ -70,9 +83,11 @@ function fakeStore(
 ) {
   const bodies = new Map<number, string>(); // commentId (= issue) -> latest body
   for (const [k, v] of comments) bodies.set(k, v);
-  const updateComment = vi.fn(async (id: number, body: string) => {
+  const writes: Array<[number, string]> = [];
+  const updateComment = async (id: number, body: string) => {
+    writes.push([id, body]);
     bodies.set(id, body);
-  });
+  };
   const store: BlockedParkStore = {
     readParkComment: async (issue) => {
       const body = bodies.get(issue);
@@ -82,28 +97,28 @@ function fakeStore(
     listBlockedBy: async (issue) => blockedBy.get(issue) ?? [],
     blockerEvidence: async (n) => evidence.get(n) ?? { factoryFiled: false, mergedClosingPr: false },
   };
-  return { store, bodies, updateComment };
+  return { store, bodies, writes };
 }
 
 describe('pollBlockedParks', () => {
   it('unparks a blocked parent whose factory-filed blocker closed completed with a merged PR', async () => {
     const labels = new Map([[5, parked()]]);
-    const { client, addLabels, removeLabel } = fakeClient(labels);
+    const { client, added, removed } = fakeClient(labels);
     const { store, bodies } = fakeStore(
       new Map([[5, comment(5)]]),
       new Map([[5, [blocker(9)]]]),
       new Map([[9, { factoryFiled: true, mergedClosingPr: true }]]),
     );
-    const logEvent = vi.fn();
+    const { events, logEvent } = eventSink();
     const results = await pollBlockedParks({ client, ...base, store, logEvent });
     expect(results).toEqual([{ issue: 5, outcome: 'unparked', lane: 'build', order: 1 }]);
     const have = labels.get(5)!;
     expect(have).toContain(QUEUED_LABEL);
     expect(have.filter((l) => l.startsWith('factory:order:'))).toHaveLength(1);
     expect(have).not.toContain(PARKED_LABEL);
-    expect(removeLabel.mock.calls.at(-1)![0].name).toBe(PARKED_LABEL);
-    expect(addLabels).toHaveBeenCalled();
-    expect(logEvent).toHaveBeenCalledWith('issue_unparked', 5, expect.stringContaining('blockers #9 resolved'));
+    expect(removed.at(-1)?.name).toBe(PARKED_LABEL);
+    expect(added).not.toEqual([]);
+    expect(events).toContainEqual(['issue_unparked', 5, expect.stringContaining('blockers #9 resolved')]);
     expect(bodies.get(5)).toContain('status: resumed');
     expect(bodies.get(5)).toContain('auto-unparks: 1');
   });
@@ -131,7 +146,7 @@ describe('pollBlockedParks', () => {
     ['weird', 'weird'],
   ])('holds the parent and does not enqueue when a blocker closed %s', async (reason, text) => {
     const labels = new Map([[5, parked()]]);
-    const { client, addLabels } = fakeClient(labels);
+    const { client, added } = fakeClient(labels);
     const { store, bodies } = fakeStore(
       new Map([[5, comment(5)]]),
       new Map([[5, [blocker(8, { state: 'open', stateReason: null }), blocker(9, { stateReason: reason })]]]),
@@ -140,7 +155,7 @@ describe('pollBlockedParks', () => {
     expect(r.outcome).toBe('held');
     expect(r.detail).toBe(`blocker #9 closed ${text}`);
     expect(labels.get(5)).toContain(PARKED_LABEL);
-    expect(addLabels).not.toHaveBeenCalled();
+    expect(added).toEqual([]);
     expect(bodies.get(5)).toContain('reason: held');
     expect(bodies.get(5)).toContain(`status: held: blocker #9 closed ${text}`);
   });
@@ -155,22 +170,22 @@ describe('pollBlockedParks', () => {
   });
 
   it('parks held instead of enqueueing after two auto-unparks', async () => {
-    const { client, addLabels } = fakeClient(new Map([[5, parked()]]));
+    const { client, added } = fakeClient(new Map([[5, parked()]]));
     const { store, bodies } = fakeStore(
       new Map([[5, comment(5, { autoUnparks: MAX_AUTO_UNPARKS })]]),
       new Map([[5, [blocker(9)]]]),
     );
     const [r] = await pollBlockedParks({ client, ...base, store });
     expect(r.outcome).toBe('capped');
-    expect(addLabels).not.toHaveBeenCalled();
+    expect(added).toEqual([]);
     expect(bodies.get(5)).toContain('reason: held');
     expect(bodies.get(5)).toContain('status: held: auto-unpark cap (2) reached');
   });
 
   it('a manual unpark racing the poller yields exactly one enqueue and one order label', async () => {
     const labels = new Map([[5, parked()]]);
-    const { client, addLabels } = fakeClient(labels);
-    const { store, updateComment } = fakeStore(new Map([[5, comment(5)]]), new Map([[5, [blocker(9)]]]));
+    const { client, added } = fakeClient(labels);
+    const { store, writes } = fakeStore(new Map([[5, comment(5)]]), new Map([[5, [blocker(9)]]]));
     const read = store.readParkComment;
     let first = true;
     store.readParkComment = async (n) => {
@@ -182,19 +197,19 @@ describe('pollBlockedParks', () => {
     };
     const [r] = await pollBlockedParks({ client, ...base, store });
     expect(r.outcome).toBe('raced');
-    expect(addLabels.mock.calls.filter(([a]) => a.labels.includes(QUEUED_LABEL))).toHaveLength(1);
+    expect(added.filter((a) => a.labels.includes(QUEUED_LABEL))).toHaveLength(1);
     expect(labels.get(5)!.filter((l) => l.startsWith('factory:order:'))).toHaveLength(1);
-    expect(updateComment).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
   });
 
   it('waits on an open blocker and on a factory-filed blocker with no merged PR, with no writes', async () => {
-    const { client, addLabels } = fakeClient(
+    const { client, added } = fakeClient(
       new Map([
         [5, parked()],
         [6, parked()],
       ]),
     );
-    const { store, updateComment } = fakeStore(
+    const { store, writes } = fakeStore(
       new Map([
         [5, comment(5)],
         [6, comment(6)],
@@ -207,8 +222,8 @@ describe('pollBlockedParks', () => {
     );
     const results = await pollBlockedParks({ client, ...base, store });
     expect(results.map((r) => r.outcome)).toEqual(['waiting', 'waiting']);
-    expect(updateComment).not.toHaveBeenCalled();
-    expect(addLabels).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
+    expect(added).toEqual([]);
   });
 
   it('skips with the cause: no comment, other reason, no blockers', async () => {
@@ -239,7 +254,7 @@ describe('pollBlockedParks', () => {
 
   it('writes nothing when the patch cannot be applied', async () => {
     const { client } = fakeClient(new Map([[5, parked()]]));
-    const { store, updateComment } = fakeStore(
+    const { store, writes } = fakeStore(
       new Map([[5, comment(5)]]),
       new Map([[5, [blocker(9, { stateReason: 'not_planned' })]]]),
     );
@@ -257,7 +272,7 @@ describe('pollBlockedParks', () => {
     let reads = 0;
     const [r] = await pollBlockedParks({ client, ...base, store });
     expect(r.outcome).toBe('held');
-    expect(updateComment).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
   });
 
   it('isolates errors per parent and reports lane-required', async () => {
@@ -307,15 +322,15 @@ describe('pollBlockedParks', () => {
     store.updateComment = async () => {
       throw new Error('write failed');
     };
-    const logEvent = vi.fn();
+    const { events, logEvent } = eventSink();
     const [r] = await pollBlockedParks({ client, ...base, store, logEvent });
     expect(r).toMatchObject({ outcome: 'unparked', lane: 'build', order: 1 });
-    expect(logEvent).toHaveBeenCalledWith('warn', 5, 'park comment not updated: write failed');
+    expect(events).toContainEqual(['warn', 5, 'park comment not updated: write failed']);
   });
 
   it('does not write a comment after unpark when the patch cannot be applied', async () => {
     const { client } = fakeClient(new Map([[5, parked()]]));
-    const { store, updateComment } = fakeStore(new Map([[5, comment(5)]]), new Map([[5, [blocker(9)]]]));
+    const { store, writes } = fakeStore(new Map([[5, comment(5)]]), new Map([[5, [blocker(9)]]]));
     let reads = 0;
     store.readParkComment = async () =>
       ({
@@ -325,18 +340,26 @@ describe('pollBlockedParks', () => {
         },
       }) as { id: number; body: string };
     expect((await pollBlockedParks({ client, ...base, store }))[0].outcome).toBe('unparked');
-    expect(updateComment).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
   });
 });
 
 describe('createOctokitBlockedParkStore', () => {
   function fakeOctokit(opts: { body?: string | null; graphql?: unknown }) {
-    const updateComment = vi.fn(async () => ({}));
-    const get = vi.fn(async () => ({ data: { body: opts.body } }));
-    const graphql = vi.fn(async () => opts.graphql);
-    const request = vi.fn(async () => ({ data: [{ number: 3, state: 'open', repository: { full_name: 'o/r' } }] }));
+    const updates: unknown[] = [];
+    const queries: Array<[string, unknown]> = [];
+    const updateComment = async (input: unknown) => {
+      updates.push(input);
+      return {};
+    };
+    const get = async () => ({ data: { body: opts.body } });
+    const graphql = async (query: string, variables: unknown) => {
+      queries.push([query, variables]);
+      return opts.graphql;
+    };
+    const request = async () => ({ data: [{ number: 3, state: 'open', repository: { full_name: 'o/r' } }] });
     const octokit = Object.assign({} as Octokit, { rest: { issues: { get, updateComment } }, graphql, request });
-    return { octokit, updateComment, get, graphql, request };
+    return { octokit, updates, queries };
   }
   const merged = (...m: unknown[]) => ({
     repository: { issue: { closedByPullRequestsReferences: { nodes: m.map((merged) => ({ merged })) } } },
@@ -346,11 +369,9 @@ describe('createOctokitBlockedParkStore', () => {
     const f = fakeOctokit({ body: 'x <!-- factory-blocker v1 parent:5 hash:abc -->', graphql: merged(false, true) });
     const store = createOctokitBlockedParkStore(f.octokit, 'o/r');
     expect(await store.blockerEvidence(9)).toEqual({ factoryFiled: true, mergedClosingPr: true });
-    expect(f.graphql).toHaveBeenCalledWith(expect.stringContaining('includeClosedPrs:true'), {
-      owner: 'o',
-      name: 'r',
-      number: 9,
-    });
+    expect(f.queries).toEqual([
+      [expect.stringContaining('includeClosedPrs:true'), { owner: 'o', name: 'r', number: 9 }],
+    ]);
   });
 
   it('reports unmerged PRs, a null body, and malformed GraphQL as not merged', async () => {
@@ -374,12 +395,12 @@ describe('createOctokitBlockedParkStore', () => {
     const f = fakeOctokit({});
     const store = createOctokitBlockedParkStore(f.octokit, 'o/r');
     await store.updateComment(11, 'new');
-    expect(f.updateComment).toHaveBeenCalledWith({ owner: 'o', repo: 'r', comment_id: 11, body: 'new' });
+    expect(f.updates).toEqual([{ owner: 'o', repo: 'r', comment_id: 11, body: 'new' }]);
     expect(await store.listBlockedBy(5)).toEqual([{ number: 3, state: 'open', stateReason: null, repository: 'o/r' }]);
   });
 
   it('reads the own park comment via the paginated lookup', async () => {
-    const listComments = vi.fn(async () => ({ data: [{ id: 2, body: comment(5), user: { id: 1 } }] }));
+    const listComments = async () => ({ data: [{ id: 2, body: comment(5), user: { id: 1 } }] });
     const octokit = Object.assign({} as Octokit, {
       rest: { users: { getAuthenticated: async () => ({ data: { id: 1 } }) }, issues: { listComments } },
     });
@@ -407,15 +428,23 @@ describe('isFleetLeader (#3147)', () => {
 describe('pollBlockedParks fleet leader and order repair (#3147)', () => {
   it('returns [] without touching GitHub or the store on a non-leader host', async () => {
     const { client } = fakeClient(new Map([[5, parked()]]));
-    const list = vi.spyOn(client, 'listOpenIssuesWithLabels');
+    client.listOpenIssuesWithLabels = async () => {
+      throw new Error('touched');
+    };
     const { store } = fakeStore(new Map(), new Map());
-    const read = vi.spyOn(store, 'readParkComment');
-    const onSkip = vi.fn();
-    const results = await pollBlockedParks({ client, ...base, store, isLeader: () => false, onSkip });
+    store.readParkComment = async () => {
+      throw new Error('touched');
+    };
+    const skips: string[] = [];
+    const results = await pollBlockedParks({
+      client,
+      ...base,
+      store,
+      isLeader: () => false,
+      onSkip: (m) => skips.push(m),
+    });
     expect(results).toEqual([]);
-    expect(list).not.toHaveBeenCalled();
-    expect(read).not.toHaveBeenCalled();
-    expect(onSkip).toHaveBeenCalledWith(expect.stringContaining('not the fleet leader'));
+    expect(skips).toEqual([expect.stringContaining('not the fleet leader')]);
   });
 
   it('emits order_collision_repaired when an auto-unpark lost a position race', async () => {
@@ -441,9 +470,9 @@ describe('pollBlockedParks fleet leader and order repair (#3147)', () => {
       new Map([[5, [blocker(9)]]]),
       new Map([[9, { factoryFiled: true, mergedClosingPr: true }]]),
     );
-    const logEvent = vi.fn();
+    const { events, logEvent } = eventSink();
     const results = await pollBlockedParks({ client, ...base, store, logEvent });
     expect(results[0]).toMatchObject({ issue: 5, outcome: 'unparked', order: 2 });
-    expect(logEvent).toHaveBeenCalledWith('order_collision_repaired', 5, expect.stringContaining('from order 1 to 2'));
+    expect(events).toContainEqual(['order_collision_repaired', 5, expect.stringContaining('from order 1 to 2')]);
   });
 });

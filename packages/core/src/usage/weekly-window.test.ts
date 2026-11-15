@@ -80,7 +80,10 @@ describe('readUsage weekly window', () => {
 describe('watchUsage weekly window', () => {
   it('the watchdog stops on the weekly window when the 5h window is low', async () => {
     const events: EmitEventArgs[] = [];
-    const setStop = vi.fn();
+    const stops: string[] = [];
+    const setStop = (file: string) => {
+      stops.push(file);
+    };
     const controller = new AbortController();
     let sleeps = 0;
     const sleepFn = vi.fn(async () => {
@@ -111,8 +114,7 @@ describe('watchUsage weekly window', () => {
       }),
     ).resolves.toBe('stopped');
 
-    expect(setStop).toHaveBeenCalledTimes(1);
-    expect(setStop.mock.calls[0][0]).toBe('/repo/.factory/STOP');
+    expect(stops).toEqual(['/repo/.factory/STOP']);
     const stopEvent = events.find((e) => e[1] === 'usage-stop');
     expect(stopEvent?.[3]).toContain('weekly subscription window at 96%');
   });
