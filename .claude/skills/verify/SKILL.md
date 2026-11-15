@@ -38,6 +38,8 @@ The factory's own CHECK phase runs `bash scripts/verify.sh --no-e2e` in the buil
 
 CI (`.github/workflows/ci.yml`) runs the same checks as the full path, split into parallel jobs: `static` (format, build, guards, typecheck, lint, knip) and `test (1/3)`…`test (3/3)` (Vitest shards that write blob reports with raw coverage and no thresholds, via `FACTORY_COVERAGE_SHARD=1`). The required `ci` job fails unless all of them succeeded, then merges the shard reports (`vitest --merge-reports`) and enforces the coverage thresholds, the ratchet, and the stub eval on the merged result. A red `ci` names the failing job; read that job's log. CI also runs `scripts/quickstart-smoke.sh` in a separate job. It does not run the `install-sweep-plist` test.
 
+The pre-commit hook (`lefthook.yml`) auto-fixes staged files with `oxlint --fix` and `prettier --write`. A direct `mkdtemp(tmpdir())` in a test fails `npm run lint` via `anti-slop/no-direct-tmpdir-mkdtemp`; the fix is `createTempDirs` (per-file allowances live in `tmpdir-mkdtemp-baseline.json` and can only shrink).
+
 ## Coverage gate and ratchet
 
 - Thresholds live in `vitest.config.ts`: one global set plus one set per package. Read the file for the current numbers.

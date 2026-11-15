@@ -10,6 +10,12 @@ export const MAX_LINES_BASELINE: Readonly<Record<string, number>> = JSON.parse(
   readFileSync(new URL('./max-lines-baseline.json', import.meta.url), 'utf8'),
 );
 
+// #3114/#4050: test files grandfathered with direct mkdtemp(tmpdir()) calls; counts can only shrink,
+// never add a file. Use createTempDirs.
+export const TMPDIR_MKDTEMP_BASELINE: Readonly<Record<string, number>> = JSON.parse(
+  readFileSync(new URL('./tmpdir-mkdtemp-baseline.json', import.meta.url), 'utf8'),
+);
+
 const MAX_LINES_OPTIONS = { skipBlankLines: false, skipComments: false } as const;
 
 export default defineConfig({
@@ -128,9 +134,17 @@ export default defineConfig({
     'anti-slop/no-chained-type-assertions': 'error',
     // #798/#1975: repo-wide. Replace dependencies through a real injected seam, never vi.mock/jest.mock.
     'anti-slop/no-module-mocking': 'error',
+    // #4050: no direct mkdtemp(tmpdir()) in tests; per-file allowances come from the baseline overrides.
+    'anti-slop/no-direct-tmpdir-mkdtemp': 'error',
   },
-  overrides: Object.entries(MAX_LINES_BASELINE).map(([file, max]) => ({
-    files: [file],
-    rules: { 'max-lines': ['error', { max, ...MAX_LINES_OPTIONS }] },
-  })),
+  overrides: [
+    ...Object.entries(MAX_LINES_BASELINE).map(([file, max]) => ({
+      files: [file],
+      rules: { 'max-lines': ['error', { max, ...MAX_LINES_OPTIONS }] },
+    })),
+    ...Object.entries(TMPDIR_MKDTEMP_BASELINE).map(([file, allowed]) => ({
+      files: [file],
+      rules: { 'anti-slop/no-direct-tmpdir-mkdtemp': ['error', { allowed }] },
+    })),
+  ],
 });

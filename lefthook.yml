@@ -1,0 +1,11 @@
+# Pre-commit (#4050): fix lint and formatting on staged files only, then re-stage them.
+pre-commit:
+  parallel: false
+  commands:
+    oxlint:
+      glob: '*.{ts,tsx,js,jsx,mjs,cjs,mts,cts}'
+      run: npx oxlint --type-aware --fix --deny-warnings {staged_files}
+      stage_fixed: true
+    prettier:
+      run: npx prettier --write --ignore-unknown {staged_files}
+      stage_fixed: true

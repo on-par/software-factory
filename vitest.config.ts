@@ -67,7 +67,11 @@ export default defineConfig({
       ? [`packages/*/src/${REAL_CLI_GLOB}`]
       : integrationOnly
         ? [`packages/*/src/${INTEGRATION_GLOB}`]
-        : ['packages/*/src/**/*.test.{ts,tsx}', 'scripts/**/*.test.ts'],
+        : [
+            'packages/*/src/**/*.test.{ts,tsx}',
+            'scripts/**/*.test.ts',
+            'tools/oxlint/anti-slop/rules/no-direct-tmpdir-mkdtemp.test.ts',
+          ],
     exclude: realCliOnly
       ? configDefaults.exclude
       : integrationOnly
