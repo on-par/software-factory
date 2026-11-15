@@ -11,17 +11,23 @@ const response = (ok: boolean, status: number) => ({
   text: async () => '',
   json: async () => ({}),
 });
-const okFetch = () => vi.fn<FetchFn>(async () => response(true, 200));
+const okFetch = () => {
+  const calls: [string, RequestInit | undefined][] = [];
+  const fetchFn: FetchFn = async (url, init) => {
+    calls.push([url, init]);
+    return response(true, 200);
+  };
+  return { fetchFn, calls };
+};
 
 describe('probeOllama', () => {
   beforeEach(resetOllamaProbeCache);
 
   it('is reachable on a 200 and GETs /api/version', async () => {
-    const fetchFn = okFetch();
+    const { fetchFn, calls } = okFetch();
     expect(await probeOllama(fetchFn, EP)).toEqual({ reachable: true, endpoint: EP });
-    const [url, init] = fetchFn.mock.calls[0];
-    expect(url).toBe(`${EP}/api/version`);
-    expect(init?.method).toBe('GET');
+    expect(calls[0]![0]).toBe(`${EP}/api/version`);
+    expect(calls[0]![1]?.method).toBe('GET');
   });
 
   it('is unreachable on non-2xx', async () => {
@@ -53,12 +59,12 @@ describe('probeOllama', () => {
   });
 
   it('shares one in-flight probe across concurrent callers and caches per endpoint', async () => {
-    const fetchFn = okFetch();
+    const { fetchFn, calls } = okFetch();
     await Promise.all([probeOllama(fetchFn, EP), probeOllama(fetchFn, EP)]);
     await probeOllama(fetchFn, EP);
-    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(1);
     await probeOllama(fetchFn, 'http://other:11434');
-    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(calls).toHaveLength(2);
   });
 });
 

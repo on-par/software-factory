@@ -251,12 +251,13 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
       false,
       executor(() => router, []),
     );
-    const sink = vi.fn();
-    router.setLocalAuthSink(sink);
+    const reported: string[] = [];
+    router.setLocalAuthSink((a) => {
+      reported.push(a);
+    });
     await router.run('readiness_enrich', 'enrich').catch(() => undefined);
     await router.run('plan', 'plan');
-    expect(sink).toHaveBeenCalledTimes(1);
-    expect(sink).toHaveBeenCalledWith('claude');
+    expect(reported).toEqual(['claude']);
   });
 
   it('a throwing local-auth sink never breaks failover (#2733)', async () => {
@@ -1346,18 +1347,33 @@ describe('Ollama reachability probe', () => {
   };
 
   const setup = (fetchStub: FetchFn, withProbe = true) => {
-    const runModel = vi.fn(async () => 'OK');
+    const seen: string[] = [];
+    const runModel = async (model: string) => {
+      seen.push(model);
+      return 'OK';
+    };
     const executor = withProbe ? { runModel, probeOllama: () => probeOllama(fetchStub) } : { runModel };
-    return { runModel, executor };
+    return { seen, executor };
   };
-  const down = () =>
-    vi.fn<FetchFn>(async () => {
+  const down = () => {
+    const urls: string[] = [];
+    const fetchFn: FetchFn = async (url) => {
+      urls.push(url);
       throw new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } });
-    });
-  const up = () => vi.fn<FetchFn>(async () => okResponse);
+    };
+    return { fetchFn, urls };
+  };
+  const up = () => {
+    const urls: string[] = [];
+    const fetchFn: FetchFn = async (url) => {
+      urls.push(url);
+      return okResponse;
+    };
+    return { fetchFn, urls };
+  };
 
   it('skips Ollama models with one log line when the Ollama probe fails', async () => {
-    const { runModel, executor } = setup(down());
+    const { seen, executor } = setup(down().fetchFn);
     const router = new ModelRouter(ollamaModels, routes, false, executor);
     const logs: string[] = [];
 
@@ -1368,24 +1384,24 @@ describe('Ollama reachability probe', () => {
     expect(
       logs.filter((l) => l.startsWith('Skipping Ollama models: http://127.0.0.1:11434 unreachable (')),
     ).toHaveLength(1);
-    expect(runModel.mock.calls.some((c) => (c as unknown[])[0] === 'qwen2.5-coder:14b')).toBe(false);
+    expect(seen).not.toContain('qwen2.5-coder:14b');
   });
 
   it('probes Ollama once across two routed tasks', async () => {
-    const fetchStub = down();
-    const { executor } = setup(fetchStub);
+    const { fetchFn, urls } = down();
+    const { executor } = setup(fetchFn);
     const logs: string[] = [];
     const onLog = (m: string) => logs.push(m);
 
     await new ModelRouter(ollamaModels, routes, false, executor).run('plan', 'p', { onLog });
     await new ModelRouter(ollamaModels, routes, false, executor).run('plan', 'p', { onLog });
 
-    expect(fetchStub).toHaveBeenCalledTimes(1);
+    expect(urls).toHaveLength(1);
     expect(logs.filter((l) => l.startsWith('Skipping Ollama models'))).toHaveLength(1);
   });
 
   it('keeps Ollama-first ordering when the Ollama probe succeeds', async () => {
-    const { executor } = setup(up());
+    const { executor } = setup(up().fetchFn);
     const logs: string[] = [];
 
     await new ModelRouter(ollamaModels, routes, false, executor).run('plan', 'p', { onLog: (m) => logs.push(m) });
@@ -1395,14 +1411,14 @@ describe('Ollama reachability probe', () => {
   });
 
   it('does not probe when the executor has no probeOllama', async () => {
-    const { runModel, executor } = setup(down(), false);
+    const { seen, executor } = setup(down().fetchFn, false);
     const result = await new ModelRouter(ollamaModels, routes, false, executor).run('plan', 'p');
     expect(result.model).toBe('qwen2.5-coder:14b');
-    expect(runModel).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual(['qwen2.5-coder:14b']);
   });
 
   it('throws unavailable naming the endpoint when every model is Ollama and unreachable', async () => {
-    const { executor } = setup(down());
+    const { executor } = setup(down().fetchFn);
     const router = new ModelRouter(ollamaModels, routes, false, executor);
 
     const err = await router
@@ -1416,10 +1432,10 @@ describe('Ollama reachability probe', () => {
   });
 
   it('does not probe for chains with no Ollama model', async () => {
-    const fetchStub = down();
-    const { executor } = setup(fetchStub);
+    const { fetchFn, urls } = down();
+    const { executor } = setup(fetchFn);
     await new ModelRouter(claudeOnly, routes, false, executor).run('plan', 'p');
-    expect(fetchStub).not.toHaveBeenCalled();
+    expect(urls).toHaveLength(0);
   });
 });
 
@@ -1557,12 +1573,17 @@ describe('OpenCode Zen failover guard (#3334)', () => {
 });
 
 describe('provider failure kinds', () => {
-  const failingExecutor = (err: Error) => ({
-    runModel: vi.fn(async (model: string) => {
-      if (model === 'claude-preferred') throw err;
-      return 'FROM SIBLING';
-    }),
-  });
+  const failingExecutor = (err: Error) => {
+    const seen: string[] = [];
+    return {
+      seen,
+      runModel: async (model: string) => {
+        seen.push(model);
+        if (model === 'claude-preferred') throw err;
+        return 'FROM SIBLING';
+      },
+    };
+  };
   const runWith = async (err: Error) => {
     const router = new ModelRouter(sameProviderModels, routes, false, failingExecutor(err));
     const infos: unknown[] = [];
@@ -1635,12 +1656,12 @@ describe('provider failure kinds', () => {
     const opts = { modelOverride: 'claude-preferred', modelFallbacks: ['gpt-fallback'] };
     router.setProviderHold(async (p) => p === 'anthropic');
     await router.run('plan', 'do it', opts);
-    expect(executor.runModel.mock.calls.map((c) => c[0])).toEqual(['gpt-fallback']);
+    expect(executor.seen).toEqual(['gpt-fallback']);
     router.setProviderHold(async () => {
       throw new Error('boom');
     });
     await router.run('plan', 'do it', opts).catch(() => undefined);
-    expect(executor.runModel.mock.calls.map((c) => c[0])).toContain('claude-preferred');
+    expect(executor.seen).toContain('claude-preferred');
   });
 
   it('opens the breaker for kind auth even when the reason is error', async () => {
@@ -1696,7 +1717,10 @@ describe('router failover scope (#3228)', () => {
       false,
       exec,
     );
-    const onProviderFailure = vi.fn();
+    const infos: unknown[] = [];
+    const onProviderFailure = (info: unknown) => {
+      infos.push(info);
+    };
 
     const err: any = await router.run('plan', 'p', { onProviderFailure }).catch((e) => e);
 
@@ -1704,8 +1728,7 @@ describe('router failover scope (#3228)', () => {
     expect(err.reason).toBe('usage_cap');
     expect(err.attempts).toHaveLength(1);
     expect(exec.seen).toEqual(['model-a']);
-    expect(onProviderFailure).toHaveBeenCalledTimes(1);
-    expect(onProviderFailure).toHaveBeenCalledWith(expect.objectContaining({ provider: 'anthropic' }));
+    expect(infos).toEqual([expect.objectContaining({ provider: 'anthropic' })]);
   });
 });
 

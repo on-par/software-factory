@@ -135,7 +135,11 @@ describe('metered failover guard (#3234)', () => {
   });
 
   it('the plan is detected once per model per router', async () => {
-    const readFile = vi.fn(noFile);
+    let reads = 0;
+    const readFile = () => {
+      reads++;
+      return noFile();
+    };
     const stub = new StubModelExecutor({ scripts: { plan: [] } });
     const router = new ModelRouter(meteredModels, routes, false, stub);
     router.setProviderHold(heldClaude);
@@ -149,9 +153,9 @@ describe('metered failover guard (#3234)', () => {
     });
 
     await expect(router.run('plan', 'do it')).rejects.toMatchObject({ detail: 'only_metered_left' });
-    const afterFirst = readFile.mock.calls.length;
+    const afterFirst = reads;
     await expect(router.run('plan', 'do it')).rejects.toMatchObject({ detail: 'only_metered_left' });
     expect(afterFirst).toBeGreaterThan(0);
-    expect(readFile.mock.calls.length).toBe(afterFirst);
+    expect(reads).toBe(afterFirst);
   });
 });

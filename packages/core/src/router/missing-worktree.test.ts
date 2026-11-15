@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { HarnessError } from '../harness/index.js';
@@ -36,9 +36,11 @@ const routes: RoutesConfig = { version: 1, routes: { plan: { tier: 'boss', descr
 describe('ModelRouter missing worktree (#2964)', () => {
   it('names the missing worktree instead of failing over when the cwd was deleted (#2964)', async () => {
     const gone = join(tmpdir(), `gone-${Math.random().toString(36).slice(2)}`);
-    const runModel = vi.fn(async () => {
+    const seen: string[] = [];
+    const runModel = async (m: string): Promise<string> => {
+      seen.push(m);
       throw new HarnessError('claude CLI process exited ENOENT', 'cli_missing', { code: 'ENOENT' });
-    });
+    };
     const router = new ModelRouter(twoModels, routes, false, { runModel });
 
     const err: any = await router.run('plan', 'do it', { worktree: gone }).catch((e) => e);
@@ -46,22 +48,24 @@ describe('ModelRouter missing worktree (#2964)', () => {
     expect(err).toBeInstanceOf(ModelRouterError);
     expect(err.message).toContain('Worktree missing');
     expect(err.message).toContain(gone);
-    expect(runModel).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual(['model-a']);
   });
 
   it('still fails over when the worktree exists and the attempt fails', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'router-wt-'));
     try {
-      const runModel = vi.fn(async (m: string) => {
+      const seen: string[] = [];
+      const runModel = async (m: string) => {
+        seen.push(m);
         if (m === 'model-a') throw new HarnessError('claude CLI process exited ENOENT', 'cli_missing');
         return 'OK';
-      });
+      };
       const router = new ModelRouter(twoModels, routes, false, { runModel });
 
       const result = await router.run('plan', 'do it', { worktree: dir });
 
       expect(result.model).toBe('model-b');
-      expect(runModel).toHaveBeenCalledTimes(2);
+      expect(seen).toEqual(['model-a', 'model-b']);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -71,19 +75,21 @@ describe('ModelRouter missing worktree (#2964)', () => {
     const tempDirs = createTempDirs();
     const dir = await tempDirs.make('router-wt-removed-');
     try {
-      const runModel = vi.fn(async () => {
+      const removedRuns: string[] = [];
+      const runModel = async (model: string): Promise<string> => {
+        removedRuns.push(model);
         await rm(dir, { recursive: true, force: true });
         throw new HarnessError('claude CLI process exited ENOENT', 'cli_missing', { code: 'ENOENT' });
-      });
+      };
       const router = new ModelRouter(twoModels, routes, false, { runModel });
 
-      const err: any = await router.run('plan', 'do it', { worktree: dir }).catch((e) => e);
+      const failure: any = await router.run('plan', 'do it', { worktree: dir }).catch((e) => e);
 
-      expect(err).toBeInstanceOf(ModelRouterError);
-      expect(err.message).toBe(
+      expect(failure).toBeInstanceOf(ModelRouterError);
+      expect(failure.message).toBe(
         `Worktree missing for task 'plan': ${dir} no longer exists (removed while model-a was running) — not a model failure`,
       );
-      expect(runModel).toHaveBeenCalledTimes(1);
+      expect(removedRuns).toEqual(['model-a']);
     } finally {
       await tempDirs.cleanup();
     }
@@ -91,9 +97,11 @@ describe('ModelRouter missing worktree (#2964)', () => {
 
   it('reports a worktree that never existed accurately, with the attempt failure detail', async () => {
     const never = join(tmpdir(), `never-${Math.random().toString(36).slice(2)}`);
-    const runModel = vi.fn(async () => {
+    const attempted: string[] = [];
+    const runModel = async (model: string): Promise<string> => {
+      attempted.push(model);
       throw new Error('StubModelExecutor: no scripted step or defaultOutput for task plan');
-    });
+    };
     const router = new ModelRouter(twoModels, routes, false, { runModel });
 
     const err: any = await router.run('plan', 'do it', { worktree: never }).catch((e) => e);
@@ -102,6 +110,6 @@ describe('ModelRouter missing worktree (#2964)', () => {
     expect(err.message).toContain(`Worktree missing for task 'plan': ${never} did not exist when the task started`);
     expect(err.message).toContain('no scripted step or defaultOutput for task plan');
     expect(err.message).not.toContain('removed while');
-    expect(runModel).toHaveBeenCalledTimes(1);
+    expect(attempted).toEqual(['model-a']);
   });
 });
