@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
+import { recorder } from '../test-support/recording-fakes.test.js';
 import { claimGuardedRunner, shortDetail } from './ship-git.js';
 
 describe('shortDetail', () => {
@@ -42,18 +43,18 @@ describe('shortDetail', () => {
 
 describe('claimGuardedRunner (#3146)', () => {
   it('calls the inner runner while the claim is healthy', async () => {
-    const inner = vi.fn(async () => ({ stdout: 'ok' }));
+    const inner = recorder(async () => ({ stdout: 'ok' }));
     const run = claimGuardedRunner(new AbortController().signal, inner);
     await expect(run('git push', { cwd: '/wt' })).resolves.toEqual({ stdout: 'ok' });
-    expect(inner).toHaveBeenCalledWith('git push', { cwd: '/wt' });
+    expect(inner.calls).toEqual([['git push', { cwd: '/wt' }]]);
   });
 
   it('rejects with the abort reason without calling the inner runner after abort', () => {
     const controller = new AbortController();
     const lost = new Error('claim lost');
     controller.abort(lost);
-    const inner = vi.fn(async () => ({ stdout: '' }));
+    const inner = recorder(async () => ({ stdout: 'ok' }));
     expect(() => claimGuardedRunner(controller.signal, inner)('git push')).toThrow(lost);
-    expect(inner).not.toHaveBeenCalled();
+    expect(inner.calls).toEqual([]);
   });
 });

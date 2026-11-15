@@ -4,6 +4,7 @@ import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
 
 import { parseSlicePlanComment } from '../readiness/slice-plan.js';
+import { recorder } from '../test-support/recording-fakes.test.js';
 import type { SlicePlan } from '../readiness/slice-plan.js';
 import { detectLowerSliceChange, parkOnLowerSliceChange } from './stack-review-change.js';
 
@@ -45,19 +46,18 @@ function fake(
   opts: {
     heads?: Record<number, string>;
     states?: Record<number, string>;
-    get?: ReturnType<typeof vi.fn>;
-    createComment?: ReturnType<typeof vi.fn>;
+    getFails?: boolean;
+    createCommentFails?: boolean;
   } = {},
 ) {
-  const get =
-    opts.get ??
-    vi.fn().mockImplementation(async ({ pull_number }: { pull_number: number }) => ({
-      data: {
-        state: opts.states?.[pull_number] ?? 'open',
-        head: { sha: opts.heads?.[pull_number] ?? `sha${pull_number - 100}` },
-      },
-    }));
-  const createComment = opts.createComment ?? vi.fn().mockResolvedValue({ data: { id: 1 } });
+  const get = recorder(async ({ pull_number }: { pull_number: number }) => {
+    if (opts.getFails) throw new Error('boom');
+    const state = opts.states?.[pull_number] ?? 'open';
+    return { data: { state, head: { sha: opts.heads?.[pull_number] ?? `sha${pull_number - 100}` } } };
+  });
+  const createComment = recorder(async (_params: { body: string }) =>
+    opts.createCommentFails ? Promise.reject(new Error('nope')) : { data: { id: 1 } },
+  );
   const octokit = Object.assign({} as Octokit, {
     rest: {
       pulls: { get },
@@ -68,11 +68,11 @@ function fake(
   return { octokit, get, createComment };
 }
 
-const park = (f: ReturnType<typeof fake>, p: SlicePlan = plan, log = vi.fn()) =>
+const park = (f: ReturnType<typeof fake>, p: SlicePlan = plan, log = recorder<[string, string]>()) =>
   parkOnLowerSliceChange({ octokit: f.octokit, repo: 'acme/widgets', issue: workKeyFromIssue(5), plan: p, log });
 
 function written(f: ReturnType<typeof fake>) {
-  const body: string = f.createComment.mock.calls[0]![0].body;
+  const body: string = f.createComment.calls[0]![0].body;
   const parsed = parseSlicePlanComment(body);
   if (!parsed?.ok) throw new Error('unparseable plan comment');
   return { body, slices: parsed.plan.slices };
@@ -81,12 +81,12 @@ function written(f: ReturnType<typeof fake>) {
 describe('parkOnLowerSliceChange', () => {
   it('parks the issue and names slices 2 and 3 when slice 1 PR head changed', async () => {
     const f = fake({ heads: { 101: 'new1' } });
-    const log = vi.fn();
+    const log = recorder<[string, string]>();
     const res = await park(f, plan, log);
     expect(res?.outcome).toMatchObject({ state: 'parked', reason: 'escalate', prNumber: 101 });
     expect(res?.affected).toEqual([2, 3]);
     expect(res?.message).toContain('slices 2, 3');
-    expect(log).toHaveBeenCalledWith('escalate', res?.message);
+    expect(log.calls).toContainEqual(['escalate', res?.message]);
     const { body, slices } = written(f);
     expect(slices.map((s) => s.affectedBy)).toEqual([undefined, 1, 1]);
     expect(body).toContain('affected by review changes to slice 1');
@@ -111,13 +111,13 @@ describe('parkOnLowerSliceChange', () => {
   it('returns undefined and writes nothing when no head changed', async () => {
     const f = fake();
     expect(await park(f)).toBeUndefined();
-    expect(f.createComment).not.toHaveBeenCalled();
+    expect(f.createComment.calls).toEqual([]);
   });
 
   it('ignores a change to the top slice only', async () => {
     const f = fake({ heads: { 103: 'new3' } });
     expect(await park(f)).toBeUndefined();
-    expect(f.get).toHaveBeenCalledTimes(2);
+    expect(f.get.calls).toHaveLength(2);
   });
 
   it('does not flag a slice without a recorded head SHA and logs it', async () => {
@@ -125,9 +125,9 @@ describe('parkOnLowerSliceChange', () => {
       ...plan,
       slices: plan.slices.map((s) => (s.index === 1 ? { ...s, headSha: undefined } : s)),
     };
-    const log = vi.fn();
+    const log = recorder<[string, string]>();
     expect(await park(fake({ heads: { 101: 'new1' } }), p, log)).toBeUndefined();
-    expect(log).toHaveBeenCalledWith('ship', expect.stringContaining('slice 1/3 PR #101 has no recorded head SHA'));
+    expect(log.calls).toContainEqual(['ship', expect.stringContaining('slice 1/3 PR #101 has no recorded head SHA')]);
   });
 
   it('skips slices above a merged slice (GitHub rebase)', async () => {
@@ -135,16 +135,16 @@ describe('parkOnLowerSliceChange', () => {
       ...plan,
       slices: plan.slices.map((s) => (s.index === 1 ? { ...s, state: 'merged' as const } : s)),
     };
-    const log = vi.fn();
+    const log = recorder<[string, string]>();
     expect(await park(fake({ heads: { 102: 'rebased' } }), p, log)).toBeUndefined();
-    expect(log).toHaveBeenCalledWith('ship', expect.stringContaining('merged'));
+    expect(log.calls).toContainEqual(['ship', expect.stringContaining('merged')]);
   });
 
   it('returns undefined when pulls.get rejects', async () => {
-    const f = fake({ get: vi.fn().mockRejectedValue(new Error('boom')) });
-    const log = vi.fn();
+    const f = fake({ getFails: true });
+    const log = recorder<[string, string]>();
     expect(await park(f, plan, log)).toBeUndefined();
-    expect(log).toHaveBeenCalledWith('ship', expect.stringContaining('boom'));
+    expect(log.calls).toContainEqual(['ship', expect.stringContaining('boom')]);
   });
 
   it('skips a closed PR', async () => {
@@ -152,27 +152,27 @@ describe('parkOnLowerSliceChange', () => {
   });
 
   it('still returns the parked result when the comment write fails', async () => {
-    const f = fake({ heads: { 101: 'new1' }, createComment: vi.fn().mockRejectedValue(new Error('nope')) });
-    const log = vi.fn();
+    const f = fake({ heads: { 101: 'new1' }, createCommentFails: true });
+    const log = recorder<[string, string]>();
     const res = await park(f, plan, log);
     expect(res?.outcome.state).toBe('parked');
-    expect(log).toHaveBeenCalledWith(
+    expect(log.calls).toContainEqual([
       'ship',
       expect.stringContaining('could not record the affected slices in the slice plan comment: nope'),
-    );
+    ]);
   });
 });
 
 describe('detectLowerSliceChange', () => {
   it('reports status error when pulls.get rejects', async () => {
-    const f = fake({ get: vi.fn().mockRejectedValue(new Error('boom')) });
-    const res = await detectLowerSliceChange({ octokit: f.octokit, repo: 'acme/widgets', plan, log: vi.fn() });
+    const f = fake({ getFails: true });
+    const res = await detectLowerSliceChange({ octokit: f.octokit, repo: 'acme/widgets', plan, log: recorder() });
     expect(res.status).toBe('error');
   });
 
   it('reports the lowest changed slice', async () => {
     const f = fake({ heads: { 101: 'n1', 102: 'n2' } });
-    const res = await detectLowerSliceChange({ octokit: f.octokit, repo: 'acme/widgets', plan, log: vi.fn() });
+    const res = await detectLowerSliceChange({ octokit: f.octokit, repo: 'acme/widgets', plan, log: recorder() });
     expect(res).toEqual({
       status: 'changed',
       change: { index: 1, prNumber: 101, recordedSha: 'sha1', currentSha: 'n1' },
