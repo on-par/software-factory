@@ -17,6 +17,10 @@ section to `## X.Y.Z - date`. See
 
 - Direct `mkdtemp(tmpdir())` in tests is now an oxlint error (`anti-slop/no-direct-tmpdir-mkdtemp`), replacing the vitest guard, and a lefthook pre-commit hook runs `oxlint --fix` and `prettier --write` on staged files (#4050).
 
+### Removed
+
+- `@on-par/factory-core/internal` no longer re-exports the last 56 unused names, the unused `createLinearTicketWriteback` is deleted, and the export-surface guard drops its allowlist so `internal.ts` must export exactly what consumers import (#3787).
+
 ## 0.9.37 - 2026-11-14
 
 SHIP no longer parks a run just because CI is still pending at the CI-watch deadline: the visual-proof gate classifies and captures regardless of CI, leaving the usual CI-pending draft (#4047). Requiring UI proof is now configurable with `visualProof.mode` (`required` default, `advisory`, `off`) (#4047), visual proof uploads for factory-opened PRs (#4038), and queue preflight adopts a factory draft left without a draft reason (#4039).
