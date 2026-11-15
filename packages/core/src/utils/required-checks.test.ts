@@ -121,8 +121,9 @@ describe('fetchRequiredChecksVerdict', () => {
         actions: {
           listWorkflowRunsForRepo: async (p: { head_sha?: string; event?: string }) => {
             if (opts.workflowRuns instanceof Error) throw opts.workflowRuns;
-            const matches = p.head_sha === args.sha && p.event === 'push';
-            return { data: { workflow_runs: matches ? (opts.workflowRuns ?? []) : [] } };
+            return {
+              data: { workflow_runs: p.head_sha === args.sha && p.event === 'push' ? (opts.workflowRuns ?? []) : [] },
+            };
           },
         },
       },
@@ -301,10 +302,7 @@ describe('fetchRequiredChecksVerdict', () => {
     });
 
     it('without pushFallback still reports no required checks and skips the workflow-run lookup', async () => {
-      const { octokit } = fake({
-        runs: [inSuite('ci', 'success', 1)],
-        workflowRuns: httpError(500),
-      });
+      const { octokit } = fake({ runs: [inSuite('ci', 'success', 1)], workflowRuns: httpError(500) });
       expect((await fetchRequiredChecksVerdict(octokit, args)).reason).toBe('no required checks configured');
     });
 

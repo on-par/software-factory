@@ -132,8 +132,7 @@ describe('kept lane branch name collision (#3651)', () => {
   it('renames a kept branch with a closed PR aside locally and on origin, then creates a fresh lane worktree from the base', async () => {
     const { repoRoot, origin, worktree } = await stuckBranch(true);
     const events: Array<[string, string]> = [];
-    const log = (type: string, msg: string) => events.push([type, msg]);
-    const res = await setupWorktree(repoRoot, branch, worktree, undefined, undefined, log, {
+    const res = await setupWorktree(repoRoot, branch, worktree, undefined, undefined, (t, m) => events.push([t, m]), {
       findOpenPr: async () => ({ status: 'absent' }),
       now,
     });

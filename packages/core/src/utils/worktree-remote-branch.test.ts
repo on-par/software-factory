@@ -40,9 +40,8 @@ describe('pre-existing remote branch (#1868)', () => {
 
     expect(result.remoteBranch).toEqual({ sha, prNumber: 42 });
     expect(result.base).toBe(`origin/${branch}`);
-    const [msg, ...rest] = preexisting();
-    expect(rest).toEqual([]);
-    expect([sha, '#42', `continuing on origin/${branch}`].filter((s) => !msg.includes(s))).toEqual([]);
+    expect(preexisting()).toEqual([expect.stringContaining(sha)]);
+    expect(preexisting()[0]).toMatch(new RegExp(`#42.*continuing on origin/${branch}`, 's'));
     const { stdout } = await execFile('git', ['rev-parse', 'HEAD'], { cwd: worktree });
     expect(stdout.trim()).toBe(sha);
   });
@@ -59,9 +58,7 @@ describe('pre-existing remote branch (#1868)', () => {
     });
 
     expect(result.base).toBe('origin/main');
-    const [msg] = preexisting();
-    expect(msg).toContain('#42');
-    expect(msg).not.toContain('continuing');
+    expect(preexisting()).toEqual([expect.stringMatching(/^(?!.*continuing).*#42/s)]);
     const { stdout } = await execFile('git', ['rev-parse', 'HEAD'], { cwd: worktree });
     const { stdout: main } = await execFile('git', ['rev-parse', 'origin/main'], { cwd: repoRoot });
     expect(stdout.trim()).toBe(main.trim());
@@ -111,10 +108,9 @@ describe('pre-existing remote branch (#1868)', () => {
     const worktree = kit.trackWorktree(repoRoot, 210);
     const { log, preexisting } = recorder();
     let lookups = 0;
-    const findOpenPr = async () => (lookups++, { status: 'absent' as const });
 
     const result = await setupWorktree(repoRoot, 'ship-it/210-fresh', worktree, undefined, undefined, log, {
-      findOpenPr,
+      findOpenPr: async () => (lookups++, { status: 'absent' as const }),
     });
 
     expect(result.remoteBranch).toBeNull();

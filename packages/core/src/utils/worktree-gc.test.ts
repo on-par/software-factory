@@ -957,8 +957,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       data: { state: 'open', labels: [] },
     }),
   ) {
-    const pullsParams: unknown[] = [];
-    const issueParams: unknown[] = [];
+    const [pullsParams, issueParams]: unknown[][] = [[], []];
     const octokit = asSweepOctokit({
       rest: {
         pulls: { list: async (p: unknown) => (pullsParams.push(p), result()) },

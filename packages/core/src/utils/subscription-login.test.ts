@@ -63,13 +63,10 @@ describe('filterRefusedProviders (#3335)', () => {
     }
     expect(refused).toHaveLength(1);
     expect(refused[0]).toMatchObject({ provider: 'codex', login: 'api' });
-    expect(logs).toEqual([
-      {
-        type: 'provider_refused',
-        msg: expect.any(String),
-        extra: { providerRefused: { provider: 'codex', login: 'api', at: new Date(NOW).toISOString() } },
-      },
-    ]);
+    expect(logs.map((l) => l.type)).toEqual(['provider_refused']);
+    expect(logs[0].extra).toEqual({
+      providerRefused: { provider: 'codex', login: 'api', at: new Date(NOW).toISOString() },
+    });
     expect(execs).not.toContain('codex');
     expect(JSON.stringify(logs)).not.toContain('sk-test');
   });
