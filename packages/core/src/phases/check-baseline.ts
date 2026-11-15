@@ -1,10 +1,7 @@
-// src/phases/check-baseline.ts — CHECK's baseline (base SHA) helpers: the cache wiring (#3540) and the log summary.
-
 import { BaselineCache } from '../checkers/baseline-cache.js';
 import type { BaselineOptions, BaselineReport } from '../checkers/baseline.js';
 import type { RequiredChecksVerdict } from '../utils/required-checks.js';
 
-/** The cache, CI cross-check and invalidation hook runBaselineCheckers gets from CHECK (#3540). */
 export function baselineCacheOptions(
   cachePath: string | undefined,
   ttlHours: number | undefined,
@@ -18,7 +15,6 @@ export function baselineCacheOptions(
   };
 }
 
-/** One-line summary of the baseline comparison for the CHECK log. */
 export function describeBaseline(report: BaselineReport): string {
   const parts = report.checkers.map((c) => {
     if (c.verdict === 'fails-on-base') {

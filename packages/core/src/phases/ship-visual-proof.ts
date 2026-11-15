@@ -1,9 +1,6 @@
-// packages/core/src/phases/ship-visual-proof.ts — SHIP UI visual proof gate wrapper and failure reason (#2232)
-
 import type { VisualProofResult } from '../checkers/visual-proof.js';
 import type { EventKind } from '../events/kinds.js';
 
-/** Classifies, captures, attaches and publishes visual proof for the PR's exact head. */
 export type VisualProofGate = (pr: { prNumber: number; headSha: string }) => Promise<VisualProofResult>;
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -21,8 +18,6 @@ export async function runVisualProofGate(
   pr: { prNumber: number; headSha: string },
   ctx: { log: (type: EventKind, msg: string) => void; ciPending: boolean },
 ): Promise<VisualProofResult> {
-  // CI pending does not skip the gate: it classifies first and captures locally,
-  // so neither depends on CI; landing still enforces proof on the head (#4047).
   let result: VisualProofResult;
   try {
     result = await gate(pr);

@@ -6,7 +6,6 @@ import { checkRemoteIsAncestor, pushAndVerifyRemoteHead } from './ship-git.js';
 
 const allSuccess = [{ status: 'completed', conclusion: 'success' }];
 
-/** Octokit stub with one open PR (#123) whose checks are all green. */
 function createWatchOctokit(sequence: any[][]) {
   const octokit = {
     graphql: async (_query: string, _vars: any) => ({
@@ -35,7 +34,6 @@ describe('shipPhase existing PR push (#1813)', () => {
   const STALE = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
   const PUSH = `git push -u origin '${BRANCH}'`;
 
-  /** Ships against an open PR; `remoteAfterPush` is what ls-remote reports once the push ran. */
   async function ship(opts: { remoteBefore: string; remoteAfterPush: string; pushError?: unknown }) {
     const { octokit } = createWatchOctokit([allSuccess]);
     const events: string[] = [];

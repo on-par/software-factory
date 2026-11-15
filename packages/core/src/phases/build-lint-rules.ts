@@ -1,5 +1,3 @@
-// src/phases/build-lint-rules.ts — "Lint rules in force" BUILD prompt section from .oxlintrc.json (#3040) or oxlint.config.* read as text, never evaluated (#3042); ESLint/Biome get a config pointer (#3041)
-
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -9,20 +7,17 @@ import { UNTRUSTED_LINT_CONFIG_NOTICE, wrapUntrustedLintConfig } from '../utils/
 
 export const LINT_RULES_HEADING = '## Lint rules in force';
 
-// Max rules listed in the prompt; the rest are counted, not named (#3042).
 export const LINT_RULES_CAP = 40;
 
 const LINTER_NAMES: Record<LintConfigProbe['linter'], string> = { oxlint: 'oxlint', eslint: 'ESLint', biome: 'Biome' };
 
-// oxlint AllowWarnDeny: "error" | "deny" | 2 are error severity.
-const ERROR_SEVERITIES = new Set<unknown>(['error', 'deny', 2]);
+const OXLINT_ALLOW_WARN_DENY_ERROR_VALUES = new Set<unknown>(['error', 'deny', 2]);
 const SAFE_RULE_NAME = /^[A-Za-z0-9@_./-]{1,200}$/;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Top-level error-severity rule names from a parsed oxlint config; unsafe names are dropped and counted. */
 export function collectOxlintErrorRules(config: unknown): { rules: string[]; unsafe: number } {
   if (!isPlainObject(config) || !isPlainObject(config.rules)) return { rules: [], unsafe: 0 };
   const rules: string[] = [];
@@ -30,7 +25,7 @@ export function collectOxlintErrorRules(config: unknown): { rules: string[]; uns
   for (const [name, value] of Object.entries(config.rules)) {
     const head = Array.isArray(value) ? value[0] : value;
     const severity = typeof head === 'string' ? head.toLowerCase() : head;
-    if (!ERROR_SEVERITIES.has(severity)) continue;
+    if (!OXLINT_ALLOW_WARN_DENY_ERROR_VALUES.has(severity)) continue;
     if (SAFE_RULE_NAME.test(name)) rules.push(name);
     else unsafe++;
   }
@@ -42,7 +37,6 @@ const LINE_COMMENT = /(^|[^:'"\\])\/\/.*$/gm;
 const ERROR_PAIR =
   /(?:(['"`])([^'"`\n]{1,300})\1|([A-Za-z_$][\w$-]*))\s*:\s*\[?\s*(?:(['"`])(?:error|deny)\4|2(?![\w.]))/gi;
 
-/** Error-severity rule keys scraped from oxlint.config.* source text (regex, no evaluation); unsafe names are dropped and counted. */
 export function extractOxlintErrorRulesFromText(source: string): { rules: string[]; unsafe: number } {
   const stripped = source.replace(BLOCK_COMMENT, '').replace(LINE_COMMENT, '$1');
   const names = new Set<string>();
@@ -56,7 +50,6 @@ export function extractOxlintErrorRulesFromText(source: string): { rules: string
   return { rules: rules.sort(), unsafe };
 }
 
-/** Pointer section naming the linter and its config path; never reads the config (#3041). */
 export function renderLintConfigPointer(probe: LintConfigProbe): string {
   const exec = probe.executable ? ' It is a JS/TS module, so it was not evaluated.' : '';
   return (
@@ -65,7 +58,6 @@ export function renderLintConfigPointer(probe: LintConfigProbe): string {
   );
 }
 
-/** Markdown section (leading blank line) for the BUILD prompt, or '' when there is nothing to say. Never throws. */
 export async function renderLintRulesInForce(worktree: string): Promise<string> {
   try {
     const probe = await detectLintConfig(worktree);
@@ -107,6 +99,5 @@ export async function renderLintRulesInForce(worktree: string): Promise<string> 
   }
 }
 
-// BUILD workers read the code before editing instead of writing from the plan alone (#3372, T13).
 export const READ_BEFORE_EDIT_RULE =
   'Before editing, open the files the spec and its design grounding name, read the code you will change and its direct callers, and reuse the helpers and conventions already there; the spec stays the plan, but do not write from it alone.';

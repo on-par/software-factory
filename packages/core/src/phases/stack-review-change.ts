@@ -1,5 +1,3 @@
-// src/phases/stack-review-change.ts — ADR-0161 stack mode: park the issue when review changes a lower slice.
-
 import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 import type { Octokit } from '@octokit/rest';
 
@@ -8,9 +6,7 @@ import { type SlicePlan, withSlicesAffected } from '../readiness/slice-plan.js';
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
 import type { RunOutcome } from '../run/outcome.js';
 
-/** A lower slice PR whose head moved since the factory opened it. */
 export interface LowerSliceChange {
-  /** 1-based index of the changed slice. */
   index: number;
   prNumber: number;
   recordedSha: string;
@@ -22,10 +18,8 @@ export type LowerSliceChangeDetection =
 
 export interface ReviewChangeParkResult {
   outcome: Extract<RunOutcome, { state: 'parked' }>;
-  /** Human-readable park message naming the changed slice and the affected upper slices. */
   message: string;
   change: LowerSliceChange;
-  /** Upper slice indexes named as affected, ascending. */
   affected: number[];
 }
 
@@ -33,7 +27,6 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Finds the lowest open lower slice PR (not the top slice) whose current head SHA differs from the recorded one. */
 export async function detectLowerSliceChange(opts: {
   octokit: Octokit;
   repo: string;
@@ -78,8 +71,6 @@ export async function detectLowerSliceChange(opts: {
   return { status: 'unchanged' };
 }
 
-/** When review changed a lower slice PR, record the affected upper slices in the slice-plan comment and return a
- *  parked outcome naming them; undefined when nothing changed (or the check could not run). */
 export async function parkOnLowerSliceChange(opts: {
   octokit: Octokit;
   repo: string;

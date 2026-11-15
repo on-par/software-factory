@@ -4,9 +4,6 @@ import { updateSpecRoute } from '../spec/index.js';
 import { type BuildRouteName, defaultBuildRoute, resolveRunnableBuildRoute } from './plan-routes.js';
 import { resolveRoute, type RouteCapabilities } from './route-capabilities.js';
 
-/** Settle the build route after PLAN: the planner's choice, then local-only / codex-disabled /
- *  unrunnable-route fallbacks, then the repo pin. The persisted spec's frontmatter is kept in sync,
- *  since it's the frozen artifact downstream consumers (eval scoring, PR review) read. */
 export async function settlePlanRoute(opts: {
   parsedRoute: BuildRoutePin | null;
   runnableNow: readonly BuildRouteName[];
@@ -16,7 +13,6 @@ export async function settlePlanRoute(opts: {
   log: (type: EventKind, msg: string) => void;
 }): Promise<BuildRoutePin> {
   const { parsedRoute, runnableNow, capabilities, preferredRoute, specPath, log } = opts;
-  // A planner-written command is kept only when build_command can run here (#2874).
   const commandRunnable = runnableNow.includes('command');
   let planned: BuildRouteName =
     (parsedRoute === 'command' && !commandRunnable ? undefined : parsedRoute) ?? defaultBuildRoute(runnableNow);
@@ -47,7 +43,7 @@ export async function settlePlanRoute(opts: {
     await updateSpecRoute(specPath, preferredRoute, 'repo-config-pin');
     return preferredRoute;
   }
-  // The spec still names the command route the planner wrote but could not run: record the route actually used.
-  if (parsedRoute === 'command' && planned !== 'command') await updateSpecRoute(specPath, planned, 'route-unavailable');
+  const specStillNamesUnrunnableCommand = parsedRoute === 'command' && planned !== 'command';
+  if (specStillNamesUnrunnableCommand) await updateSpecRoute(specPath, planned, 'route-unavailable');
   return planned;
 }

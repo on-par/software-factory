@@ -6,9 +6,6 @@ import type { FailoverReason } from '../types/index.js';
 
 type Log = (type: 'worker_failover', msg: string, extra: { failoverReason: FailoverReason }) => void;
 
-/** oc-08's cross-harness order for leaving OpenCode: the first build_claude worker, else the first
- *  build_codex worker unless codex is disabled. Shared by in-phase failover and runIssue's
- *  pre-BUILD breaker gate (#2891). */
 export function pickOpencodeFallback(
   router: ModelRouter,
   codexDisabled?: boolean,
@@ -19,8 +16,6 @@ export function pickOpencodeFallback(
   return codexModel ? { route: 'codex', task: 'build_codex', model: codexModel } : undefined;
 }
 
-/** ISO instant the latest capped attempt says OpenCode resets, parsed from the attempt details with the
- *  breaker's own parser (no padding); undefined when no attempt carries a reset hint. */
 export function opencodeCapResetAt(attempts: readonly RouterAttempt[], now = Date.now()): string | undefined {
   let latest: number | undefined;
   for (const attempt of attempts) {
@@ -37,8 +32,6 @@ const WHY_TEXT = {
   'no-harness': 'no other build harness allowed',
 } as const;
 
-/** The error a capped OpenCode BUILD fails with when it does not fail over: keeps the router error's
- *  reason and attempts, and names the cap reason, why it stayed, and the reset time. */
 export function opencodeCapError(opts: {
   err: unknown;
   reason: FailoverReason;
@@ -56,11 +49,6 @@ export function opencodeCapError(opts: {
   );
 }
 
-/**
- * Where an OpenCode BUILD continues once every build_opencode worker is capped (#2885): the first
- * build_claude worker, else the first build_codex worker. Throws a cap error (#3034) when the repo
- * pinned the route (ADR-0092), auto-failover is off, or no target worker exists.
- */
 export async function failOverOpencodeBuild(opts: {
   router: ModelRouter;
   reason: FailoverReason;
@@ -91,7 +79,6 @@ export async function failOverOpencodeBuild(opts: {
     { failoverReason: reason },
   );
   const prompt = applySteering(opts.prompts[target.route](), opts.build.steering);
-  // modelOverride must be the chosen model: runOpts may hold the opencode pin.
   const result = await router.run(target.task, prompt, {
     ...opts.runOpts,
     retryCause: 'failover',

@@ -1,5 +1,3 @@
-// src/phases/check-affected.ts — affected-test selection for CHECK rework rounds (#3260)
-
 import {
   type AffectedTestsResolution,
   describeAffectedResolution,
@@ -14,7 +12,6 @@ import type { CheckSummary, Constitution } from '../types/index.js';
 
 export type AffectedSelection = AffectedTestsResolution & { round: number };
 
-/** The repo's `tests.affected` config, or null when unset or unreadable. */
 export function loadAffectedConfig(
   worktree: string,
   log?: (type: EventKind, msg: string) => void,
@@ -30,7 +27,6 @@ export function loadAffectedConfig(
   }
 }
 
-/** Returns a per-round selector: undefined (and silent) when `tests.affected` is unset, else one logged `affected_tests` resolution. */
 export function createAffectedSelector(deps: {
   worktree: string;
   diffBase: string | undefined;
@@ -55,7 +51,6 @@ export function createAffectedSelector(deps: {
   };
 }
 
-/** Rework instruction 3 for this round; undefined keeps the default text. */
 export async function affectedVerifyInstruction(
   sel: AffectedSelection | undefined,
   ctx: CheckerContext,
@@ -68,7 +63,6 @@ export async function affectedVerifyInstruction(
   return `Re-run the full test command \`${full}\` (affected-test selection fell back to the full suite: ${sel.reason}${sel.trigger === undefined ? '' : ` — ${sel.trigger}`}).`;
 }
 
-/** A rework round that passed on affected tests only counts after one full tests run; a FAIL there keeps the rework loop going. */
 export async function fullTestsBeforeShip(
   summary: CheckSummary,
   ctx: CheckerContext,

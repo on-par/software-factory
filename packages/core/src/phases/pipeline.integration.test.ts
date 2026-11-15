@@ -24,12 +24,10 @@ import { planPhase } from './plan.js';
 import { shipPhase } from './ship.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 
-function makeTwoModelStubConfig(): ModelsConfig {
+function makeSameProviderTwoModelStubConfig(): ModelsConfig {
   const base = makeStubModelsConfig().models['stub-model'];
   return {
     version: 1,
-    // Both models share a provider: ModelRouter.run fails over only within the first model's
-    // provider per call (#3608); cross-provider moves happen at a phase boundary.
     models: {
       'model-a': { ...base },
       'model-b': { ...base },
@@ -266,7 +264,7 @@ describe('pipeline integration', () => {
         ],
       },
     });
-    const router = new ModelRouter(makeTwoModelStubConfig(), makeStubRoutesConfig(), false, stub);
+    const router = new ModelRouter(makeSameProviderTwoModelStubConfig(), makeStubRoutesConfig(), false, stub);
     const constitution = null;
 
     const plan = await planPhase({

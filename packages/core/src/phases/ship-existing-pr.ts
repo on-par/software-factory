@@ -1,5 +1,3 @@
-// packages/core/src/phases/ship-existing-pr.ts — SHIP sync of an already-open PR's branch
-
 import { shellEscape } from '../utils/index.js';
 import { checkRemoteIsAncestor, type CommandRunner, pushAndVerifyRemoteHead, verifyRemoteHead } from './ship-git.js';
 import type { ShipPhaseOptions } from './ship-options.js';
@@ -13,7 +11,6 @@ export async function syncExistingPr(ctx: {
   log: ShipPhaseOptions['log'];
 }): Promise<ShipResult | undefined> {
   const { run, worktree, branch, prNumber, log } = ctx;
-  // Rework commits made after BUILD's push must reach the open PR before evidence or ready (#1813).
   const current = await verifyRemoteHead(run, worktree, branch);
   if (current.status === 'match') {
     log(

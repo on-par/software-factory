@@ -1,6 +1,5 @@
 import type { WorktreeProbe } from '../checkers/index.js';
 
-/** Human-readable e2e signal ("playwright.config.ts", "package.json script 'e2e'"), or null when the worktree shows no live-app testing. */
 export function detectLiveAppSignal(probe: WorktreeProbe): string | null {
   if (probe.playwrightConfigFiles.length > 0) return probe.playwrightConfigFiles[0];
 
@@ -13,8 +12,6 @@ export function detectLiveAppSignal(probe: WorktreeProbe): string | null {
   return null;
 }
 
-/** Human-readable headed-mode signals ("playwright.config.ts forces headless: false",
- *  "package.json script 'e2e' passes --headed"), empty when nothing forces a headed browser. */
 export function detectHeadedModeSignals(probe: WorktreeProbe): string[] {
   const signals: string[] = [];
 

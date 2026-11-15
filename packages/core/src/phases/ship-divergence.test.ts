@@ -5,7 +5,6 @@ import { shipPhase } from './ship.js';
 
 const allSuccess = [{ status: 'completed', conclusion: 'success' }];
 
-/** Octokit stub with one open draft PR (#123) that records every call. */
 function createWatchOctokit(runs: any[]) {
   const calls: any[] = [];
   const octokit = {

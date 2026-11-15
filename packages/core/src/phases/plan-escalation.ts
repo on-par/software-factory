@@ -1,8 +1,5 @@
-// src/phases/plan-escalation.ts — planner ESCALATE line classification, split out of plan.ts
-
 import type { EscalateKind } from '../types/index.js';
 
-/** Classify a planner ESCALATE line for the escalate event (#3275). */
 export function classifyEscalation(line: string | undefined): EscalateKind | undefined {
   if (!line) return undefined;
   const rest = line.replace(/^\s*ESCALATE:\s*/i, '');

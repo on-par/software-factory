@@ -1,5 +1,3 @@
-// src/phases/check.ts — CHECK phase: independent checkers verify output, rework loop
-
 import { type WorkKey } from '../work/work-key.js';
 import { join } from 'node:path';
 
@@ -57,17 +55,11 @@ type LogFn = (
   extra?: { failoverReason?: FailoverReason; rework?: ReworkInfo; durationMs?: number },
 ) => void;
 
-/** A CHECK failure caused by the base, not the issue (#1928). */
 export interface EnvironmentFailure {
-  /** diffBase the baseline ran on (BaselineReport.baseSha). */
   baseSha: string;
-  /** Round-1 FAIL checker names, in summary order. */
   failingChecks: string[];
-  /** 'config' when a failing checker is an unknown-checker constitution error (#2581), else 'environment'. */
   cause: BaseFailureCause;
-  /** Full-output log files from round 1 plus the base-run log dir; empty when logsDir is unset. */
   logPaths: string[];
-  /** Base FAIL confirmed by a fresh local run while CI is green (#3851). */
   confirmedLocally?: true;
 }
 
@@ -76,32 +68,19 @@ export interface CheckPhaseResult {
   summary: CheckSummary;
   reworkRounds: number;
   stuck?: boolean;
-  /** True when round one's failure signature already matched `priorFailureSignature`
-   *  (#740) — the rework loop was skipped entirely (0 rounds burned) rather than
-   *  re-running a full budget against a root cause a prior run already exhausted
-   *  its rework budget on without fixing. Always implies `stuck: true`. */
   crossRunStuck?: boolean;
-  /** Signature of the final failing checks, persisted via ReworkHistory to spot repeats; absent on a clean pass. */
   failureSignature?: string;
-  /** Round-1 failing checkers re-run on diffBase (#1925); absent when round 1 passed, worker_output failed, or no diffBase. */
   baseline?: BaselineReport;
-  /** Set when every round-1 failing checker also fails on the base SHA (#1928): no rework
-   *  ran (`reworkRounds` is 0) and the caller releases the issue instead of parking it. */
   environment?: EnvironmentFailure;
-  /** Serial re-run of the failing tests checker on an environment failure (#2301, #2302). On 'passed', tests counts as PASS in summary and the run continues unless another checker still fails on base; absent when tests did not fail or the cause is not environment. */
   flakeRerun?: FlakeRerun;
-  /** Set when tests hit the verify.sh sandbox marker (#3332): the park message; no baseline or rework ran. */
   sandboxEnv?: string;
-  /** Set when every lane-owned FAIL was infra and a network/missing-tool failure repeated on the one free re-run (#3371): the park message; no rework ran. */
   infra?: string;
 }
 
 export const MAX_REWORK_ROUNDS = 3;
 
-/** Consecutive no-progress rework rounds before the lane is declared stuck. */
-const STUCK_THRESHOLD = 2;
+const CONSECUTIVE_NO_PROGRESS_ROUNDS_BEFORE_STUCK = 2;
 
-/** Provider/CI-level reasons that point away from a factory fault. */
 const EXTERNAL_REASONS = new Set<FailoverReason>([
   'rate_limit',
   'usage_cap',
@@ -118,7 +97,6 @@ function failingCheckerNames(summary: CheckSummary): string[] {
 const MAX_FAILING_TESTS = 3;
 const MAX_FAILURE_OUTPUT_LENGTH = 400;
 
-/** Bounded test-failure evidence for rework events; absent unless the tests checker failed. */
 function testFailureEvidence(summary: CheckSummary): Pick<ReworkInfo, 'failingTests' | 'failureOutput'> {
   const testsFailure = summary.results.find((result) => result.checker === 'tests' && result.result === 'FAIL');
   if (!testsFailure) return {};
@@ -135,9 +113,7 @@ function testFailureEvidence(summary: CheckSummary): Pick<ReworkInfo, 'failingTe
 function classifyReworkCause(opts: {
   steering?: ConsumedSteering;
   failovers: { reason: FailoverReason }[];
-  /** Reason from a router error when the call threw before any model produced output (#642). */
   failureReason?: FailoverReason;
-  /** A config-validation FAIL (unknown checker, schema error, unfilled placeholder) drove the round (#2582). */
   config?: boolean;
 }): ReworkCause {
   if (opts.steering && opts.steering.messages.length > 0) return 'direction-change';
@@ -147,14 +123,10 @@ function classifyReworkCause(opts: {
   return 'factory-fault';
 }
 
-/** 'config' when any FAIL is a config-validation error (unknown checker, schema error, unfilled placeholder; #2581/#2582); otherwise 'environment'. */
 export function classifyBaseFailureCause(summary: CheckSummary): BaseFailureCause {
   return summary.results.some(isConfigCheckerOutput) ? 'config' : 'environment';
 }
 
-/** True when every round-1 failing checker also fails on the base SHA (#1927): the failure
- *  belongs to the environment/base, not the lane. False without a usable baseline, on any
- *  clean-on-base or not-run failing checker, or when nothing failed. */
 export function isEnvironmentFailure(summary: CheckSummary, baseline: BaselineReport | undefined): boolean {
   if (!baseline || baseline.error !== undefined) return false;
   const failing = failingCheckerNames(summary);
@@ -162,14 +134,12 @@ export function isEnvironmentFailure(summary: CheckSummary, baseline: BaselineRe
   return failing.every((name) => baseline.checkers.some((c) => c.checker === name && c.verdict === 'fails-on-base'));
 }
 
-/** Round-1 FAIL results worth comparing against base: never evidence_plan, side_effects or tests (#4029). */
 export function baselineCandidates(summary: CheckSummary): CheckerOutput[] {
   return summary.results.filter(
     (result) => !['evidence_plan', 'side_effects', 'tests'].includes(result.checker) && result.result === 'FAIL',
   );
 }
 
-/** Checkers rework ignores on partial overlap (#1929): fails-on-base with no new failing tests. Empty without a usable baseline. */
 export function baseFailingCheckers(baseline: BaselineReport | undefined): Set<string> {
   if (!baseline || baseline.error !== undefined) return new Set();
   return new Set(
@@ -179,7 +149,6 @@ export function baseFailingCheckers(baseline: BaselineReport | undefined): Set<s
   );
 }
 
-/** The summary without the FAIL results of excluded (base-failing) checkers. */
 export function excludeBaseFailing(summary: CheckSummary, excluded: ReadonlySet<string>): CheckSummary {
   if (excluded.size === 0) return summary;
   const results = summary.results.filter((r) => !(r.result === 'FAIL' && excluded.has(r.checker)));
@@ -191,14 +160,11 @@ export function excludeBaseFailing(summary: CheckSummary, excluded: ReadonlySet<
   };
 }
 
-/** Failure signature over the lane-owned failures; falls back to the full signature when the
- *  filter leaves none, so a failing CHECK never gets an empty signature. */
 export function stuckSignature(summary: CheckSummary, excluded: ReadonlySet<string>): string {
   const target = excludeBaseFailing(summary, excluded);
   return failureSignature(target.failures > 0 ? target : summary);
 }
 
-/** The summary with the tests FAIL replaced by a PASS after a passing serial re-run (#2302). */
 export function markTestsFlaky(summary: CheckSummary, rerun: FlakeRerun): CheckSummary {
   const names = rerun.tests.length > 0 ? rerun.tests.join(', ') : 'full suite';
   const results = summary.results.map((r) =>
@@ -252,63 +218,38 @@ async function checkPhaseImpl(opts: {
   router: ModelRouter;
   log: LogFn;
   autoRework?: boolean;
-  /** Hard cap for checker repair attempts. Defaults to one to avoid full-session retry loops. */
   maxReworkRounds?: number;
   buildTimeoutSeconds?: number;
   checkTimeoutSeconds?: number;
-  /** Timeout for the tests checker command (`timeouts.tests_seconds`, #2299). */
   testsTimeoutSeconds?: number;
   compileTimeoutSeconds?: number;
   sandbox?: SandboxPolicy;
   drainSteering?: () => ConsumedSteering;
   appPort?: number;
-  /** Stable lane URL from the factory proxy (e.g. http://<lane>.factory.localhost), when running. */
   appBaseUrl?: string;
   onPgid?: (pgid: number) => void;
-  budgetGuard?: BudgetGuard; // per-issue budget guard for rework sessions (#3320)
+  budgetGuard?: BudgetGuard;
   processGroupTracker?: CheckerContext['processGroupTracker'];
-  /** Signature a prior run parked on (ReworkHistory, #740); a round-one match skips the rework loop. */
   priorFailureSignature?: string;
-  /** Fallback diff base for workerOutputChecker and designSmellsChecker in checkouts
-   *  with no remote base ref (#1211, #1212). For localOnly runs this is the run-start
-   *  HEAD captured once in runIssue before PLAN (#1210); otherwise it is buildPhase's
-   *  pre-worker HEAD. */
   diffBase?: string;
-  /** Parent ref of a stacked slice (#2716); forwarded to CheckerContext.parentBaseRef. */
   parentBaseRef?: string;
-  reviewFloorRules?: CheckerContext['reviewFloorRules']; // design_smells class-A skip (#3374)
-  /** Worker route that completed BUILD (`command` included, #2873); direct callers retain Claude rework by default. */
+  reviewFloorRules?: CheckerContext['reviewFloorRules'];
   reworkRoute?: BuildRoutePin;
-  /** Worker model that completed BUILD, retained as the compatible rework override. */
   reworkModel?: string;
-  /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
   laneId?: string;
-  /** Per-run id minted by runIssue; becomes SharedCompilationId=factory-<runId> for .NET lanes (#1910). */
   runId?: string;
-  /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
   bus?: LifecycleBus;
-  /** Heartbeat hook (#1326) for `CheckerContext.onActivity`; bumps the run-phase snapshot's `lastActivityAt`. */
   onActivity?: () => void | Promise<void>;
-  /** Factory logs dir; failing checker output goes to `<logsDir>/issue-<n>/check-r<round>/` and FAIL links it. */
   logsDir?: string;
   onWorkerResult?: ReworkWorkerOptions['onWorkerResult'];
-  /** state/baseline-cache.json (#1926); when set, baseline results are cached per base SHA + laneEnv hash. */
   baselineCachePath?: string;
-  /** check.baselineCacheTtlHours (#3540); undefined = 24. */
   baselineCacheTtlHours?: number;
-  /** GitHub CI verdict for the base SHA (#3540); absent = cached FAILs are never cross-checked. */
   requiredChecksVerdict?: (sha: string) => Promise<RequiredChecksVerdict>;
-  /** Injection seam for tests; defaults to runBaselineCheckers (#1925). */
   runBaseline?: typeof runBaselineCheckers;
-  /** Injection seam for tests; defaults to runAllCheckers (#2238). */
   runCheckers?: typeof runAllCheckers;
-  /** Empty global/system git config for checker commands (#3272); default true. */
   hermeticGit?: boolean;
-  /** Injection seam for the flaky re-run command only (#2301); defaults to ctx.runCommand / runVerificationCommand. */
   runCommand?: CheckerContext['runCommand'];
-  /** Injection seam for tests; defaults to the frozen evidence-plan runner. */
   runEvidence?: typeof runEvidencePlan;
-  /** Test seam; undefined reads `tests.affected` from the worktree's repo config (#3260). */
   testsAffected?: TestsAffectedConfig | null;
 }): Promise<CheckPhaseResult> {
   const {
@@ -352,9 +293,6 @@ async function checkPhaseImpl(opts: {
   const checkBaseDir = logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, 'check-base');
   const selectAffected = createAffectedSelector({ worktree, diffBase, constitution, config: opts.testsAffected, log });
   const checkTriageDir = logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, 'check-triage');
-  // Each failing checker is logged individually, the same way SKIPs are: the parked
-  // outcome only carries an aggregate count, so without this the checker/details pairs
-  // that name WHY a run parked are never surfaced to the operator (#675).
   const logFailures = (s: CheckSummary): void => {
     for (const f of s.results.filter((r) => r.result === 'FAIL')) {
       const findings = f.findings?.length ? `\n${renderCheckerFindings(f.findings).join('\n')}` : '';
@@ -422,7 +360,6 @@ async function checkPhaseImpl(opts: {
   }
 
   let baseline: BaselineReport | undefined;
-  // Tests are never baselined (#4029): a failing test, even one red on main, is fixed forward in rework.
   const candidates = baselineCandidates(summary);
   if (candidates.length > 0) {
     if (diffBase === undefined) {
@@ -447,13 +384,11 @@ async function checkPhaseImpl(opts: {
     }
   }
 
-  // Decided before the rework loop from the single pre-loop baseline (#1927).
   let environmentCause = isEnvironmentFailure(summary, baseline);
   if (environmentCause) {
     log('check', `every failing checker also fails on base — rework cause=${classifyBaseFailureCause(summary)}`);
   }
 
-  // Serial re-run (#2301): a tests failure that passes alone is flaky; act on it (#2302).
   let flakeRerun: FlakeRerun | undefined;
   const testsFail = summary.results.find((r) => r.checker === 'tests' && r.result === 'FAIL');
   if (testsFail) {
@@ -474,8 +409,6 @@ async function checkPhaseImpl(opts: {
     }
   }
 
-  // Environment cause (#1928): the lane cannot fix a broken base, so skip rework and the
-  // held check; the caller releases the issue and pauses the lane.
   if (environmentCause && baseline) {
     const environment: EnvironmentFailure = {
       baseSha: baseline.baseSha,
@@ -526,11 +459,6 @@ async function checkPhaseImpl(opts: {
     };
   }
 
-  // Cross-run stuck (#740): round one already reproduces the exact failure a
-  // prior run parked on. Skip the rework loop entirely rather than re-burning
-  // a full budget against a root cause nothing has fixed since — a watchdog
-  // relaunching a dead session every ~10 minutes would otherwise walk straight
-  // back into the same 3 rework rounds indefinitely.
   if (
     summary.failures > 0 &&
     priorFailureSignature !== undefined &&
@@ -620,9 +548,6 @@ async function checkPhaseImpl(opts: {
     ctx.affectedTests = undefined;
     summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
-    // When no model ran this round (modelCompleted === false), an unchanged failure
-    // signature is not evidence of a stuck worker — leave the streak untouched
-    // (neither advanced nor reset) rather than treat a provider outage as no-progress (#642).
     if (modelCompleted) {
       if (summary.failures > 0 && stuckSignature(summary, baseFailing) === signatureBefore) {
         noProgressStreak++;
@@ -631,11 +556,11 @@ async function checkPhaseImpl(opts: {
       }
     }
 
-    if (noProgressStreak >= STUCK_THRESHOLD) {
+    if (noProgressStreak >= CONSECUTIVE_NO_PROGRESS_ROUNDS_BEFORE_STUCK) {
       stuck = true;
       log(
         'stuck',
-        `lane stuck: identical failures (${failingCheckerNames(summary).join(', ')}) across ${STUCK_THRESHOLD} consecutive rework rounds — escalating early`,
+        `lane stuck: identical failures (${failingCheckerNames(summary).join(', ')}) across ${CONSECUTIVE_NO_PROGRESS_ROUNDS_BEFORE_STUCK} consecutive rework rounds — escalating early`,
         {
           rework: {
             round: reworkRounds,
@@ -703,20 +628,16 @@ export interface ReworkWorkerOptions {
   reworkRoute?: BuildRoutePin;
   reworkModel?: string;
   runId?: string;
-  /** Called with each rework worker's router result, e.g. to keep it as a run log (#3274). */
   onWorkerResult?: (result: RouterResult) => Promise<void>;
   extraInstructions?: string;
-  /** Replaces rework instruction 3 (#3260); undefined keeps the default text. */
   verifyInstruction?: string;
 }
 
-// Rework reads the failing code before changing it, staying scoped to the failures (#3372, T13).
 export const REWORK_READ_RULE =
   'Before changing anything, read the code at each failing location (the file and line in the failure, or the failing test and the code it exercises).';
 
 export async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
   failovers: { model: string; reason: FailoverReason; detail?: string }[];
-  /** False when router.run threw — no model produced output for this round (#642). */
   modelCompleted: boolean;
   failureReason?: FailoverReason;
   budgetStopped?: boolean;
@@ -794,9 +715,6 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
     attempts = reworkResult.attempts;
   } catch (err) {
     if (isBudgetStopError(err)) return { failovers: [], modelCompleted: false, budgetStopped: true };
-    // ModelRouter.run only throws once every eligible model is exhausted, and the
-    // error carries the reason + attempts. Swallowing it made a provider outage
-    // look like a factory fault (#642).
     const routerFailure = routerFailureOf(err);
     failureReason = routerFailure?.reason;
     attempts = routerFailure?.attempts ?? [];

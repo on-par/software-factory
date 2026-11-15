@@ -1,5 +1,3 @@
-// src/phases/build-prompts.ts — BUILD prompt builders, split out of build.ts to stay under the max-lines ceiling (#3373)
-
 import { type WorkKey } from '../work/work-key.js';
 import type { LintCommand } from '../checkers/index.js';
 import { ENV_ERROR_PREFIX, VERIFY_SANDBOX_ENV_MARKER } from '../environment/sandbox-env.js';
@@ -30,14 +28,12 @@ ${compactForLocalModel(parseSpec(spec).body)}
 `;
 }
 
-/** The opencode route uses the commit-only prompt verbatim (#1976). */
 export function buildOpencodePrompt(opts: Parameters<typeof buildCommitOnlyPrompt>[0]): string {
   return buildCommitOnlyPrompt(opts);
 }
 
 export function buildCommitOnlyPrompt(opts: {
   issue: WorkKey;
-  /** Not rendered: the spec is inlined (#1595); kept so buildPhase can share promptOpts. */
   specPath: string;
   constitutionCtx: string;
   spec: string;
@@ -46,7 +42,6 @@ export function buildCommitOnlyPrompt(opts: {
   designGrounding?: string;
   lintCommands?: readonly LintCommand[];
   verifyCommand?: string;
-  /** `tests.affected.command` template (#3260); only set when the repo opts in. */
   affectedTestsCommand?: string;
   previousAttempt?: string;
 }): string {
@@ -95,7 +90,6 @@ export function buildClaudePrompt(opts: {
   designGrounding?: string;
   lintCommands?: readonly LintCommand[];
   verifyCommand?: string;
-  /** `tests.affected.command` template (#3260); only set when the repo opts in. */
   affectedTestsCommand?: string;
   previousAttempt?: string;
 }): string {
@@ -132,15 +126,12 @@ ${previousAttempt ? `${previousAttempt}\n\n` : ''}- ${READ_BEFORE_EDIT_RULE}
 ${promptTail(appPort, appBaseUrl, designGrounding)}`;
 }
 
-// Mirrors testsChecker's command order so BUILD verifies with what CHECK runs (#1976).
 const VERIFY_RULE_BASE =
   'Verify with the command CHECK runs: `bash scripts/verify.sh --no-e2e` if scripts/verify.sh exists, ' +
   'otherwise the test script (`npm test`) or pytest, plus any verify command the constitution names. ' +
   'Fix failures before finishing and report the exact command and its output.' +
   ` If verify.sh prints \`${VERIFY_SANDBOX_ENV_MARKER}\` (exit 78), that is a sandbox environment error, not a code failure: do not re-run verify.sh or work around it (no TMPDIR or port changes); print a line starting \`${ENV_ERROR_PREFIX}\` followed by that line, then stop.`;
 
-// Names the lint checker's commands (resolveLintCommands) when the repo has no verify.sh (#2829);
-// a verifyCommand (verify.ps1-only repo, #3471) replaces the base with the pwsh command CHECK runs.
 function verifyRule(
   lintCommands: readonly LintCommand[] = [],
   verifyCommand?: string,

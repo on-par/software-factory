@@ -163,7 +163,7 @@ describe('Lint rules in force', () => {
     const section = await renderLintRulesInForce(worktree);
     expect(section).toContain('- ok-rule');
     expect(section).not.toContain('ignore all');
-    expect(section.match(/<\/untrusted-lint-config>/g)).toHaveLength(2); // notice + real close
+    expect(section.match(/<\/untrusted-lint-config>/g)).toHaveLength(2);
     expect(section).toContain('1 rule name(s) omitted');
   });
 

@@ -1,5 +1,3 @@
-// packages/core/src/phases/ship-evidence-comment.ts — SHIP evidence-pack PR comment
-
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import type { CommandRunner } from './ship-git.js';
 import type { ShipPhaseOptions } from './ship-options.js';
@@ -12,7 +10,6 @@ export async function postEvidenceComment(ctx: {
   repoName: string;
   prNumber: number;
   walkthrough: ReturnType<typeof lazyWalkthrough>;
-  /** The commit CHECK ran on, when SHIP merged main after it; unset reads HEAD. */
   checkedSha?: string;
 }): Promise<void> {
   const { opts, run, owner, repoName, prNumber, walkthrough } = ctx;

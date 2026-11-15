@@ -1,19 +1,12 @@
-// src/phases/plan-routes.ts — build-route helpers shared by PLAN and its prompt
-
 import { type BuildRoutePin, routeForBuildModel } from '../config/repo.js';
 import type { ModelRouter } from '../router/index.js';
 
 export type BuildRouteName = 'codex' | 'claude' | 'opencode' | 'command';
 
-/** Order PLAN falls back through when its chosen route cannot run here. */
 export const ROUTE_FALLBACK_ORDER: readonly BuildRouteName[] = ['claude', 'codex', 'opencode', 'command'];
 
-/** Routes PLAN offers when the runnable set is unknown. `command` needs a declared agentic harness,
- *  so it is only offered when known runnable. */
 export const CLI_BUILD_ROUTES: readonly BuildRouteName[] = ['codex', 'claude', 'opencode'];
 
-/** Build routes whose task resolves to at least one runnable model, in fallback order.
- *  Returns [] when the router cannot answer, which callers treat as "no restriction". */
 export function runnableBuildRoutes(router: Pick<ModelRouter, 'resolveAll'>): BuildRouteName[] {
   try {
     return ROUTE_FALLBACK_ORDER.filter((route) => router.resolveAll(`build_${route}`).length > 0);
@@ -22,12 +15,10 @@ export function runnableBuildRoutes(router: Pick<ModelRouter, 'resolveAll'>): Bu
   }
 }
 
-/** The route PLAN should use when it chose none, or chose one that cannot run here. */
 export function defaultBuildRoute(runnable: readonly BuildRouteName[]): BuildRouteName {
   return runnable[0] ?? 'claude';
 }
 
-/** Keep the requested route when it can run here (or the router cannot say); otherwise fall back. */
 export function resolveRunnableBuildRoute(
   requested: BuildRouteName,
   runnable: readonly BuildRouteName[],
@@ -36,12 +27,6 @@ export function resolveRunnableBuildRoute(
   return { route: defaultBuildRoute(runnable), rerouted: true };
 }
 
-/** The route and pin CHECK/CI rework runs on (#2873). codex/claude/opencode follow
- *  resolveRunnableBuildRoute and keep the pin unless rerouted (the pin belongs to the old route's
- *  harness). `command` is last in ROUTE_FALLBACK_ORDER and runnable when build_command resolves; its
- *  own branch decides pin keeping: it stays when the pin sits on a declared agentic harness (pin
- *  kept) or build_command resolves a runnable model (router picks), and otherwise falls back
- *  without the pin. */
 export function resolveReworkRoute(
   router: Pick<ModelRouter, 'resolveAll'> & Partial<Pick<ModelRouter, 'registryRef'>>,
   requested: BuildRoutePin,
@@ -72,7 +57,6 @@ function commandResolves(router: Pick<ModelRouter, 'resolveAll'>): boolean {
   }
 }
 
-/** Step-3 route bullets, in display order. */
 export const ROUTE_BULLETS: Record<BuildRouteName, string> = {
   codex: `   - route: codex — when the implementation from a frozen spec is bounded and mechanical
      (known-repro fixes, well-scoped features, refactors, test writing, CI/tooling)`,

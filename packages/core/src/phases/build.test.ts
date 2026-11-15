@@ -160,7 +160,6 @@ describe('buildPhase local-only codex prompt', () => {
     const prompt = stub.calls[stub.calls.length - 1].prompt;
     expect(stub.calls[stub.calls.length - 1].task).toBe('build_codex');
     expect(prompt).toContain('Local-small build for issue #82.');
-    // Spec is trimmed (leading/trailing whitespace removed) and inlined.
     expect(prompt).toContain('# Frozen spec 82');
     expect(prompt).not.toContain('   # Frozen spec 82');
     expect(prompt).not.toContain('[truncated for local model');
@@ -193,7 +192,6 @@ describe('buildPhase local-only codex prompt', () => {
     expect(prompt).toContain(
       '[truncated for local model: keep the implementation minimal and inspect files as needed]',
     );
-    // Only the first 5600 chars of the spec are retained before the truncation note.
     expect(prompt).toContain('x'.repeat(5600));
     expect(prompt).not.toContain('x'.repeat(6001));
   });
@@ -664,7 +662,6 @@ describe('buildPhase steering', () => {
   });
 });
 
-// Failover stays at one provider inside a call (#3228): a same-provider pair of workers.
 const sameProviderModels: ModelsConfig = { ...models, tiers: { worker: ['stub-worker', 'pinned-model'] } };
 
 describe('buildPhase failover events', () => {
@@ -1419,7 +1416,6 @@ describe('buildPhase cross-harness failover', () => {
         build_claude: [{ output: 'claude output' }],
       },
     });
-    // maxRetries: 0 so a rate_limit fails over immediately instead of retrying the same model.
     const rateLimitModels: ModelsConfig = {
       ...failoverModels,
       failover: { ...failoverModels.failover, maxRetries: 0 },
@@ -1930,8 +1926,6 @@ describe('buildPhase no-diff post-condition', () => {
       router: fakeRouter(),
       constitution: null,
       log: () => {},
-      // The pycache churn is filtered out by DIFF_EXCLUDES; the surviving
-      // source-file hunk is what makes the filtered text non-empty.
       collectDiff: async () => ({
         text: 'diff --git a/src/real.py b/src/real.py\n+implemented\n',
         baseRef: 'origin/main',
@@ -2087,11 +2081,9 @@ describe('BUILD prompt required elements (#1976)', () => {
   });
 
   it('does not regress the slimmed fixed instruction text length', () => {
-    // before: 2472 chars (now ~1924). Caps include the #3372 read-before-edit bullet (+237), the #3466 max-lines rule bullet (+335) and the #3332 sandbox environment-error rule (+286), the only allowed growth. The 60% target is unreachable: the mandated notice and headless note alone are ~700.
     expect(
       buildCommitOnlyPrompt({ issue: workKeyFromIssue(1), specPath: 's', constitutionCtx: '', spec: '' }).length,
     ).toBeLessThanOrEqual(2808);
-    // before: 2144 chars (now ~2040)
     expect(
       buildClaudePrompt({ issue: workKeyFromIssue(1), branch: 'b', specPath: 's', constitutionCtx: '' }).length,
     ).toBeLessThanOrEqual(2928);

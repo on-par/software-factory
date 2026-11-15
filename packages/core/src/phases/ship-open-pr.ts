@@ -1,5 +1,3 @@
-// packages/core/src/phases/ship-open-pr.ts — SHIP draft PR creation and already-exists recovery
-
 import { briefSummaryLine, renderPrBody, stripBriefIds } from '../reports/pr-body.js';
 import type { WorkRequest } from '../work/index.js';
 import { issueNumberOf, type WorkKey } from '../work/work-key.js';
@@ -23,7 +21,6 @@ export async function openOrFindPr(ctx: {
   const { opts, inlineWork, ticket, stack, base, owner, repoName, walkthrough } = ctx;
   const { octokit, issue, branch, checkSummary, log } = opts;
   let prNumber: number;
-  // Get title from issue (skipped for a non-github work source — no such issue exists)
   const title = inlineWork
     ? inlineWork.title
     : ticket
@@ -33,8 +30,6 @@ export async function openOrFindPr(ctx: {
   const slice = inlineWork ? undefined : opts.slice;
   const ref = ticket ? ticket.key : `#${issue}`;
   const finalSlice = !slice || slice.index >= slice.count;
-  // A brief is a local file reviewers cannot open, so the body describes it by its title and links the
-  // open PR it builds on (a --stack or --base-branch base), never its id, digest or path.
   const basePr = inlineWork && base !== SHIP_BASE_BRANCH ? await findOpenPR(octokit, owner, repoName, base) : undefined;
   const summaryLine = inlineWork
     ? briefSummaryLine(title, basePr?.status === 'found' ? basePr.prNumber : undefined)
@@ -47,7 +42,6 @@ export async function openOrFindPr(ctx: {
       ? `${title} — slice ${slice.index}/${slice.count} (${ref})`
       : `${title} (${ref})`;
 
-  // Create PR
   try {
     const { data: pr } = await octokit.rest.pulls.create({
       owner,

@@ -26,8 +26,7 @@ const run = async (command: string, options?: { cwd?: string }) => ({
   stderr: '',
 });
 
-/** A lane branch and a main that both added a CHANGELOG bullet since the lane branched. */
-function conflictingLane(): { lane: string; checked: string } {
+function laneAndMainBothAddingChangelogBullets(): { lane: string; checked: string } {
   const root = tempDirs.makeSync('ship-main-sync-');
   const origin = join(root, 'origin.git');
   const main = join(root, 'main');
@@ -56,7 +55,7 @@ function conflictingLane(): { lane: string; checked: string } {
 
 describe('syncShipBranchWithMain', () => {
   it('merges origin/main into a branch whose only conflict is CHANGELOG Unreleased, keeping both bullets', async () => {
-    const { lane, checked } = conflictingLane();
+    const { lane, checked } = laneAndMainBothAddingChangelogBullets();
     const log = vi.fn();
     const result = await syncShipBranchWithMain({ run, worktree: lane, branch: 'factory/3-topic', log });
     expect(result.checkedSha).toBe(checked);

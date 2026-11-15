@@ -1,5 +1,3 @@
-// src/phases/ship.ts — SHIP phase: create/verify PR, mark ready for review
-
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -72,7 +70,6 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
     if (denied) return denied;
   }
 
-  // Check if a PR already exists (claude route may have created one)
   const openLookup = await findOpenPR(octokit, owner, repoName, branch);
   if (openLookup.status === 'error') {
     const reason = `could not determine whether an open PR exists for ${branch} (${openLookup.detail})`;
@@ -84,7 +81,6 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
   let watchRef = branch;
   let headSha: string | undefined;
 
-  // #3945: open the PR mergeable with main (CHANGELOG/ADR index auto-resolved), or GitHub runs no CI on it.
   const synced =
     opts.syncMain && !reentry && base === SHIP_BASE_BRANCH
       ? await syncShipBranchWithMain({ run, worktree, branch, log })

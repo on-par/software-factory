@@ -1,5 +1,3 @@
-// packages/core/src/phases/ship-branch-push.ts — SHIP push of a new branch before PR creation
-
 import type { Octokit } from '@octokit/rest';
 
 import { shellEscape } from '../utils/index.js';
@@ -33,15 +31,10 @@ export async function pushNewBranch(ctx: {
   });
   if (stop) return stop;
 
-  // Push branch. A rejected push means the remote head does not contain this run's
-  // commits — opening a PR against it would advertise work that is not there, so the
-  // ship fails closed here rather than continuing to PR creation (#734).
   let pushCmd = `git push -u origin ${shellEscape(branch)}`;
   const recorded = ctx.recordedRemoteSha;
   let leased = false;
   if (recorded) {
-    // A retry rebuilds the branch from origin/main, so an earlier run's push is stale. Replace it
-    // only while the remote is still exactly what was recorded at worktree creation (#1869).
     const current = await readRemoteBranchSha(run, worktree, branch);
     if (current.status === 'unreadable') {
       const reason = `could not read origin/${branch} to check recorded SHA ${recorded} (${current.detail})`;
@@ -60,10 +53,6 @@ export async function pushNewBranch(ctx: {
       log('ship', `replacing stale origin/${branch} @ ${recorded} with a leased push`);
     }
   }
-  // A zero-exit push is not proof the remote branch actually carries this run's commits — a
-  // concurrent push or an update that silently applied nothing leaves the remote head elsewhere,
-  // and a PR opened against it advertises work that is not there (#735). Fail closed, like the
-  // push-failure abort (#734).
   const pushed = await pushAndVerifyRemoteHead(run, worktree, branch, pushCmd);
   if (pushed.status === 'push-failed') {
     const pushReason = `git push failed (${pushed.kind}): ${pushed.detail}`;
