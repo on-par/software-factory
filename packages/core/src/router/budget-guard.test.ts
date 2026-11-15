@@ -6,7 +6,7 @@ import type { HarnessLiveUsage, HarnessRequest } from '../harness/index.js';
 import { BudgetStopError, isBudgetStopError, watchBudget } from './budget-guard.js';
 import { CliModelExecutor, type ModelExecutor, ModelRouter } from './index.js';
 import { ModelRegistry } from '../models/index.js';
-import { recordArgs } from '../test-support/record-args.test.js';
+import { recordArgs } from '../test-support/record-args.js';
 
 const def = (provider: 'anthropic' | 'openai') => ({
   provider,

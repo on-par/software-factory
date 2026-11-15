@@ -18,7 +18,7 @@ import {
   ProviderBreaker,
   reportedCooldownMs,
 } from './breaker.js';
-import { recordArgs } from '../test-support/record-args.test.js';
+import { recordArgs } from '../test-support/record-args.js';
 
 const tempDirs = new Set<string>();
 

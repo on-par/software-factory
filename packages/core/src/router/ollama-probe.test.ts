@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FetchFn } from './index.js';
 import { claimOllamaSkipNotice, ollamaEndpoint, probeOllama, resetOllamaProbeCache } from './ollama-probe.js';
-import { recordArgs } from '../test-support/record-args.test.js';
+import { recordArgs } from '../test-support/record-args.js';
 
 const EP = 'http://127.0.0.1:11434';
 const response = (ok: boolean, status: number) => ({

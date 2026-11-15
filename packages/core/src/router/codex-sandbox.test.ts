@@ -5,7 +5,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { CodingHarness, HarnessRequest } from '../harness/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { CliModelExecutor, type ModelExecutorContext, ModelRouter } from './index.js';
-import { recordArgs } from '../test-support/record-args.test.js';
+import { recordArgs } from '../test-support/record-args.js';
 
 const fakeGitExec: ExecFn = async () => ({ stdout: '', stderr: '' });
 
