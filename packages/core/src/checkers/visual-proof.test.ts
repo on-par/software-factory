@@ -244,23 +244,37 @@ describe('runVisualProofCapture', () => {
       ],
     }),
   );
+  type StartArgs = Parameters<VisualProofCaptureDeps['startApp']>;
+  type RunArgs = Parameters<VisualProofCaptureDeps['runCommand']>;
   const deps = (patch: Partial<VisualProofCaptureDeps> = {}) => {
-    const startApp = vi.fn(() => ({
+    const starts: { argv: StartArgs[0]; opts: StartArgs[1] }[] = [];
+    const commands: { argv: RunArgs[0]; opts: RunArgs[1] }[] = [];
+    const killed: number[] = [];
+    const defaultStart: VisualProofCaptureDeps['startApp'] = () => ({
       pid: 1,
       exited: new Promise<never>(() => {}),
       output: () => '',
-    }));
+    });
+    const innerStart = patch.startApp ?? defaultStart;
     const full: Partial<VisualProofCaptureDeps> = {
-      startApp,
-      probeReady: vi.fn(async () => 200),
-      runCommand: vi.fn(async () => cmdResult()),
-      killGroup: vi.fn(async () => undefined),
+      probeReady: async () => 200,
+      runCommand: async (argv, opts) => {
+        commands.push({ argv, opts });
+        return cmdResult();
+      },
+      killGroup: async (pgid) => {
+        killed.push(pgid);
+      },
       sleep: async () => {},
       now: Date.now,
       readFile: (p: string) => (p.endsWith('manifest.json') ? goodManifest : png),
       ...patch,
+      startApp: (argv, opts) => {
+        starts.push({ argv, opts });
+        return innerStart(argv, opts);
+      },
     };
-    return { full, startApp };
+    return { full, starts, commands, killed };
   };
   const input = (patch: Record<string, unknown> = {}) => ({
     requirement,
@@ -275,18 +289,18 @@ describe('runVisualProofCapture', () => {
   });
 
   it('never starts the app or runs the command when proof is not required', async () => {
-    const { full, startApp } = deps();
+    const { full, starts, commands } = deps();
     const r = await runVisualProofCapture(input({ requirement: { required: false } }), full);
     expect(r.status).toBe('not-required');
-    expect(startApp).not.toHaveBeenCalled();
-    expect(full.runCommand).not.toHaveBeenCalled();
+    expect(starts).toEqual([]);
+    expect(commands).toEqual([]);
   });
 
   it('fails with the requirement diagnostic', async () => {
-    const { full, startApp } = deps();
+    const { full, starts } = deps();
     const r = await runVisualProofCapture(input({ requirement: { ...requirement, diagnostic: 'uncovered' } }), full);
     expect(r).toMatchObject({ status: 'fail', diagnostic: 'uncovered' });
-    expect(startApp).not.toHaveBeenCalled();
+    expect(starts).toEqual([]);
   });
 
   it('is unavailable without qa.start', async () => {
@@ -295,28 +309,27 @@ describe('runVisualProofCapture', () => {
   });
 
   it('fails with a remedy when no lane port is leased', async () => {
-    const { full, startApp } = deps();
+    const { full, starts } = deps();
     const r = await runVisualProofCapture(input({ port: undefined }), full);
     expect(r).toMatchObject({ status: 'unavailable', diagnostic: 'no leased lane port — enable environment.ports' });
-    expect(startApp).not.toHaveBeenCalled();
+    expect(starts).toEqual([]);
   });
 
   it('passes with validated captures and kills the start group', async () => {
     vi.stubEnv('GITHUB_TOKEN', 'secret');
     vi.stubEnv('FACTORY_MERGE', '1');
-    const { full } = deps({
-      startApp: vi.fn((_argv, opts) => {
+    const { full, commands, killed } = deps({
+      startApp: (_argv, opts) => {
         opts.onPgid?.(42);
         return { pid: 42, exited: new Promise<never>(() => {}), output: () => '' };
-      }),
+      },
     });
     const r = await runVisualProofCapture(input(), full);
     vi.unstubAllEnvs();
     expect(r.status).toBe('pass');
     expect(r.captures).toHaveLength(1);
-    expect(full.killGroup).toHaveBeenCalledWith(42);
-    const run = vi.mocked(full.runCommand as NonNullable<typeof full.runCommand>);
-    const [argv, opts] = run.mock.calls[0] ?? [];
+    expect(killed).toEqual([42]);
+    const { argv, opts } = commands[0] ?? {};
     expect(argv).toEqual(['node', 'capture.mjs']);
     expect(opts?.env).toMatchObject({
       VISUAL_PROOF_BASE_URL: 'http://127.0.0.1:3100',
@@ -333,14 +346,10 @@ describe('runVisualProofCapture', () => {
     vi.stubEnv('GITHUB_TOKEN', 'secret');
     vi.stubEnv('GH_TOKEN', 'secret');
     vi.stubEnv('FACTORY_MERGE', '1');
-    const startApp = vi.fn((_argv: readonly string[], _opts: { env: NodeJS.ProcessEnv }) => ({
-      pid: 1,
-      exited: new Promise<never>(() => {}),
-      output: () => '',
-    }));
-    await runVisualProofCapture(input(), deps({ startApp }).full);
+    const { full, starts } = deps();
+    await runVisualProofCapture(input(), full);
     vi.unstubAllEnvs();
-    const opts = startApp.mock.calls[0]?.[1];
+    const opts = starts[0]?.opts;
     expect(opts?.env.GITHUB_TOKEN).toBeUndefined();
     expect(opts?.env.GH_TOKEN).toBeUndefined();
     expect(opts?.env.FACTORY_MERGE).toBeUndefined();
@@ -349,7 +358,7 @@ describe('runVisualProofCapture', () => {
   });
 
   it('is unavailable when start exits before ready', async () => {
-    const { full } = deps({
+    const { full, commands } = deps({
       startApp: () => ({ pid: 1, exited: Promise.resolve({ code: 1, signal: null }), output: () => 'boom' }),
       probeReady: async () => null,
     });
@@ -358,7 +367,7 @@ describe('runVisualProofCapture', () => {
       status: 'unavailable',
       diagnostic: expect.stringContaining('start exited (code 1) before ready: boom'),
     });
-    expect(full.runCommand).not.toHaveBeenCalled();
+    expect(commands).toEqual([]);
   });
 
   it('is unavailable when the app never becomes ready', async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { applyReviewFloorOverrides } from '../review/floor.js';
@@ -46,13 +46,12 @@ function numstatRunner(numstat: string | null): DiffRunner {
 async function runWith(numstat: string | null, extra: Partial<CheckerContext> = {}) {
   const stub = new StubModelExecutor({ scripts: { check_design: [{ output: PASS }] } });
   const router = new ModelRouter(models, routes, false, stub);
-  const run = vi.spyOn(router, 'run');
   const ctx: CheckerContext = { worktree: '/no/such/worktree', specPath: '/no/such/spec.md', ...extra };
   const result = await designSmellsChecker(ctx, router, undefined, {
     collectDiff: async () => cleanDiff,
     diffRunner: numstatRunner(numstat),
   });
-  return { result, calls: run.mock.calls.length };
+  return { result, calls: stub.calls.length };
 }
 
 describe('designSmellsChecker review floor skip', () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it, type Mock, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { PreviewConfigSchema } from '../config/preview-section.js';
 import {
@@ -20,12 +20,17 @@ interface Fixtures {
   headCommitDate?: string;
 }
 
-function fakeGitHub(f: Fixtures): PreviewGitHub & { headCommitDate: Mock<PreviewGitHub['headCommitDate']> } {
+function fakeGitHub(f: Fixtures): PreviewGitHub & { headDateReads: () => number } {
+  let reads = 0;
   return {
     listDeployments: async () => f.deployments ?? [],
     listDeploymentStatuses: async (_target, id) => f.statuses?.[id] ?? [],
     listComments: async () => f.comments ?? [],
-    headCommitDate: vi.fn(async () => f.headCommitDate),
+    headCommitDate: async () => {
+      reads++;
+      return f.headCommitDate;
+    },
+    headDateReads: () => reads,
   };
 }
 
@@ -123,7 +128,7 @@ describe('findPreviewUrl from a PR comment', () => {
     });
     const source = commentSource({ urlPattern: ': (?<url>https://\\S+)' });
     expect(await findPreviewUrl(github, target, source)).toBe('https://sha.example.com');
-    expect(github.headCommitDate).not.toHaveBeenCalled();
+    expect(github.headDateReads()).toBe(0);
   });
 
   it('uses capture group 1 when the pattern has no url group', async () => {

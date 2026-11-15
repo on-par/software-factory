@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   assertVisualProofForHead,
@@ -11,6 +11,7 @@ import {
   VISUAL_PROOF_STATUS_CONTEXT,
   VisualProofMissingError,
 } from './visual-proof-attach.js';
+import { fakeOctokit } from '../test-support/fake-octokit.js';
 import type { VisualProofResult } from './visual-proof.js';
 
 const HEAD = 'abcdef0123456789abcdef0123456789abcdef01';
@@ -32,46 +33,11 @@ const passResult: VisualProofResult = {
   ],
 };
 
-const httpError = (status: number) => Object.assign(new Error(`http ${status}`), { status });
-
-function fakeOctokit(opts: { ref?: 'none' | 'exists'; readBack?: 'ok' | 'missing'; updateFails?: number } = {}) {
-  let updateFails = opts.updateFails ?? 0;
-  const git = {
-    getRef: vi.fn(async () => {
-      if (opts.ref !== 'exists') throw httpError(404);
-      return { data: { object: { sha: 'parentsha' } } };
-    }),
-    getCommit: vi.fn(async () => ({ data: { tree: { sha: 'parenttree' } } })),
-    createBlob: vi.fn(async () => ({ data: { sha: 'blobsha' } })),
-    createTree: vi.fn(async () => ({ data: { sha: 'treesha' } })),
-    createCommit: vi.fn(async () => ({ data: { sha: 'commitsha000000' } })),
-    createRef: vi.fn(async () => ({})),
-    updateRef: vi.fn(async () => {
-      if (updateFails-- > 0) throw httpError(422);
-      return {};
-    }),
-  };
-  const repos = {
-    getContent: vi.fn(async (_args: { path: string }) => {
-      if (opts.readBack === 'missing') throw httpError(404);
-      return { data: { type: 'file', size: 4 } };
-    }),
-    createCommitStatus: vi.fn(async (_args: { state: string; description: string }) => ({})),
-    listCommitStatusesForRef: vi.fn(),
-  };
-  const pulls = {
-    get: vi.fn(async () => ({ data: { body: 'Original body' } })),
-    update: vi.fn(async (_args: { body: string }) => ({})),
-  };
-  const octokit: any = { rest: { git, repos, pulls } };
-  return { octokit, git, repos, pulls };
-}
-
 const readFile = () => Buffer.from([1, 2, 3, 4]);
 
 describe('attachVisualProof', () => {
   it('embeds an immutable evidence-branch image for a valid capture', async () => {
-    const { octokit, git, repos } = fakeOctokit();
+    const { octokit, calls } = fakeOctokit();
     const r = await attachVisualProof(octokit, target, passResult, readFile);
     expect(r.status).toBe('pass');
     expect(r.images).toEqual([
@@ -82,30 +48,29 @@ describe('attachVisualProof', () => {
         url: 'https://github.com/o/r/blob/commitsha000000/visual-proof/7/run-9/abcdef012345/0-settings-default-1280x800.png?raw=true',
       },
     ]);
-    expect(git.createBlob).toHaveBeenCalledWith({ owner: 'o', repo: 'r', content: 'AQIDBA==', encoding: 'base64' });
-    expect(git.createTree).toHaveBeenCalledWith(expect.not.objectContaining({ base_tree: expect.anything() }));
-    expect(git.createCommit).toHaveBeenCalledWith(
-      expect.objectContaining({ message: 'visual proof for PR #7 at abcdef012345 (run run-9)', parents: [] }),
-    );
-    expect(git.createRef).toHaveBeenCalledWith(expect.objectContaining({ ref: 'refs/heads/factory-evidence' }));
-    expect(repos.getContent).toHaveBeenCalledWith(expect.objectContaining({ ref: 'commitsha000000' }));
+    expect(calls.createBlob).toEqual([{ owner: 'o', repo: 'r', content: 'AQIDBA==', encoding: 'base64' }]);
+    expect(calls.createTree[0]).not.toHaveProperty('base_tree');
+    expect(calls.createCommit[0]).toMatchObject({
+      message: 'visual proof for PR #7 at abcdef012345 (run run-9)',
+      parents: [],
+    });
+    expect(calls.createRef[0]).toMatchObject({ ref: 'refs/heads/factory-evidence' });
+    expect(calls.getContent[0]).toMatchObject({ ref: 'commitsha000000' });
   });
 
   it('builds on the existing evidence branch with a fast-forward update', async () => {
-    const { octokit, git } = fakeOctokit({ ref: 'exists' });
+    const { octokit, calls } = fakeOctokit({ ref: 'exists' });
     const r = await attachVisualProof(octokit, { ...target, evidenceBranch: 'proof' }, passResult, readFile);
     expect(r.status).toBe('pass');
-    expect(git.createTree).toHaveBeenCalledWith(expect.objectContaining({ base_tree: 'parenttree' }));
-    expect(git.updateRef).toHaveBeenCalledWith(
-      expect.objectContaining({ ref: 'heads/proof', sha: 'commitsha000000', force: false }),
-    );
+    expect(calls.createTree[0]).toMatchObject({ base_tree: 'parenttree' });
+    expect(calls.updateRef[0]).toMatchObject({ ref: 'heads/proof', sha: 'commitsha000000', force: false });
   });
 
   it('retries once when the ref moved (422)', async () => {
-    const { octokit, git } = fakeOctokit({ ref: 'exists', updateFails: 1 });
+    const { octokit, calls } = fakeOctokit({ ref: 'exists', updateFails: 1 });
     expect((await attachVisualProof(octokit, target, passResult, readFile)).status).toBe('pass');
-    expect(git.updateRef).toHaveBeenCalledTimes(2);
-    expect(git.createBlob).toHaveBeenCalledTimes(1);
+    expect(calls.updateRef).toHaveLength(2);
+    expect(calls.createBlob).toHaveLength(1);
   });
 
   it('fails with an upload diagnostic when the ref keeps moving', async () => {
@@ -123,20 +88,19 @@ describe('attachVisualProof', () => {
   });
 
   it('fails when the read-back asset is not the uploaded file', async () => {
-    const { octokit, repos } = fakeOctokit();
-    repos.getContent.mockResolvedValueOnce({ data: { type: 'file', size: 99 } });
+    const { octokit } = fakeOctokit({ readBackSize: 99 });
     const r = await attachVisualProof(octokit, target, passResult, readFile);
     expect(r).toMatchObject({ status: 'fail', diagnostic: expect.stringContaining('embedded asset unavailable') });
   });
 
   it('uploads proof for a factory/* PR head branch to the default evidence branch', async () => {
-    const { octokit, git } = fakeOctokit();
+    const { octokit, calls } = fakeOctokit();
     const r = await attachVisualProof(octokit, { ...target, branch: 'factory/12-x' }, passResult, readFile);
     expect(r.status).toBe('pass');
     expect(r.images?.[0]?.url).toBe(
       'https://github.com/o/r/blob/commitsha000000/visual-proof/7/run-9/abcdef012345/0-settings-default-1280x800.png?raw=true',
     );
-    expect(git.createRef).toHaveBeenCalledWith(expect.objectContaining({ ref: 'refs/heads/factory-evidence' }));
+    expect(calls.createRef[0]).toMatchObject({ ref: 'refs/heads/factory-evidence' });
     expect(r.diagnostic).toBeUndefined();
   });
 
@@ -145,25 +109,25 @@ describe('attachVisualProof', () => {
       { ...target, branch: 'factory-evidence' },
       { ...target, branch: 'proof', evidenceBranch: 'proof' },
     ]) {
-      const { octokit, git } = fakeOctokit();
+      const { octokit, calls } = fakeOctokit();
       const r = await attachVisualProof(octokit, t, passResult, readFile);
       expect(r.status).toBe('fail');
       expect(r.diagnostic).toContain('refusing to write visual proof to the PR branch');
-      expect(git.createBlob).not.toHaveBeenCalled();
-      expect(git.createRef).not.toHaveBeenCalled();
-      expect(git.updateRef).not.toHaveBeenCalled();
+      expect(calls.createBlob).toEqual([]);
+      expect(calls.createRef).toEqual([]);
+      expect(calls.updateRef).toEqual([]);
     }
   });
 
   it('refuses a factory/* evidence branch', async () => {
-    const { octokit, git } = fakeOctokit();
+    const { octokit, calls } = fakeOctokit();
     const r = await attachVisualProof(octokit, { ...target, evidenceBranch: 'factory/proof' }, passResult, readFile);
     expect(r.status).toBe('fail');
     expect(r.diagnostic).toContain('factory/proof');
     expect(r.diagnostic).not.toContain('PR branch feat/ui');
-    expect(git.createBlob).not.toHaveBeenCalled();
-    expect(git.createRef).not.toHaveBeenCalled();
-    expect(git.updateRef).not.toHaveBeenCalled();
+    expect(calls.createBlob).toEqual([]);
+    expect(calls.createRef).toEqual([]);
+    expect(calls.updateRef).toEqual([]);
   });
 
   it('fails when the capture directory is unknown', async () => {
@@ -216,18 +180,20 @@ describe('renderVisualProofBlock and publishVisualProof', () => {
   });
 
   it('upserts the body and stamps a success status on the head', async () => {
-    const { octokit, pulls, repos } = fakeOctokit();
+    const { octokit, calls } = fakeOctokit();
     await publishVisualProof(octokit, target, withImages);
-    const body = pulls.update.mock.calls[0]?.[0].body;
+    const body = calls.pullsUpdate[0]?.body;
     expect(body).toContain('Original body');
     expect(body).toContain(VISUAL_PROOF_START);
-    expect(repos.createCommitStatus).toHaveBeenCalledWith(
-      expect.objectContaining({ sha: HEAD, context: VISUAL_PROOF_STATUS_CONTEXT, state: 'success' }),
-    );
+    expect(calls.createCommitStatus[0]).toMatchObject({
+      sha: HEAD,
+      context: VISUAL_PROOF_STATUS_CONTEXT,
+      state: 'success',
+    });
   });
 
   it('stamps a failure status with a truncated diagnostic', async () => {
-    const { octokit, repos } = fakeOctokit();
+    const { octokit, calls } = fakeOctokit();
     await publishVisualProof(octokit, target, {
       status: 'fail',
       headSha: HEAD,
@@ -235,7 +201,7 @@ describe('renderVisualProofBlock and publishVisualProof', () => {
       captures: [],
       diagnostic: 'x'.repeat(400),
     });
-    const call = repos.createCommitStatus.mock.calls[0]?.[0];
+    const call = calls.createCommitStatus[0];
     expect(call?.state).toBe('failure');
     expect(call?.description).toHaveLength(140);
   });
@@ -260,54 +226,50 @@ describe('renderVisualProofBlock and publishVisualProof', () => {
   });
 
   it('stamps success with an advisory description for an advisory non-pass, so required-check readers never see red nor wait forever on an unreported status (#4047)', async () => {
-    const { octokit, repos, pulls } = fakeOctokit();
+    const { octokit, calls } = fakeOctokit();
     await publishVisualProof(octokit, target, failed, 'advisory');
-    expect(pulls.update.mock.calls[0]?.[0].body).toContain(VISUAL_PROOF_ADVISORY_START);
-    expect(repos.createCommitStatus).toHaveBeenCalledWith(
-      expect.objectContaining({
-        context: VISUAL_PROOF_STATUS_CONTEXT,
-        state: 'success',
-        description: 'advisory: visual proof fail: capture exited 1',
-      }),
-    );
+    expect(calls.pullsUpdate[0]?.body).toContain(VISUAL_PROOF_ADVISORY_START);
+    expect(calls.createCommitStatus[0]).toMatchObject({
+      context: VISUAL_PROOF_STATUS_CONTEXT,
+      state: 'success',
+      description: 'advisory: visual proof fail: capture exited 1',
+    });
   });
 
   it('replaces a required block with the advisory one in place, and back, so switching modes never leaves two blocks (#4047)', async () => {
     const required = `Intro\n\n${renderVisualProofBlock(failed)}\n\nOutro`;
-    const { octokit, pulls } = fakeOctokit();
-    pulls.get.mockResolvedValueOnce({ data: { body: required } });
+    const prBodies = [required];
+    const { octokit, calls } = fakeOctokit({ prBodies });
     await publishVisualProof(octokit, target, failed, 'advisory');
-    const advisoryBody = pulls.update.mock.calls[0]?.[0].body ?? '';
+    const advisoryBody = calls.pullsUpdate[0]?.body ?? '';
     expect(advisoryBody).not.toContain(VISUAL_PROOF_START);
     expect(count(advisoryBody, VISUAL_PROOF_ADVISORY_START)).toBe(1);
     expect(count(advisoryBody, VISUAL_PROOF_END)).toBe(1);
     expect(advisoryBody.indexOf('Intro')).toBeLessThan(advisoryBody.indexOf(VISUAL_PROOF_ADVISORY_START));
     expect(advisoryBody.indexOf(VISUAL_PROOF_END)).toBeLessThan(advisoryBody.indexOf('Outro'));
 
-    pulls.get.mockResolvedValueOnce({ data: { body: `${advisoryBody}\n\n${renderVisualProofBlock(failed)}` } });
+    prBodies.push(`${advisoryBody}\n\n${renderVisualProofBlock(failed)}`);
     await publishVisualProof(octokit, target, withImages);
-    const requiredBody = pulls.update.mock.calls[1]?.[0].body ?? '';
+    const requiredBody = calls.pullsUpdate[1]?.body ?? '';
     expect(requiredBody).not.toContain(VISUAL_PROOF_ADVISORY_START);
     expect(count(requiredBody, VISUAL_PROOF_START)).toBe(1);
     expect(count(requiredBody, VISUAL_PROOF_END)).toBe(1);
   });
 
   it('does not rewrite an unchanged body', async () => {
-    const { octokit, pulls } = fakeOctokit();
     const block = renderVisualProofBlock(withImages);
-    pulls.get.mockResolvedValueOnce({ data: { body: block } });
+    const { octokit, calls } = fakeOctokit({ prBodies: [block] });
     await publishVisualProof(octokit, target, withImages);
-    expect(pulls.update).not.toHaveBeenCalled();
+    expect(calls.pullsUpdate).toEqual([]);
   });
 });
 
 describe('assertVisualProofForHead', () => {
   const marked = `body\n${VISUAL_PROOF_START}\nx`;
   const run = (prBody: string | null, statuses: object[], self = 5) => {
-    const { octokit, repos } = fakeOctokit();
-    repos.listCommitStatusesForRef.mockResolvedValue({ data: statuses });
+    const { octokit, calls } = fakeOctokit({ statuses });
     return {
-      repos,
+      calls,
       result: assertVisualProofForHead(
         octokit,
         { owner: 'o', repo: 'r', prNumber: 7, prBody, headSha: HEAD },
@@ -322,10 +284,10 @@ describe('assertVisualProofForHead', () => {
   });
 
   it('returns without a lookup when the body has no marker, since land enforces proof only under the required marker', async () => {
-    const { repos, result } = run('plain', []);
+    const { calls, result } = run('plain', []);
     await expect(result).resolves.toBeUndefined();
     await expect(run(null, []).result).resolves.toBeUndefined();
-    expect(repos.listCommitStatusesForRef).not.toHaveBeenCalled();
+    expect(calls.listCommitStatusesForRef).toEqual([]);
   });
 
   it('throws with the remedy when the head has no status (proof for another sha)', async () => {
@@ -348,9 +310,9 @@ describe('assertVisualProofForHead', () => {
   });
 
   it('does not enforce an advisory block (#4047)', async () => {
-    const { repos, result } = run(`body\n${VISUAL_PROOF_ADVISORY_START}\nx\n${VISUAL_PROOF_END}`, [status('failure')]);
+    const { calls, result } = run(`body\n${VISUAL_PROOF_ADVISORY_START}\nx\n${VISUAL_PROOF_END}`, [status('failure')]);
     await expect(result).resolves.toBeUndefined();
-    expect(repos.listCommitStatusesForRef).not.toHaveBeenCalled();
+    expect(calls.listCommitStatusesForRef).toEqual([]);
   });
 
   it('passes for a factory-created success status', async () => {
