@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { STEWARD_ESCALATION_LINE, stewardCommentMarker, stewardSignatureHash } from './comment.js';
 import type { StewardCommentGitHubClient, StewardIssueComment } from './comment.js';
@@ -24,19 +24,25 @@ function verdictJson(confidence: number): string {
 
 function memoryClient() {
   const comments: StewardIssueComment[] = [];
+  const requests: string[] = [];
   const client: StewardCommentGitHubClient = {
-    listIssueComments: vi.fn(async () => comments.map((c) => ({ ...c }))),
-    createIssueComment: vi.fn(async ({ body }) => {
+    listIssueComments: async () => {
+      requests.push('listIssueComments');
+      return comments.map((c) => ({ ...c }));
+    },
+    createIssueComment: async ({ body }) => {
+      requests.push('createIssueComment');
       const id = comments.length + 1;
       comments.push({ id, body });
       return { id };
-    }),
-    updateIssueComment: vi.fn(async ({ comment_id, body }) => {
+    },
+    updateIssueComment: async ({ comment_id, body }) => {
+      requests.push('updateIssueComment');
       const c = comments.find((x) => x.id === comment_id);
       if (c) c.body = body;
-    }),
+    },
   };
-  return { comments, client };
+  return { comments, client, requests };
 }
 
 describe('runSteward', () => {
@@ -50,7 +56,11 @@ describe('runSteward', () => {
 
   const setup = (text: string) => {
     const mem = memoryClient();
-    const invoke = vi.fn<StewardModelInvoker>(async () => ({ text }));
+    const calls: Parameters<StewardModelInvoker>[0][] = [];
+    const invoke: StewardModelInvoker = async (c) => {
+      calls.push(c);
+      return { text };
+    };
     const ports: RunStewardPorts = {
       runDir: dir,
       costsFile: join(dir, 'costs.jsonl'),
@@ -58,7 +68,7 @@ describe('runSteward', () => {
       comments: mem.client,
       bossModels: ['boss-model'],
     };
-    return { ...mem, invoke, ports };
+    return { ...mem, calls, ports };
   };
   const input = (overrides: Partial<RunStewardInput> = {}): RunStewardInput => ({
     runId: 'abc123abc123',
@@ -69,12 +79,11 @@ describe('runSteward', () => {
   });
 
   it('writes the packet and verdict and creates one comment', async () => {
-    const { ports, invoke, comments } = setup(verdictJson(0.95));
+    const { ports, calls, comments } = setup(verdictJson(0.95));
     const result = await runSteward(input(), ports);
     await expect(readFile(join(dir, STEWARD_PACKET_FILE), 'utf8')).resolves.toBeTruthy();
     await expect(readFile(join(dir, STEWARD_VERDICT_FILE), 'utf8')).resolves.toBeTruthy();
-    expect(invoke).toHaveBeenCalledTimes(1);
-    expect(invoke.mock.calls[0][0].model).toBe('boss-model');
+    expect(calls.map((c) => c.model)).toEqual(['boss-model']);
     expect(comments).toHaveLength(1);
     expect(comments[0].body).toContain(stewardCommentMarker('abc123abc123', 'sig-1'));
     expect(comments[0].body).toContain('check-exhausted');
@@ -97,13 +106,12 @@ describe('runSteward', () => {
   });
 
   it('records a steward-error verdict but publishes no comment', async () => {
-    const { ports, client } = setup('not json');
+    const { ports, requests } = setup('not json');
     const result = await runSteward(input(), ports);
     expect(result.verdict.reason).toBe('steward-error');
     expect(result.comment).toBeUndefined();
     await expect(readFile(join(dir, STEWARD_VERDICT_FILE), 'utf8')).resolves.toBeTruthy();
-    expect(client.listIssueComments).not.toHaveBeenCalled();
-    expect(client.createIssueComment).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
   });
 
   it('falls back to the trigger as the signature when none is carried', async () => {
