@@ -2,7 +2,7 @@
 
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { EventKind } from '../events/kinds.js';
@@ -71,24 +71,36 @@ function setup(
 ) {
   const writes: string[] = [];
   const store = createStore(issues, {}, writes);
+  const gh = {
+    lists: 0,
+    issueReads: [] as number[],
+    closed: [] as number[],
+    comments: [] as Array<{ issue_number: number; body: string }>,
+    deletedRefs: [] as string[],
+  };
   const octokit = {
     rest: {
       pulls: {
-        list: vi.fn(async () => ({
-          data: prs.map((p) => ({
-            number: p.number,
-            head: { ref: p.branch },
-            draft: p.draft ?? true,
-            created_at: p.createdAt ?? ago(48),
-          })),
-        })),
-        update: vi.fn(async () => {
+        list: async () => {
+          gh.lists++;
+          return {
+            data: prs.map((p) => ({
+              number: p.number,
+              head: { ref: p.branch },
+              draft: p.draft ?? true,
+              created_at: p.createdAt ?? ago(48),
+            })),
+          };
+        },
+        update: async ({ pull_number, state }: { pull_number: number; state: string }) => {
           if (opts.closeFails) throw new Error('close boom');
+          if (state === 'closed') gh.closed.push(pull_number);
           return {};
-        }),
+        },
       },
       issues: {
-        get: vi.fn(async ({ issue_number }: { issue_number: number }) => {
+        get: async ({ issue_number }: { issue_number: number }) => {
+          gh.issueReads.push(issue_number);
           const meta = issues.find((i) => i.number === issue_number);
           return {
             data: {
@@ -96,14 +108,22 @@ function setup(
               labels: [...(store.state.get(issue_number) ?? [])].map((name) => ({ name })),
             },
           };
-        }),
-        createComment: vi.fn(async () => ({})),
+        },
+        createComment: async ({ issue_number, body }: { issue_number: number; body: string }) => {
+          gh.comments.push({ issue_number, body });
+          return {};
+        },
       },
-      git: { deleteRef: vi.fn(async () => ({})) },
+      git: {
+        deleteRef: async ({ ref }: { ref: string }) => {
+          gh.deletedRefs.push(ref);
+          return {};
+        },
+      },
     },
   };
   const events: Array<[EventKind, string | number, string]> = [];
-  return { octokit, store, writes, events };
+  return { octokit, store, writes, events, gh };
 }
 
 const tmp = createTempDirs();
@@ -158,18 +178,11 @@ describe('sweepOrphanDrafts', () => {
   it('closes a stale orphan draft with one comment and keeps its branch', async () => {
     const s = setup([{ number: 101, branch: branch(7) }], [claimless(7)]);
     const report = await run(s);
-    expect(s.octokit.rest.pulls.update).toHaveBeenCalledTimes(1);
-    expect(s.octokit.rest.pulls.update).toHaveBeenCalledWith(
-      expect.objectContaining({ pull_number: 101, state: 'closed' }),
-    );
-    expect(s.octokit.rest.issues.createComment).toHaveBeenCalledTimes(1);
-    expect(s.octokit.rest.issues.createComment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        issue_number: 101,
-        body: expect.stringContaining('<!-- factory:orphan-draft-sweep -->'),
-      }),
-    );
-    expect(s.octokit.rest.git.deleteRef).not.toHaveBeenCalled();
+    expect(s.gh.closed).toEqual([101]);
+    expect(s.gh.comments).toEqual([
+      { issue_number: 101, body: expect.stringContaining('<!-- factory:orphan-draft-sweep -->') },
+    ]);
+    expect(s.gh.deletedRefs).toEqual([]);
     expect(report.closed).toEqual([{ pr: 101, issue: 7, lane: 'x', order: 1 }]);
     expect(s.events.map((e) => e[0])).toEqual(['orphan_draft_closed']);
   });
@@ -200,8 +213,8 @@ describe('sweepOrphanDrafts', () => {
       [claimless(1, [IN_PROGRESS_LABEL]), claimless(2, ['factory:claimed-by:abc']), claimless(3)],
     );
     const report = await run(s);
-    expect(s.octokit.rest.pulls.update).not.toHaveBeenCalled();
-    expect(s.octokit.rest.issues.createComment).not.toHaveBeenCalled();
+    expect(s.gh.closed).toEqual([]);
+    expect(s.gh.comments).toEqual([]);
     expect(s.writes).toEqual([]);
     expect(report.skipped.map((k) => k.reason)).toEqual(['claimed', 'claimed']);
   });
@@ -215,8 +228,8 @@ describe('sweepOrphanDrafts', () => {
       [claimless(5), claimless(123)],
     );
     await run(s);
-    expect(s.octokit.rest.issues.get).not.toHaveBeenCalled();
-    expect(s.octokit.rest.pulls.update).not.toHaveBeenCalled();
+    expect(s.gh.issueReads).toEqual([]);
+    expect(s.gh.closed).toEqual([]);
     expect(s.writes).toEqual([]);
   });
 
@@ -232,25 +245,23 @@ describe('sweepOrphanDrafts', () => {
     const capped = s.events.filter((e) => e[0] === 'orphan_draft_sweep_capped');
     expect(capped).toHaveLength(1);
     expect(capped[0]?.[2]).toContain('#111, #112, #113');
-    expect(s.octokit.rest.pulls.update).toHaveBeenCalledTimes(10);
+    expect(s.gh.closed).toEqual(Array.from({ length: 10 }, (_, i) => 101 + i));
   });
 
   it('a second sweep within the hour makes no GitHub calls', async () => {
     const s = setup([{ number: 101, branch: branch(7) }], [claimless(7)]);
     await run(s);
-    const calls = () => Object.values(s.octokit.rest.pulls).length;
-    expect(calls()).toBe(2);
-    s.octokit.rest.pulls.list.mockClear();
-    s.octokit.rest.issues.get.mockClear();
+    const listsBefore = s.gh.lists;
+    const readsBefore = s.gh.issueReads.length;
     const writesBefore = s.writes.length;
     const second = await run(s, { now: NOW + 59 * 60_000 });
     expect(second.throttled).toBe(true);
-    expect(s.octokit.rest.pulls.list).not.toHaveBeenCalled();
-    expect(s.octokit.rest.issues.get).not.toHaveBeenCalled();
+    expect(s.gh.lists).toBe(listsBefore);
+    expect(s.gh.issueReads).toHaveLength(readsBefore);
     expect(s.writes.length).toBe(writesBefore);
     const third = await run(s, { now: NOW + 61 * 60_000 });
     expect(third.throttled).toBe(false);
-    expect(s.octokit.rest.pulls.list).toHaveBeenCalledTimes(1);
+    expect(s.gh.lists).toBe(listsBefore + 1);
   });
 
   it('skips closed issues and issues with zero or several lane labels', async () => {
@@ -268,7 +279,7 @@ describe('sweepOrphanDrafts', () => {
     );
     const report = await run(s);
     expect(report.skipped.map((k) => k.reason)).toEqual(['issue-closed', 'no-lane', 'multiple-lanes']);
-    expect(s.octokit.rest.pulls.update).not.toHaveBeenCalled();
+    expect(s.gh.closed).toEqual([]);
   });
 
   it('requeues an issue once when two stale drafts share it and closes both', async () => {
@@ -284,14 +295,14 @@ describe('sweepOrphanDrafts', () => {
     expect([...(s.store.state.get(7) ?? [])].filter((l) => l.startsWith('factory:order:'))).toEqual([
       queueOrderLabel(1),
     ]);
-    expect(s.octokit.rest.pulls.update).toHaveBeenCalledTimes(2);
+    expect(s.gh.closed).toEqual([101, 102]);
   });
 
   it('posts no comment when the close fails', async () => {
     const s = setup([{ number: 101, branch: branch(7) }], [claimless(7)], { closeFails: true });
     const report = await run(s);
     expect(report.skipped).toEqual([{ pr: 101, issue: 7, reason: 'close-failed' }]);
-    expect(s.octokit.rest.issues.createComment).not.toHaveBeenCalled();
+    expect(s.gh.comments).toEqual([]);
   });
 });
 

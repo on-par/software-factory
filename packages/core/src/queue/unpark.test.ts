@@ -1,6 +1,6 @@
 import { chmodSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { QueueGitHubClient } from './github-queue.js';
 import { runUnpark, UnparkError } from './unpark.js';
@@ -8,16 +8,19 @@ import { readWorktreeKeeps, upsertWorktreeKeep } from '../worktree/worktree-keep
 import { fakeIssueComments } from './fake-issue-comments.js';
 
 function fakeClient(labels: Map<number, string[]>) {
-  const addLabels = vi.fn(async ({ issue_number, labels: add }: { issue_number: number; labels: string[] }) => {
+  const writes: string[] = [];
+  const addLabels = async ({ issue_number, labels: add }: { issue_number: number; labels: string[] }) => {
+    writes.push(`add #${issue_number}`);
     const have = labels.get(issue_number) ?? [];
     labels.set(issue_number, [...have, ...add.filter((l) => !have.includes(l))]);
-  });
-  const removeLabel = vi.fn(async ({ issue_number, name }: { issue_number: number; name: string }) => {
+  };
+  const removeLabel = async ({ issue_number, name }: { issue_number: number; name: string }) => {
+    writes.push(`remove #${issue_number}`);
     labels.set(
       issue_number,
       (labels.get(issue_number) ?? []).filter((l) => l !== name),
     );
-  });
+  };
   const client: QueueGitHubClient = {
     listOpenIssuesWithLabels: async ({ labels: want }) =>
       [...labels.entries()]
@@ -29,7 +32,7 @@ function fakeClient(labels: Map<number, string[]>) {
     ...fakeIssueComments(),
     ensureLabel: async () => false,
   };
-  return { client, addLabels, removeLabel };
+  return { client, writes };
 }
 
 const base = { owner: 'o', repo: 'r' };
@@ -65,10 +68,9 @@ describe('runUnpark', () => {
   });
 
   it('rejects an issue that is not parked without writing', async () => {
-    const { client, addLabels, removeLabel } = fakeClient(new Map([[5, ['factory:lane:ops']]]));
+    const { client, writes } = fakeClient(new Map([[5, ['factory:lane:ops']]]));
     await expect(runUnpark({ ...base, client, issue: 5 })).rejects.toMatchObject({ code: 'not-parked' });
-    expect(addLabels).not.toHaveBeenCalled();
-    expect(removeLabel).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
   });
 
   it('requires --lane when there are zero or several lane labels', async () => {
@@ -76,14 +78,13 @@ describe('runUnpark', () => {
     await expect(runUnpark({ ...base, client: zero.client, issue: 5 })).rejects.toMatchObject({
       code: 'lane-required',
     });
-    expect(zero.removeLabel).not.toHaveBeenCalled();
+    expect(zero.writes).toEqual([]);
     const two = fakeClient(new Map([[5, ['factory:parked', 'factory:lane:a', 'factory:lane:b']]]));
     const err = await runUnpark({ ...base, client: two.client, issue: 5 }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(UnparkError);
     expect((err as UnparkError).code).toBe('lane-required');
     expect((err as UnparkError).message).toContain('a, b');
-    expect(two.addLabels).not.toHaveBeenCalled();
-    expect(two.removeLabel).not.toHaveBeenCalled();
+    expect(two.writes).toEqual([]);
   });
 
   it('--lane overrides and removes other lane labels', async () => {
@@ -136,15 +137,15 @@ describe('runUnpark', () => {
     const keepsFile = join(dir, 'worktree-keeps.json');
     upsertWorktreeKeep(keepsFile, { issue: 5, path: '/wt', reason: 'manual', since: 'now' });
     const { client } = fakeClient(new Map([[5, ['factory:parked', 'factory:lane:ops']], ...peers()]));
-    const warn = vi.fn();
+    const warnings: string[] = [];
     chmodSync(dir, 0o500);
     try {
-      const res = await runUnpark({ ...base, client, issue: 5, keepsFile, warn });
+      const res = await runUnpark({ ...base, client, issue: 5, keepsFile, warn: (m: string) => void warnings.push(m) });
       expect(res.ok).toBe(true);
     } finally {
       chmodSync(dir, 0o700);
     }
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not release the keep record for #5'));
+    expect(warnings).toEqual([expect.stringContaining('could not release the keep record for #5')]);
   });
 
   it('leaves the keep record when the unpark fails', async () => {
@@ -215,24 +216,24 @@ describe('runUnpark', () => {
 
     it('fails closed when the lane scan omits the parked issue', async () => {
       const labels = new Map([parked(200)]);
-      const { client, addLabels } = fakeClient(labels);
+      const { client, writes } = fakeClient(labels);
       client.listOpenIssuesWithLabels = async () => [];
       await expect(runUnpark({ ...base, client, issue: 200 })).rejects.toMatchObject({ code: 'unpark-failed' });
       expect(labels.get(200)).toContain('factory:parked');
       expect(orderLabels(labels.get(200))).toEqual([]);
-      expect(addLabels).not.toHaveBeenCalled();
+      expect(writes).toEqual([]);
     });
 
     it('fails closed when the lane listing throws', async () => {
       const labels = new Map([parked(200)]);
-      const { client, addLabels } = fakeClient(labels);
+      const { client, writes } = fakeClient(labels);
       client.listOpenIssuesWithLabels = async () => {
         throw new Error('listing down');
       };
       await expect(runUnpark({ ...base, client, issue: 200 })).rejects.toMatchObject({ code: 'unpark-failed' });
       expect(labels.get(200)).toContain('factory:parked');
       expect(orderLabels(labels.get(200))).toEqual([]);
-      expect(addLabels).not.toHaveBeenCalled();
+      expect(writes).toEqual([]);
     });
 
     it("keeps today's placement for --lane into another lane (issue is not a member)", async () => {
@@ -243,86 +244,58 @@ describe('runUnpark', () => {
       expect(res.order).toBe(18);
     });
 
-    it('keepOrder restores a free park-time order', async () => {
-      const labels = lane17([5]);
+    async function keepOrderRun(labels: Map<number, string[]>, readParkedOrder: () => Promise<number | undefined>) {
       labels.set(...parked(200));
       const { client } = fakeClient(labels);
-      const warn = vi.fn();
+      const warnings: string[] = [];
       const res = await runUnpark({
         ...base,
         client,
         issue: 200,
         keepOrder: true,
-        readParkedOrder: async () => 5,
-        warn,
+        readParkedOrder,
+        warn: (m: string) => void warnings.push(m),
       });
+      return { res, warnings };
+    }
+
+    it('keepOrder restores a free park-time order', async () => {
+      const labels = lane17([5]);
+      const { res, warnings } = await keepOrderRun(labels, async () => 5);
       expect(res.order).toBe(5);
       expect(orderLabels(labels.get(200))).toEqual(['factory:order:5']);
-      expect(warn).not.toHaveBeenCalled();
+      expect(warnings).toEqual([]);
     });
 
     it('keepOrder goes to the back and names the holder when the order is taken', async () => {
-      const labels = lane17();
-      labels.set(...parked(200));
-      const { client } = fakeClient(labels);
-      const warn = vi.fn();
-      const res = await runUnpark({
-        ...base,
-        client,
-        issue: 200,
-        keepOrder: true,
-        readParkedOrder: async () => 5,
-        warn,
-      });
+      const { res, warnings } = await keepOrderRun(lane17(), async () => 5);
       expect(res.order).toBe(18);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('#105'));
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('order 18'));
+      expect(warnings).toEqual([expect.stringMatching(/#105.*order 18/)]);
     });
 
     it('keepOrder with no recorded order warns and goes to the back', async () => {
-      const labels = lane17();
-      labels.set(...parked(200));
-      const { client } = fakeClient(labels);
-      const warn = vi.fn();
-      const res = await runUnpark({
-        ...base,
-        client,
-        issue: 200,
-        keepOrder: true,
-        readParkedOrder: async () => undefined,
-        warn,
-      });
+      const { res, warnings } = await keepOrderRun(lane17(), async () => undefined);
       expect(res.order).toBe(18);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('no recorded park-time order'));
+      expect(warnings).toEqual([expect.stringContaining('no recorded park-time order')]);
     });
 
     it('keepOrder when the reader throws warns and goes to the back', async () => {
-      const labels = lane17();
-      labels.set(...parked(200));
-      const { client } = fakeClient(labels);
-      const warn = vi.fn();
-      const res = await runUnpark({
-        ...base,
-        client,
-        issue: 200,
-        keepOrder: true,
-        readParkedOrder: async () => {
-          throw new Error('comments down');
-        },
-        warn,
+      const { res, warnings } = await keepOrderRun(lane17(), async () => {
+        throw new Error('comments down');
       });
       expect(res.order).toBe(18);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('comments down'));
+      expect(warnings).toEqual([expect.stringContaining('comments down')]);
     });
 
     it('ignores the recorded park order without keepOrder', async () => {
       const labels = lane17([5]);
       labels.set(...parked(200));
       const { client } = fakeClient(labels);
-      const readParkedOrder = vi.fn(async () => 5);
+      let reads = 0;
+      const readParkedOrder = async () => (reads++, 5);
       const res = await runUnpark({ ...base, client, issue: 200, readParkedOrder });
       expect(res.order).toBe(18);
-      expect(readParkedOrder).not.toHaveBeenCalled();
+      expect(reads).toBe(0);
     });
   });
 });

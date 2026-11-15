@@ -1,6 +1,6 @@
 // packages/core/src/queue/stale-claims.test.ts — Expired-lease claim detection and release (#1500).
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
   claimedByLabel,
@@ -10,6 +10,7 @@ import {
   type QueueIssue,
 } from './github-queue.js';
 import { defaultClockSkewCache } from './clock-skew.js';
+import type { OrphanClaimLabelSweep } from './claim-label-sweep.js';
 import { findStaleClaims, releaseStaleClaims } from './stale-claims.js';
 import { fakeIssueComments } from './fake-issue-comments.js';
 
@@ -20,6 +21,7 @@ const now = () => NOW_MS;
 function createFakeStore(issues: Array<{ number: number; labels: string[] }>, repoLabels: string[] = []) {
   const deletedRepoLabels: string[] = [];
   const repoLabelSet = new Set(repoLabels);
+  const writes: string[] = [];
   const state = new Map<number, Set<string>>(issues.map((i) => [i.number, new Set(i.labels)]));
 
   const client: QueueGitHubClient = {
@@ -36,11 +38,13 @@ function createFakeStore(issues: Array<{ number: number; labels: string[] }>, re
       return [...(state.get(issue_number) ?? new Set<string>())];
     },
     async addLabels({ issue_number, labels }) {
+      writes.push(`add #${issue_number}`);
       const set = state.get(issue_number) ?? new Set<string>();
       for (const label of labels) set.add(label);
       state.set(issue_number, set);
     },
     async removeLabel({ issue_number, name }) {
+      writes.push(`remove #${issue_number}:${name}`);
       state.get(issue_number)?.delete(name);
     },
     ...fakeIssueComments(),
@@ -59,7 +63,7 @@ function createFakeStore(issues: Array<{ number: number; labels: string[] }>, re
     },
   };
 
-  return { state, client, deletedRepoLabels, repoLabelSet };
+  return { state, client, deletedRepoLabels, repoLabelSet, writes };
 }
 
 describe('findStaleClaims', () => {
@@ -119,15 +123,12 @@ describe('releaseStaleClaims', () => {
   });
 
   it('returns [] and performs no writes when nothing is stale', async () => {
-    const { client } = createFakeStore([{ number: 1, labels: [] }]);
-    const addLabels = vi.spyOn(client, 'addLabels');
-    const removeLabel = vi.spyOn(client, 'removeLabel');
+    const { client, writes } = createFakeStore([{ number: 1, labels: [] }]);
 
     const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
 
     expect(results).toEqual([]);
-    expect(addLabels).not.toHaveBeenCalled();
-    expect(removeLabel).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
   });
 
   it('records released: false with the error message when one issue fails, and still releases the other', async () => {
@@ -184,20 +185,19 @@ describe('releaseStaleClaims', () => {
   it('skips and reports renewed when the fresh read shows a heartbeat-renewed lease', async () => {
     const stale = claimExpiresLabel(NOW_SECONDS - 60);
     const renewed = claimExpiresLabel(NOW_SECONDS + 600);
-    const { state, client } = createFakeStore([
+    const { state, client, writes } = createFakeStore([
       { number: 42, labels: [IN_PROGRESS_LABEL, claimedByLabel('host-a-1'), renewed] },
     ]);
     client.listOpenIssuesWithLabels = async () => [
       { number: 42, labels: [IN_PROGRESS_LABEL, claimedByLabel('host-a-1'), stale] },
     ];
-    const removeLabel = vi.spyOn(client, 'removeLabel');
 
     const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
 
     expect(results).toEqual([
       { issue: 42, label: stale, expiresAt: NOW_SECONDS - 60, released: false, outcome: 'renewed' },
     ]);
-    expect(removeLabel).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
     expect([...state.get(42)!].sort()).toEqual([IN_PROGRESS_LABEL, claimedByLabel('host-a-1'), renewed].sort());
   });
 });
@@ -213,11 +213,14 @@ describe('releaseStaleClaims orphan lease-label sweep (#1623)', () => {
       ],
       [...expires, ...owners],
     );
-    const onLabelSweep = vi.fn();
+    const sweeps: OrphanClaimLabelSweep[] = [];
+    const onLabelSweep = (sweep: OrphanClaimLabelSweep) => void sweeps.push(sweep);
     await expect(releaseStaleClaims({ client, owner: 'o', repo: 'r', now, onLabelSweep })).resolves.toEqual([]);
     expect(deletedRepoLabels).toHaveLength(56);
     expect([...repoLabelSet].sort()).toEqual([expires[0], expires[1], owners[0], owners[1]].sort());
-    expect(onLabelSweep).toHaveBeenCalledTimes(1);
+    expect(sweeps).toHaveLength(1);
+    expect(sweeps[0]).toMatchObject({ ran: true, remaining: 0 });
+    expect(sweeps[0]!.deleted).toHaveLength(56);
   });
 
   it('releaseStaleClaims deletes leftover lease labels when no issue is claimed (#1623)', async () => {
@@ -237,11 +240,12 @@ describe('releaseStaleClaims orphan lease-label sweep (#1623)', () => {
     client.listRepoLabels = async () => {
       throw new Error('rate limited');
     };
-    const onLabelSweepError = vi.fn();
+    const sweepErrors: unknown[] = [];
+    const onLabelSweepError = (err: unknown) => void sweepErrors.push(err);
     const out = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now, onLabelSweepError });
     expect(out).toHaveLength(1);
     expect(out[0]!.outcome).toBe('released');
-    expect(onLabelSweepError).toHaveBeenCalledTimes(1);
+    expect(sweepErrors).toEqual([expect.objectContaining({ message: 'rate limited' })]);
   });
 });
 
@@ -254,9 +258,7 @@ describe('releaseStaleClaims clock skew guard (#3149)', () => {
   it.each([300_000, -300_000])(
     'releaseStaleClaims refuses to reap when the local clock is %i ms off GitHub',
     async (skew) => {
-      const { state, client } = claimed();
-      const addLabels = vi.spyOn(client, 'addLabels');
-      const removeLabel = vi.spyOn(client, 'removeLabel');
+      const { state, client, writes } = claimed();
       const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now, clockSkewMs: async () => skew });
       expect(results).toEqual([
         {
@@ -270,26 +272,27 @@ describe('releaseStaleClaims clock skew guard (#3149)', () => {
         },
       ]);
       expect([...state.get(1)!].sort()).toEqual([IN_PROGRESS_LABEL, label].sort());
-      expect(addLabels).not.toHaveBeenCalled();
-      expect(removeLabel).not.toHaveBeenCalled();
+      expect(writes).toEqual([]);
     },
   );
 
   it('still runs the orphan lease-label sweep after a refusal', async () => {
     const { client } = claimed();
-    const onLabelSweep = vi.fn();
+    const sweeps: unknown[] = [];
+    const onLabelSweep = (sweep: unknown) => void sweeps.push(sweep);
     await releaseStaleClaims({ client, owner: 'o', repo: 'r', now, clockSkewMs: async () => 300_000, onLabelSweep });
-    expect(onLabelSweep).toHaveBeenCalledTimes(1);
+    expect(sweeps).toHaveLength(1);
   });
 
   it('releaseStaleClaims reaps as before when the clock skew is 2 seconds', async () => {
     const { state, client } = claimed();
-    const clockSkewMs = vi.fn(async () => 2_000);
+    let probes = 0;
+    const clockSkewMs = async () => (probes++, 2_000);
     const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now, clockSkewMs });
     expect(results).toEqual([{ issue: 1, label, expiresAt: NOW_SECONDS - 60, released: true, outcome: 'released' }]);
     expect(state.get(1)!.has(IN_PROGRESS_LABEL)).toBe(false);
     expect(state.get(1)!.has(label)).toBe(false);
-    expect(clockSkewMs).toHaveBeenCalledTimes(1);
+    expect(probes).toBe(1);
   });
 
   it('honours maxClockSkewMs and treats a skew equal to it as acceptable', async () => {
@@ -333,8 +336,9 @@ describe('releaseStaleClaims clock skew guard (#3149)', () => {
 
   it('never consults the probe when nothing is stale', async () => {
     const { client } = createFakeStore([{ number: 1, labels: [] }]);
-    const clockSkewMs = vi.fn(async () => 300_000);
+    let probes = 0;
+    const clockSkewMs = async () => (probes++, 300_000);
     await releaseStaleClaims({ client, owner: 'o', repo: 'r', now, clockSkewMs });
-    expect(clockSkewMs).not.toHaveBeenCalled();
+    expect(probes).toBe(0);
   });
 });
