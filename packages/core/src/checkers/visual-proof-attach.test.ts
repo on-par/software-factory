@@ -52,7 +52,7 @@ function fakeOctokit(opts: { ref?: 'none' | 'exists'; readBack?: 'ok' | 'missing
     }),
   };
   const repos = {
-    getContent: vi.fn(async () => {
+    getContent: vi.fn(async (_args: { path: string }) => {
       if (opts.readBack === 'missing') throw httpError(404);
       return { data: { type: 'file', size: 4 } };
     }),
@@ -170,6 +170,106 @@ describe('attachVisualProof', () => {
     const { octokit } = fakeOctokit();
     const r = await attachVisualProof(octokit, target, { ...passResult, outDir: undefined }, readFile);
     expect(r.status).toBe('fail');
+  });
+});
+
+const statefulCapture = (format: 'gif' | 'webm' | 'mp4' = 'gif') => ({
+  route: '/items',
+  state: 'item-created',
+  viewport: { width: 1280, height: 800 },
+  finalPath: '/items',
+  file: 'after.png',
+  bytes: 4,
+  before: { file: 'before.png', finalPath: '/items', bytes: 4 },
+  steps: [{ click: '#new' }, { fill: '#name', value: 'Demo' }, { waitFor: '#item-1' }],
+  clip: { file: `clip.${format}`, format, bytes: 4 },
+});
+
+describe('stateful visual proof (#4054)', () => {
+  const stateful = (format: 'gif' | 'webm' | 'mp4' = 'gif'): VisualProofResult => ({
+    ...passResult,
+    captures: [statefulCapture(format)],
+  });
+
+  it('uploads before, after and clip and embeds a gif or links a video', async () => {
+    const { octokit, repos } = fakeOctokit();
+    const readPaths: string[] = [];
+    repos.getContent.mockImplementation(async (args: { path: string }) => {
+      readPaths.push(args.path);
+      return { data: { type: 'file', size: 4 } };
+    });
+    const read: string[] = [];
+    const r = await attachVisualProof(octokit, target, stateful(), (path) => {
+      read.push(path);
+      return readFile();
+    });
+    const dir = 'visual-proof/7/run-9/abcdef012345';
+    expect(readPaths).toEqual([
+      `${dir}/0-items-item-created-1280x800.png`,
+      `${dir}/0-items-item-created-before-1280x800.png`,
+      `${dir}/0-items-item-created-clip.gif`,
+    ]);
+    expect(read.map((p) => p.slice(p.lastIndexOf('/') + 1))).toEqual(['after.png', 'before.png', 'clip.gif']);
+    const base = 'https://github.com/o/r/blob/commitsha000000';
+    expect(r.images).toEqual([
+      {
+        route: '/items',
+        state: 'item-created',
+        viewport: { width: 1280, height: 800 },
+        url: `${base}/${dir}/0-items-item-created-1280x800.png?raw=true`,
+        beforeUrl: `${base}/${dir}/0-items-item-created-before-1280x800.png?raw=true`,
+        clipUrl: `${base}/${dir}/0-items-item-created-clip.gif?raw=true`,
+        clipFormat: 'gif',
+        steps: statefulCapture().steps,
+      },
+    ]);
+    const video = await attachVisualProof(fakeOctokit().octokit, target, stateful('mp4'), readFile);
+    expect(video.images?.[0]).toMatchObject({ clipFormat: 'mp4', clipUrl: expect.stringContaining('-clip.mp4') });
+  });
+
+  it('renders a before and after table with steps and clip', async () => {
+    const attached = await attachVisualProof(fakeOctokit().octokit, target, stateful(), readFile);
+    const block = renderVisualProofBlock(attached);
+    expect(block).toContain('| Before | After |\n| --- | --- |\n| ![before](https://github.com/');
+    expect(block).toContain('| ![/items item-created at abcdef012345](https://github.com/');
+    expect(block).toContain('Steps: 1. click "#new" · 2. fill "#name" with "Demo" · 3. waitFor "#item-1"');
+    expect(block).toContain('![clip](https://github.com/o/r/blob/commitsha000000/');
+    const video = await attachVisualProof(fakeOctokit().octokit, target, stateful('webm'), readFile);
+    expect(renderVisualProofBlock(video)).toContain('[▶ clip (webm)](https://github.com/');
+    expect(renderVisualProofBlock(video)).not.toContain('![clip]');
+  });
+
+  it('renders a stepless image exactly as before and appends a coverage warning', () => {
+    const plain: VisualProofResult = {
+      ...passResult,
+      images: [
+        { route: '/settings', state: 'default', viewport: { width: 1280, height: 800 }, url: 'https://x/a.png' },
+      ],
+      uncovered: ['web/app.css', 'web/b.css'],
+    };
+    const block = renderVisualProofBlock(plain);
+    expect(block).toContain('![/settings default at abcdef012345](https://x/a.png)');
+    expect(block).not.toContain('| Before | After |');
+    expect(block).toContain(
+      '- Coverage warning: UI files not covered by any visualProof route: web/app.css, web/b.css',
+    );
+    expect(block).not.toContain('Visual proof unavailable');
+  });
+
+  it('renders a visual proof unavailable line for every non-pass result', () => {
+    for (const status of ['fail', 'unavailable'] as const) {
+      const withDiagnostic = renderVisualProofBlock({
+        ...passResult,
+        status,
+        diagnostic: 'app not  ready\nafter 3 attempts',
+      });
+      expect(withDiagnostic).toContain('**Visual proof unavailable: app not ready after 3 attempts**');
+      expect(withDiagnostic).toContain('- Diagnostic: app not ready after 3 attempts');
+      const bare = renderVisualProofBlock({ ...passResult, status });
+      expect(bare).toContain(`**Visual proof unavailable: ${status}**`);
+    }
+    const advisory = renderVisualProofBlock({ ...passResult, status: 'fail', diagnostic: 'x' }, 'advisory');
+    expect(advisory.indexOf('Visual proof unavailable')).toBeLessThan(advisory.indexOf('- Advisory:'));
   });
 });
 
