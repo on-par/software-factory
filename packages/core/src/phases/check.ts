@@ -79,7 +79,7 @@ export interface CheckPhaseResult {
 
 export const MAX_REWORK_ROUNDS = 3;
 
-const CONSECUTIVE_NO_PROGRESS_ROUNDS_BEFORE_STUCK = 2;
+const STUCK_THRESHOLD = 2;
 
 const EXTERNAL_REASONS = new Set<FailoverReason>([
   'rate_limit',
@@ -556,11 +556,11 @@ async function checkPhaseImpl(opts: {
       }
     }
 
-    if (noProgressStreak >= CONSECUTIVE_NO_PROGRESS_ROUNDS_BEFORE_STUCK) {
+    if (noProgressStreak >= STUCK_THRESHOLD) {
       stuck = true;
       log(
         'stuck',
-        `lane stuck: identical failures (${failingCheckerNames(summary).join(', ')}) across ${CONSECUTIVE_NO_PROGRESS_ROUNDS_BEFORE_STUCK} consecutive rework rounds — escalating early`,
+        `lane stuck: identical failures (${failingCheckerNames(summary).join(', ')}) across ${STUCK_THRESHOLD} consecutive rework rounds — escalating early`,
         {
           rework: {
             round: reworkRounds,

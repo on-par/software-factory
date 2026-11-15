@@ -16,7 +16,7 @@ export interface GitExecResult {
   stderr: string;
 }
 
-function isNodeTimeoutKillRejection(err: unknown): boolean {
+function isTimeoutRejection(err: unknown): boolean {
   const e = err as { killed?: unknown; signal?: unknown } | null;
   return Boolean(e) && e?.killed === true && typeof e?.signal === 'string';
 }
@@ -30,7 +30,7 @@ export async function execGit(args: readonly string[], opts: GitExecOptions = {}
       env: opts.noPrompt ? { ...process.env, GIT_TERMINAL_PROMPT: '0' } : undefined,
     });
   } catch (err) {
-    if (!isNodeTimeoutKillRejection(err)) throw err;
+    if (!isTimeoutRejection(err)) throw err;
     const cmd = ['git', ...args].join(' ');
     const where = opts.cwd === undefined ? '' : ` (cwd ${opts.cwd})`;
     throw Object.assign(new Error(`git command timed out after ${timeoutMs}ms and was killed${where}: ${cmd}`), {

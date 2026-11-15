@@ -3,7 +3,7 @@ import type { CheckerOutput, CheckSummary } from '../types/index.js';
 export type InfraKind = 'timeout' | 'network' | 'missing-tool' | 'evidence-env';
 export type CheckFailureTriage = { class: 'code' } | { class: 'infra'; kind: InfraKind; line: string };
 
-const NETWORK_PATTERNS_SKIP_ECONNREFUSED_EPIPE_AS_OFTEN_THE_LANES_OWN_APP_NOT_STARTING: RegExp[] = [
+const NETWORK_PATTERNS: RegExp[] = [
   /\bECONNRESET\b/,
   /\bETIMEDOUT\b/,
   /\bEAI_AGAIN\b/,
@@ -30,9 +30,7 @@ export function triageCheckFailure(result: CheckerOutput): CheckFailureTriage {
     const first = lines.map((l) => l.trim()).find((l) => l !== '');
     return { class: 'infra', kind: 'timeout', line: (first ?? 'timed out').slice(0, MAX_LINE) };
   }
-  const network = lines.find((l) =>
-    NETWORK_PATTERNS_SKIP_ECONNREFUSED_EPIPE_AS_OFTEN_THE_LANES_OWN_APP_NOT_STARTING.some((p) => p.test(l)),
-  );
+  const network = lines.find((l) => NETWORK_PATTERNS.some((p) => p.test(l)));
   if (network !== undefined) return { class: 'infra', kind: 'network', line: network.trim().slice(0, MAX_LINE) };
   const missing = lines.find((l) => MISSING_TOOL_PATTERN.test(l));
   if (missing !== undefined) return { class: 'infra', kind: 'missing-tool', line: missing.trim().slice(0, MAX_LINE) };

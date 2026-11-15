@@ -29,8 +29,7 @@ function declaredCheck(ctx: LintCommandSource, kind: CheckKind): { argv: string[
   }
   const argv = checkCommandArgv(loadRepoConfig(ctx.worktree)?.checks, kind);
   if (!argv) return null;
-  const readFromRunConfigSnapshotNotWorktreeFile = runConfigSource() !== undefined;
-  const file = readFromRunConfigSnapshotNotWorktreeFile ? runConfigOrigin() : getFactoryPaths(ctx.worktree).config;
+  const file = runConfigSource() === undefined ? getFactoryPaths(ctx.worktree).config : runConfigOrigin();
   return { argv, source: `.factory/${file === undefined ? 'config (run config snapshot)' : basename(file)}` };
 }
 
@@ -116,8 +115,7 @@ async function loadPackageJson(worktree: string): Promise<PackageJson | null> {
   try {
     raw = await readFile(join(worktree, 'package.json'), 'utf-8');
   } catch (e: any) {
-    const missingPackageJsonIsASkipNotAnError = e?.code === 'ENOENT';
-    if (missingPackageJsonIsASkipNotAnError) return null;
+    if (e?.code === 'ENOENT') return null;
     throw e;
   }
   return JSON.parse(raw) as PackageJson;

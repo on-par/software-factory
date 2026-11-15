@@ -230,6 +230,16 @@ describe('providerCapGate', () => {
     ).toBeUndefined();
   });
 
+  it('afterFailure leaves the park unchanged but logs a warning when the breaker cannot be read', async () => {
+    const breaker = freshBreaker();
+    const logs: Array<[EventKind, string]> = [];
+    const gate = providerCapGate(router, breaker, request, (t, m) => logs.push([t, m]));
+    await gate.enterPlan(undefined, () => {});
+    vi.spyOn(breaker, 'status').mockRejectedValue(new Error('breaker file unreadable'));
+    expect(await gate.afterFailure(capped('usage_cap'), 'plan', undefined)).toBeUndefined();
+    expect(logs).toContainEqual(['environment_warning', 'provider-cap check failed: breaker file unreadable']);
+  });
+
   it('enter returns a down verdict when every provider is untimed-open, and a release when one is timed', async () => {
     const breaker = freshBreaker();
     await breaker.openUntilCredentialsChange('anthropic', 'error');

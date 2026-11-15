@@ -45,6 +45,11 @@ describe('workerOutputTail', () => {
     expect(workerOutputTail(`leaked ${token}`)).not.toContain(token);
   });
 
+  it('redacts before truncating so the cut cannot leave a partial token the patterns miss', () => {
+    const token = `ghp_${'a'.repeat(36)}`;
+    expect(workerOutputTail(`leaked ${token} END`, { maxChars: 30 })).toBe('leaked <secret> END');
+  });
+
   it('caps at 2,000 chars keeping the end', () => {
     const tail = workerOutputTail(`${'a'.repeat(5000)}END`);
     expect(tail.length).toBeLessThanOrEqual(2000);

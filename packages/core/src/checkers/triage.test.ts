@@ -58,6 +58,13 @@ describe('triageCheckFailure (#3371)', () => {
     },
   );
 
+  it.each(['connect ECONNREFUSED 127.0.0.1:3100', 'Error: write EPIPE'])(
+    "classes %s as code, since it is often the lane's own app not starting",
+    (line) => {
+      expect(triageCheckFailure(fail(line))).toEqual({ class: 'code' });
+    },
+  );
+
   it('classes PASS and SKIP as code', () => {
     expect(triageCheckFailure({ checker: 'x', result: 'PASS', details: 'ECONNRESET' })).toEqual({ class: 'code' });
     expect(triageCheckFailure({ checker: 'x', result: 'SKIP', details: 'ECONNRESET' })).toEqual({ class: 'code' });

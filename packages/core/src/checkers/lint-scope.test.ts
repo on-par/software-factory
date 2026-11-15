@@ -135,7 +135,7 @@ afterEach(() => dirs.cleanup());
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
 
-async function makeRepoWithOriginMainAtBase(): Promise<string> {
+async function makeRepo(): Promise<string> {
   const dir = await dirs.make('lint-scope-');
   git(dir, 'init', '-q', '-b', 'main');
   await writeFile(join(dir, 'old.ts'), 'export const a = 1;\n');
@@ -148,7 +148,7 @@ async function makeRepoWithOriginMainAtBase(): Promise<string> {
 
 describe('resolveLintDiff', () => {
   it('lists committed, uncommitted and untracked paths that still exist, plus the merge base', async () => {
-    const dir = await makeRepoWithOriginMainAtBase();
+    const dir = await makeRepo();
     const base = git(dir, 'rev-parse', 'HEAD').trim();
     await writeFile(join(dir, 'new.ts'), 'n\n');
     git(dir, 'add', '.');
@@ -160,7 +160,7 @@ describe('resolveLintDiff', () => {
     expect(diff).toEqual({ baseRef: 'origin/main', mergeBase: base, changed: ['new.ts', 'old.ts', 'untracked.ts'] });
   });
   it('uses parentBaseRef without fallback, and diffBase when no origin ref exists', async () => {
-    const dir = await makeRepoWithOriginMainAtBase();
+    const dir = await makeRepo();
     expect(await resolveLintDiff({ worktree: dir, parentBaseRef: 'no-such-ref' })).toEqual({
       unavailable: 'no base ref resolves',
     });
@@ -176,7 +176,7 @@ describe('resolveLintDiff', () => {
 
 describe('withMergeBaseWorktree', () => {
   it('runs fn at the merge base and removes the worktree afterwards', async () => {
-    const dir = await makeRepoWithOriginMainAtBase();
+    const dir = await makeRepo();
     const base = git(dir, 'rev-parse', 'HEAD').trim();
     await writeFile(join(dir, 'old.ts'), 'export const a = 2;\n');
     git(dir, 'commit', '-q', '-am', 'edit');
@@ -193,7 +193,7 @@ describe('withMergeBaseWorktree', () => {
     expect(git(dir, 'worktree', 'list').trim().split('\n')).toHaveLength(1);
   });
   it('reports a failed worktree add, a failed install and a throwing fn without throwing', async () => {
-    const dir = await makeRepoWithOriginMainAtBase();
+    const dir = await makeRepo();
     const base = git(dir, 'rev-parse', 'HEAD').trim();
     const bad = await withMergeBaseWorktree(
       { laneWorktree: dir, mergeBase: 'deadbeef', run: (argv, options) => runCommand(argv, options) },

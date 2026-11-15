@@ -43,11 +43,10 @@ describe('execGit', () => {
     await expect(rm(marker)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('kills the child and rejects with a named timeout error once the deadline passes', async () => {
+  it('kills a child blocked on open stdin and rejects with a named timeout error once the deadline passes', async () => {
     const started = Date.now();
-    const commandBlockedOnOpenStdin = ['hash-object', '--stdin'];
 
-    const err: any = await execGit(commandBlockedOnOpenStdin, { timeoutMs: 50 }).catch((e) => e);
+    const err: any = await execGit(['hash-object', '--stdin'], { timeoutMs: 50 }).catch((e) => e);
 
     expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe('GitTimeoutError');

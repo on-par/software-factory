@@ -27,12 +27,6 @@ function commit(cwd: string, file: string, content: string, msg: string): void {
   git(cwd, 'commit', '-m', msg);
 }
 
-function configureRepoIdentityIndependentOfHostGitConfig(cwd: string): void {
-  git(cwd, 'config', 'user.name', 'T');
-  git(cwd, 'config', 'user.email', 't@example.com');
-  git(cwd, 'config', 'commit.gpgsign', 'false');
-}
-
 const story = {} as never;
 const emptyPlan = (): SlicePlan => ({
   issue: 9,
@@ -97,7 +91,9 @@ describe('restackAfterSquashMerge', () => {
     baseRef = {};
     git(dir, 'init', '--bare', '-b', 'main', remote);
     git(dir, 'clone', remote, root);
-    configureRepoIdentityIndependentOfHostGitConfig(root);
+    git(root, 'config', 'user.name', 'T');
+    git(root, 'config', 'user.email', 't@example.com');
+    git(root, 'config', 'commit.gpgsign', 'false');
     git(root, 'checkout', '-b', 'main');
     commit(root, 'a.txt', 'base\n', 'base');
     git(root, 'push', 'origin', 'main');

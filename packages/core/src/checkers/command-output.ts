@@ -16,7 +16,6 @@ function stripIncidentalCommanderNoise(text: string): string {
 
 const VITEST_FAIL_LINE = { pattern: /\bFAIL\s+.+\s+>/, lines: 12 };
 const VITEST_SUITE_SUMMARY = { pattern: /^\s*\S+\s+.+\(\d+ tests?\s+\|\s+\d+ failed\)/, lines: 8 };
-const VITEST_FAIL_LINE_WINS_OVER_SUITE_SUMMARY = [VITEST_FAIL_LINE, VITEST_SUITE_SUMMARY];
 const DOTNET_TESTING_PLATFORM_FAILED = {
   pattern: /^\s*failed\s+\S+\s+\((?:\d+(?:\.\d+)?\s*(?:ms|s|m)\s*)+\)\s*$/,
   lines: 12,
@@ -30,7 +29,8 @@ const VITEST_COVERAGE_THRESHOLD_MISSED = {
 };
 
 export const FAILED_TEST_MARKERS: readonly { pattern: RegExp; lines: number }[] = [
-  ...VITEST_FAIL_LINE_WINS_OVER_SUITE_SUMMARY,
+  VITEST_FAIL_LINE,
+  VITEST_SUITE_SUMMARY,
   DOTNET_TESTING_PLATFORM_FAILED,
   DOTNET_VSTEST_FAILED,
   GO_TEST_FAIL,
@@ -38,12 +38,12 @@ export const FAILED_TEST_MARKERS: readonly { pattern: RegExp; lines: number }[] 
   VITEST_COVERAGE_THRESHOLD_MISSED,
 ];
 
-const NPM_ECHOED_SCRIPT_COMMAND_NOT_OUTPUT = /^> /;
+const NPM_SCRIPT_ECHO = /^> /;
 
 export function extractFailedTestEvidence(output: string): string | null {
   const lines = stripAnsi(output).split(/\r?\n/);
   for (const { pattern, lines: keep } of FAILED_TEST_MARKERS) {
-    const start = lines.findIndex((line) => !NPM_ECHOED_SCRIPT_COMMAND_NOT_OUTPUT.test(line) && pattern.test(line));
+    const start = lines.findIndex((line) => !NPM_SCRIPT_ECHO.test(line) && pattern.test(line));
     if (start >= 0) {
       return lines
         .slice(start, start + keep)
@@ -57,14 +57,9 @@ export function extractFailedTestEvidence(output: string): string | null {
 export function outputTail(text: string, maxChars: number): string {
   const clean = stripAnsi(text).trim();
   if (clean.length <= maxChars) return clean;
-  const tailWhereRunnersPrintFailuresAfterBanners = clean.slice(-maxChars);
-  const partialFirstLineEnd = tailWhereRunnersPrintFailuresAfterBanners.indexOf('\n');
-  const droppingPartialFirstLineKeepsMostOfTail = partialFirstLineEnd >= 0 && partialFirstLineEnd < maxChars / 2;
-  return `…${
-    droppingPartialFirstLineKeepsMostOfTail
-      ? tailWhereRunnersPrintFailuresAfterBanners.slice(partialFirstLineEnd + 1)
-      : tailWhereRunnersPrintFailuresAfterBanners
-  }`;
+  const tail = clean.slice(-maxChars);
+  const lineStart = tail.indexOf('\n');
+  return `…${lineStart >= 0 && lineStart < maxChars / 2 ? tail.slice(lineStart + 1) : tail}`;
 }
 
 const VITEST_TEST_CONSOLE_HEADER = /^(?:stdout|stderr) \| \S/;
@@ -86,9 +81,7 @@ export function describeCommandFailureTail(r: CommandResult, maxChars: number): 
   return outputTail(output, maxChars) || (r.timedOut ? 'timed out' : `exit code ${r.exitCode}`);
 }
 
-const ROOM_FOR_FAILING_STEP_AFTER_TEST_CONSOLE_NOISE = 64 * 1024;
-
-export const COMBINED_TAIL_CHARS = ROOM_FOR_FAILING_STEP_AFTER_TEST_CONSOLE_NOISE;
+export const COMBINED_TAIL_CHARS = 64 * 1024;
 
 export function combinedOutputTail(maxChars: number = COMBINED_TAIL_CHARS): {
   onOutput: (stream: 'stdout' | 'stderr', chunk: Buffer) => void;
@@ -110,19 +103,14 @@ export function describeTestFailure(r: CommandResult, maxChars: number, combined
   const stderrEvidence = extractFailedTestEvidence(stderr);
   const stdoutEvidence = extractFailedTestEvidence(stripTestConsoleBlocks(r.stdout));
   if (stdoutEvidence) {
-    const stderrWhereVitestPrintsFailDetails = stripIncidentalCommanderNoise(stderrEvidence ?? stderr);
-    return (
-      stderrWhereVitestPrintsFailDetails
-        ? `${stdoutEvidence}\nstderr:\n${stderrWhereVitestPrintsFailDetails}`
-        : stdoutEvidence
-    ).slice(0, maxChars);
+    const rest = stripIncidentalCommanderNoise(stderrEvidence ?? stderr);
+    return (rest ? `${stdoutEvidence}\nstderr:\n${rest}` : stdoutEvidence).slice(0, maxChars);
   }
 
   if (stderrEvidence) return stderrEvidence.slice(0, maxChars);
 
-  const failingStepFromArrivalOrderTail =
-    combined === undefined ? '' : outputTail(stripTestConsoleBlocks(combined), maxChars);
-  return failingStepFromArrivalOrderTail || describeCommandFailureTail(r, maxChars);
+  const tail = combined === undefined ? '' : outputTail(stripTestConsoleBlocks(combined), maxChars);
+  return tail || describeCommandFailureTail(r, maxChars);
 }
 
 const DEFAULT_SUMMARY_MAX_CHARS = 4000;
@@ -214,12 +202,10 @@ export function parseCommandCounts(output: string): CommandRunCounts | null {
 
 function collectFailureBlocks(clean: string): string[] {
   const lines = clean.split(/\r?\n/);
-  const vitestMode = lines.some(
-    (l) => !NPM_ECHOED_SCRIPT_COMMAND_NOT_OUTPUT.test(l) && VITEST_FAIL_LINE.pattern.test(l),
-  );
+  const vitestMode = lines.some((l) => !NPM_SCRIPT_ECHO.test(l) && VITEST_FAIL_LINE.pattern.test(l));
   const markers = vitestMode ? [VITEST_FAIL_LINE] : FAILED_TEST_MARKERS;
   const markerLines = (line: string): number | null =>
-    NPM_ECHOED_SCRIPT_COMMAND_NOT_OUTPUT.test(line) ? null : (markers.find((m) => m.pattern.test(line))?.lines ?? null);
+    NPM_SCRIPT_ECHO.test(line) ? null : (markers.find((m) => m.pattern.test(line))?.lines ?? null);
   const isStart = (line: string): boolean =>
     markerLines(line) !== null || (!vitestMode && (TSC_ERROR_LINE.test(line) || ESLINT_ERROR_LINE.test(line)));
 
@@ -241,11 +227,10 @@ function collectFailureBlocks(clean: string): string[] {
     if (seen.has(head)) continue;
     seen.add(head);
     const body = [head];
-    const tscOrEslintBlockContinuesOnlyWhileIndented = markerLines(line) === null;
     for (let j = i + 1; j < lines.length && body.length < keep; j++) {
       const next = lines[j]!;
       if (isStart(next)) break;
-      if (tscOrEslintBlockContinuesOnlyWhileIndented && !/^\s/.test(next)) break;
+      if (markerLines(line) === null && !/^\s/.test(next)) break;
       body.push(next);
     }
     const text = body.join('\n').trimEnd();

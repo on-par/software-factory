@@ -32,10 +32,6 @@ design:
 `;
 }
 
-function repeatLastStepForDesignArtifactRetries(steps: readonly unknown[]) {
-  return Array(MAX_DESIGN_ARTIFACT_RETRIES).fill(steps[steps.length - 1]);
-}
-
 export class StubModelExecutor extends BaseStubModelExecutor {
   constructor(options: StubModelExecutorOptions = {}) {
     const plan = options.scripts?.plan;
@@ -45,7 +41,7 @@ export class StubModelExecutor extends BaseStubModelExecutor {
             ...options,
             scripts: {
               ...options.scripts,
-              plan: [...plan, ...repeatLastStepForDesignArtifactRetries(plan)],
+              plan: [...plan, ...Array(MAX_DESIGN_ARTIFACT_RETRIES).fill(plan[plan.length - 1])],
             },
           }
         : options,

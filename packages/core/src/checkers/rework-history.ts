@@ -26,14 +26,14 @@ export class ReworkHistory {
   async record(issue: number, signature: string, failingChecks: string[]): Promise<void> {
     const data = await this.read();
     data.issues[String(issue)] = { signature, failingChecks, recordedAt: new Date(this.now()).toISOString() };
-    await this.writeWithoutLockSinceQueueOwnsIssueExclusivity(data);
+    await this.write(data);
   }
 
   async clear(issue: number): Promise<boolean> {
     const data = await this.read();
     if (!(String(issue) in data.issues)) return false;
     delete data.issues[String(issue)];
-    await this.writeWithoutLockSinceQueueOwnsIssueExclusivity(data);
+    await this.write(data);
     return true;
   }
 
@@ -47,7 +47,7 @@ export class ReworkHistory {
     }
   }
 
-  private async writeWithoutLockSinceQueueOwnsIssueExclusivity(data: ReworkHistoryFile): Promise<void> {
+  private async write(data: ReworkHistoryFile): Promise<void> {
     await mkdir(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp`;
     await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);

@@ -293,11 +293,8 @@ export function providerCapGate(
           skip: new Set(),
           down: { stage, providers: [...gate.providers, ...metered], detail: 'only_metered_left' },
         };
-      } catch (unreadableBreakerError) {
-        log(
-          'environment_warning',
-          `provider-cap check failed: ${unreadableBreakerError instanceof Error ? unreadableBreakerError.message : String(unreadableBreakerError)}`,
-        );
+      } catch (e) {
+        log('environment_warning', `provider-cap check failed: ${e instanceof Error ? e.message : String(e)}`);
         return undefined;
       }
     },

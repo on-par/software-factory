@@ -128,10 +128,7 @@ const CHECK_OK: CheckPhaseResult = {
 };
 
 const HOUR = 60 * 60_000;
-const PLAN_TIER_WITHOUT_OPENCODE_GO: ModelsConfig = {
-  ...MODELS,
-  tiers: { ...MODELS.tiers, planners: ['claude-boss', 'codex-boss'] },
-};
+const NARROW_TIER: ModelsConfig = { ...MODELS, tiers: { ...MODELS.tiers, planners: ['claude-boss', 'codex-boss'] } };
 
 async function run(open: (breaker: ProviderBreaker) => Promise<void>, models: ModelsConfig = MODELS) {
   counter += 1;
@@ -201,7 +198,7 @@ describe('runIssue — all_providers_down release under providerOrder (#3340)', 
     const { outcome, planPhase, events } = await run(async (b) => {
       await b.open('anthropic', 'usage_cap', HOUR);
       await b.open('openai', 'usage_cap', HOUR);
-    }, PLAN_TIER_WITHOUT_OPENCODE_GO);
+    }, NARROW_TIER);
     expect(outcome.state).not.toBe('released');
     expect(planPhase).toHaveBeenCalledTimes(1);
     expect(planPhase.mock.calls[0]?.[0].modelOverride).toBe('og-boss');

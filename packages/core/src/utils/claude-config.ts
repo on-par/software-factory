@@ -23,10 +23,9 @@ function claudeCredentialsFilePath(env: NodeJS.ProcessEnv): string {
 
 export function claudeKeychainService(env: NodeJS.ProcessEnv = process.env): string {
   const secureStorageDir = env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
-  const unresolvedDirToHash =
-    secureStorageDir !== undefined ? secureStorageDir.normalize('NFC') : claudeConfigDirOverride(env);
-  if (!unresolvedDirToHash) return DEFAULT_CLAUDE_KEYCHAIN_SERVICE;
-  const dirHash = createHash('sha256').update(unresolvedDirToHash).digest('hex');
+  const hashedDir = secureStorageDir !== undefined ? secureStorageDir.normalize('NFC') : claudeConfigDirOverride(env);
+  if (!hashedDir) return DEFAULT_CLAUDE_KEYCHAIN_SERVICE;
+  const dirHash = createHash('sha256').update(hashedDir).digest('hex');
   return `${DEFAULT_CLAUDE_KEYCHAIN_SERVICE}-${dirHash.slice(0, KEYCHAIN_SERVICE_HASH_HEX_LENGTH)}`;
 }
 
@@ -75,10 +74,7 @@ export function claudeStoredSessionState(deps: ClaudeLoginEvidenceDeps = {}): Cl
   return 'unusable';
 }
 
-function keychainEntryExistsWithoutReadingSecret(
-  exec: (file: string, args: readonly string[]) => void,
-  env: NodeJS.ProcessEnv,
-): boolean {
+function hasKeychainEntry(exec: (file: string, args: readonly string[]) => void, env: NodeJS.ProcessEnv): boolean {
   try {
     exec('security', ['find-generic-password', '-s', claudeKeychainService(env)]);
     return true;
@@ -98,7 +94,7 @@ export function hasClaudeLoginEvidence(deps: ClaudeLoginEvidenceDeps = {}): bool
   const fileExists = deps.fileExists ?? existsSync;
 
   if (env.CLAUDE_CODE_OAUTH_TOKEN?.trim()) return true;
-  if (platform === 'darwin' && keychainEntryExistsWithoutReadingSecret(exec, env)) return true;
+  if (platform === 'darwin' && hasKeychainEntry(exec, env)) return true;
   try {
     if (!fileExists(claudeCredentialsFilePath(env))) return false;
   } catch {

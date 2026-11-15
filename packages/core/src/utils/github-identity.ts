@@ -26,7 +26,7 @@ type GraphqlOctokit = SelfIdentityOctokit & Pick<Octokit, 'graphql'>;
 const statusOf = (err: unknown): unknown => (err as { status?: unknown } | null)?.status;
 const hasGraphql = (octokit: SelfIdentityOctokit): octokit is GraphqlOctokit => octokit.graphql !== undefined;
 
-async function restConfirmedAppBotIdentity(octokit: GraphqlOctokit): Promise<SelfIdentity | undefined> {
+async function appBotIdentity(octokit: GraphqlOctokit): Promise<SelfIdentity | undefined> {
   const { viewer } = await octokit.graphql<ViewerResponse>(VIEWER_QUERY);
   const login = typeof viewer?.login === 'string' ? viewer.login : '';
   const id = viewer?.databaseId;
@@ -48,9 +48,8 @@ export async function resolveSelfIdentity(octokit: SelfIdentityOctokit): Promise
     const { data } = await octokit.rest.users.getAuthenticated();
     return { id: data.id, login: data.login, kind: data.type === 'Bot' ? 'bot' : 'user' };
   } catch (err) {
-    const refusedForIntegrationToken = statusOf(err) === 403;
-    if (!refusedForIntegrationToken || !hasGraphql(octokit)) throw err;
-    const bot = await restConfirmedAppBotIdentity(octokit);
+    if (statusOf(err) !== 403 || !hasGraphql(octokit)) throw err;
+    const bot = await appBotIdentity(octokit);
     if (bot === undefined) throw err;
     return bot;
   }
