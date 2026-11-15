@@ -1,6 +1,6 @@
 import { readdirSync } from 'node:fs';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
 import { ModelRegistry } from '../models/index.js';
@@ -72,11 +72,15 @@ describe('ClaudeCliHarness prompt dir cleanup', () => {
   });
 
   it('removes the prompt dir when writing the prompt fails', async () => {
-    const exec = vi.fn(async () => ({ stdout: '', stderr: '' }));
+    const executed: string[] = [];
+    const exec = async (command: string) => {
+      executed.push(command);
+      return { stdout: '', stderr: '' };
+    };
     await expect(
       new ClaudeCliHarness(exec).run(makeContractRequest({ model: 'claude-model', registry, prompt: 42 as never })),
     ).rejects.toThrow();
-    expect(exec).not.toHaveBeenCalled();
+    expect(executed).toEqual([]);
     expect(promptDirs()).toEqual([]);
   });
 });

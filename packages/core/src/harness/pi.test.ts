@@ -56,7 +56,14 @@ const registry = new ModelRegistry(modelsConfig);
 
 const success = fixture('success.jsonl');
 const req = (overrides = {}) => makeContractRequest({ model: 'pi-model', registry, ...overrides });
-const okExec = (stdout = success) => vi.fn(async (_cmd: string, _opts: any) => ({ stdout, stderr: '' }));
+const okExec = (stdout = success) => {
+  const calls: { cmd: string; opts: any }[] = [];
+  const fn = async (cmd: string, opts: any) => {
+    calls.push({ cmd, opts });
+    return { stdout, stderr: '' };
+  };
+  return Object.assign(fn, { calls });
+};
 
 describe('CodingHarness contract: PiHarness', () => {
   const cases = codingHarnessContractCases({
@@ -171,7 +178,7 @@ describe('PiHarness', () => {
     expect(pins.plan).toBe('pi-openrouter-deepseek-v4-flash');
     const exec = okExec();
     await new PiHarness(exec).run(req({ model: pins.plan!, registry: shipped, task: 'plan' }));
-    expect(exec.mock.calls[0][0]).toContain("--provider 'openrouter' --model 'deepseek/deepseek-v4.1-flash'");
+    expect(exec.calls[0].cmd).toContain("--provider 'openrouter' --model 'deepseek/deepseek-v4.1-flash'");
   });
 
   it('passes flags that skip repo context, extensions and config, and splits providerModel', async () => {
@@ -179,7 +186,7 @@ describe('PiHarness', () => {
     const result = await new PiHarness(exec).run(req({ worktree: '/tmp/factory worktree', timeoutSeconds: 7 }));
     expect(result.output).toBe('Final answer');
     expect(result.usage?.costUsd).toBeCloseTo(0.0042, 6);
-    const [cmd, opts] = exec.mock.calls[0];
+    const { cmd, opts } = exec.calls[0];
     expect(cmd).toContain('pi -p --mode json --no-session --no-context-files --no-extensions --no-skills');
     expect(cmd).toContain('--no-prompt-templates --no-mcp --no-approve --offline');
     expect(cmd).toContain("--provider 'openrouter' --model 'deepseek/deepseek-v4-flash'");
@@ -193,15 +200,15 @@ describe('PiHarness', () => {
     const exec = okExec();
     const effortRegistry = new ModelRegistry({ ...modelsConfig, efforts: { 'pi-model': 'high' } });
     await new PiHarness(exec).run(req({ registry: effortRegistry }));
-    expect(exec.mock.calls[0][0]).toContain("--model 'deepseek/deepseek-v4-flash' --thinking 'high' < '");
+    expect(exec.calls[0].cmd).toContain("--model 'deepseek/deepseek-v4-flash' --thinking 'high' < '");
   });
 
   it('maps effort none to --thinking off', async () => {
     const exec = okExec();
     const effortRegistry = new ModelRegistry({ ...modelsConfig, efforts: { 'pi-model': 'none' } });
     await new PiHarness(exec).run(req({ registry: effortRegistry }));
-    expect(exec.mock.calls[0][0]).toContain("--thinking 'off'");
-    expect(exec.mock.calls[0][0]).not.toContain("'none'");
+    expect(exec.calls[0].cmd).toContain("--thinking 'off'");
+    expect(exec.calls[0].cmd).not.toContain("'none'");
   });
 
   it('omits --thinking when no effort is configured for the task', async () => {
@@ -209,14 +216,14 @@ describe('PiHarness', () => {
     await new PiHarness(exec).run(req());
     const taskRegistry = new ModelRegistry({ ...modelsConfig, efforts: { 'pi-model': { triage: 'high' } } });
     await new PiHarness(exec).run(req({ registry: taskRegistry }));
-    expect(exec.mock.calls[0][0]).not.toContain('--thinking');
-    expect(exec.mock.calls[1][0]).not.toContain('--thinking');
+    expect(exec.calls[0].cmd).not.toContain('--thinking');
+    expect(exec.calls[1].cmd).not.toContain('--thinking');
   });
 
   it('drops DEEPSEEK_API_KEY so Pi cannot use the refused native DeepSeek provider', async () => {
     const exec = okExec();
     await new PiHarness(exec).run(req({ env: { DEEPSEEK_API_KEY: 'd', OPENROUTER_API_KEY: 'o' } }));
-    const env = exec.mock.calls[0][1].env;
+    const env = exec.calls[0].opts.env;
     expect(env.DEEPSEEK_API_KEY).toBeUndefined();
     expect(env.OPENROUTER_API_KEY).toBe('o');
   });
@@ -226,7 +233,7 @@ describe('PiHarness', () => {
     try {
       const exec = okExec();
       await new PiHarness(exec).run(req());
-      expect(exec.mock.calls[0][1].env).toHaveProperty('DEEPSEEK_API_KEY', undefined);
+      expect(exec.calls[0].opts.env).toHaveProperty('DEEPSEEK_API_KEY', undefined);
       expect(process.env.DEEPSEEK_API_KEY).toBe('secret');
     } finally {
       vi.unstubAllEnvs();
@@ -273,14 +280,14 @@ describe('PiHarness', () => {
       const err = await new PiHarness(exec).run(req({ model })).catch((e) => e);
       expect(err).toBeInstanceOf(HarnessError);
       expect(err.reason).toBe('error');
-      expect(exec).not.toHaveBeenCalled();
+      expect(exec.calls).toEqual([]);
     }
   });
 
   it('wraps the command with wrapCommandInSandbox when request.sandbox is set', async () => {
     const exec = okExec();
     await new PiHarness(exec).run(req({ sandbox: sandboxPolicy }));
-    const cmd: string = exec.mock.calls[0][0];
+    const cmd: string = exec.calls[0].cmd;
     const promptPath = /([^'\s]*factory-pi-prompt-[^'\s]*\/prompt\.txt)/.exec(cmd)?.[1];
     expect(promptPath).toBeDefined();
     expect(cmd).toBe(
@@ -419,9 +426,13 @@ describe('PiHarness prompt dir cleanup', () => {
   });
 
   it('removes the prompt dir when writeFile rejects a non-string prompt', async () => {
-    const exec = vi.fn(async () => ({ stdout: '', stderr: '' }));
+    const cmds: string[] = [];
+    const exec = async (cmd: string) => {
+      cmds.push(cmd);
+      return { stdout: '', stderr: '' };
+    };
     await expect(new PiHarness(exec).run(req({ prompt: 42 as never }))).rejects.toThrow();
-    expect(exec).not.toHaveBeenCalled();
+    expect(cmds).toEqual([]);
     expect(promptDirs()).toEqual([]);
   });
 });
