@@ -124,7 +124,7 @@ describe('defaultProcessActivityProbe', () => {
     expect(sample).toEqual({ cpuSeconds: 3.5, tcpConnections: 1 });
   });
 
-  it('maps lsof exit 1 with empty stdout to 0 connections', async () => {
+  it('maps lsof exit 1 with empty stdout (nothing matched) to 0 connections', async () => {
     const err = Object.assign(new Error('none'), { code: 1, stdout: '' });
     expect(await defaultProcessActivityProbe(7, fake(psOut, err))).toEqual({ cpuSeconds: 3.5, tcpConnections: 0 });
   });

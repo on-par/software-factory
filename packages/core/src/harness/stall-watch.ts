@@ -1,5 +1,3 @@
-// src/harness/stall-watch.ts — Idle-process stall detector for harness children (#694).
-
 import { killProcessGroup } from '../environment/process-groups.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
@@ -9,10 +7,8 @@ export const DEFAULT_STALL_SECONDS = 900;
 export const DEFAULT_STALL_INTERVAL_MS = 30_000;
 
 const PROBE_TIMEOUT_MS = 5000;
-/** CPU growth at or below this fraction of the sample interval counts as idle. */
 const IDLE_CPU_FRACTION = 0.01;
 
-/** Stall threshold in seconds: `0` disables, unset/invalid falls back to the default. */
 export function resolveStallSeconds(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env[STALL_SECONDS_ENV]?.trim();
   if (raw === '0') return 0;
@@ -21,16 +17,12 @@ export function resolveStallSeconds(env: NodeJS.ProcessEnv = process.env): numbe
 }
 
 export interface ProcessActivitySample {
-  /** Summed cumulative CPU time of every pid in the group. */
   cpuSeconds: number;
-  /** Established TCP connections that leave the group. */
   tcpConnections: number;
 }
 
-/** `undefined` means unknown, which the watch treats as activity. */
 export type ProcessActivityProbe = (pgid: number) => Promise<ProcessActivitySample | undefined>;
 
-/** Parses ps cumulative CPU time: `mm:ss`, `mm:ss.cc`, `hh:mm:ss`, `dd-hh:mm:ss`. */
 export function parsePsCpuSeconds(time: string): number | undefined {
   const match = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$/.exec(time.trim());
   if (!match) return undefined;
@@ -38,8 +30,6 @@ export function parsePsCpuSeconds(time: string): number | undefined {
   return Number(days ?? 0) * 86400 + Number(hours ?? 0) * 3600 + Number(minutes) * 60 + Number(seconds);
 }
 
-/** Counts `lsof -F n` connections whose reverse endpoint pair is not also open in the group
- *  (a private loopback server/client pair is internal and does not count as network use). */
 export function countExternalTcpConnections(lsofFieldOutput: string): number {
   const conns = new Set<string>();
   for (const line of lsofFieldOutput.split('\n')) {
@@ -53,8 +43,6 @@ export function countExternalTcpConnections(lsofFieldOutput: string): number {
   return external;
 }
 
-/** Samples a process group's CPU time and external TCP connections via `ps` and `lsof`.
- *  Never throws: any failure (win32, missing tool, parse error) resolves to undefined. */
 export async function defaultProcessActivityProbe(
   pgid: number,
   execFn: ExecFn = defaultExecFn,
@@ -83,7 +71,6 @@ export async function defaultProcessActivityProbe(
     });
     return { cpuSeconds, tcpConnections: countExternalTcpConnections(stdout) };
   } catch (err: any) {
-    // lsof exits 1 when nothing matched.
     if (err?.code === 1 && !err.stdout) return { cpuSeconds, tcpConnections: 0 };
     return undefined;
   }
@@ -103,7 +90,6 @@ export interface StallWatch {
   stop(): void;
 }
 
-/** Kills `pgid` once it has shown no CPU, external TCP connection or stdout for `stallMs`. */
 export function startStallWatch(pgid: number, opts: StallWatchOptions): StallWatch {
   if (opts.stallMs <= 0) return { noteActivity() {}, stop() {} };
   const intervalMs = opts.intervalMs ?? DEFAULT_STALL_INTERVAL_MS;

@@ -1,5 +1,3 @@
-// src/harness/opencode-attempt.ts — Per-attempt diagnostics for empty opencode runs (#694).
-
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,9 +10,6 @@ export interface OpenCodeAttemptOutput {
   stderr: string;
 }
 
-/** One-line summary of an opencode attempt: sizes, event/step counts and how the last step ended.
- *  Separates a tool-call-only final step (`finished=true lastFinish=tool-calls earlierTextChars>0`)
- *  from truncation (`finished=false`) and from no events at all (`events=0`). */
 export function describeOpenCodeAttempt(attempt: number, stdout: string, stderr: string): string {
   let events = 0;
   let steps = 0;
@@ -56,8 +51,6 @@ export function describeOpenCodeAttempt(attempt: number, stdout: string, stderr:
   );
 }
 
-/** Writes the raw (capped) output of each attempt to a JSON file in the OS temp dir, so nothing lands
- *  in the lane's git diff. Returns the path, or undefined when the write fails. */
 export async function writeOpenCodeEmptyTrace(
   task: string,
   model: string,

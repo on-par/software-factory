@@ -1,7 +1,3 @@
-// src/harness/injection-fixtures.ts — curated prompt-injection payloads used
-// by the contract kit and pipeline integration tests to prove the factory's
-// machinery does not propagate untrusted content into pipeline artifacts.
-
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,13 +5,9 @@ import { fileURLToPath } from 'node:url';
 export type InjectionSurface = 'issue_body' | 'pr_comment' | 'web_content';
 
 export interface InjectionFixture {
-  /** Fixture file name, e.g. 'issue-body-ignore-instructions.md'. */
   name: string;
-  /** Which untrusted source surface this payload simulates. */
   surface: InjectionSurface;
-  /** Raw markdown payload as it would arrive from the untrusted source. */
   content: string;
-  /** Substrings that must NEVER appear in any pipeline artifact (spec, diff, PR body). */
   canaries: string[];
 }
 
@@ -32,16 +24,10 @@ const FIXTURE_MANIFEST: Array<{ name: string; surface: InjectionSurface; canarie
 
 const FIXTURES_DIR = fileURLToPath(new URL('../__fixtures__/injection/', import.meta.url));
 
-/** Injectable I/O for loadInjectionFixtures; defaults to node:fs. */
 export interface InjectionFixtureDeps {
-  /** Synchronous file reader; must throw when the file is missing. */
   readFile?: (path: string, encoding: 'utf8') => string;
 }
 
-/** Loads the curated adversarial injection payloads from __fixtures__/injection.
- *  Throws if a manifest entry's file is missing so a rename can't silently
- *  drop coverage of an attack vector. Pass `deps.readFile` to replace the
- *  node:fs reader. */
 export function loadInjectionFixtures(deps: InjectionFixtureDeps = {}): InjectionFixture[] {
   const readFile = deps.readFile ?? readFileSync;
   return FIXTURE_MANIFEST.map(({ name, surface, canaries }) => {

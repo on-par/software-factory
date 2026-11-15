@@ -1,7 +1,3 @@
-// src/harness/claude-error.ts — pure Claude Code limit-message adapter (#3225).
-// Claude prints its weekly cap as `resets Oct 20 at 7am (America/Chicago)` and its 5-hour cap as
-// `resets 7am (America/Chicago)`; both are wall-clock times in the named IANA zone.
-
 import { classifyFailure } from './classify.js';
 import type { HarnessFailureReason } from './index.js';
 import { failureKindFor, type ProviderFailure } from './provider-failure.js';
@@ -43,7 +39,6 @@ function zoneOffsetMs(utcMs: number, zone: string): number {
   return Date.UTC(p.y, p.m - 1, p.d, p.h, p.min, p.s) - Math.floor(utcMs / 1000) * 1000;
 }
 
-/** UTC ms of the wall-clock time y-m-d h:min in `zone`; the second pass settles DST transitions. */
 export function zonedToUtc(y: number, m: number, d: number, h: number, min: number, zone: string): number {
   const guess = Date.UTC(y, m - 1, d, h, min);
   const first = guess - zoneOffsetMs(guess, zone);
@@ -55,8 +50,6 @@ function to24h(hour: number, meridiem: string): number {
   return (hour % 12) + (pm ? 12 : 0);
 }
 
-/** ISO instant of the reset time named in Claude limit `text`, resolved against `now` (ms). Undefined when the
- *  text has no reset wording, a field is out of range, or the zone is unknown. */
 export function parseClaudeResetAt(text: string, now: number): string | undefined {
   try {
     const weekly = WEEKLY_RE.exec(text);
@@ -88,14 +81,10 @@ export function parseClaudeResetAt(text: string, now: number): string | undefine
       }
       return new Date(t).toISOString();
     }
-  } catch {
-    // Unknown IANA zone (Intl RangeError): no reset time, caller uses its default cooldown.
-  }
+  } catch {}
   return undefined;
 }
 
-/** Classifies Claude failure text (stderr/stream diagnostics on a non-zero exit, or the `is_error` result text on
- *  exit 0) into a ProviderFailure. `zeroTokenResult` marks a zero-token, zero-API-duration result. */
 export function classifyClaudeFailure(
   text: string,
   exitCode: number,
