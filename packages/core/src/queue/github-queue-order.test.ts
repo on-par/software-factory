@@ -1,6 +1,6 @@
 // packages/core/src/queue/github-queue-order.test.ts — Duplicate factory:order positions are claimed by issue number, not skipped (#2977, #3101).
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   createGithubQueue,
@@ -57,6 +57,12 @@ function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
   return { state, createdLabels, calls, client };
 }
 
+const conflictQueue = (client: QueueGitHubClient) => {
+  const seen: QueueOrderConflict[] = [];
+  const onOrderConflict = (c: QueueOrderConflict) => void seen.push(c);
+  return { queue: createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1', onOrderConflict }), seen };
+};
+
 describe('duplicate order positions', () => {
   const dupIssues = () => [
     { number: 10, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(5)] },
@@ -83,22 +89,19 @@ describe('duplicate order positions', () => {
 
   it('reports a duplicate position through onOrderConflict with lane, position and both issues', async () => {
     const { client } = createFakeStore(dupIssues());
-    const onOrderConflict = vi.fn();
-    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1', onOrderConflict });
+    const { queue, seen } = conflictQueue(client);
 
     await queue.claimNext('build');
 
-    expect(onOrderConflict).toHaveBeenCalledTimes(1);
-    expect(onOrderConflict).toHaveBeenCalledWith({ lane: 'build', position: 5, issues: [10, 11] });
+    expect(seen).toEqual([{ lane: 'build', position: 5, issues: [10, 11] }]);
   });
 
   it('list() keeps duplicate-position issues in issue-number order and reports the conflict', async () => {
     const { client } = createFakeStore(dupIssues());
-    const onOrderConflict = vi.fn();
-    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1', onOrderConflict });
+    const { queue, seen } = conflictQueue(client);
 
     expect(await queue.list('build')).toEqual([10, 11, 12]);
-    expect(onOrderConflict).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([{ lane: 'build', position: 5, issues: [10, 11] }]);
   });
 
   it('sorts three issues at one position ascending and reports them once', async () => {
@@ -107,12 +110,10 @@ describe('duplicate order positions', () => {
       { number: 1, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(2)] },
       { number: 2, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(2)] },
     ]);
-    const onOrderConflict = vi.fn();
-    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1', onOrderConflict });
+    const { queue, seen } = conflictQueue(client);
 
     expect(await queue.list('build')).toEqual([1, 2, 3]);
-    expect(onOrderConflict).toHaveBeenCalledTimes(1);
-    expect(onOrderConflict).toHaveBeenCalledWith({ lane: 'build', position: 2, issues: [1, 2, 3] });
+    expect(seen).toEqual([{ lane: 'build', position: 2, issues: [1, 2, 3] }]);
   });
 
   it('claimNext returns the lowest issue when every issue in the lane shares one position', async () => {

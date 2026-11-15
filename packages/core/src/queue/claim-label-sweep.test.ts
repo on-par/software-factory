@@ -1,6 +1,6 @@
 // packages/core/src/queue/claim-label-sweep.test.ts — Orphaned lease-label sweep (#1623).
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { sweepOrphanClaimLabels } from './claim-label-sweep.js';
 import { fakeIssueComments } from './fake-issue-comments.js';
@@ -8,6 +8,7 @@ import type { QueueGitHubClient } from './github-queue.js';
 
 function sweepClient(repoLabels: string[], openLabels: string[][], failOn: string[] = []) {
   const deleted: string[] = [];
+  const reads: string[] = [];
   const client: QueueGitHubClient = {
     ...fakeIssueComments(),
     listOpenIssuesWithLabels: async () => [],
@@ -15,14 +16,14 @@ function sweepClient(repoLabels: string[], openLabels: string[][], failOn: strin
     addLabels: async () => {},
     removeLabel: async () => {},
     ensureLabel: async () => false,
-    listRepoLabels: vi.fn(async () => repoLabels),
-    listAllOpenIssues: vi.fn(async () => openLabels.map((labels, i) => ({ number: i + 1, labels }))),
-    deleteRepoLabel: vi.fn(async ({ name }: { name: string }) => {
+    listRepoLabels: async () => repoLabels,
+    listAllOpenIssues: async () => (reads.push('read'), openLabels.map((labels, i) => ({ number: i + 1, labels }))),
+    deleteRepoLabel: async ({ name }: { name: string }) => {
       if (failOn.includes(name)) throw new Error(`boom ${name}`);
       deleted.push(name);
-    }),
+    },
   };
-  return { client, deleted };
+  return { client, deleted, reads };
 }
 
 const E = (n: number) => `factory:claim-expires:${n}`;
@@ -49,10 +50,10 @@ describe('sweepOrphanClaimLabels', () => {
   });
 
   it('skips the issue read when there are no lease labels', async () => {
-    const { client } = sweepClient(['bug'], []);
+    const { client, reads } = sweepClient(['bug'], []);
     const out = await sweepOrphanClaimLabels({ client, owner: 'o', repo: 'r' });
     expect(out.ran).toBe(true);
-    expect(client.listAllOpenIssues).not.toHaveBeenCalled();
+    expect(reads).toEqual([]);
   });
 
   it('respects maxDeletes and reports the remainder', async () => {

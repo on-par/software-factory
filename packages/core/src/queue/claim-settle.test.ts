@@ -52,19 +52,20 @@ describe('claim settle delay (#3239)', () => {
 
   it('settle() awaits the injected sleep with claimSettleMs', async () => {
     const { client } = createFakeStore([]);
-    const sleep = vi.fn(async () => {});
+    const slept: number[] = [];
+    const sleep = async (ms: number) => void slept.push(ms);
     const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1', claimSettleMs: 500, sleep });
     await queue.settle();
-    expect(sleep).toHaveBeenCalledTimes(1);
-    expect(sleep).toHaveBeenCalledWith(500);
+    expect(slept).toEqual([500]);
   });
 
   it('claimNext does not sleep', async () => {
     const { client } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('app'), queueOrderLabel(1)] }]);
-    const sleep = vi.fn(async () => {});
+    const slept: number[] = [];
+    const sleep = async (ms: number) => void slept.push(ms);
     const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1', sleep });
     await queue.claimNext('app');
-    expect(sleep).not.toHaveBeenCalled();
+    expect(slept).toEqual([]);
   });
 
   it('the default sleep is a setTimeout of claimSettleMs', async () => {

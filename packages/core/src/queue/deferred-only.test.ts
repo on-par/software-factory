@@ -8,8 +8,10 @@ import { IN_PROGRESS_LABEL, laneLabel, QUEUED_LABEL, type QueueGitHubClient, typ
 
 function fakeStore(issues: Array<{ number: number; labels: string[] }>) {
   const state = new Map<number, Set<string>>(issues.map((i) => [i.number, new Set(i.labels)]));
+  const removed: Array<{ issue_number: number; name: string }> = [];
   const removeLabel = vi.fn(async ({ issue_number, name }: { issue_number: number; name: string }) => {
     state.get(issue_number)?.delete(name);
+    removed.push({ issue_number, name });
   });
   const client: QueueGitHubClient = {
     async listOpenIssuesWithLabels({ labels }) {
@@ -29,7 +31,7 @@ function fakeStore(issues: Array<{ number: number; labels: string[] }>) {
       return false;
     },
   };
-  return { state, client, removeLabel };
+  return { state, client, removeLabel, removed };
 }
 
 const queued = (n: number, lane = 'app') => ({
@@ -47,10 +49,10 @@ describe('unqueueDeferredOnly', () => {
   });
 
   it('writes nothing when one queued issue was not deferred', async () => {
-    const { client, removeLabel } = fakeStore([queued(1), queued(2)]);
+    const { client, removed } = fakeStore([queued(1), queued(2)]);
     const res = await unqueueDeferredOnly({ ...base, client, deferred: new Set([1]) });
     expect(res.verdict).toBe('mixed');
-    expect(removeLabel).not.toHaveBeenCalled();
+    expect(removed).toEqual([]);
   });
 
   it('is empty when nothing is queued', async () => {
@@ -66,7 +68,7 @@ describe('unqueueDeferredOnly', () => {
   });
 
   it('skips an issue claimed between the list and the fresh read', async () => {
-    const { client, state, removeLabel } = fakeStore([queued(1), queued(2)]);
+    const { client, state, removed } = fakeStore([queued(1), queued(2)]);
     const real = client.getIssueLabels;
     client.getIssueLabels = async (input) => {
       if (input.issue_number === 1) state.get(1)!.add(IN_PROGRESS_LABEL);
@@ -75,7 +77,7 @@ describe('unqueueDeferredOnly', () => {
     const res = await unqueueDeferredOnly({ ...base, client, deferred: new Set([1, 2]) });
     expect(res.skipped).toEqual([{ issue: 1, reason: 'claimed' }]);
     expect(res.unqueued).toEqual([2]);
-    expect(removeLabel).toHaveBeenCalledTimes(1);
+    expect(removed).toEqual([{ issue_number: 2, name: QUEUED_LABEL }]);
   });
 
   it('skips an issue that lost factory:queued', async () => {
