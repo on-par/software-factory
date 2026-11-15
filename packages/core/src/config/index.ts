@@ -178,6 +178,8 @@ export const FactoryConfigSchema = z.object({
     gcTtlDays: z.number().default(dWorktree.gcTtlDays),
     autoGcOnRun: z.boolean().default(dWorktree.autoGcOnRun),
     retainMax: z.number().int().nonnegative().default(dWorktree.retainMax),
+    stateBackupKeep: z.number().int().nonnegative().default(dWorktree.stateBackupKeep),
+    stateBackupMaxAgeDays: z.number().nonnegative().default(dWorktree.stateBackupMaxAgeDays),
   }),
   byok: z.object({ enabled: z.boolean(), comment: z.string() }),
   notifications: z.record(z.string(), z.boolean()),

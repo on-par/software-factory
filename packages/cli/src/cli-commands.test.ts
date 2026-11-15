@@ -1,6 +1,15 @@
 import type * as ChildProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -590,6 +599,37 @@ describe('cli commands (via main dispatch)', () => {
       expect(errored()).toContain('--branch-prefix');
     });
 
+    const writeOldBackups = () => {
+      const dir = join(h.repoRoot, '.factory');
+      mkdirSync(dir, { recursive: true });
+      const old = Date.now() / 1000 - 30 * 86400;
+      for (let i = 0; i < 6; i++) {
+        const p = join(dir, `queue.bak.relaunch-${i}`);
+        writeFileSync(p, 'x');
+        utimesSync(p, old - i, old - i);
+      }
+      return dir;
+    };
+
+    it('worktree gc keeps prior behaviour for worktrees and only previews state backups by default', async () => {
+      const dir = writeOldBackups();
+      const res = await runMain('worktree', 'gc');
+      expect(res.exited).toBe(false);
+      expect(readdirSync(dir).filter((n) => n.startsWith('queue.bak.relaunch-'))).toHaveLength(6);
+      expect(logged()).toContain('would remove 3');
+    });
+
+    it('worktree gc --prune-state-backups removes old state backup files', async () => {
+      const dir = writeOldBackups();
+      const res = await runMain('worktree', 'gc', '--prune-state-backups');
+      expect(res.exited).toBe(false);
+      expect(
+        readdirSync(dir)
+          .filter((n) => n.startsWith('queue.bak.relaunch-'))
+          .sort(),
+      ).toEqual(['queue.bak.relaunch-0', 'queue.bak.relaunch-1', 'queue.bak.relaunch-2']);
+    });
+
     it('exits 2 on a non-numeric --ttl-days', async () => {
       const res = await runMain('worktree', 'gc', '--ttl-days', 'nope');
       expect(res).toEqual({ exited: true, code: 2 });
@@ -806,7 +846,10 @@ describe('cli commands (via main dispatch)', () => {
 
   describe('ship (via cmdShip)', () => {
     it('runs worktree gc before shipping when worktree.autoGcOnRun is true (#1756)', async () => {
-      h.factoryConfig = { ...h.factoryConfig, worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true } };
+      h.factoryConfig = {
+        ...h.factoryConfig,
+        worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true, stateBackupKeep: 3, stateBackupMaxAgeDays: 7 },
+      };
       const res = await runMain('ship', '5');
       expect(res.exited).toBe(false);
       expect(ops.sweepWorktrees).toHaveBeenCalledWith(
@@ -814,6 +857,24 @@ describe('cli commands (via main dispatch)', () => {
         expect.objectContaining({ octokit: expect.anything() }),
       );
       expect(ops.formatGcReport).toHaveBeenCalled();
+    });
+
+    it('prunes old state backups in the pre-run auto gc (#4055)', async () => {
+      h.factoryConfig = {
+        ...h.factoryConfig,
+        worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true, stateBackupKeep: 1, stateBackupMaxAgeDays: 7 },
+      };
+      const dir = join(h.repoRoot, '.factory');
+      mkdirSync(dir, { recursive: true });
+      const old = Date.now() / 1000 - 30 * 86400;
+      for (let i = 0; i < 3; i++) {
+        const p = join(dir, `queue.bak${i}`);
+        writeFileSync(p, 'x');
+        utimesSync(p, old - i, old - i);
+      }
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(readdirSync(dir).filter((n) => n.startsWith('queue.bak'))).toEqual(['queue.bak0']);
     });
 
     it('does not run worktree gc when worktree.autoGcOnRun is false (#1756)', async () => {
@@ -1075,7 +1136,10 @@ describe('cli commands (via main dispatch)', () => {
     );
 
     it('runs worktree gc before shipping when worktree.autoGcOnRun is true (#1756)', async () => {
-      h.factoryConfig = { ...h.factoryConfig, worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true } };
+      h.factoryConfig = {
+        ...h.factoryConfig,
+        worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true, stateBackupKeep: 3, stateBackupMaxAgeDays: 7 },
+      };
       const res = await runMain('run-issue', '5');
       expect(res.exited).toBe(false);
       expect(ops.sweepWorktrees).toHaveBeenCalledWith(
