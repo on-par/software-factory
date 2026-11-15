@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- `npm run duplication` runs jscpd in verify and CI `static` against a shrink-only `duplication-baseline.json` (#4125).
 - Lint rule `anti-slop/no-comments` bans source comments except justified lint overrides and toolchain directives, with a shrink-only per-file baseline and a CI guard (#4053).
 - Lint rule `anti-slop/package-boundaries` enforces the config ← core ← cli direction, a zero-dependency config, published-name cross-package imports and the ADR-0004 `/internal` and `/testing` subpath boundaries (#4052).
 - Lint rule `anti-slop/no-call-assertions` bans call-count assertions and mock-call reads in tests, with a shrink-only per-file baseline and a CI guard (#4051).

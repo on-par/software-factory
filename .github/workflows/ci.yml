@@ -82,6 +82,9 @@ jobs:
       - name: Knip
         run: npm run knip
 
+      - name: Duplication
+        run: npm run duplication
+
       # The job token is a GitHub App installation token: REST GET /user refuses it, so this exercises the real
       # GraphQL self-identity fallback against GitHub. Read-only; the suite skips wherever the variable is unset.
       - name: App installation-token identity (live)
