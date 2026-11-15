@@ -2,6 +2,8 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { recordArgs } from '../test-support/recorders.js';
+
 import {
   claudeConfigDirOverride,
   claudeConfigDirPath,
@@ -80,14 +82,10 @@ describe('claudeKeychainService', () => {
   });
 });
 
-function recordExec(fail?: Error) {
-  const execCalls: Array<[string, readonly string[]]> = [];
-  const exec = (file: string, args: readonly string[]) => {
-    execCalls.push([file, args]);
+const recordExec = (fail?: Error) =>
+  recordArgs((_file: string, _args: readonly string[]) => {
     if (fail) throw fail;
-  };
-  return { execCalls, exec };
-}
+  });
 
 const noFile = (): string => {
   throw new Error('ENOENT');
@@ -95,17 +93,12 @@ const noFile = (): string => {
 
 describe('hasClaudeLoginEvidence', () => {
   it('returns true for a non-empty CLAUDE_CODE_OAUTH_TOKEN without touching exec or the filesystem', () => {
-    const { execCalls, exec } = recordExec();
-    const fileExistsCalls: string[] = [];
-    const fileExists = (path: string) => {
-      fileExistsCalls.push(path);
-      return false;
-    };
-    expect(
-      hasClaudeLoginEvidence({ env: { CLAUDE_CODE_OAUTH_TOKEN: 'tok' }, platform: 'darwin', exec, fileExists }),
-    ).toBe(true);
+    const { calls: execCalls, fn: exec } = recordExec();
+    const fileExists = recordArgs((_path: string) => false);
+    const env = { CLAUDE_CODE_OAUTH_TOKEN: 'tok' };
+    expect(hasClaudeLoginEvidence({ env, platform: 'darwin', exec, fileExists: fileExists.fn })).toBe(true);
     expect(execCalls).toEqual([]);
-    expect(fileExistsCalls).toEqual([]);
+    expect(fileExists.calls).toEqual([]);
   });
 
   it('ignores a whitespace-only CLAUDE_CODE_OAUTH_TOKEN', () => {
@@ -119,24 +112,18 @@ describe('hasClaudeLoginEvidence', () => {
   });
 
   it('checks keychain-entry existence without reading the secret (no -w), uses only env and file evidence, and never runs claude', () => {
-    const { execCalls, exec } = recordExec();
+    const { calls: execCalls, fn: exec } = recordExec();
     expect(hasClaudeLoginEvidence({ env: {}, platform: 'darwin', exec, fileExists: () => false })).toBe(true);
     expect(execCalls).toEqual([['security', ['find-generic-password', '-s', 'Claude Code-credentials']]]);
-    expect(execCalls.flatMap(([, a]) => a)).not.toContain('-w');
-    expect(execCalls.map(([f]) => f)).not.toContain('claude');
   });
 
   it('resolves the keychain service and credentials file for CLAUDE_CONFIG_DIR', () => {
     const env = { CLAUDE_CONFIG_DIR: '/home/dev/.claude-work' };
-    const { execCalls, exec } = recordExec(new Error('not found'));
-    const fileExistsCalls: string[] = [];
-    const fileExists = (path: string) => {
-      fileExistsCalls.push(path);
-      return true;
-    };
-    expect(hasClaudeLoginEvidence({ env, platform: 'darwin', exec, fileExists })).toBe(true);
+    const { calls: execCalls, fn: exec } = recordExec(new Error('not found'));
+    const fileExists = recordArgs((_path: string) => true);
+    expect(hasClaudeLoginEvidence({ env, platform: 'darwin', exec, fileExists: fileExists.fn })).toBe(true);
     expect(execCalls).toContainEqual(['security', ['find-generic-password', '-s', claudeKeychainService(env)]]);
-    expect(fileExistsCalls).toContainEqual(resolve('/home/dev/.claude-work', '.credentials.json'));
+    expect(fileExists.calls).toContainEqual([resolve('/home/dev/.claude-work', '.credentials.json')]);
   });
 
   it('falls back to the credentials file when the darwin keychain lookup throws', () => {
@@ -150,7 +137,7 @@ describe('hasClaudeLoginEvidence', () => {
   });
 
   it('never calls exec on linux; only the credentials file decides', () => {
-    const { execCalls, exec } = recordExec();
+    const { calls: execCalls, fn: exec } = recordExec();
     expect(hasClaudeLoginEvidence({ env: {}, platform: 'linux', exec, fileExists: () => true, readFile: noFile })).toBe(
       true,
     );
@@ -214,13 +201,9 @@ describe('claudeStoredSessionState (#2721)', () => {
   });
 
   it('reads the selected profile file', () => {
-    const read = file({ accessToken: 'a', expiresAt: NOW + 3_600_000 });
-    const readPaths: string[] = [];
-    state((path) => {
-      readPaths.push(path);
-      return read();
-    });
-    expect(readPaths).toEqual([resolve('/p', '.credentials.json')]);
+    const reads = recordArgs((_path: string) => file({ accessToken: 'a', expiresAt: NOW + 3_600_000 })());
+    state(reads.fn);
+    expect(reads.calls).toEqual([[resolve('/p', '.credentials.json')]]);
   });
 
   it('runs with real defaults without throwing', () => {
@@ -244,13 +227,9 @@ describe('hasClaudeLoginEvidence with an expired stored login (#2721)', () => {
   });
 
   it('a CLAUDE_CODE_OAUTH_TOKEN still wins without reading the file', () => {
-    const readPaths: string[] = [];
-    const readFile = (path: string) => {
-      readPaths.push(path);
-      return '{}';
-    };
-    expect(hasClaudeLoginEvidence({ ...base, env: { CLAUDE_CODE_OAUTH_TOKEN: 't' }, readFile })).toBe(true);
-    expect(readPaths).toEqual([]);
+    const reads = recordArgs((_path: string) => '{}');
+    expect(hasClaudeLoginEvidence({ ...base, env: { CLAUDE_CODE_OAUTH_TOKEN: 't' }, readFile: reads.fn })).toBe(true);
+    expect(reads.calls).toEqual([]);
   });
 });
 
@@ -287,13 +266,13 @@ describe('detectClaudePlan (#3214)', () => {
   });
 
   it('is unknown on darwin when the keychain probe throws and there is no file', () => {
-    const { execCalls, exec } = recordExec(new Error('not found'));
+    const { calls: execCalls, fn: exec } = recordExec(new Error('not found'));
     expect(detectClaudePlan({ ...base, platform: 'darwin', env: {}, fileExists: () => false, exec })).toBe('unknown');
     expect(execCalls.length).toBeGreaterThan(0);
   });
 
   it('does not probe the keychain when an API key is set', () => {
-    const { execCalls, exec } = recordExec();
+    const { calls: execCalls, fn: exec } = recordExec();
     expect(detectClaudePlan({ ...base, platform: 'darwin', env: { ANTHROPIC_API_KEY: 'x' }, exec })).toBe('api');
     expect(execCalls).toEqual([]);
   });

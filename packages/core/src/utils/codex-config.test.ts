@@ -1,14 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { recordArgs } from '../test-support/recorders.js';
 import { codexChatgptSessionState, codexHasApiKey, hasCodexLoginEvidence } from './codex-config.js';
 
-function recordExec(fail?: Error) {
-  const execCalls: Array<[string, readonly string[]]> = [];
-  const exec = (file: string, args: readonly string[]) => {
-    execCalls.push([file, args]);
+const recordExec = (fail?: Error) =>
+  recordArgs((_file: string, _args: readonly string[]) => {
     if (fail) throw fail;
-  };
-  return { execCalls, exec };
-}
+  });
 
 const noFile = () => {
   throw new Error('ENOENT');
@@ -16,22 +13,21 @@ const noFile = () => {
 
 describe('hasCodexLoginEvidence', () => {
   it('returns true for a non-empty CODEX_API_KEY without running anything', () => {
-    const { execCalls, exec } = recordExec();
+    const { calls: execCalls, fn: exec } = recordExec();
     expect(hasCodexLoginEvidence({ env: { CODEX_API_KEY: 'sk-test' }, exec })).toBe(true);
     expect(execCalls).toEqual([]);
   });
 
   it('ignores a whitespace-only CODEX_API_KEY and falls through to login status', () => {
-    const { execCalls, exec } = recordExec();
+    const { calls: execCalls, fn: exec } = recordExec();
     expect(hasCodexLoginEvidence({ env: { CODEX_API_KEY: '   ' }, exec, readFile: noFile })).toBe(true);
     expect(execCalls).toHaveLength(1);
   });
 
   it('runs only `codex login status` and never codex exec', () => {
-    const { execCalls, exec } = recordExec();
+    const { calls: execCalls, fn: exec } = recordExec();
     expect(hasCodexLoginEvidence({ env: {}, exec, readFile: noFile })).toBe(true);
     expect(execCalls).toEqual([['codex', ['login', 'status']]]);
-    expect(execCalls.flatMap(([, a]) => a)).not.toContain('exec');
   });
 
   it('returns false when the command throws (non-zero exit or not found)', () => {
@@ -115,15 +111,11 @@ describe('codexHasApiKey (#3214)', () => {
   });
 
   it('reads auth.json under CODEX_HOME, falling back to ~/.codex when blank', () => {
-    const readPaths: string[] = [];
-    const readFile = (path: string) => {
-      readPaths.push(path);
-      return '{}';
-    };
+    const { calls, fn: readFile } = recordArgs((_path: string) => '{}');
     codexHasApiKey({ env: { CODEX_HOME: '/c' }, homedir, readFile });
-    expect(readPaths).toEqual(['/c/auth.json']);
+    expect(calls).toEqual([['/c/auth.json']]);
     codexHasApiKey({ env: { CODEX_HOME: ' ' }, homedir, readFile });
-    expect(readPaths).toEqual(['/c/auth.json', '/home/u/.codex/auth.json']);
+    expect(calls).toEqual([['/c/auth.json'], ['/home/u/.codex/auth.json']]);
   });
 
   it('is false for a null, blank or non-string key', () => {

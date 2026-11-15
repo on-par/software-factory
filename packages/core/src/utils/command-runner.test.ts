@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { KillOutcome } from '../environment/process-groups.js';
 import { trackedProcessGroups } from '../environment/process-groups.js';
+import { recordArgs } from '../test-support/recorders.js';
 import { runCommand } from './command-runner.js';
 
 const tempDirs = new Set<string>();
@@ -173,12 +174,12 @@ describe('runCommand', () => {
 
     it('win32 timeout takes the tree-kill path once, reusing it for the sweep', async () => {
       let reportedPid: number | undefined;
-      const killCalls: Array<[number, unknown]> = [];
-      const killGroup = async (pid: number, opts?: unknown): Promise<KillOutcome> => {
-        killCalls.push([pid, opts]);
-        process.kill(pid, 'SIGKILL');
-        return { pgid: pid, terminated: true, forced: false };
-      };
+      const { calls: killCalls, fn: killGroup } = recordArgs(
+        async (pid: number, _opts?: unknown): Promise<KillOutcome> => {
+          process.kill(pid, 'SIGKILL');
+          return { pgid: pid, terminated: true, forced: false };
+        },
+      );
 
       const result = await runCommand(sleeper, {
         timeoutMs: 200,
@@ -192,16 +193,13 @@ describe('runCommand', () => {
 
       expect(result.timedOut).toBe(true);
       expect(result.killed).toBe(true);
-      expect(killCalls).toHaveLength(1);
-      expect(killCalls[0]).toEqual([reportedPid, expect.objectContaining({ platform: 'win32', graceMs: 50 })]);
+      expect(killCalls).toEqual([[reportedPid, expect.objectContaining({ platform: 'win32', graceMs: 50 })]]);
     }, 10000);
 
     it('win32 falls back to child.kill() when the tree kill does not terminate the root', async () => {
-      const killCalls: Array<[number, unknown]> = [];
-      const killGroup = async (pid: number, opts?: unknown): Promise<KillOutcome> => {
-        killCalls.push([pid, opts]);
-        return { pgid: pid, terminated: false, forced: true };
-      };
+      const { calls: killCalls, fn: killGroup } = recordArgs(
+        async (pid: number, _opts?: unknown): Promise<KillOutcome> => ({ pgid: pid, terminated: false, forced: true }),
+      );
 
       const result = await runCommand(sleeper, {
         timeoutMs: 200,
@@ -216,11 +214,9 @@ describe('runCommand', () => {
     }, 10000);
 
     it('posix sweeps once after exit with the injected platform', async () => {
-      const killCalls: Array<[number, unknown]> = [];
-      const killGroup = async (pid: number, opts?: unknown): Promise<KillOutcome> => {
-        killCalls.push([pid, opts]);
-        return { pgid: pid, terminated: true, forced: false };
-      };
+      const { calls: killCalls, fn: killGroup } = recordArgs(
+        async (pid: number, _opts?: unknown): Promise<KillOutcome> => ({ pgid: pid, terminated: true, forced: false }),
+      );
 
       const result = await runCommand(sleeper, {
         timeoutMs: 200,

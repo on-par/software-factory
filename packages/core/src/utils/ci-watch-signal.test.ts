@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { recordArgs } from '../test-support/recorders.js';
 import { hasAnyCiSignal, watchChecks } from './ci-watch.js';
 
 const statuses = (total: number) => vi.fn(async () => ({ data: { total_count: total, statuses: [], sha: 'abc' } }));
@@ -8,14 +9,11 @@ const base = { owner: 'o', repo: 'r', ref: 'abc' };
 
 describe('hasAnyCiSignal (#3208)', () => {
   it('is true when a check run exists, without reading statuses', async () => {
-    let statusReads = 0;
-    const getCombinedStatusForRef = async () => {
-      statusReads++;
-      return { data: { total_count: 0, statuses: [], sha: 'abc' } };
-    };
-    const octokit = { rest: { checks: { listForRef: runs([{ name: 'x' }]) }, repos: { getCombinedStatusForRef } } };
+    const reads = recordArgs(statuses(0));
+    const checks = { listForRef: runs([{ name: 'x' }]) };
+    const octokit = { rest: { checks, repos: { getCombinedStatusForRef: reads.fn } } };
     expect(await hasAnyCiSignal(octokit as any, 'o', 'r', 'abc')).toBe(true);
-    expect(statusReads).toBe(0);
+    expect(reads.calls).toEqual([]);
   });
 
   it('is true when only a commit status exists', async () => {

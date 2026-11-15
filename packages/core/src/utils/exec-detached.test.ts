@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { recordArgs } from '../test-support/recorders.js';
 import type { KillOutcome } from '../environment/process-groups.js';
 import { createDefaultExecFn, type ExecDeps } from './exec.js';
 
@@ -11,9 +12,7 @@ function fakeChild(pid: number | undefined) {
     killed: false,
     stdout: new EventEmitter(),
     stderr: new EventEmitter(),
-    killCount: 0,
     kill: () => {
-      child.killCount++;
       child.killed = true;
       return true;
     },
@@ -24,13 +23,10 @@ function fakeChild(pid: number | undefined) {
 function setup(pid: number | null = 4242) {
   const child = fakeChild(pid ?? undefined);
   const spawn: NonNullable<ExecDeps['spawn']> = () => child as never;
-  const killCalls: Array<[number, unknown]> = [];
-  const killProcessGroup = async (pgid: number, opts?: unknown) => {
-    killCalls.push([pgid, opts]);
-    return {} as KillOutcome;
-  };
-  const pgids: number[] = [];
-  const onPgid = (pgid: number) => void pgids.push(pgid);
+  const { calls: killCalls, fn: killProcessGroup } = recordArgs(
+    async (_pgid: number, _opts?: unknown) => ({}) as KillOutcome,
+  );
+  const { calls: pgids, fn: onPgid } = recordArgs((_pgid: number) => undefined);
   const exec = createDefaultExecFn({ spawn, killProcessGroup });
   const run = (opts: Parameters<typeof exec>[1] = {}) =>
     exec('cmd', { ...opts, env: { FACTORY_DAEMON_GROUPS_FILE: '' }, onPgid });
@@ -49,7 +45,7 @@ describe('createDefaultExecFn detached path (fake child)', () => {
       child[stream].emit('data', Buffer.from('12345'));
       child.emit('exit', null, 'SIGTERM');
       const err = await result;
-      expect(child.killCount).toBeGreaterThan(0);
+      expect(child.killed).toBe(true);
       expect(err.message).toBe('stdout/stderr maxBuffer exceeded');
       expect(err.killed).toBe(true);
       expect(err[stream]).toBe('');
@@ -66,7 +62,7 @@ describe('createDefaultExecFn detached path (fake child)', () => {
     expect(err.message).toBe('spawn ENOENT');
     expect(killCalls).toEqual([]);
     vi.advanceTimersByTime(2000);
-    expect(child.killCount).toBe(0);
+    expect(child.killed).toBe(false);
   });
 
   it('sets no timer when timeoutMs is absent', async () => {
@@ -74,7 +70,7 @@ describe('createDefaultExecFn detached path (fake child)', () => {
     const { child, run } = setup();
     const result = run();
     vi.advanceTimersByTime(10 * 60_000);
-    expect(child.killCount).toBe(0);
+    expect(child.killed).toBe(false);
     child.stdout.emit('data', Buffer.from('ok'));
     child.emit('exit', 0, null);
     await expect(result).resolves.toEqual({ stdout: 'ok', stderr: '' });
@@ -97,7 +93,7 @@ describe('createDefaultExecFn detached path (fake child)', () => {
     const err = await result;
     expect(err.killed).toBe(false);
     expect(err.signal).toBe('SIGTERM');
-    expect(pgids).toEqual([4242]);
+    expect(pgids).toEqual([[4242]]);
     expect(killCalls).toEqual([[4242, { graceMs: 50 }]]);
   });
 

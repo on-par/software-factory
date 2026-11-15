@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { recordArgs } from '../test-support/recorders.js';
+
 import { DEFAULT_CI_NO_CHECKS_GRACE_MS, detectNoCiConfigured, watchChecks } from './ci-watch.js';
 
 function createClock() {
@@ -24,16 +26,12 @@ describe('watchChecks up-front no-CI probe (#2488)', () => {
       commits?: Array<{ sha: string }>;
     } = {},
   ) {
-    const contentCalls: unknown[][] = [];
-    const impl =
+    const { calls: contentCalls, fn: getContent } = recordArgs(
       opts.getContent ??
-      (async () => {
-        throw notFound();
-      });
-    const getContent = async (...args: unknown[]) => {
-      contentCalls.push(args);
-      return impl();
-    };
+        (async (..._args: unknown[]): Promise<any> => {
+          throw notFound();
+        }),
+    );
     const octokit = {
       rest: {
         checks: { listForRef: async () => ({ data: { check_runs: [], total_count: 0 } }) },

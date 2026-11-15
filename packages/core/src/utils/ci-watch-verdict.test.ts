@@ -19,7 +19,7 @@ describe('noChecksVerdictMs', () => {
     };
     const listForRef = async () => ({ data: { check_runs: [] } });
     const getCombinedStatusForRef = async () => ({ data: { total_count: 0, statuses: [], sha: 'abc123' } });
-    const infos: Array<{ reason: string; waitedMs: number }> = [];
+    const infos: unknown[] = [];
     const octokit = { rest: { checks: { listForRef }, repos: { getCombinedStatusForRef } } };
 
     const outcome = await watchChecks({
@@ -34,9 +34,6 @@ describe('noChecksVerdictMs', () => {
     });
 
     expect(outcome).toBe('no-checks');
-    expect(infos).toHaveLength(1);
-    const [info] = infos;
-    expect(info.reason).toBe('grace-elapsed');
-    expect(info.waitedMs).toBe(noChecksVerdictMs());
+    expect(infos).toEqual([expect.objectContaining({ reason: 'grace-elapsed', waitedMs: noChecksVerdictMs() })]);
   });
 });
