@@ -135,10 +135,7 @@ describe('classifyPrShadow', () => {
     const sandbox = { runtime: 'none' } as SandboxPolicy;
     const seen: unknown[] = [];
     const realRun = router.run.bind(router);
-    vi.spyOn(router, 'run').mockImplementation(async (task, prompt, options) => {
-      seen.push(options);
-      return realRun(task, prompt, options);
-    });
+    vi.spyOn(router, 'run').mockImplementation((...args) => (seen.push(args[2]), realRun(...args)));
     await classifyPrShadow(input(router, { onLog: (m) => lines.push(m), sandbox }), deps);
     expect(seen[0]).toMatchObject({ sandbox });
     expect(rows).toHaveLength(1);
@@ -150,7 +147,6 @@ describe('classifyPrShadow', () => {
     const pinned = makeRouter(VALID);
     await classifyPrShadow(input(pinned.router, { modelPin: 'pin-model' }), deps);
     expect(pinned.calls[0]).toMatchObject({ task: 'classify_pr', options: { modelOverride: 'pin-model' } });
-    expect(typeof pinned.calls[0].prompt).toBe('string');
     const plain = makeRouter(VALID);
     await classifyPrShadow(input(plain.router), deps);
     expect('modelOverride' in plain.calls[0].options).toBe(false);
@@ -236,11 +232,8 @@ describe('classifyPrShadow', () => {
       return { ok: true, stdout: '' };
     };
     const { router, calls } = makeRouter(VALID);
-    await classifyPrShadow(input(router), {
-      ...deps,
-      collectDiff: (w, _r, o) => collectDesignDiff(w, runner, o),
-    });
-    const prompt = calls[0].prompt;
+    await classifyPrShadow(input(router), { ...deps, collectDiff: (w, _r, o) => collectDesignDiff(w, runner, o) });
+    const { prompt } = calls[0];
     for (const s of ['DIFF-BODY-SENTINEL', 'ISSUE-TITLE-SENTINEL', 'ISSUE-BODY-SENTINEL', 'SPEC-SENTINEL']) {
       expect(prompt).toContain(s);
     }

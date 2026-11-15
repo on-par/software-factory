@@ -93,8 +93,8 @@ describe('publishRiskReceipt', () => {
   it('writes a receipt with the tier into the PR body', async () => {
     const f = fakeOctokit('Closes #5', ['src/auth/login.ts']);
     const res = await publishRiskReceipt({ octokit: f.octokit, owner: 'o', repo: 'r', prNumber: 5 });
-    expect(f.updates).toHaveLength(1);
-    const [arg] = f.updates;
+    const [arg, ...rest] = f.updates;
+    expect(rest).toEqual([]);
     expect(arg.pull_number).toBe(5);
     expect(arg.body).toContain('Closes #5');
     expect(arg.body).toContain('**Tier: high**');
