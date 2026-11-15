@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- Lint rule `anti-slop/no-call-assertions` bans call-count assertions and mock-call reads in tests, with a shrink-only per-file baseline and a CI guard (#4051).
+
 ### Changed
 
 - Direct `mkdtemp(tmpdir())` in tests is now an oxlint error (`anti-slop/no-direct-tmpdir-mkdtemp`), replacing the vitest guard, and a lefthook pre-commit hook runs `oxlint --fix` and `prettier --write` on staged files (#4050).

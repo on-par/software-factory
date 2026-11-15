@@ -16,6 +16,12 @@ export const TMPDIR_MKDTEMP_BASELINE: Readonly<Record<string, number>> = JSON.pa
   readFileSync(new URL('./tmpdir-mkdtemp-baseline.json', import.meta.url), 'utf8'),
 );
 
+// #4051: test files grandfathered with call-count assertions and mock-call reads; counts can only
+// shrink, never add a file. Assert observable behaviour instead.
+export const CALL_ASSERTIONS_BASELINE: Readonly<Record<string, number>> = JSON.parse(
+  readFileSync(new URL('./call-assertions-baseline.json', import.meta.url), 'utf8'),
+);
+
 const MAX_LINES_OPTIONS = { skipBlankLines: false, skipComments: false } as const;
 
 export default defineConfig({
@@ -136,6 +142,8 @@ export default defineConfig({
     'anti-slop/no-module-mocking': 'error',
     // #4050: no direct mkdtemp(tmpdir()) in tests; per-file allowances come from the baseline overrides.
     'anti-slop/no-direct-tmpdir-mkdtemp': 'error',
+    // #4051: no call-count assertions or mock-call reads in tests; per-file allowances come from the baseline overrides.
+    'anti-slop/no-call-assertions': 'error',
   },
   overrides: [
     ...Object.entries(MAX_LINES_BASELINE).map(([file, max]) => ({
@@ -145,6 +153,10 @@ export default defineConfig({
     ...Object.entries(TMPDIR_MKDTEMP_BASELINE).map(([file, allowed]) => ({
       files: [file],
       rules: { 'anti-slop/no-direct-tmpdir-mkdtemp': ['error', { allowed }] },
+    })),
+    ...Object.entries(CALL_ASSERTIONS_BASELINE).map(([file, allowed]) => ({
+      files: [file],
+      rules: { 'anti-slop/no-call-assertions': ['error', { allowed }] },
     })),
   ],
 });
