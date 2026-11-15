@@ -13,12 +13,15 @@ import { stripAnsi } from './command-log.js';
 import { runVerificationCommand, VERIFICATION_SCRUBBED_ENV_VARS } from './run-command.js';
 import {
   MAX_CLIP_BYTES,
+  readError,
   validateVisualProofManifest,
   type VisualProofCapture,
   type VisualProofRoute,
 } from './visual-proof-manifest.js';
 
 export type { VisualProofCapture, VisualProofRoute } from './visual-proof-manifest.js';
+export { describeVisualProofStep, validateVisualProofManifest } from './visual-proof-manifest.js';
+export { isBlankPng } from './visual-proof-png.js';
 
 export type VisualProofRequirement =
   { required: false } | { required: true; routes: VisualProofRoute[]; diagnostic?: string; uncovered?: string[] };
@@ -262,8 +265,11 @@ export async function runVisualProofCapture(
       let manifest: unknown;
       try {
         manifest = JSON.parse(readFile(join(outDir, 'manifest.json')).toString('utf8'));
-      } catch {
-        return done('fail', 'capture command wrote no readable manifest.json to VISUAL_PROOF_OUT_DIR');
+      } catch (err) {
+        return done(
+          'fail',
+          `capture command wrote no readable manifest.json to VISUAL_PROOF_OUT_DIR: ${readError(err)}`,
+        );
       }
       const checked = validateVisualProofManifest(
         manifest,

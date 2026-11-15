@@ -27,7 +27,7 @@ export interface VisualProofCapture {
   clip?: { file: string; format: 'gif' | 'webm' | 'mp4'; bytes: number };
 }
 
-function readError(err: unknown): string {
+export function readError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
