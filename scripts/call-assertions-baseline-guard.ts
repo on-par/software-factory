@@ -54,13 +54,16 @@ export function runCallAssertionsBaselineGuard(argv: readonly string[], io: Call
   const readHead = io.readHead ?? (() => readFileSync(resolve(cwd, BASELINE_FILE), 'utf8'));
   let diff: BaselineDiff;
   try {
-    let baseText = '{}';
-    try {
-      baseText = git(['show', `${base}:${BASELINE_FILE}`]);
-    } catch {
-      // The baseline did not exist at the base ref: every head entry counts as added.
+    if (git(['ls-tree', base, '--', BASELINE_FILE]).trim() === '') {
+      // The baseline does not exist at the base ref: this change introduces it, so there is nothing to ratchet against.
+      parseBaseline(readHead(), 'head');
+      log(`call-assertions baseline guard: ${BASELINE_FILE} is new at the base ref; nothing to compare`);
+      return 0;
     }
-    diff = diffMaxLinesBaseline(parseBaseline(baseText, 'base'), parseBaseline(readHead(), 'head'));
+    diff = diffMaxLinesBaseline(
+      parseBaseline(git(['show', `${base}:${BASELINE_FILE}`]), 'base'),
+      parseBaseline(readHead(), 'head'),
+    );
   } catch (err) {
     error(`call-assertions baseline guard: ${err instanceof Error ? err.message : String(err)}`);
     return 1;
