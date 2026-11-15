@@ -373,9 +373,7 @@ describe('providerCapGate under models.providerOrder (#3340)', () => {
     const probed = await mk();
     t = NOW;
     const probedModels: string[] = [];
-    const probe = async (model: string) => {
-      probedModels.push(model);
-    };
+    const probe = async (model: string) => void probedModels.push(model);
     const router = {
       registryRef: {
         get: (id: string) => (id === 'claude-a' ? { provider: 'anthropic', harness: 'claude-cli' } : undefined),

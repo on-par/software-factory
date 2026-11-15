@@ -11,9 +11,7 @@ type Log = ReturnType<RunPorts['events']>;
 
 function wrapped(): { events: RunPorts['events']; entries: unknown[][] } {
   const entries: unknown[][] = [];
-  const log = ((...args: unknown[]) => {
-    entries.push(args);
-  }) as Log;
+  const log = ((...args: unknown[]) => void entries.push(args)) as Log;
   const ports: RunPorts = {
     router: {} as ModelRouter,
     octokit: {} as Octokit,

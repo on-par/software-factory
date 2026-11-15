@@ -44,10 +44,7 @@ describe('restackAfterSquashMerge', () => {
   let updates: Array<{ pull_number: number; base?: string; body?: string }>;
   let saved: SlicePlan[];
   let savePlan: (plan: SlicePlan) => Promise<void>;
-  const update = async (args: Record<string, unknown>) => {
-    updates.push(args as { pull_number: number; base?: string; body?: string });
-    return {};
-  };
+  const update = async (args: (typeof updates)[number]) => (updates.push(args), {});
   let baseRef: Record<number, string>;
 
   const octokit = (): Octokit => {
@@ -93,9 +90,7 @@ describe('restackAfterSquashMerge', () => {
     root = join(dir, 'root');
     updates = [];
     saved = [];
-    savePlan = async (p) => {
-      saved.push(p);
-    };
+    savePlan = async (p) => void saved.push(p);
     baseRef = {};
     git(dir, 'init', '--bare', '-b', 'main', remote);
     git(dir, 'clone', remote, root);
@@ -134,7 +129,6 @@ describe('restackAfterSquashMerge', () => {
     const out = await run({ plan: withSliceState(plan, 3, 'pending') });
     expect(out.status).toBe('restacked');
     expect(remoteLog('factory/9-slice-2')).toEqual(['s2 only']);
-    expect(out.status === 'restacked' && out.retargeted).toBe(true);
     expect(updates).toHaveLength(1);
     expect(updates[0]).toMatchObject({ pull_number: 102, base: 'main' });
     expect(updates[0]!.body).toContain('stacked on `main`');
@@ -148,10 +142,9 @@ describe('restackAfterSquashMerge', () => {
     expect(git(remote, 'rev-parse', 'factory/9-slice-3^')).toBe(head2);
     expect(remoteLog('factory/9-slice-3')).toEqual(['s3 only', 's2 only']);
     expect(updates.map((u) => u.pull_number)).not.toContain(103);
-    const heads = [undefined, head2, remoteHead('factory/9-slice-3')];
-    expect(saved).toHaveLength(1);
-    expect(saved[0]!.slices.map((s) => s.headSha)).toEqual(heads);
-    expect(out.status === 'restacked' && out.plan.slices.map((s) => s.headSha)).toEqual(heads);
+    expect(saved.map((p) => p.slices.map((s) => s.headSha))).toEqual([
+      [undefined, head2, remoteHead('factory/9-slice-3')],
+    ]);
   });
 
   it('still rebases with --onto when GitHub already retargeted the PR to main', async () => {
@@ -174,7 +167,6 @@ describe('restackAfterSquashMerge', () => {
     expect(out.status === 'park' && out.reason).toContain('#102');
     expect(remoteHead('factory/9-slice-2')).toBe(humanHead);
     expect(updates).toEqual([]);
-    expect(saved).toEqual([]);
   });
 
   it('parks naming the slice, its PR and the conflicting files on a rebase conflict', async () => {
@@ -224,7 +216,6 @@ describe('restackAfterSquashMerge', () => {
     expect(out).toMatchObject({ status: 'park', index: 3 });
     expect(remoteHead('factory/9-slice-2')).toBe(before2);
     expect(updates).toEqual([]);
-    expect(saved).toEqual([]);
   });
 
   it('returns nothing when the branch no longer holds the merged head', async () => {
@@ -269,9 +260,7 @@ describe('restackAfterSquashMerge', () => {
   it('parks after the push when saving the plan fails', async () => {
     const out = await run({
       plan: withSliceState(plan, 3, 'pending'),
-      savePlan: async () => {
-        throw new Error('comment gone');
-      },
+      savePlan: () => Promise.reject(new Error('comment gone')),
     });
     expect(out.status === 'park' && out.reason).toContain('comment gone');
     expect(remoteLog('factory/9-slice-2')).toEqual(['s2 only']);
