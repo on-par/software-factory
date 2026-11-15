@@ -1,6 +1,6 @@
 // packages/core/src/queue/clock-skew.test.ts — clock skew measurement against GitHub's Date header (#3149).
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { defaultFactoryConfig } from '@on-par/factory-config';
 
@@ -36,17 +36,21 @@ describe('measureClockSkew', () => {
   });
 
   it('reuses a cached measurement inside the TTL and re-measures after it', async () => {
-    const serverDate = vi.fn(async () => SERVER_DATE);
+    let fetches = 0;
+    const serverDate = async () => {
+      fetches++;
+      return SERVER_DATE;
+    };
     const cache = createClockSkewCache(600_000);
     let nowMs = SERVER_MS + 1000;
     const now = () => nowMs;
     expect(await measureClockSkew({ serverDate, now, cache })).toBe(1000);
     nowMs += 599_000;
     await measureClockSkew({ serverDate, now, cache });
-    expect(serverDate).toHaveBeenCalledTimes(1);
+    expect(fetches).toBe(1);
     nowMs += 1000;
-    await measureClockSkew({ serverDate, now, cache });
-    expect(serverDate).toHaveBeenCalledTimes(2);
+    expect(await measureClockSkew({ serverDate, now, cache })).toBe(1000 + 599_000 + 1000);
+    expect(fetches).toBe(2);
   });
 
   it('returns null and caches nothing when serverDate throws or the header is unparsable', async () => {
@@ -77,7 +81,7 @@ describe('isClockSkewExcessive', () => {
 
 describe('measureGithubClockSkew', () => {
   it('reads the Date header of rest.rateLimit.get', async () => {
-    const get = vi.fn(async () => ({ headers: { date: SERVER_DATE } }));
+    const get = async () => ({ headers: { date: SERVER_DATE } });
     expect(await measureGithubClockSkew({ rest: { rateLimit: { get } } }, { now: () => SERVER_MS + 3000 })).toBe(3000);
   });
   it('returns null when the header is absent or the call fails', async () => {

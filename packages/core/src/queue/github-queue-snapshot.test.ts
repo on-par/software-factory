@@ -1,15 +1,19 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { type QueueIssue, readGithubQueueSnapshot } from './github-queue.js';
 
 function clientWith(issues: QueueIssue[]) {
-  const listOpenIssuesWithLabels = vi.fn(async () => issues);
-  return { client: { listOpenIssuesWithLabels }, listOpenIssuesWithLabels };
+  const requests: Array<{ owner: string; repo: string; labels: string[] }> = [];
+  const listOpenIssuesWithLabels = async (input: { owner: string; repo: string; labels: string[] }) => {
+    requests.push(input);
+    return issues;
+  };
+  return { client: { listOpenIssuesWithLabels }, requests };
 }
 
 describe('readGithubQueueSnapshot (#1362)', () => {
   it('lists queued issues grouped by lane, in order-label order, with titles', async () => {
-    const { client, listOpenIssuesWithLabels } = clientWith([
+    const { client, requests } = clientWith([
       { number: 12, title: 'Second in cleanup', labels: ['factory:queued', 'factory:lane:cleanup', 'factory:order:2'] },
       { number: 7, title: 'First in access', labels: ['factory:queued', 'factory:lane:access', 'factory:order:1'] },
       { number: 11, title: 'First in cleanup', labels: ['factory:queued', 'factory:lane:cleanup', 'factory:order:1'] },
@@ -17,8 +21,7 @@ describe('readGithubQueueSnapshot (#1362)', () => {
 
     const snapshot = await readGithubQueueSnapshot({ client, owner: 'o', repo: 'r' });
 
-    expect(listOpenIssuesWithLabels).toHaveBeenCalledTimes(1);
-    expect(listOpenIssuesWithLabels).toHaveBeenCalledWith({ owner: 'o', repo: 'r', labels: ['factory:queued'] });
+    expect(requests).toEqual([{ owner: 'o', repo: 'r', labels: ['factory:queued'] }]);
     expect(snapshot).toEqual({
       entries: [
         { lane: 'access', issue: 7, title: 'First in access', status: 'queued' },
@@ -86,10 +89,12 @@ describe('readGithubQueueSnapshot (#1362)', () => {
   });
 
   it('returns no entries when nothing is queued or the queued issues carry no lane label', async () => {
-    expect(await readGithubQueueSnapshot({ ...clientWith([]), owner: 'o', repo: 'r' })).toEqual({ entries: [] });
+    expect(await readGithubQueueSnapshot({ client: clientWith([]).client, owner: 'o', repo: 'r' })).toEqual({
+      entries: [],
+    });
     expect(
       await readGithubQueueSnapshot({
-        ...clientWith([{ number: 5, labels: ['factory:queued', 'factory:order:1', 'factory:lane:'] }]),
+        client: clientWith([{ number: 5, labels: ['factory:queued', 'factory:order:1', 'factory:lane:'] }]).client,
         owner: 'o',
         repo: 'r',
       }),

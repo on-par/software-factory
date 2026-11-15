@@ -1,6 +1,6 @@
 // packages/core/src/queue/linear-queue-lifecycle.test.ts — Linear queue release, park, heartbeat and reap (#3893).
 import { readFileSync } from 'node:fs';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { LinearTrackerSchema } from '../config/tracker-section.js';
 import { LinearApiError } from '../work/linear-client.js';
 import { toWorkKey } from '../work/work-key.js';
@@ -77,7 +77,8 @@ function setup(o: { failOn?: Set<string>; claimantId?: string; now?: number; mut
   const fx = fixture();
   o.mutate?.(fx);
   const { client, calls } = fakeClient(fx, { failOn: o.failOn });
-  const warn = vi.fn();
+  const warnings: string[] = [];
+  const warn = (msg: string) => void warnings.push(msg);
   const lifecycle = createLinearQueueLifecycle({
     client,
     linear,
@@ -87,19 +88,19 @@ function setup(o: { failOn?: Set<string>; claimantId?: string; now?: number; mut
   });
   const names = () => fx.issue.labels.map((l) => l.name);
   const writes = () => calls.filter((c) => WRITES.has(c));
-  return { fx, lifecycle, warn, names, writes };
+  return { fx, lifecycle, warnings, names, writes };
 }
 
 describe('release', () => {
   it('park adds the parked label, comments the reason and moves ON-12 to the ready state', async () => {
-    const { fx, lifecycle, warn, names } = setup();
+    const { fx, lifecycle, warnings, names } = setup();
     await lifecycle.release(key, 'parked', 'CHECK failed after 3 rework rounds');
     expect(names()).toContain('factory:parked');
     expect(names()).not.toContain('factory:claimed-by:host-a-1');
     expect(fx.comments[0]).toContain('CHECK failed after 3 rework rounds');
     expect(fx.issue.state).toBe('Todo');
     expect(fx.issue.lease).toBeUndefined();
-    expect(warn).not.toHaveBeenCalled();
+    expect(warnings).toEqual([]);
   });
 
   it('queued release removes the claim label and lease and moves ON-12 to ready', async () => {
@@ -134,21 +135,21 @@ describe('release', () => {
   });
 
   it('release of an unknown key warns', async () => {
-    const { lifecycle, warn } = setup();
+    const { lifecycle, warnings } = setup();
     await lifecycle.release(toWorkKey('ON-99'));
-    expect(warn).toHaveBeenCalledWith('linear queue: release of ON-99: issue not found');
+    expect(warnings).toEqual(['linear queue: release of ON-99: issue not found']);
   });
 
   it('a failed lookup during release warns and resolves', async () => {
-    const { lifecycle, warn } = setup({ failOn: new Set(['findIssue']) });
+    const { lifecycle, warnings } = setup({ failOn: new Set(['findIssue']) });
     await expect(lifecycle.release(key)).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warnings).toHaveLength(1);
   });
 
   it('a failed write during release warns and resolves', async () => {
-    const { fx, lifecycle, warn, names } = setup({ failOn: new Set(['addComment']) });
+    const { fx, lifecycle, warnings, names } = setup({ failOn: new Set(['addComment']) });
     await expect(lifecycle.release(key, 'parked', 'why')).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('ON-12'));
+    expect(warnings.some((w) => w.includes('ON-12'))).toBe(true);
     expect(names()).toContain('factory:parked');
     expect(fx.issue.state).toBe('Todo');
   });
@@ -178,15 +179,15 @@ describe('heartbeat', () => {
   });
 
   it('warns and returns true when the lookup rejects', async () => {
-    const { lifecycle, warn } = setup({ failOn: new Set(['findIssue']) });
+    const { lifecycle, warnings } = setup({ failOn: new Set(['findIssue']) });
     await expect(lifecycle.heartbeat(key)).resolves.toBe(true);
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warnings).toHaveLength(1);
   });
 
   it('warns and returns true when the lease write fails', async () => {
-    const { lifecycle, warn } = setup({ failOn: new Set(['upsertLeaseAttachment']) });
+    const { lifecycle, warnings } = setup({ failOn: new Set(['upsertLeaseAttachment']) });
     await expect(lifecycle.heartbeat(key)).resolves.toBe(true);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('lease renew'));
+    expect(warnings.some((w) => w.includes('lease renew'))).toBe(true);
   });
 });
 
@@ -213,26 +214,26 @@ describe('reap', () => {
   });
 
   it('reap reads the lease from the factory attachment metadata and skips malformed metadata', async () => {
-    const { lifecycle, warn, writes } = setup({
+    const { lifecycle, warnings, writes } = setup({
       now: 1700000900001,
       mutate: (f) => void (f.issue.lease = { attachmentId: 'att-lease-12', metadata: { kind: 'other' } }),
     });
     await expect(lifecycle.reap()).resolves.toEqual([]);
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warnings).toHaveLength(1);
     expect(writes()).toEqual([]);
   });
 
   it('a failed write during reap warns and reports a failed row', async () => {
-    const { lifecycle, warn } = setup({ now: 1700000900001, failOn: new Set(['removeLabel']) });
+    const { lifecycle, warnings } = setup({ now: 1700000900001, failOn: new Set(['removeLabel']) });
     const rows = await lifecycle.reap();
     expect(rows).toEqual([expect.objectContaining({ outcome: 'failed', released: false, detail: 'boom' })]);
-    expect(warn).toHaveBeenCalled();
+    expect(warnings.length).toBeGreaterThan(0);
   });
 
   it('warns and returns [] when listing rejects', async () => {
-    const { lifecycle, warn } = setup({ failOn: new Set(['listLeasedIssues']) });
+    const { lifecycle, warnings } = setup({ failOn: new Set(['listLeasedIssues']) });
     await expect(lifecycle.reap()).resolves.toEqual([]);
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warnings).toHaveLength(1);
   });
 });
 

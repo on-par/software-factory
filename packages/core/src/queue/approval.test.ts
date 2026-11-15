@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { defaultFactoryConfig } from '@on-par/factory-config';
 
@@ -11,8 +11,14 @@ import {
 
 const base = { owner: 'o', repo: 'r' };
 const fake = (impl: () => Promise<string>) => {
-  const getPermissionLevel = vi.fn(impl);
-  return { getPermissionLevel } satisfies CollaboratorPermissionClient;
+  const lookups: Array<{ owner: string; repo: string; username: string }> = [];
+  const client = {
+    getPermissionLevel: async (input: { owner: string; repo: string; username: string }) => {
+      lookups.push(input);
+      return impl();
+    },
+  } satisfies CollaboratorPermissionClient;
+  return { client, lookups };
 };
 
 describe('intake defaults', () => {
@@ -26,26 +32,26 @@ describe('intake defaults', () => {
 
 describe('isTrustedApprover', () => {
   it('trusts only listed logins, case-insensitively, without calling the client', async () => {
-    const client = fake(async () => 'admin');
+    const { client, lookups } = fake(async () => 'admin');
     const opts = { ...base, trustedApprovers: ['patrob'], client };
     expect(await isTrustedApprover('patrob', opts)).toBe(true);
     expect(await isTrustedApprover('PatRob', opts)).toBe(true);
     expect(await isTrustedApprover('someone-else', opts)).toBe(false);
-    expect(client.getPermissionLevel).not.toHaveBeenCalled();
+    expect(lookups).toEqual([]);
   });
 
   it('trusts nobody for an explicit empty list', async () => {
-    const client = fake(async () => 'admin');
+    const { client, lookups } = fake(async () => 'admin');
     expect(await isTrustedApprover('patrob', { ...base, trustedApprovers: [], client })).toBe(false);
-    expect(client.getPermissionLevel).not.toHaveBeenCalled();
+    expect(lookups).toEqual([]);
   });
 
   it('falls back to admin permission when the list is unset', async () => {
     const admin = fake(async () => 'admin');
-    expect(await isTrustedApprover('u', { ...base, client: admin })).toBe(true);
-    expect(admin.getPermissionLevel).toHaveBeenCalledWith({ owner: 'o', repo: 'r', username: 'u' });
+    expect(await isTrustedApprover('u', { ...base, client: admin.client })).toBe(true);
+    expect(admin.lookups).toEqual([{ owner: 'o', repo: 'r', username: 'u' }]);
     for (const level of ['write', 'read', 'none', 'maintain']) {
-      expect(await isTrustedApprover('u', { ...base, client: fake(async () => level) })).toBe(false);
+      expect(await isTrustedApprover('u', { ...base, client: fake(async () => level).client })).toBe(false);
     }
   });
 
@@ -55,26 +61,32 @@ describe('isTrustedApprover', () => {
         throw new Error('boom');
       },
     };
-    const notFound = fake(() => Promise.reject(Object.assign(new Error('Not Found'), { status: 404 })));
+    const notFound = fake(() => Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }))).client;
     expect(await isTrustedApprover('u', { ...base, client: throwing })).toBe(false);
-    expect(await isTrustedApprover('u', { ...base, client: fake(() => Promise.reject(new Error('x'))) })).toBe(false);
+    expect(await isTrustedApprover('u', { ...base, client: fake(() => Promise.reject(new Error('x'))).client })).toBe(
+      false,
+    );
     expect(await isTrustedApprover('u', { ...base, client: notFound })).toBe(false);
   });
 
   it('never trusts an empty or whitespace login', async () => {
-    const client = fake(async () => 'admin');
+    const { client, lookups } = fake(async () => 'admin');
     expect(await isTrustedApprover('', { ...base, client })).toBe(false);
     expect(await isTrustedApprover('  ', { ...base, trustedApprovers: [''], client })).toBe(false);
-    expect(client.getPermissionLevel).not.toHaveBeenCalled();
+    expect(lookups).toEqual([]);
   });
 });
 
 describe('createOctokitCollaboratorPermissionClient', () => {
   it('returns the permission and passes input through', async () => {
-    const get = vi.fn(async () => ({ data: { permission: 'admin' } }));
+    const inputs: unknown[] = [];
+    const get = async (input: unknown) => {
+      inputs.push(input);
+      return { data: { permission: 'admin' } };
+    };
     const octokit: any = { rest: { repos: { getCollaboratorPermissionLevel: get } } };
     const client = createOctokitCollaboratorPermissionClient(octokit);
     expect(await client.getPermissionLevel({ owner: 'o', repo: 'r', username: 'u' })).toBe('admin');
-    expect(get).toHaveBeenCalledWith({ owner: 'o', repo: 'r', username: 'u' });
+    expect(inputs).toEqual([{ owner: 'o', repo: 'r', username: 'u' }]);
   });
 });
