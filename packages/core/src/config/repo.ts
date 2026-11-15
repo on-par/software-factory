@@ -4,7 +4,7 @@
 import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
 
-import { defaultLaneBreakerThreshold } from '@on-par/factory-config';
+import { defaultBudget, defaultLaneBreakerThreshold } from '@on-par/factory-config';
 import { z } from 'zod';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { resolvePrecedence, type ConfigSource } from './precedence.js';
@@ -543,7 +543,7 @@ export interface EffectiveUsageCap {
 }
 
 /** Resolve the usage cap: repo `budget.capUsd` > `FACTORY_USAGE_CAP` env var > the
- *  packaged default (227). */
+ *  packaged default (`defaultBudget.usageCapUsd`). */
 export function resolveUsageCap(
   repo: RepoFactoryConfig | null,
   env: NodeJS.ProcessEnv = process.env,
@@ -563,7 +563,7 @@ export function resolveUsageCap(
         },
       },
     ],
-    227,
+    defaultBudget.usageCapUsd,
   );
   return { cap: value, source };
 }
@@ -636,7 +636,7 @@ export function resolveWatchdogPolicy(
         read: () => envNumber(env.FACTORY_STOP_AT, (n) => fraction(n, 'FACTORY_STOP_AT must be a number in (0, 1]')),
       },
     ],
-    0.75,
+    defaultBudget.watchdogStopAt,
   );
   const resumeAt = resolvePrecedence<number>(
     [

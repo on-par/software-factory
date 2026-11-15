@@ -24,12 +24,14 @@ export function resolveConfigPath(filename: string): string {
 export const constitutionsDir = resolveConfigPath('constitutions');
 
 export {
+  defaultBudget,
   defaultEvidenceCaps,
   defaultFactoryConfig,
   defaultLaneBreakerThreshold,
   defaultModelsConfig,
   defaultPrWalkthrough,
   defaultRoutesConfig,
+  defaultSchemaFields,
   type EvidenceCapsDefaults,
   type FactoryDefaults,
   type ModelDefaults,
