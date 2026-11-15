@@ -8,10 +8,9 @@ Software Factory is a TypeScript monorepo (npm workspaces under `packages/`) tha
 - Never lower a coverage threshold in `vitest.config.ts`. When the ratchet says coverage rose, raise the threshold in the same PR.
 - Never merge past a required check that is genuinely `FAILURE` (`gh pr merge --admin` or equivalent). `main` must always be green.
 - Write or update the colocated `*.test.ts` next to every source change.
-- Keep `packages/config` zero-dependency. The dependency direction is `config ← core ← cli`.
+- Package boundaries (config ← core ← cli, zero-dependency config, published-name imports, ADR-0004 subpaths) are enforced by the `anti-slop/package-boundaries` lint rule in `npm run lint`; its messages say how to fix a finding.
 - Model routing lives in `packages/config/src/defaults.ts`. Do not hard-code model lists in `core`.
-- `core`'s root export is the narrow public API. Put implementation details behind `@on-par/factory-core/internal` and test helpers behind `@on-par/factory-core/testing` (ADR-0004).
-- Import across packages by published name (`@on-par/factory-core`), never by a relative path across a package boundary.
+- `core`'s root export is the narrow public API; see ADR-0004 and the `anti-slop/package-boundaries` rule for the `/internal` and `/testing` subpaths.
 - TypeScript is strict and ESM only. Use `.js` extensions on relative imports.
 - Record significant design decisions as ADRs in `docs/adr/` (see its README).
 - A user- or ops-visible change adds a `## Unreleased` entry to `CHANGELOG.md` and updates the docs users read (README, `docs/status.md`, `docs/agents.md`, `docs/models.md`, `docs/ops/`) in the same PR. Never hand-edit `package.json` versions. See [docs/ops/docs-and-changelog.md](docs/ops/docs-and-changelog.md).
