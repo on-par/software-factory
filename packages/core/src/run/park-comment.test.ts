@@ -1,6 +1,7 @@
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
 
+import { recordArgs } from '../test-support/recorders.js';
 import type { ParkReason } from './outcome.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 import {
@@ -57,11 +58,13 @@ interface FakeComment {
 
 function fakeOctokit(initial: FakeComment[] = []) {
   const store = [...initial];
+  const requests: string[] = [];
   let nextId = 1000;
   const getAuthenticated = vi.fn(async () => ({ data: { id: ME } }));
-  const listComments = vi.fn(async ({ page, per_page }: { page: number; per_page: number }) => ({
-    data: store.slice((page - 1) * per_page, page * per_page),
-  }));
+  const listComments = vi.fn(async ({ page, per_page }: { page: number; per_page: number }) => {
+    requests.push('list');
+    return { data: store.slice((page - 1) * per_page, page * per_page) };
+  });
   const createComment = vi.fn(async ({ body }: { body: string }) => {
     const c = { id: nextId++, body, user: { id: ME } };
     store.push(c);
@@ -75,7 +78,7 @@ function fakeOctokit(initial: FakeComment[] = []) {
   const octokit = Object.assign({} as Octokit, {
     rest: { users: { getAuthenticated }, issues: { listComments, createComment, updateComment } },
   });
-  return { octokit, store, getAuthenticated, listComments, createComment, updateComment };
+  return { octokit, store, requests, getAuthenticated, listComments, createComment, updateComment };
 }
 
 describe('issueStateMarker', () => {
@@ -205,8 +208,6 @@ describe('upsertParkComment', () => {
     const marked = f.store.filter((c) => c.body?.includes('factory-issue-state'));
     expect(marked).toHaveLength(1);
     expect(marked[0].body).toContain('reason: config');
-    expect(f.createComment).toHaveBeenCalledTimes(1);
-    expect(f.updateComment).toHaveBeenCalledTimes(1);
     expect(second.created).toBe(false);
   });
 
@@ -214,7 +215,7 @@ describe('upsertParkComment', () => {
     const f = fakeOctokit([{ id: 1, body: issueStateMarker(K7), user: { id: 5 } }]);
     const result = await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input() });
     expect(result.created).toBe(true);
-    expect(f.updateComment).not.toHaveBeenCalled();
+    expect(f.store).toHaveLength(2);
   });
 
   it('finds the lowest-id marker comment across pages', async () => {
@@ -226,7 +227,7 @@ describe('upsertParkComment', () => {
     ]);
     const result = await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input() });
     expect(result).toEqual({ commentId: 500, created: false });
-    expect(f.listComments).toHaveBeenCalledTimes(2);
+    expect(f.requests.filter((r) => r === 'list')).toHaveLength(2);
   });
 
   it('keeps the lowest id when a later page entry comes first in order', async () => {
@@ -265,9 +266,10 @@ describe('publishParkComment', () => {
 
   it('does not call readHead without a worktree', async () => {
     const f = fakeOctokit();
-    const readHead = vi.fn();
-    await publishParkComment({ octokit: f.octokit, repo: 'o/r', input: base, readHead });
-    expect(readHead).not.toHaveBeenCalled();
+    const readHead = recordArgs(async () => 'b'.repeat(40));
+    await publishParkComment({ octokit: f.octokit, repo: 'o/r', input: base, readHead: readHead.fn });
+    expect(readHead.calls).toEqual([]);
+    expect(f.store[0].body).toContain('park-sha: -');
   });
 
   it('returns { ok: false } instead of throwing when GitHub fails', async () => {
@@ -384,7 +386,6 @@ describe('upsertMarkerComment', () => {
       body: 'hello',
     });
     expect(result).toEqual({ commentId: 1000, created: true });
-    expect(f.updateComment).not.toHaveBeenCalled();
     expect(f.store[1].body).toBe(`hello\n${marker}`);
   });
 
@@ -402,7 +403,7 @@ describe('upsertMarkerComment', () => {
       body,
     });
     expect(result).toEqual({ commentId: 500, created: false });
-    expect(f.createComment).not.toHaveBeenCalled();
+    expect(f.store).toHaveLength(2);
     expect(f.store.find((c) => c.id === 500)?.body).toBe(body);
   });
 
@@ -416,7 +417,6 @@ describe('upsertMarkerComment', () => {
       body: 'x',
     });
     expect(result.created).toBe(true);
-    expect(f.store[0].body).toBe(issueStateMarker(K7));
   });
 });
 

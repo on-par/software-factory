@@ -5,10 +5,12 @@ import { join } from 'node:path';
 import type { Octokit } from '@octokit/rest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { recordArgs } from '../test-support/recorders.js';
 import type { DesignArtifact } from '../types/index.js';
 import {
   createGithubLaneClaimStalenessProbe,
   LaneFileGuard,
+  type LaneFileClaim,
   releaseLaneClaim,
   touchedFilesFrom,
 } from './lane-file-guard.js';
@@ -194,7 +196,7 @@ describe('LaneFileGuard stale claims', () => {
       if (issue instanceof Error) throw issue;
       return { data: issue };
     });
-    const list = vi.fn(async () => ({ data: prs }));
+    const { calls: listCalls, fn: list } = recordArgs(async (_: { head: string; state: string }) => ({ data: prs }));
     const octokit: Pick<Octokit, 'rest'> = Object.assign({} as Octokit, { rest: { issues: { get }, pulls: { list } } });
     const events: Array<[string, string]> = [];
     const log = (type: string, msg: string) => events.push([type, msg]);
@@ -203,29 +205,29 @@ describe('LaneFileGuard stale claims', () => {
         isStale: createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: 'factory', now }),
         log,
       });
-    return { file, guard, list, events, check };
+    return { file, guard, listCalls, events, check };
   }
 
   it('reaps a claim whose holder issue is closed and emits lane_file_claim_reaped (issue-closed)', async () => {
-    const { guard, list, events, check } = await setup({ state: 'closed', labels: [], title: 'X' });
+    const { guard, listCalls, events, check } = await setup({ state: 'closed', labels: [], title: 'X' });
     await expect(check()).resolves.toBeUndefined();
     expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(events).toHaveLength(1);
     expect(events[0][0]).toBe('lane_file_claim_reaped');
     expect(events[0][1]).toContain('#1');
     expect(events[0][1]).toContain('issue-closed');
-    expect(list).not.toHaveBeenCalled();
+    expect(listCalls).toEqual([]);
   });
 
   it('reaps a claim whose holder factory PR is merged (pr-merged)', async () => {
-    const { guard, list, events, check } = await setup({ state: 'open', labels: [], title: 'Do thing' }, [
+    const { guard, listCalls, events, check } = await setup({ state: 'open', labels: [], title: 'Do thing' }, [
       { state: 'closed', merged_at: '2026-01-01T00:00:00Z' },
     ]);
     await expect(check()).resolves.toBeUndefined();
     expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(events[0][1]).toContain('#1');
     expect(events[0][1]).toContain('pr-merged');
-    expect(list).toHaveBeenCalledWith(expect.objectContaining({ head: 'acme:factory/1-do-thing', state: 'all' }));
+    expect(listCalls[0]?.[0]).toMatchObject({ head: 'acme:factory/1-do-thing', state: 'all' });
   });
 
   it('reaps a claim whose holder factory PR is closed unmerged (pr-closed)', async () => {
@@ -427,9 +429,9 @@ describe('LaneFileGuard.sweepStale', () => {
   it('scopes to opts.repo: other repos are neither probed nor removed', async () => {
     const { guard } = await seed(1);
     await guard.register('other/repo', workKeyFromIssue(5), ['z.swift']);
-    const probe = vi.fn(async () => 'issue-closed' as const);
-    await guard.sweepStale({ isStale: probe, repo: 'acme/repo' });
-    expect(probe).toHaveBeenCalledTimes(1);
+    const probe = recordArgs(async (_: LaneFileClaim) => 'issue-closed' as const);
+    await guard.sweepStale({ isStale: probe.fn, repo: 'acme/repo' });
+    expect(probe.calls.map(([c]) => c.repo)).toEqual(['acme/repo']);
     expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(await guard.claimsForIssue(workKeyFromIssue(5))).toHaveLength(1);
   });

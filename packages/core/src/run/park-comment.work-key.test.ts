@@ -12,11 +12,10 @@ describe('non-numeric work keys', () => {
   });
 
   it('are rejected at the Octokit boundary before any listComments call', async () => {
-    const listComments = vi.fn(async () => ({ data: [] }));
+    const listComments = async () => Promise.reject(new Error('listComments reached'));
     const octokit = Object.assign({} as Octokit, {
       rest: { users: { getAuthenticated: vi.fn(async () => ({ data: { id: 1 } })) }, issues: { listComments } },
     });
     await expect(findOwnParkComment({ octokit, repo: 'o/r', issue: key })).rejects.toThrow(/not a numeric/);
-    expect(listComments).not.toHaveBeenCalled();
   });
 });

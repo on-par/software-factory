@@ -1,6 +1,7 @@
 import type { Octokit } from '@octokit/rest';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
+import { recordArgs } from '../test-support/recorders.js';
 import type { ParkReason } from './outcome.js';
 import { parkedPrAction, renderParkedPrComment, settleParkedPullRequest } from './park-pr.js';
 import { toWorkKey, workKeyFromIssue } from '../work/work-key.js';
@@ -21,26 +22,26 @@ const ALL: ParkReason[] = [
 ];
 
 function fake(opts: { open?: boolean; draft?: boolean; updateError?: Error } = {}) {
-  const createComment = vi.fn(async (_args: { issue_number: number; body: string }) => ({ data: {} }));
-  const update = vi.fn(async (_args: { state: string }) => {
-    if (opts.updateError) throw opts.updateError;
-    return { data: {} };
-  });
-  const deleteRef = vi.fn();
-  const graphql = vi.fn(async () => ({}));
+  const requests: [string, unknown][] = [];
   const octokit = Object.assign({} as Octokit, {
-    graphql,
+    graphql: async (args: unknown) => (requests.push(['graphql', args]), {}),
     rest: {
       pulls: {
-        list: vi.fn(async () => ({ data: opts.open === false ? [] : [{ number: 77 }] })),
-        get: vi.fn(async () => ({ data: { draft: opts.draft ?? true, node_id: 'PR_1' } })),
-        update,
+        list: async () => ({ data: opts.open === false ? [] : [{ number: 77 }] }),
+        get: async () => ({ data: { draft: opts.draft ?? true, node_id: 'PR_1' } }),
+        update: async (args: { state: string }) => {
+          requests.push(['update', args]);
+          if (opts.updateError) throw opts.updateError;
+          return { data: {} };
+        },
       },
-      issues: { createComment },
-      git: { deleteRef },
+      issues: {
+        createComment: async (args: unknown) => (requests.push(['comment', args]), { data: {} }),
+      },
+      git: { deleteRef: async (args: unknown) => void requests.push(['deleteRef', args]) },
     },
   });
-  return { octokit, createComment, update, deleteRef, graphql };
+  return { octokit, requests };
 }
 
 const base = { repo: 'o/r', issue: workKeyFromIssue(9), branch: 'issue-9-x' };
@@ -69,63 +70,58 @@ describe('settleParkedPullRequest', () => {
   it.each(['ci-infra', 'fail', 'conflict', 'timeout'] as const)(
     'closes the PR with one comment naming %s and linking the issue, and keeps the branch',
     async (reason) => {
-      const { octokit, createComment, update, deleteRef } = fake();
-      const log = vi.fn();
-      const out = await settleParkedPullRequest({ octokit, ...base, reason, prNumber: 77, log });
+      const { octokit, requests } = fake();
+      const out = await settleParkedPullRequest({ octokit, ...base, reason, prNumber: 77, log: () => {} });
       expect(out).toEqual({ action: 'closed', prNumber: 77 });
-      expect(createComment).toHaveBeenCalledTimes(1);
-      expect(createComment.mock.calls[0][0].issue_number).toBe(77);
-      expect(createComment.mock.calls[0][0].body).toContain(reason);
-      expect(createComment.mock.calls[0][0].body).toContain('#9');
-      expect(update).toHaveBeenCalledWith(expect.objectContaining({ pull_number: 77, state: 'closed' }));
-      expect(deleteRef).not.toHaveBeenCalled();
+      const comments = requests.filter((r) => r[0] === 'comment');
+      expect(comments).toHaveLength(1);
+      expect(comments[0][1]).toMatchObject({ issue_number: 77, body: expect.stringContaining(reason) });
+      expect(comments[0][1]).toMatchObject({ body: expect.stringContaining('#9') });
+      expect(requests).toContainEqual(['update', expect.objectContaining({ pull_number: 77, state: 'closed' })]);
+      expect(requests.some((r) => r[0] === 'deleteRef')).toBe(false);
     },
   );
 
   it('marks a green and checked PR ready instead of closing it', async () => {
-    const { octokit, update, graphql } = fake();
+    const { octokit, requests } = fake();
     const out = await settleParkedPullRequest({
       octokit,
       ...base,
       reason: 'fail',
       greenAndChecked: true,
-      log: vi.fn(),
+      log: () => {},
     });
     expect(out).toEqual({ action: 'readied', prNumber: 77 });
-    expect(graphql).toHaveBeenCalledTimes(1);
-    expect(update).not.toHaveBeenCalled();
+    expect(requests.map((r) => r[0])).toEqual(['graphql']);
   });
 
   it('leaves a ci-failed PR open without commenting or closing (#3998)', async () => {
-    const { octokit, createComment, update } = fake();
-    const out = await settleParkedPullRequest({ octokit, ...base, reason: 'ci-failed', prNumber: 77, log: vi.fn() });
+    const { octokit, requests } = fake();
+    const out = await settleParkedPullRequest({ octokit, ...base, reason: 'ci-failed', prNumber: 77, log: () => {} });
     expect(out).toEqual({ action: 'left', prNumber: 77 });
-    expect(createComment).not.toHaveBeenCalled();
-    expect(update).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
   });
 
   it('leaves the PR alone on an escalate park that is not green', async () => {
-    const { octokit, createComment, update, graphql } = fake();
-    const out = await settleParkedPullRequest({ octokit, ...base, reason: 'escalate', prNumber: 77, log: vi.fn() });
+    const { octokit, requests } = fake();
+    const out = await settleParkedPullRequest({ octokit, ...base, reason: 'escalate', prNumber: 77, log: () => {} });
     expect(out).toEqual({ action: 'left', prNumber: 77 });
-    expect(createComment).not.toHaveBeenCalled();
-    expect(update).not.toHaveBeenCalled();
-    expect(graphql).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
   });
 
   it('is a no-op when the branch has no open PR', async () => {
-    const { octokit, update } = fake({ open: false });
-    expect(await settleParkedPullRequest({ octokit, ...base, reason: 'fail', log: vi.fn() })).toEqual({
+    const { octokit, requests } = fake({ open: false });
+    expect(await settleParkedPullRequest({ octokit, ...base, reason: 'fail', log: () => {} })).toEqual({
       action: 'none',
     });
-    expect(update).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
   });
 
   it('never throws: a pulls.update rejection returns failed and logs a warn naming the PR', async () => {
     const { octokit } = fake({ updateError: new Error('boom') });
-    const log = vi.fn();
-    const out = await settleParkedPullRequest({ octokit, ...base, reason: 'fail', prNumber: 77, log });
+    const log = recordArgs((_t: string, _m: string) => {});
+    const out = await settleParkedPullRequest({ octokit, ...base, reason: 'fail', prNumber: 77, log: log.fn });
     expect(out.action).toBe('failed');
-    expect(log).toHaveBeenCalledWith('warn', expect.stringContaining('#77'));
+    expect(log.calls).toContainEqual(['warn', expect.stringContaining('#77')]);
   });
 });
