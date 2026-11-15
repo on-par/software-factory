@@ -11,7 +11,6 @@
   "mutate": [
     "packages/core/src/review/floor.ts",
     "packages/core/src/review/risk.ts",
-    "packages/core/src/review/verdict.ts",
     "packages/core/src/review/routing.ts"
   ],
   "vitest": { "configFile": "vitest.config.ts", "related": true },

@@ -22,9 +22,6 @@ export const DEFAULT_REPO_CONSTITUTION_PATH = '.factory/constitution.md';
 /** Bundled product name of the built-in review fallback (packages/config/src/constitutions/default-review.md). */
 export const DEFAULT_REVIEW_CONSTITUTION = 'default-review';
 
-/** Bundled product name of the default code constitution (packages/config/src/constitutions/default-code.md), scaffolded by `factory init` when no product is active. */
-export const DEFAULT_CODE_CONSTITUTION = 'default-code';
-
 export type ReviewConstitutionSource =
   | { kind: 'repo-constitution'; path: string }
   | { kind: 'instruction-files'; files: string[] }
@@ -33,18 +30,6 @@ export type ReviewConstitutionSource =
 export interface ReviewConstitution {
   constitution: Constitution;
   source: ReviewConstitutionSource;
-}
-
-/** One-line report description of where a review's standards came from. */
-export function describeReviewConstitutionSource(source: ReviewConstitutionSource): string {
-  switch (source.kind) {
-    case 'repo-constitution':
-      return `constitution: ${source.path} (the repo's factory constitution)`;
-    case 'instruction-files':
-      return `constitution: repo instruction files (${source.files.join(', ')})`;
-    case 'default':
-      return `constitution: built-in default review constitution — the repo has no ${DEFAULT_REPO_CONSTITUTION_PATH} and no ${REPO_INSTRUCTION_FILES.join(', ')}`;
-  }
 }
 
 /** Build a Constitution from a bundled/repo-instance file's raw text and frontmatter. */
