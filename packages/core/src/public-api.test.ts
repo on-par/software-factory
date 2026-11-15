@@ -7,6 +7,7 @@ import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
 import {
+  DEPRECATED_PUBLIC_API_KEYS,
   ITERATE_INTERNAL_KEYS,
   KPIS_API_KEYS,
   LAND_DEFERRED_INTERNAL_KEYS,
@@ -635,6 +636,21 @@ const INTERNAL_API_KEYS = [
 describe('public API surface (ADR-0004)', () => {
   it('root export exposes exactly the documented public API', () => {
     expect(Object.keys(publicApi).sort()).toEqual([...PUBLIC_API_KEYS, ...WORK_KEY_API_KEYS].sort());
+  });
+  it('deprecated root exports are still exported until removal', () => {
+    const exported = new Set(Object.keys(publicApi));
+    expect(DEPRECATED_PUBLIC_API_KEYS.filter((key) => !exported.has(key))).toEqual([]);
+  });
+  it('deprecated root exports equal the baselined index.ts knip findings', () => {
+    const baseline = JSON.parse(
+      readFileSync(fileURLToPath(new URL('../../../knip-baseline.json', import.meta.url)), 'utf8'),
+    ) as { production: string[] };
+    const prefix = 'production|exports|packages/core/src/index.ts|';
+    const baselined = baseline.production
+      .filter((key) => key.startsWith(prefix))
+      .map((key) => key.slice(prefix.length))
+      .sort();
+    expect(baselined).toEqual([...DEPRECATED_PUBLIC_API_KEYS].sort());
   });
   it('SIZE_GATE_MODES lists exactly off and stack (#3835)', () => {
     expect(SIZE_GATE_MODES).toEqual(['off', 'stack']);

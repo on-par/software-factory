@@ -9,10 +9,15 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- `npm run knip` now reports unused exports of `@on-par/factory-core`'s entry points and test-only code (`knip --production`) against a shrink-only `knip-baseline.json` (#4126).
 - `npm run duplication` runs jscpd in verify and CI `static` against a shrink-only `duplication-baseline.json` (#4125).
 - Lint rule `anti-slop/no-comments` bans source comments except justified lint overrides and toolchain directives, with a shrink-only per-file baseline and a CI guard (#4053).
 - Lint rule `anti-slop/package-boundaries` enforces the config ← core ← cli direction, a zero-dependency config, published-name cross-package imports and the ADR-0004 `/internal` and `/testing` subpath boundaries (#4052).
 - Lint rule `anti-slop/no-call-assertions` bans call-count assertions and mock-call reads in tests, with a shrink-only per-file baseline and a CI guard (#4051).
+
+### Deprecated
+
+- Root `@on-par/factory-core` exports no in-repo consumer imports are deprecated and will be removed after one minor release: the value exports in `DEPRECATED_PUBLIC_API_KEYS` (`packages/core/src/public-api-keys.ts`), and the type-only root exports listed under `production|types|packages/core/src/index.ts|` in `knip-baseline.json` (#4126).
 
 ### Changed
 

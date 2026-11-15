@@ -28,7 +28,7 @@ The factory's own CHECK phase runs `bash scripts/verify.sh --no-e2e` in the buil
 6. `bash scripts/check-oxlint-plugin-version.sh` — `@oxlint/plugins` must match `oxlint` exactly (#795)
 7. `npm run typecheck`
 8. `npm run lint` — Oxlint, type-aware, `--deny-warnings`
-9. `npm run knip` — dead code and unused dependencies
+9. `npm run knip` — dead code and unused dependencies (default and `--production` runs) against the shrink-only `knip-baseline.json`; `npm run knip:raw` shows the human-readable report
 10. `npm run duplication` — jscpd clones against `duplication-baseline.json`; fails only when clones rise, a drop prints suggested lower numbers and passes, percentage is informational
 11. Tests:
     - full path: `npm run test` (Vitest with coverage thresholds), then `npm run coverage-ratchet`
@@ -101,7 +101,7 @@ Local `verify.sh` does not enforce this.
 | `check-oxlint-plugin…`                    | Bump `oxlint` and `@oxlint/plugins` to the same version in `package.json`, then `npm install`.                                                |
 | `lint`                                    | Fix the code. Warnings fail the build too.                                                                                                    |
 | `lint` / test: `max-lines`                | See [Max-lines guard](#max-lines-guard).                                                                                                      |
-| `knip`                                    | Delete the unused export, file, or dependency.                                                                                                |
+| `knip`                                    | Fix the finding. If you fixed a baselined one, delete its key from knip-baseline.json. Never add keys for new findings.                       |
 | `duplication`                             | Clones rose: deduplicate via existing test or harness helpers. A drop passes and prints suggested lower numbers; percentage is informational. |
 | `test` threshold                          | Add tests for the uncovered lines the report names.                                                                                           |
 | `coverage-ratchet`                        | Raise the named threshold in `vitest.config.ts` to the suggested value.                                                                       |
