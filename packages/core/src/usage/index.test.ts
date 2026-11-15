@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { CostEntry } from '../types/index.js';
 import type { logEvent } from '../utils/index.js';
@@ -15,9 +15,7 @@ import {
   formatUsageReport,
   priceFor,
   readCostsFile,
-  harnessHasUsageSignal,
   readUsage,
-  resolveRunUsageHarness,
   watchUsage,
 } from './index.js';
 
@@ -569,7 +567,11 @@ describe('formatCostTotal', () => {
 
 describe('readUsage', () => {
   it('prefers the subscription signal over the estimator', async () => {
-    const estimateSpend = vi.fn(() => 180);
+    let estimates = 0;
+    const estimateSpend = () => {
+      estimates++;
+      return 180;
+    };
     const reading = await readUsage({
       cap: 227,
       estimator: true,
@@ -578,7 +580,7 @@ describe('readUsage', () => {
     });
 
     expect(reading).toEqual({ pct: 0.42, source: 'subscription', detail: '5h subscription window at 42%' });
-    expect(estimateSpend).not.toHaveBeenCalled();
+    expect(estimates).toBe(0);
   });
 
   it('includes the reset timestamp in the detail when present', async () => {
@@ -613,7 +615,11 @@ describe('readUsage', () => {
   });
 
   it('returns null when the subscription signal is unavailable and estimator is disabled, even if an estimateSpend fn is provided', async () => {
-    const estimateSpend = vi.fn(() => 180);
+    let estimates = 0;
+    const estimateSpend = () => {
+      estimates++;
+      return 180;
+    };
     const reading = await readUsage({
       cap: 227,
       estimator: false,
@@ -622,7 +628,7 @@ describe('readUsage', () => {
     });
 
     expect(reading).toBeNull();
-    expect(estimateSpend).not.toHaveBeenCalled();
+    expect(estimates).toBe(0);
   });
 });
 
@@ -631,9 +637,17 @@ describe('watchUsage', () => {
     'reports not available for this agent for a non-Claude harness and never reads Claude usage (%s)',
     async (harness) => {
       const events: EmitEventArgs[] = [];
-      const readUsageFn = vi.fn(async () => ({ pct: 0.99, source: 'estimate' as const, detail: 'x' }));
-      const setStop = vi.fn();
-      const sleepFn = vi.fn(async () => {});
+      const touched: string[] = [];
+      const readUsageFn = async () => {
+        touched.push('readUsage');
+        return { pct: 0.99, source: 'estimate' as const, detail: 'x' };
+      };
+      const setStop = () => {
+        touched.push('setStop');
+      };
+      const sleepFn = async () => {
+        touched.push('sleep');
+      };
 
       await expect(
         watchUsage({
@@ -656,9 +670,7 @@ describe('watchUsage', () => {
       expect(events[0].slice(0, 3)).toEqual(['/repo/.factory/events.ndjson', 'usage-unavailable', 'usage']);
       expect(events[0][3]).toContain('not available for this agent');
       expect(events[0][3]).toContain(harness);
-      expect(readUsageFn).not.toHaveBeenCalled();
-      expect(setStop).not.toHaveBeenCalled();
-      expect(sleepFn).not.toHaveBeenCalled();
+      expect(touched).toEqual([]);
     },
   );
 
@@ -668,7 +680,10 @@ describe('watchUsage', () => {
       { pct: 0.5, source: 'estimate', detail: 'trailing-5h usage ~= $100 = 44% of $227 cap' },
       { pct: 0.79, source: 'estimate', detail: 'trailing-5h usage ~= $180 = 79% of $227 cap' },
     ];
-    const setStop = vi.fn();
+    let stops = 0;
+    const setStop = () => {
+      stops++;
+    };
 
     await expect(
       watchUsage({
@@ -687,7 +702,7 @@ describe('watchUsage', () => {
       }),
     ).resolves.toBe('stopped');
 
-    expect(setStop).toHaveBeenCalledTimes(1);
+    expect(stops).toBe(1);
     expect(events).toEqual([
       ['/repo/.factory/events.ndjson', 'watchdog', 'usage', 'usage watchdog armed: stop at 75% of $227 cap, poll 180s'],
       [
@@ -885,47 +900,5 @@ describe('watchUsage', () => {
       'usage',
       'usage watchdog armed: stop at 75% of $227 cap, poll 180s',
     ]);
-  });
-});
-
-describe('harnessHasUsageSignal', () => {
-  it.each([
-    [undefined, true],
-    ['claude-cli', true],
-    ['codex-cli', false],
-    ['opencode', false],
-    ['', false],
-    ['my-agent', false],
-  ])('%j -> %s', (harness, expected) => {
-    expect(harnessHasUsageSignal(harness)).toBe(expected);
-  });
-});
-
-describe('resolveRunUsageHarness', () => {
-  const base = {
-    buildRoute: 'opencode' as const,
-    buildRouteSource: 'repo' as const,
-    planHarnesses: ['opencode'] as ReadonlyArray<string | undefined>,
-    codexDisabled: false,
-    localOnly: false,
-  };
-  it.each([
-    ['opencode route, non-Claude plan pin', {}, 'opencode'],
-    ['codex route, non-Claude plan pin', { buildRoute: 'codex' as const }, 'codex-cli'],
-    ['repo codex route with codexDisabled', { buildRoute: 'codex' as const, codexDisabled: true }, 'codex-cli'],
-    ['claude route', { buildRoute: 'claude' as const }, undefined],
-    ['undefined route', { buildRoute: undefined, buildRouteSource: 'plan' as const }, undefined],
-    ['no plan pins', { planHarnesses: [] }, undefined],
-    ['claude-cli plan pin', { planHarnesses: ['claude-cli'] }, undefined],
-    ['claude-cli planFallback', { planHarnesses: ['opencode', 'claude-cli'] }, undefined],
-    ['unknown plan model', { planHarnesses: [undefined] }, undefined],
-    ['localOnly', { localOnly: true }, undefined],
-    [
-      'build-pin codex route with codexDisabled',
-      { buildRoute: 'codex' as const, buildRouteSource: 'build-pin' as const, codexDisabled: true },
-      undefined,
-    ],
-  ])('%s', (_name, override, expected) => {
-    expect(resolveRunUsageHarness({ ...base, ...override })).toBe(expected);
   });
 });

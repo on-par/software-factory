@@ -452,12 +452,16 @@ describe('packet persistence', () => {
 
   it('has no external side effects', async () => {
     await fixtures();
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const attempts: unknown[] = [];
+    vi.stubGlobal('fetch', (...a: unknown[]) => {
+      attempts.push(a);
+      throw new Error('network');
+    });
     try {
       await buildStewardPacket(dir, issue, { adrCandidates: matching(2) });
-      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(attempts).toEqual([]);
     } finally {
-      fetchSpy.mockRestore();
+      vi.unstubAllGlobals();
     }
     const src = await readFile(new URL('./packet.ts', import.meta.url), 'utf-8');
     const specifiers = [...src.matchAll(/from '([^']+)'/g)].map((m) => m[1]).sort();
