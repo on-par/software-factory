@@ -12,6 +12,7 @@ import {
   defaultFactoryConfig,
   defaultModelsConfig,
   defaultRoutesConfig,
+  defaultSchemaFields,
   resolveConfigPath,
 } from '@on-par/factory-config';
 import { z } from 'zod';
@@ -127,6 +128,18 @@ const RoutesConfigSchema = z.object({
   ),
 });
 
+const { paths: dPaths, timeouts: dTimeouts, merge: dMerge, worktree: dWorktree, ci: dCi } = defaultFactoryConfig;
+const { sweep: dSweep, plan_approval: dPlanApproval, design: dDesign, readiness: dReadiness } = defaultFactoryConfig;
+const { build: dBuild, kpis: dKpis, discovery: dDiscovery, filing: dFiling, ingest: dIngest } = defaultFactoryConfig;
+const { intake: dIntake, host: dHost, auto_failover: dFailover, queue: dQueue } = defaultFactoryConfig;
+const { ports: dPorts, proxy: dProxy } = defaultFactoryConfig.environment;
+
+/** A defaultFactoryConfig section without its prose `comment`, so object-level defaults keep today's keys (#3444). */
+function withoutComment<T extends { comment?: string }>(section: T): Omit<T, 'comment'> {
+  const { comment: _comment, ...rest } = section;
+  return rest;
+}
+
 export const FactoryConfigSchema = z.object({
   version: z.number(),
   paths: z.object({
@@ -135,23 +148,23 @@ export const FactoryConfigSchema = z.object({
     plans: z.string(),
     logs: z.string(),
     events: z.string(),
-    constitution: z.string().default('.factory/constitution.md'),
+    constitution: z.string().default(dPaths.constitution),
   }),
   timeouts: z.object({
     plan_seconds: z.number(),
     build_seconds: z.number(),
     check_seconds: z.number(),
     merge_poll_seconds: z.number(),
-    approval_seconds: z.number().default(1800),
-    tests_seconds: z.number().default(300),
-    compile_seconds: z.number().default(120),
+    approval_seconds: z.number().default(dTimeouts.approval_seconds),
+    tests_seconds: z.number().default(dTimeouts.tests_seconds),
+    compile_seconds: z.number().default(dTimeouts.compile_seconds),
   }),
   merge: z.object({
     auto: z.boolean(),
-    admin: z.boolean().default(false),
+    admin: z.boolean().default(defaultSchemaFields.mergeAdmin),
     comment: z.string(),
-    maxConflictRounds: z.number().int().min(1).max(10).default(2),
-    maxLandDeferrals: z.number().int().min(1).max(10).default(3),
+    maxConflictRounds: z.number().int().min(1).max(10).default(dMerge.maxConflictRounds),
+    maxLandDeferrals: z.number().int().min(1).max(10).default(dMerge.maxLandDeferrals),
   }),
   /** `run.merge.*` mirrors the `run.merge` shape of RepoFactoryConfigV2Schema in `config/repo.ts` and, when present,
    *  is authoritative over the legacy top-level `merge.*` fields above (see
@@ -162,45 +175,47 @@ export const FactoryConfigSchema = z.object({
   worktree: z.object({
     parent: z.string(),
     comment: z.string(),
-    gcTtlDays: z.number().default(7),
-    autoGcOnRun: z.boolean().default(true),
-    retainMax: z.number().int().nonnegative().default(8),
+    gcTtlDays: z.number().default(dWorktree.gcTtlDays),
+    autoGcOnRun: z.boolean().default(dWorktree.autoGcOnRun),
+    retainMax: z.number().int().nonnegative().default(dWorktree.retainMax),
   }),
   byok: z.object({ enabled: z.boolean(), comment: z.string() }),
   notifications: z.record(z.string(), z.boolean()),
   cost_tracking: z.object({ enabled: z.boolean(), log_file: z.string(), comment: z.string() }),
   ci: z
     .object({
-      skip: z.boolean().default(false),
+      skip: z.boolean().default(dCi.skip),
       watchMinutes: z.number().optional().catch(undefined),
       awaitingCiCapHours: z.number().optional().catch(undefined),
-      comment: z.string().default('Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging'),
+      comment: z.string().default(defaultSchemaFields.ciComment),
     })
-    .default({ skip: false, comment: 'Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging' }),
+    .default({ skip: dCi.skip, comment: defaultSchemaFields.ciComment }),
   ship: z
     .object({ ciWatchMinutes: z.number().optional().catch(undefined), comment: z.string().optional() })
     .default({}),
   sweep: z
     .object({
       heartbeatFile: z.string().optional(),
-      loopIntervalSeconds: z.number().int().positive().default(300),
-      staleThresholdMultiplier: z.number().positive().default(2),
+      loopIntervalSeconds: z.number().int().positive().default(dSweep.loopIntervalSeconds),
+      staleThresholdMultiplier: z.number().positive().default(dSweep.staleThresholdMultiplier),
       comment: z.string().optional(),
     })
-    .default({ loopIntervalSeconds: 300, staleThresholdMultiplier: 2 }),
+    .default(withoutComment(dSweep)),
   plan_approval: z
-    .object({ enabled: z.boolean().default(false), comment: z.string().optional() })
-    .default({ enabled: false }),
+    .object({ enabled: z.boolean().default(dPlanApproval.enabled), comment: z.string().optional() })
+    .default({ enabled: dPlanApproval.enabled }),
   design: z
-    .object({ blockUnresolvedRegressions: z.boolean().default(false) })
-    .default({ blockUnresolvedRegressions: false }),
-  readiness: z.object({ updateIssueBody: z.boolean().default(true) }).default({ updateIssueBody: true }),
+    .object({ blockUnresolvedRegressions: z.boolean().default(dDesign.blockUnresolvedRegressions) })
+    .default({ blockUnresolvedRegressions: dDesign.blockUnresolvedRegressions }),
+  readiness: z
+    .object({ updateIssueBody: z.boolean().default(dReadiness.updateIssueBody) })
+    .default({ updateIssueBody: dReadiness.updateIssueBody }),
   build: z
     .object({
-      publishFromBuild: z.boolean().default(false),
-      contextCeiling: z.record(z.string(), z.number().int().nonnegative()).default({ 'codex-cli': 120000 }),
+      publishFromBuild: z.boolean().default(dBuild.publishFromBuild),
+      contextCeiling: z.record(z.string(), z.number().int().nonnegative()).default({ ...dBuild.contextCeiling }),
     })
-    .default({ publishFromBuild: false, contextCeiling: { 'codex-cli': 120000 } }),
+    .default({ publishFromBuild: dBuild.publishFromBuild, contextCeiling: { ...dBuild.contextCeiling } }),
   // Plain string on purpose: an unknown mode must load, resolve to `stack` and warn, not throw (ADR-0160, #3850).
   sizeGate: z
     .object({
@@ -211,121 +226,129 @@ export const FactoryConfigSchema = z.object({
     })
     .default({}),
   kpis: z
-    .object({ defectWindowDays: z.number().int().positive().default(14), comment: z.string().optional() })
-    .default({ defectWindowDays: 14 }),
+    .object({
+      defectWindowDays: z.number().int().positive().default(dKpis.defectWindowDays),
+      comment: z.string().optional(),
+    })
+    .default({ defectWindowDays: dKpis.defectWindowDays }),
   events: EventsConfigSchema,
   sandbox: SandboxConfigSchema,
   discovery: z
     .object({
-      enabled: z.boolean().default(true),
-      schedule: z.enum(['weekly', 'daily', 'manual']).default('weekly'),
-      maxCandidates: z.number().int().positive().default(5),
+      enabled: z.boolean().default(dDiscovery.enabled),
+      schedule: z.enum(['weekly', 'daily', 'manual']).default(dDiscovery.schedule),
+      maxCandidates: z.number().int().positive().default(dDiscovery.maxCandidates),
       comment: z.string().optional(),
     })
-    .default({ enabled: true, schedule: 'weekly', maxCandidates: 5 }),
+    .default(withoutComment(dDiscovery)),
   filing: z
     .object({
-      enabled: z.boolean().default(true),
-      excludeReasons: z.array(z.string()).default(['rate_limit', 'usage_cap', 'timeout', 'verify_failed']),
-      repeatThreshold: z.number().int().positive().default(3),
-      maxPerRun: z.number().int().positive().default(5),
-      maxPerDay: z.number().int().positive().default(20),
-      selfFixLabel: z.string().default('no-auto-merge'),
-      bugLabels: z.array(z.string()).default(['bug']),
+      enabled: z.boolean().default(dFiling.enabled),
+      excludeReasons: z.array(z.string()).default([...dFiling.excludeReasons]),
+      repeatThreshold: z.number().int().positive().default(dFiling.repeatThreshold),
+      maxPerRun: z.number().int().positive().default(dFiling.maxPerRun),
+      maxPerDay: z.number().int().positive().default(dFiling.maxPerDay),
+      selfFixLabel: z.string().default(dFiling.selfFixLabel),
+      bugLabels: z.array(z.string()).default([...dFiling.bugLabels]),
       repo: z
         .string()
         .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'filing.repo must be owner/name')
         .optional(),
-      sensitivePaths: z
-        .array(z.string())
-        .default(['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/']),
+      sensitivePaths: z.array(z.string()).default([...dFiling.sensitivePaths]),
       comment: z.string().optional(),
     })
     .default({
-      enabled: true,
-      excludeReasons: ['rate_limit', 'usage_cap', 'timeout', 'verify_failed'],
-      repeatThreshold: 3,
-      maxPerRun: 5,
-      maxPerDay: 20,
-      selfFixLabel: 'no-auto-merge',
-      bugLabels: ['bug'],
-      sensitivePaths: ['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/'],
+      enabled: dFiling.enabled,
+      excludeReasons: [...dFiling.excludeReasons],
+      repeatThreshold: dFiling.repeatThreshold,
+      maxPerRun: dFiling.maxPerRun,
+      maxPerDay: dFiling.maxPerDay,
+      selfFixLabel: dFiling.selfFixLabel,
+      bugLabels: [...dFiling.bugLabels],
+      sensitivePaths: [...dFiling.sensitivePaths],
     }),
   ingest: z
     .object({
-      enabled: z.boolean().default(false),
-      label: z.string().default('ready'),
-      lane: z.string().default('auto'),
-      maxPerCycle: z.number().int().positive().default(20),
+      enabled: z.boolean().default(dIngest.enabled),
+      label: z.string().default(dIngest.label),
+      lane: z.string().default(dIngest.lane),
+      maxPerCycle: z.number().int().positive().default(dIngest.maxPerCycle),
       comment: z.string().optional(),
     })
-    .default({ enabled: false, label: 'ready', lane: 'auto', maxPerCycle: 20 }),
+    .default(withoutComment(dIngest)),
   intake: z
     .object({
       trustedApprovers: z.array(z.string().min(1)).optional(),
-      enforce: z.enum(['warn', 'enforce']).default('warn'),
+      enforce: z.enum(['warn', 'enforce']).default(dIntake.enforce),
       comment: z.string().optional(),
     })
-    .default({ enforce: 'warn' }),
+    .default({ enforce: dIntake.enforce }),
   environment: z
     .object({
       ports: z
         .object({
-          enabled: z.boolean().default(true),
+          enabled: z.boolean().default(dPorts.enabled),
           range: z
             .tuple([z.number().int().min(1024).max(65535), z.number().int().min(1024).max(65535)])
-            .default([3100, 3999]),
+            .default([dPorts.range[0], dPorts.range[1]]),
           comment: z.string().optional(),
         })
         .refine((p) => p.range[0] <= p.range[1], { message: 'ports.range must be [low, high]' })
-        .default({ enabled: true, range: [3100, 3999] }),
+        .default({ enabled: dPorts.enabled, range: [dPorts.range[0], dPorts.range[1]] }),
       processGroups: z
-        .object({ graceMs: z.number().int().positive().default(5000), comment: z.string().optional() })
-        .default({ graceMs: 5000 }),
-      proxy: z
         .object({
-          enabled: z.boolean().default(false),
-          port: z.number().int().min(1).max(65535).default(80),
-          domain: z.string().default('factory.localhost'),
+          graceMs: z.number().int().positive().default(defaultSchemaFields.processGroupGraceMs),
           comment: z.string().optional(),
         })
-        .default({ enabled: false, port: 80, domain: 'factory.localhost' }),
+        .default({ graceMs: defaultSchemaFields.processGroupGraceMs }),
+      proxy: z
+        .object({
+          enabled: z.boolean().default(dProxy.enabled),
+          port: z.number().int().min(1).max(65535).default(dProxy.port),
+          domain: z.string().default(dProxy.domain),
+          comment: z.string().optional(),
+        })
+        .default({ enabled: dProxy.enabled, port: dProxy.port, domain: dProxy.domain }),
     })
     .default({
-      ports: { enabled: true, range: [3100, 3999] },
-      processGroups: { graceMs: 5000 },
-      proxy: { enabled: false, port: 80, domain: 'factory.localhost' },
+      ports: { enabled: dPorts.enabled, range: [dPorts.range[0], dPorts.range[1]] },
+      processGroups: { graceMs: defaultSchemaFields.processGroupGraceMs },
+      proxy: { enabled: dProxy.enabled, port: dProxy.port, domain: dProxy.domain },
     }),
   host: z
     .object({
-      maxBuilds: z.number().int().positive().default(2),
-      maxAgentJobs: z.number().int().positive().default(1),
+      maxBuilds: z.number().int().positive().default(dHost.maxBuilds),
+      maxAgentJobs: z.number().int().positive().default(dHost.maxAgentJobs),
       loadGuard: z
         .object({
-          enabled: z.boolean().default(true),
+          enabled: z.boolean().default(dHost.loadGuard.enabled),
           maxLoad: z.number().positive().optional(),
-          retrySeconds: z.number().int().positive().default(60),
+          retrySeconds: z.number().int().positive().default(dHost.loadGuard.retrySeconds),
         })
-        .default({ enabled: true, retrySeconds: 60 }),
+        .default({ enabled: dHost.loadGuard.enabled, retrySeconds: dHost.loadGuard.retrySeconds }),
       comment: z.string().optional(),
     })
-    .default({ maxBuilds: 2, maxAgentJobs: 1, loadGuard: { enabled: true, retrySeconds: 60 } }),
+    .default({
+      maxBuilds: dHost.maxBuilds,
+      maxAgentJobs: dHost.maxAgentJobs,
+      loadGuard: { enabled: dHost.loadGuard.enabled, retrySeconds: dHost.loadGuard.retrySeconds },
+    }),
   disk: DiskConfigSchema,
   auto_failover: z
     .object({
-      enabled: z.boolean().default(true),
-      cooldown_minutes: z.number().positive().default(30),
-      fallback_model: z.string().default('claude-sonnet-5'),
+      enabled: z.boolean().default(dFailover.enabled),
+      cooldown_minutes: z.number().positive().default(dFailover.cooldown_minutes),
+      fallback_model: z.string().default(dFailover.fallback_model),
       comment: z.string().optional(),
     })
-    .default({ enabled: true, cooldown_minutes: 30, fallback_model: 'claude-sonnet-5' }),
+    .default(withoutComment(dFailover)),
   queue: z
     .object({
       claim_settle_ms: z
         .number()
         .int()
         .nonnegative()
-        .default(3000)
+        .default(dQueue.claim_settle_ms)
         .describe(
           'Milliseconds a lane waits after writing its claim before confirming it (#3145). 0 turns the wait off.',
         ),
@@ -333,7 +356,7 @@ export const FactoryConfigSchema = z.object({
         .number()
         .int()
         .nonnegative()
-        .default(2)
+        .default(dQueue.max_review_rework_runs)
         .describe(
           'Review-rework runs allowed per issue (#3565). At the cap a trusted changes-requested review starts no run and parks the issue. 0 always parks.',
         ),
@@ -341,36 +364,41 @@ export const FactoryConfigSchema = z.object({
         .number()
         .int()
         .nonnegative()
-        .default(60000)
+        .default(dQueue.maxClockSkewMs)
         .describe('Max ms this clock may differ from GitHub before the stale-claim reaper refuses (#3149).'),
-      stackOnOpenPrerequisite: z.boolean().catch(true).describe('Stack on an open prerequisite PR (#3916).'),
+      stackOnOpenPrerequisite: z
+        .boolean()
+        .catch(dQueue.stackOnOpenPrerequisite)
+        .describe('Stack on an open prerequisite PR (#3916).'),
       discovery_interval_ms: z
         .number()
         .int()
         .positive()
-        .default(60000)
+        .default(dQueue.discovery_interval_ms)
         .describe('Milliseconds between lane-discovery passes in a running factory run (#3920).'),
       comment: z.string().optional(),
     })
     .default({
-      claim_settle_ms: 3000,
-      max_review_rework_runs: 2,
-      maxClockSkewMs: 60000,
-      discovery_interval_ms: 60000,
-      stackOnOpenPrerequisite: true,
+      claim_settle_ms: dQueue.claim_settle_ms,
+      max_review_rework_runs: dQueue.max_review_rework_runs,
+      maxClockSkewMs: dQueue.maxClockSkewMs,
+      discovery_interval_ms: dQueue.discovery_interval_ms,
+      stackOnOpenPrerequisite: dQueue.stackOnOpenPrerequisite,
     }),
-  adr: z.object({ mandate: z.boolean().default(false), comment: z.string().optional() }).default({ mandate: false }),
+  adr: z
+    .object({ mandate: z.boolean().default(defaultSchemaFields.adrMandate), comment: z.string().optional() })
+    .default({ mandate: defaultSchemaFields.adrMandate }),
   /** Ship-it lane workspace isolation (#1535). `'host'` is the existing sibling-worktree
    *  behavior; `'disposable-docker'` opts a repo into a managed, labeled container per
    *  lane via the existing hosted ContainerEngine. Default-off — every existing repo is
    *  unaffected unless it explicitly opts in. */
   workspace: z
     .object({
-      backend: z.enum(['host', 'disposable-docker']).default('host'),
+      backend: z.enum(['host', 'disposable-docker']).default(defaultSchemaFields.workspaceBackend),
       comment: z.string().optional(),
     })
-    .default({ backend: 'host' }),
-  tracker: TrackerConfigSchema.default({ kind: 'github' }),
+    .default({ backend: defaultSchemaFields.workspaceBackend }),
+  tracker: TrackerConfigSchema.default({ kind: defaultSchemaFields.trackerKind }),
 });
 
 // ---------- Types ----------
@@ -519,12 +547,12 @@ export function resolveTimeouts(
   };
 
   return {
-    plan: fromEnv(env.FACTORY_PLAN_TIMEOUT) ?? config.timeouts.plan_seconds ?? 1800,
-    build: fromEnv(env.FACTORY_BUILD_TIMEOUT) ?? config.timeouts.build_seconds ?? 7200,
-    check: fromEnv(env.FACTORY_CHECK_TIMEOUT) ?? config.timeouts.check_seconds ?? 1800,
-    approval: fromEnv(env.FACTORY_APPROVAL_TIMEOUT) ?? config.timeouts.approval_seconds ?? 1800,
-    tests: fromEnv(env.FACTORY_TESTS_TIMEOUT) ?? config.timeouts.tests_seconds ?? 300,
-    compile: fromEnv(env.FACTORY_COMPILE_TIMEOUT) ?? config.timeouts.compile_seconds ?? 120,
+    plan: fromEnv(env.FACTORY_PLAN_TIMEOUT) ?? config.timeouts.plan_seconds ?? dTimeouts.plan_seconds,
+    build: fromEnv(env.FACTORY_BUILD_TIMEOUT) ?? config.timeouts.build_seconds ?? dTimeouts.build_seconds,
+    check: fromEnv(env.FACTORY_CHECK_TIMEOUT) ?? config.timeouts.check_seconds ?? dTimeouts.check_seconds,
+    approval: fromEnv(env.FACTORY_APPROVAL_TIMEOUT) ?? config.timeouts.approval_seconds ?? dTimeouts.approval_seconds,
+    tests: fromEnv(env.FACTORY_TESTS_TIMEOUT) ?? config.timeouts.tests_seconds ?? dTimeouts.tests_seconds,
+    compile: fromEnv(env.FACTORY_COMPILE_TIMEOUT) ?? config.timeouts.compile_seconds ?? dTimeouts.compile_seconds,
   };
 }
 
@@ -538,7 +566,7 @@ function resolveEnabledFlag(env: NodeJS.ProcessEnv, envVar: string, fallback: bo
 }
 
 export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
-  return resolveEnabledFlag(env, 'FACTORY_SKIP_CI', config.ci?.skip ?? false);
+  return resolveEnabledFlag(env, 'FACTORY_SKIP_CI', config.ci?.skip ?? dCi.skip);
 }
 
 /** SHIP's CI watch deadline (#3569, #3932): ship.ciWatchMinutes, then ci.watchMinutes, as ms; unset, non-finite or <= 0 → DEFAULT_CI_DEADLINE_MS. */
@@ -589,33 +617,37 @@ export function resolveSizeGateBudget(config: FactoryConfig): SizeBudget {
 }
 
 export function resolveBuildPublish(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
-  return resolveEnabledFlag(env, 'FACTORY_BUILD_PUBLISH', config.build?.publishFromBuild ?? false);
+  return resolveEnabledFlag(env, 'FACTORY_BUILD_PUBLISH', config.build?.publishFromBuild ?? dBuild.publishFromBuild);
 }
 
 export function resolveDesignRegressionBlock(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveEnabledFlag(
     env,
     'FACTORY_DESIGN_BLOCK_REGRESSIONS',
-    config.design?.blockUnresolvedRegressions ?? false,
+    config.design?.blockUnresolvedRegressions ?? dDesign.blockUnresolvedRegressions,
   );
 }
 
 export function resolveReadinessUpdateIssueBody(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
-  return resolveEnabledFlag(env, 'FACTORY_READINESS_UPDATE_BODY', config.readiness?.updateIssueBody ?? true);
+  return resolveEnabledFlag(
+    env,
+    'FACTORY_READINESS_UPDATE_BODY',
+    config.readiness?.updateIssueBody ?? dReadiness.updateIssueBody,
+  );
 }
 
 export function resolvePlanApproval(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
-  return resolveEnabledFlag(env, 'FACTORY_APPROVE_PLAN', config.plan_approval?.enabled ?? false);
+  return resolveEnabledFlag(env, 'FACTORY_APPROVE_PLAN', config.plan_approval?.enabled ?? dPlanApproval.enabled);
 }
 
 export function resolveAdrMandate(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
-  return resolveEnabledFlag(env, 'FACTORY_ADR_MANDATE', config.adr?.mandate ?? false);
+  return resolveEnabledFlag(env, 'FACTORY_ADR_MANDATE', config.adr?.mandate ?? defaultSchemaFields.adrMandate);
 }
 
 export function resolveDefectWindowDays(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): number {
   const n = Number(env.FACTORY_DEFECT_WINDOW_DAYS);
   if (Number.isFinite(n) && n > 0) return n;
-  return config.kpis?.defectWindowDays ?? 14;
+  return config.kpis?.defectWindowDays ?? dKpis.defectWindowDays;
 }
 
 export interface IngestSettings {
@@ -628,10 +660,10 @@ export interface IngestSettings {
 export function resolveIngestConfig(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): IngestSettings {
   const i = config.ingest;
   return {
-    enabled: resolveEnabledFlag(env, 'FACTORY_AUTO_INGEST', i?.enabled ?? false),
-    label: i?.label ?? 'ready',
-    lane: i?.lane ?? 'auto',
-    maxPerCycle: i?.maxPerCycle ?? 20,
+    enabled: resolveEnabledFlag(env, 'FACTORY_AUTO_INGEST', i?.enabled ?? dIngest.enabled),
+    label: i?.label ?? dIngest.label,
+    lane: i?.lane ?? dIngest.lane,
+    maxPerCycle: i?.maxPerCycle ?? dIngest.maxPerCycle,
   };
 }
 
@@ -645,8 +677,8 @@ export function resolveEnvironmentPorts(
   env: NodeJS.ProcessEnv = process.env,
 ): EnvironmentPortsSettings {
   return {
-    enabled: resolveEnabledFlag(env, 'FACTORY_ENV_PORTS', config.environment?.ports?.enabled ?? true),
-    range: config.environment?.ports?.range ?? [3100, 3999],
+    enabled: resolveEnabledFlag(env, 'FACTORY_ENV_PORTS', config.environment?.ports?.enabled ?? dPorts.enabled),
+    range: config.environment?.ports?.range ?? [dPorts.range[0], dPorts.range[1]],
   };
 }
 
@@ -661,9 +693,9 @@ export function resolveEnvironmentProxy(
   env: NodeJS.ProcessEnv = process.env,
 ): EnvironmentProxySettings {
   return {
-    enabled: resolveEnabledFlag(env, 'FACTORY_PROXY', config.environment?.proxy?.enabled ?? false),
-    port: config.environment?.proxy?.port ?? 80,
-    domain: config.environment?.proxy?.domain ?? 'factory.localhost',
+    enabled: resolveEnabledFlag(env, 'FACTORY_PROXY', config.environment?.proxy?.enabled ?? dProxy.enabled),
+    port: config.environment?.proxy?.port ?? dProxy.port,
+    domain: config.environment?.proxy?.domain ?? dProxy.domain,
   };
 }
 
@@ -723,7 +755,7 @@ export function resolveExperimental(env: NodeJS.ProcessEnv = process.env): boole
 /** Grace period (ms) between SIGTERM and SIGKILL when sweeping a lane's
  *  process groups on terminal state or reaping a dead lane's orphans. */
 export function resolveProcessGroupGraceMs(config: FactoryConfig): number {
-  return config.environment?.processGroups?.graceMs ?? 5000;
+  return config.environment?.processGroups?.graceMs ?? defaultSchemaFields.processGroupGraceMs;
 }
 
 export {
