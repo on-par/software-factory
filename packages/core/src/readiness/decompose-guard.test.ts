@@ -70,11 +70,15 @@ describe('findPendingProposal', () => {
 });
 
 function makeOctokit(over: { get?: () => unknown; me?: () => unknown; list?: (args: { page: number }) => unknown }) {
-  const get = vi.fn(over.get ?? (() => ({ data: { state: 'open' } })));
-  const getAuthenticated = vi.fn(over.me ?? (() => ({ data: { id: 1 } })));
-  const listComments = vi.fn(over.list ?? (() => ({ data: [] })));
+  const pages: number[] = [];
+  const get = async () => (over.get ?? (() => ({ data: { state: 'open' } })))();
+  const getAuthenticated = async () => (over.me ?? (() => ({ data: { id: 1 } })))();
+  const listComments = async (args: { page: number }) => (
+    pages.push(args.page),
+    (over.list ?? (() => ({ data: [] })))(args)
+  );
   const octokit = { rest: { issues: { get, listComments }, users: { getAuthenticated } } } as any;
-  return { octokit, get, getAuthenticated, listComments };
+  return { octokit, pages };
 }
 const wire = (c: GuardComment) => ({
   id: c.id,
@@ -90,7 +94,7 @@ describe('checkDecomposeGuard', () => {
     const verdict = await run(closed.octokit);
     expect(verdict).toMatchObject({ kind: 'issue-closed' });
     expect(verdict.kind === 'issue-closed' && verdict.reason).toMatch(/already closed/);
-    expect(closed.listComments).not.toHaveBeenCalled();
+    expect(closed.pages).toEqual([]);
 
     const pending = makeOctokit({ list: () => ({ data: [wire(proposal(10))] }) });
     expect(await run(pending.octokit)).toMatchObject({ kind: 'proposal-pending', commentId: 10 });
@@ -105,7 +109,7 @@ describe('checkDecomposeGuard', () => {
       list: ({ page }) => ({ data: page === 1 ? filler : [wire(proposal(500))] }),
     });
     expect(await run(mock.octokit)).toMatchObject({ kind: 'proposal-pending', commentId: 500 });
-    expect(mock.listComments).toHaveBeenCalledTimes(2);
+    expect(mock.pages).toEqual([1, 2]);
   });
 
   it('fails open when a GitHub read throws or a page is not an array', async () => {

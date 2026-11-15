@@ -23,7 +23,11 @@ const CLOSE = '</untrusted-issue-body>';
 
 function fakeRunner(...outputs: string[]) {
   const queue = [...outputs];
-  return vi.fn(async (_prompt: string) => ({ model: 'm', output: queue.shift() ?? READY, cost: 0.5 }));
+  const prompts: string[] = [];
+  return Object.assign(
+    async (prompt: string) => (prompts.push(prompt), { model: 'm', output: queue.shift() ?? READY, cost: 0.5 }),
+    { prompts },
+  );
 }
 
 let dir: string;
@@ -53,10 +57,10 @@ describe('judgeReadiness', () => {
     const opts = { title: 't', body: 'b', run, cache: { dir } };
     await judgeReadiness(opts);
     const second = await judgeReadiness(opts);
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.prompts).toHaveLength(1);
     expect(second).toMatchObject({ kind: 'verdict', cached: true, cost: 0 });
     await judgeReadiness({ ...opts, rejudge: true });
-    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.prompts).toHaveLength(2);
     expect(jsonFiles()).toHaveLength(1);
   });
 
@@ -70,7 +74,7 @@ describe('judgeReadiness', () => {
     entry.verdict = { verdict: 'nope' };
     writeFileSync(file, JSON.stringify(entry));
     await judgeReadiness(opts);
-    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.prompts).toHaveLength(2);
   });
 
   it('hashes bodies equal when they differ only by an enriched block or hidden characters', async () => {
@@ -93,8 +97,8 @@ describe('judgeReadiness', () => {
     );
     const r = await judgeReadiness({ title: 't', body: 'b', run, cache: { dir } });
     expect(r).toMatchObject({ kind: 'error', errorKind: 'schema-violation' });
-    expect(run).toHaveBeenCalledTimes(2);
-    expect(run.mock.calls[1][0]).toContain('Your previous reply was rejected');
+    expect(run.prompts).toHaveLength(2);
+    expect(run.prompts[1]).toContain('Your previous reply was rejected');
     expect(jsonFiles()).toEqual([]);
   });
 
@@ -134,7 +138,7 @@ describe('judgeReadiness', () => {
       kind: 'skipped',
       reason: 'epic',
     });
-    expect(run).not.toHaveBeenCalled();
+    expect(run.prompts).toEqual([]);
   });
 });
 

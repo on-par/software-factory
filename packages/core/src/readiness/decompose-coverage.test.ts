@@ -171,7 +171,6 @@ describe('decomposeOversizedIssue parent coverage (#3105)', () => {
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
-    const run = vi.spyOn(router, 'run');
     const octokit = { rest: { issues: { createComment: vi.fn() } }, request: vi.fn() } as any;
 
     const result = await decomposeOversizedIssue({
@@ -187,10 +186,10 @@ describe('decomposeOversizedIssue parent coverage (#3105)', () => {
     });
 
     expect(result.decomposition).toBeDefined();
-    expect(run).toHaveBeenCalledTimes(2);
-    const first = String(run.mock.calls[0][1]);
+    expect(stub.calls).toHaveLength(2);
+    const first = stub.calls[0].prompt;
     expect(first).toContain('<untrusted-parent-criteria>');
     expect(first).toContain('P1: one');
-    expect(String(run.mock.calls[1][1])).toContain('parent criterion P3 ("three")');
+    expect(stub.calls[1].prompt).toContain('parent criterion P3 ("three")');
   });
 });

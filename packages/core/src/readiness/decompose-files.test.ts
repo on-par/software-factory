@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
@@ -80,9 +80,12 @@ describe('filesLikelyTouched (#3351)', () => {
     for (const story of parsed.stories) story.filesLikelyTouched = ['src/a.ts', 'src/b.ts'];
     const stub = new StubModelExecutor({ scripts: { decompose: [{ output: JSON.stringify(parsed) }] } });
     const router = new ModelRouter(models, routes, false, stub);
-    const createComment = vi.fn().mockResolvedValue({});
-    const create = vi.fn();
-    const octokit = { rest: { issues: { createComment, create } }, request: vi.fn() } as any;
+    const comments: unknown[] = [];
+    const created: unknown[] = [];
+    const createComment = async (args: unknown) => (comments.push(args), {});
+    const create = async (args: unknown) => void created.push(args);
+    const request = async () => ({ data: [] });
+    const octokit = { rest: { issues: { createComment, create } }, request } as any;
     const events: { type: string; msg: string }[] = [];
 
     const result = await decomposeOversizedIssue({
@@ -99,8 +102,8 @@ describe('filesLikelyTouched (#3351)', () => {
     expect(result.cohesive?.cohesive).toBe(true);
     expect(result.posted).toBe(false);
     expect(result.childIssues).toEqual([]);
-    expect(createComment).not.toHaveBeenCalled();
-    expect(create).not.toHaveBeenCalled();
+    expect(comments).toEqual([]);
+    expect(created).toEqual([]);
     expect(events.find((e) => e.type === 'size_gate_cohesive')?.msg).toContain('src/a.ts');
   });
 });
