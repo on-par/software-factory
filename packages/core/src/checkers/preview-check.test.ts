@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import { PreviewConfigSchema } from '../config/preview-section.js';
@@ -62,6 +62,7 @@ const config = (over: Record<string, unknown> = {}) =>
 
 function setup(github: PreviewGitHub, over: Partial<PreviewCheckInput> = {}) {
   let clock = 0;
+  const sleeps: number[] = [];
   const commands: { argv: readonly string[]; options: RunCommandOptions }[] = [];
   const probes: string[] = [];
   const pins: PinnedAddress[] = [];
@@ -86,13 +87,14 @@ function setup(github: PreviewGitHub, over: Partial<PreviewCheckInput> = {}) {
       commands.push({ argv, options });
       return okResult();
     },
-    sleep: vi.fn(async (ms: number) => {
+    sleep: async (ms: number) => {
+      sleeps.push(ms);
       clock += ms;
-    }),
+    },
     now: () => clock,
     ...more,
   });
-  return { input, deps, commands, probes, pins, advance: (ms: number) => (clock += ms) };
+  return { input, deps, commands, probes, pins, sleeps, advance: (ms: number) => (clock += ms) };
 }
 
 describe('runPreviewCheck', () => {
@@ -126,7 +128,7 @@ describe('runPreviewCheck', () => {
     });
     const r = await runPreviewCheck(h.input, deps);
     expect(r.status).toBe('pass');
-    expect(deps.sleep).toHaveBeenCalledTimes(2);
+    expect(h.sleeps).toHaveLength(2);
     expect(r.evidence).toMatchObject({ readyWaitMs: 10_000, commandMs: 1234, durationMs: 11_234 });
     expect(previewReworkSummary(r)).toContain('Ready wait: 10.0s; command: 1.2s');
   });
@@ -195,7 +197,7 @@ describe('runPreviewCheck', () => {
     const r = await runPreviewCheck(h.input, deps);
     expect(r.evidence.reason).toBe('preview lookup failed: api down');
     expect(calls).toBe(4);
-    expect(deps.sleep).toHaveBeenCalledTimes(3);
+    expect(h.sleeps).toHaveLength(3);
   });
 
   it.each([
