@@ -2,13 +2,13 @@ import { workKeyFromIssue } from '../work/work-key.js';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createTempDirs } from '@on-par/factory-core/testing';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { execGit } from '../utils/git-exec.js';
 import { checkPhase } from './check.js';
 import type { CheckSummary } from '../types/index.js';
+import { afterEach, describe, expect, it } from 'vitest';
 
 const tempDirs = createTempDirs();
 afterEach(async () => tempDirs.cleanup());
@@ -63,7 +63,8 @@ describe('checkPhase side effects', () => {
     const executor = new StubModelExecutor({ defaultOutput: 'repaired' });
     const router = new ModelRouter(models, routes, false, executor);
     let evidenceCalls = 0;
-    const baseline = vi.fn();
+    let baselineRuns = 0;
+    const baseline = async () => Promise.reject(new Error(`no baseline ${++baselineRuns}`));
     const check = await checkPhase({
       issue: workKeyFromIssue(3259),
       worktree,
@@ -88,6 +89,6 @@ describe('checkPhase side effects', () => {
     expect(check.summary.failures).toBe(0);
     expect(executor.calls[0]?.prompt).toContain(JSON.stringify('leak.tmp'));
     expect(check.summary.results.find((result) => result.checker === 'side_effects')).toMatchObject({ result: 'PASS' });
-    expect(baseline).not.toHaveBeenCalled();
+    expect(baselineRuns).toBe(0);
   });
 });

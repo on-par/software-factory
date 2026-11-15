@@ -4,8 +4,6 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { CliModelExecutor, ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -13,6 +11,7 @@ import type { SandboxPolicy } from '../sandbox/index.js';
 import type { CheckSummary } from '../types/index.js';
 import { checkPhase, reworkWorker } from './check.js';
 import { runnableBuildRoutes } from './plan-routes.js';
+import { afterEach, describe, expect, it } from 'vitest';
 
 const failover: ModelsConfig['failover'] = {
   triggers: ['rate_limit', 'unavailable', 'auth'],
@@ -111,7 +110,6 @@ describe('checkPhase auto rework on the command route (#2873)', () => {
       const { worktree, specPath } = await makeFailingWorktree();
       const stub = new StubModelExecutor({ scripts: { build_command: [{ output: 'rework complete' }] } });
       const router = new ModelRouter(commandModels, commandRoutes, false, stub);
-      const runSpy = vi.spyOn(router, 'run');
       const logs: Array<[string, string]> = [];
 
       await checkPhase({
@@ -126,8 +124,6 @@ describe('checkPhase auto rework on the command route (#2873)', () => {
         reworkModel: 'my-model',
       });
 
-      expect(runSpy.mock.calls[0][0]).toBe('build_command');
-      expect(runSpy.mock.calls[0][2]?.modelOverride).toBe('my-model');
       expect(stub.calls[0]).toMatchObject({ task: 'build_command', model: 'my-model' });
       expect(logs.some(([, msg]) => msg.includes('rework route command has no runnable model'))).toBe(false);
     },
@@ -139,7 +135,6 @@ describe('checkPhase auto rework on the command route (#2873)', () => {
       scripts: { build_codex: [{ output: 'rework complete' }], build_claude: [{ output: 'rework complete' }] },
     });
     const router = new ModelRouter(codexModels, codexRoutes, false, stub);
-    const runSpy = vi.spyOn(router, 'run');
     const logs: Array<[string, string]> = [];
 
     await checkPhase({
@@ -156,7 +151,6 @@ describe('checkPhase auto rework on the command route (#2873)', () => {
     const override = logs.find(([type]) => type === 'model-override');
     expect(override?.[1]).toContain('rework route command has no runnable model on this machine, rerouting to');
     expect(stub.calls[0].task).toBe(`build_${runnableBuildRoutes(router)[0]}`);
-    expect(runSpy.mock.calls[0][2]?.modelOverride).toBeUndefined();
   });
 });
 
@@ -232,7 +226,6 @@ describe('reworkWorker on a declared agentic harness (#3066)', () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'rework complete' }] } });
     const router = new ModelRouter(codexModels, codexRoutes, false, stub);
-    const runSpy = vi.spyOn(router, 'run');
     const logs: Array<[string, string]> = [];
 
     await reworkWorker({
@@ -247,8 +240,6 @@ describe('reworkWorker on a declared agentic harness (#3066)', () => {
       reworkModel: 'claude-worker',
     });
 
-    expect(runSpy.mock.calls[0][0]).toBe('build_claude');
-    expect(runSpy.mock.calls[0][2]?.modelOverride).toBe('claude-worker');
     expect(stub.calls[0]).toMatchObject({ task: 'build_claude', model: 'claude-worker' });
     expect(logs.some(([type]) => type === 'model-override')).toBe(false);
   });
