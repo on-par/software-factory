@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { errored, h, installCliCommandsHarness, logged, paths, runMain } from './test-support/cli-commands-harness.js';
 
@@ -16,17 +16,17 @@ describe('cli commands (via main dispatch)', () => {
         if (cmd.includes('gh repo view')) return h.ghRepo;
         return '';
       };
-      h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
-      h.octokit.rest.issues.addLabels = vi.fn(async ({ labels: add }: any) => {
+      h.octokit.rest.issues.createLabel = async () => ({});
+      h.octokit.rest.issues.addLabels = async ({ labels: add }: any) => {
         labels.push(...add.filter((l: string) => !labels.includes(l)));
         return {};
-      });
-      h.octokit.rest.issues.removeLabel = vi.fn(async ({ name }: any) => {
+      };
+      h.octokit.rest.issues.removeLabel = async ({ name }: any) => {
         labels = labels.filter((l) => l !== name);
         return {};
-      });
-      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [{ number: 12, labels: [labels[1]] }] }));
-      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: labels.map((name) => ({ name })) }));
+      };
+      h.octokit.rest.issues.listForRepo = async () => ({ data: [{ number: 12, labels: [labels[1]] }] });
+      h.octokit.rest.issues.listLabelsOnIssue = async () => ({ data: labels.map((name) => ({ name })) });
     });
 
     it('--json re-queues a parked issue and prints one object', async () => {
@@ -36,12 +36,8 @@ describe('cli commands (via main dispatch)', () => {
       expect(logged().trim().split('\n')).toHaveLength(1);
       const json = JSON.parse(logged());
       expect(json).toMatchObject({ schemaVersion: 1, action: 'unpark', issue: 12, lane: 'ops', order: 1 });
-      expect(h.octokit.rest.issues.addLabels).toHaveBeenCalledWith(
-        expect.objectContaining({ labels: expect.arrayContaining(['factory:order:1']) }),
-      );
-      expect(h.octokit.rest.issues.removeLabel).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'factory:parked' }),
-      );
+      expect(labels).toContain('factory:order:1');
+      expect(labels).not.toContain('factory:parked');
     });
 
     it('text mode prints the position line', async () => {
@@ -75,7 +71,7 @@ describe('cli commands (via main dispatch)', () => {
     it('exits 2 for an invalid issue argument', async () => {
       const res = await runMain('unpark', 'abc');
       expect(res).toEqual({ exited: true, code: 2 });
-      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+      expect(labels).toEqual(['factory:parked', 'factory:lane:ops']);
     });
   });
 });
