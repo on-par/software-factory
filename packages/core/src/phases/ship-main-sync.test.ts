@@ -2,7 +2,7 @@ import { execFileSync, execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import { syncShipBranchWithMain } from './ship-main-sync.js';
@@ -25,6 +25,11 @@ const run = async (command: string, options?: { cwd?: string }) => ({
   stdout: execSync(command, { cwd: options?.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }),
   stderr: '',
 });
+
+function recordingLog(): { log: (type: string, msg: string) => void; logged: Array<[string, string]> } {
+  const logged: Array<[string, string]> = [];
+  return { log: (type, msg) => void logged.push([type, msg]), logged };
+}
 
 function conflictingLane(): { lane: string; checked: string } {
   const root = tempDirs.makeSync('ship-main-sync-');
@@ -56,7 +61,7 @@ function conflictingLane(): { lane: string; checked: string } {
 describe('syncShipBranchWithMain merges origin/main before SHIP pushes, because GitHub runs no pull_request CI on a PR left conflicting by sibling merges, so syncing first opens it mergeable and CI runs', () => {
   it('merges origin/main into a branch whose only conflict is CHANGELOG Unreleased, keeping both bullets', async () => {
     const { lane, checked } = conflictingLane();
-    const log = vi.fn();
+    const { log, logged } = recordingLog();
     const result = await syncShipBranchWithMain({ run, worktree: lane, branch: 'factory/3-topic', log });
     expect(result.checkedSha).toBe(checked);
     expect(git(lane, 'rev-parse', 'HEAD')).not.toBe(checked);
@@ -65,41 +70,47 @@ describe('syncShipBranchWithMain merges origin/main before SHIP pushes, because 
     expect(text).toContain('- sibling (#4)');
     expect(text).toContain('- lane work (#3)');
     expect(text).not.toMatch(/^(<{7}|={7}|>{7})/m);
-    expect(log).toHaveBeenCalledWith('ship', expect.stringContaining('merged origin/main into factory/3-topic'));
+    expect(
+      logged.some(([type, msg]) => type === 'ship' && msg.includes('merged origin/main into factory/3-topic')),
+    ).toBe(true);
   });
 
   it('ships unsynced and says so when the sync cannot finish', async () => {
-    const log = vi.fn();
-    const fakeRun = vi.fn(async () => ({ stdout: 'abc123\n', stderr: '' }));
-    const sync = vi.fn(async () => ({
+    const { log, logged } = recordingLog();
+    const fakeRun = async () => ({ stdout: 'abc123\n', stderr: '' });
+    const sync = async () => ({
       ok: false as const,
       message: 'unresolved merge conflicts: src/a.ts',
       paths: [],
-    }));
+    });
     const result = await syncShipBranchWithMain({ run: fakeRun, worktree: '/w', branch: 'b', log, sync });
     expect(result).toEqual({ checkedSha: 'abc123' });
-    expect(log).toHaveBeenCalledWith(
-      'ship',
-      'could not sync b with origin/main before push (unresolved merge conflicts: src/a.ts); pushing it unsynced',
-    );
+    expect(logged).toEqual([
+      [
+        'ship',
+        'could not sync b with origin/main before push (unresolved merge conflicts: src/a.ts); pushing it unsynced',
+      ],
+    ]);
   });
 
   it('never throws when git itself fails', async () => {
-    const log = vi.fn();
-    const fakeRun = vi.fn(async () => {
+    const { log, logged } = recordingLog();
+    const fakeRun = async () => {
       throw new Error('git missing');
-    });
+    };
     await expect(syncShipBranchWithMain({ run: fakeRun, worktree: '/w', branch: 'b', log })).resolves.toEqual({
       checkedSha: undefined,
     });
-    expect(log).toHaveBeenCalledWith('ship', expect.stringContaining('(git missing); pushing it unsynced'));
+    expect(logged.some(([type, msg]) => type === 'ship' && msg.includes('(git missing); pushing it unsynced'))).toBe(
+      true,
+    );
   });
 
   it('logs nothing about a merge when the branch is already up to date', async () => {
-    const log = vi.fn();
-    const fakeRun = vi.fn(async () => ({ stdout: 'same\n', stderr: '' }));
-    const sync = vi.fn(async () => ({ ok: true as const }));
+    const { log, logged } = recordingLog();
+    const fakeRun = async () => ({ stdout: 'same\n', stderr: '' });
+    const sync = async () => ({ ok: true as const });
     await syncShipBranchWithMain({ run: fakeRun, worktree: '/w', branch: 'b', log, sync });
-    expect(log).not.toHaveBeenCalled();
+    expect(logged).toEqual([]);
   });
 });

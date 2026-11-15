@@ -1,5 +1,5 @@
 import { StorySchema } from '@on-par/contracts';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Slice, SlicePlan } from '../readiness/slice-plan.js';
 import { readReviewApproval, readStackSliceGate } from './stack-approval.js';
 import type { StackPullReviews, StackSliceGateReader, StackSliceReview } from './stack-approval.js';
@@ -69,18 +69,28 @@ const slice = (index: number, state: Slice['state'], prNumber?: number): Slice =
   ...(prNumber === undefined ? {} : { prNumber }),
 });
 const planOf = (...slices: Slice[]): SlicePlan => ({ issue: 7, slices });
-const readerOf = (state: 'open' | 'merged' | 'closed', reviews: StackPullReviews = pull()) =>
-  ({
-    getPullState: vi.fn(async () => state),
-    getPullReviews: vi.fn(async () => reviews),
-  }) satisfies StackSliceGateReader;
+const readerOf = (state: 'open' | 'merged' | 'closed', reviews: StackPullReviews = pull()) => {
+  const stateReads: number[] = [];
+  const reviewReads: number[] = [];
+  const reader = {
+    getPullState: async (prNumber: number) => {
+      stateReads.push(prNumber);
+      return state;
+    },
+    getPullReviews: async (prNumber: number) => {
+      reviewReads.push(prNumber);
+      return reviews;
+    },
+  } satisfies StackSliceGateReader;
+  return Object.assign(reader, { stateReads, reviewReads });
+};
 
 describe('readStackSliceGate', () => {
   it('picks the highest pr-open or merged slice', async () => {
     const reader = readerOf('open', pull(review(2, 'APPROVED')));
     const plan = planOf(slice(1, 'merged', 10), slice(2, 'pr-open', 11), slice(3, 'pending'));
     await expect(readStackSliceGate(plan, reader)).resolves.toEqual({ status: 'approved', index: 2, prNumber: 11 });
-    expect(reader.getPullState).toHaveBeenCalledWith(11);
+    expect(reader.stateReads).toEqual([11]);
   });
   it('does not read an approval on an older commit or one superseded by CHANGES_REQUESTED as approved', async () => {
     const plan = planOf(slice(1, 'pr-open', 10), slice(2, 'pending'));
@@ -98,8 +108,8 @@ describe('readStackSliceGate', () => {
       index: 1,
       prNumber: 10,
     });
-    expect(reader.getPullState).not.toHaveBeenCalled();
-    expect(reader.getPullReviews).not.toHaveBeenCalled();
+    expect(reader.stateReads).toEqual([]);
+    expect(reader.reviewReads).toEqual([]);
   });
   it('reads a PR that merged on GitHub as merged', async () => {
     await expect(
@@ -111,7 +121,7 @@ describe('readStackSliceGate', () => {
     await expect(readStackSliceGate(planOf(slice(1, 'pr-open', 10)), reader)).resolves.toMatchObject({
       status: 'waiting',
     });
-    expect(reader.getPullReviews).not.toHaveBeenCalled();
+    expect(reader.reviewReads).toEqual([]);
   });
   it('returns none when no slice is built', async () => {
     await expect(

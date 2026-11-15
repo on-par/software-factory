@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -140,8 +140,16 @@ describe('openOrFindPr trailers and references (#3894)', () => {
   const LINEAR = { key: toWorkKey('ON-12'), title: 'Add X' };
 
   async function open(extra: Partial<ShipPhaseOptions>, ticket: typeof LINEAR | undefined) {
-    const create = vi.fn(async (_args: { title: string; body: string }) => ({ data: { number: 5 } }));
-    const get = vi.fn(async () => ({ data: { title: 'GitHub title' } }));
+    const created: Array<{ title: string; body: string }> = [];
+    const create = async (args: { title: string; body: string }) => {
+      created.push(args);
+      return { data: { number: 5 } };
+    };
+    const reads: unknown[] = [];
+    const get = async (params: unknown) => {
+      reads.push(params);
+      return { data: { title: 'GitHub title' } };
+    };
     const octokit = Object.assign({} as Octokit, { rest: { pulls: { create }, issues: { get } } });
     const opts = {
       issue: workKeyFromIssue(123),
@@ -163,7 +171,7 @@ describe('openOrFindPr trailers and references (#3894)', () => {
       walkthrough: { walkthrough: async () => undefined, counts: async () => 'unavailable' as const },
     });
     expect(result).toEqual({ prNumber: 5 });
-    return { args: create.mock.calls[0][0], get };
+    return { args: created[0], reads };
   }
 
   it('a Linear run on its final slice opens a PR with Fixes ON-12 and no Closes #', async () => {
@@ -180,10 +188,10 @@ describe('openOrFindPr trailers and references (#3894)', () => {
   });
 
   it('a Linear run titles the PR and summary with ON-12 without reading a GitHub issue', async () => {
-    const { args, get } = await open({}, LINEAR);
+    const { args, reads } = await open({}, LINEAR);
     expect(args.title).toBe('Add X (ON-12)');
     expect(args.body).toContain('Implements ON-12.');
-    expect(get).not.toHaveBeenCalled();
+    expect(reads).toEqual([]);
   });
 
   it('a GitHub run keeps Closes #123 and the issue title', async () => {

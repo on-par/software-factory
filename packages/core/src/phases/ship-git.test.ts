@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { claimGuardedRunner, shortDetail } from './ship-git.js';
 
@@ -42,18 +42,26 @@ describe('shortDetail', () => {
 
 describe('claimGuardedRunner (#3146)', () => {
   it('calls the inner runner while the claim is healthy', async () => {
-    const inner = vi.fn(async () => ({ stdout: 'ok' }));
+    const seen: Array<[string, unknown]> = [];
+    const inner = async (cmd: string, opts?: { cwd?: string }) => {
+      seen.push([cmd, opts]);
+      return { stdout: 'ok' };
+    };
     const run = claimGuardedRunner(new AbortController().signal, inner);
     await expect(run('git push', { cwd: '/wt' })).resolves.toEqual({ stdout: 'ok' });
-    expect(inner).toHaveBeenCalledWith('git push', { cwd: '/wt' });
+    expect(seen).toEqual([['git push', { cwd: '/wt' }]]);
   });
 
   it('rejects with the abort reason without calling the inner runner after abort', () => {
     const controller = new AbortController();
     const lost = new Error('claim lost');
     controller.abort(lost);
-    const inner = vi.fn(async () => ({ stdout: '' }));
+    const seen: string[] = [];
+    const inner = async (cmd: string) => {
+      seen.push(cmd);
+      return { stdout: '' };
+    };
     expect(() => claimGuardedRunner(controller.signal, inner)('git push')).toThrow(lost);
-    expect(inner).not.toHaveBeenCalled();
+    expect(seen).toEqual([]);
   });
 });

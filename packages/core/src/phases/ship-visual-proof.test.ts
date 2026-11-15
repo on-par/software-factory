@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { VisualProofResult } from '../checkers/visual-proof.js';
 import { runVisualProofGate, visualProofFailureReason } from './ship-visual-proof.js';
@@ -15,29 +15,33 @@ const result = (patch: Partial<VisualProofResult>): VisualProofResult => ({
 
 describe('runVisualProofGate (#2232)', () => {
   it('returns the gate result and logs status, head and diagnostic', async () => {
-    const log = vi.fn();
+    const logged: Array<[string, string]> = [];
     const r = await runVisualProofGate(async () => result({ status: 'fail', diagnostic: 'blank' }), PR, {
-      log,
+      log: (level, msg) => logged.push([level, msg]),
       ciPending: false,
     });
     expect(r.status).toBe('fail');
-    expect(log).toHaveBeenCalledWith('ship', 'visual proof fail for PR #4 (abcdef012345): blank');
+    expect(logged).toEqual([['ship', 'visual proof fail for PR #4 (abcdef012345): blank']]);
   });
 
   it('does not start the app or publish anything when proof is not required', async () => {
-    const gate = vi.fn(async () => result({ status: 'not-required' }));
-    const r = await runVisualProofGate(gate, PR, { log: vi.fn(), ciPending: false });
+    const gate = async () => result({ status: 'not-required' });
+    const r = await runVisualProofGate(gate, PR, { log: () => undefined, ciPending: false });
     expect(r.status).toBe('not-required');
     expect(r.diagnostic).toBeUndefined();
   });
 
   it('still runs the gate while CI is pending and notes it in the log (#4047)', async () => {
-    const gate = vi.fn(async () => result({ status: 'not-required' }));
-    const log = vi.fn();
-    const r = await runVisualProofGate(gate, PR, { log, ciPending: true });
-    expect(gate).toHaveBeenCalledWith(PR);
+    const gateInputs: unknown[] = [];
+    const gate = async (input: typeof PR) => {
+      gateInputs.push(input);
+      return result({ status: 'not-required' });
+    };
+    const logged: Array<[string, string]> = [];
+    const r = await runVisualProofGate(gate, PR, { log: (level, msg) => logged.push([level, msg]), ciPending: true });
+    expect(gateInputs).toEqual([PR]);
     expect(r.status).toBe('not-required');
-    expect(log).toHaveBeenCalledWith('ship', 'visual proof not-required for PR #4 (abcdef012345) (CI pending)');
+    expect(logged).toEqual([['ship', 'visual proof not-required for PR #4 (abcdef012345) (CI pending)']]);
   });
 
   it('turns a gate error into unavailable while CI is pending (#4047)', async () => {
@@ -46,7 +50,7 @@ describe('runVisualProofGate (#2232)', () => {
         throw new Error('no port');
       },
       PR,
-      { log: vi.fn(), ciPending: true },
+      { log: () => undefined, ciPending: true },
     );
     expect(r).toMatchObject({ status: 'unavailable', headSha: HEAD, diagnostic: 'no port' });
   });
@@ -57,7 +61,7 @@ describe('runVisualProofGate (#2232)', () => {
         throw new Error('listing files failed');
       },
       PR,
-      { log: vi.fn(), ciPending: false },
+      { log: () => undefined, ciPending: false },
     );
     expect(r).toMatchObject({ status: 'unavailable', headSha: HEAD, diagnostic: 'listing files failed' });
   });
