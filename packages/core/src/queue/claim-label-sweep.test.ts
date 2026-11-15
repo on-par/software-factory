@@ -17,10 +17,7 @@ function sweepClient(repoLabels: string[], openLabels: string[][], failOn: strin
     removeLabel: async () => {},
     ensureLabel: async () => false,
     listRepoLabels: async () => repoLabels,
-    listAllOpenIssues: async () => {
-      reads.push('listAllOpenIssues');
-      return openLabels.map((labels, i) => ({ number: i + 1, labels }));
-    },
+    listAllOpenIssues: async () => (reads.push('read'), openLabels.map((labels, i) => ({ number: i + 1, labels }))),
     deleteRepoLabel: async ({ name }: { name: string }) => {
       if (failOn.includes(name)) throw new Error(`boom ${name}`);
       deleted.push(name);

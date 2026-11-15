@@ -78,11 +78,10 @@ function setup(o: { failOn?: Set<string>; claimantId?: string; now?: number; mut
   o.mutate?.(fx);
   const { client, calls } = fakeClient(fx, { failOn: o.failOn });
   const warnings: string[] = [];
-  const warn = (msg: string) => void warnings.push(msg);
   const lifecycle = createLinearQueueLifecycle({
     client,
     linear,
-    warn,
+    warn: (msg) => void warnings.push(msg),
     claimantId: o.claimantId ?? 'host-a-1',
     now: () => o.now ?? 1700000000000,
   });

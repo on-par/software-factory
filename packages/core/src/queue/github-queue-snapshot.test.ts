@@ -4,11 +4,8 @@ import { type QueueIssue, readGithubQueueSnapshot } from './github-queue.js';
 
 function clientWith(issues: QueueIssue[]) {
   const requests: Array<{ owner: string; repo: string; labels: string[] }> = [];
-  const listOpenIssuesWithLabels = async (input: { owner: string; repo: string; labels: string[] }) => {
-    requests.push(input);
-    return issues;
-  };
-  return { client: { listOpenIssuesWithLabels }, requests };
+  const listOpenIssuesWithLabels = async (input: (typeof requests)[number]) => (requests.push(input), issues);
+  return { client: { listOpenIssuesWithLabels }, listOpenIssuesWithLabels, requests };
 }
 
 describe('readGithubQueueSnapshot (#1362)', () => {
@@ -89,12 +86,10 @@ describe('readGithubQueueSnapshot (#1362)', () => {
   });
 
   it('returns no entries when nothing is queued or the queued issues carry no lane label', async () => {
-    expect(await readGithubQueueSnapshot({ client: clientWith([]).client, owner: 'o', repo: 'r' })).toEqual({
-      entries: [],
-    });
+    expect(await readGithubQueueSnapshot({ ...clientWith([]), owner: 'o', repo: 'r' })).toEqual({ entries: [] });
     expect(
       await readGithubQueueSnapshot({
-        client: clientWith([{ number: 5, labels: ['factory:queued', 'factory:order:1', 'factory:lane:'] }]).client,
+        ...clientWith([{ number: 5, labels: ['factory:queued', 'factory:order:1', 'factory:lane:'] }]),
         owner: 'o',
         repo: 'r',
       }),

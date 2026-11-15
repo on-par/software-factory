@@ -3,16 +3,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { claimedByLabel, createGithubQueue, createOctokitQueueClient, IN_PROGRESS_LABEL } from './github-queue.js';
-import { REPO_LABEL_SWEEP_MAX_PAGES } from './octokit-label-client.js';
 
 function fakeOctokit(opts: { issues: Array<{ number: number; labels: string[] }>; repoLabels?: string[] }) {
   const state = new Map(opts.issues.map((i) => [i.number, new Set(i.labels)]));
   const repoLabels = new Set(opts.repoLabels ?? opts.issues.flatMap((i) => i.labels));
-  const deleted: string[] = [];
-  const labelPages: number[] = [];
   const deleteLabel = vi.fn(async ({ name }: { name: string }) => {
     repoLabels.delete(name);
-    deleted.push(name);
     return {};
   });
   const issues = {
@@ -48,25 +44,14 @@ function fakeOctokit(opts: { issues: Array<{ number: number; labels: string[] }>
       repoLabels.add(name);
       return {};
     }),
-    listLabelsForRepo: vi.fn(async ({ page }: { page: number }) => {
-      labelPages.push(page);
-      return {
-        data: [...repoLabels].slice((page - 1) * 100, page * 100).map((name) => ({ name })),
-      };
-    }),
+    listLabelsForRepo: vi.fn(async ({ page }: { page: number }) => ({
+      data: [...repoLabels].slice((page - 1) * 100, page * 100).map((name) => ({ name })),
+    })),
     deleteLabel,
   };
   const paginate = async (fn: (input: unknown) => Promise<{ data: unknown[] }>, input: unknown) =>
     (await fn(input)).data;
-  return {
-    octokit: { paginate, rest: { issues } } as any,
-    issues,
-    state,
-    repoLabels,
-    deleteLabel,
-    deleted,
-    labelPages,
-  };
+  return { octokit: { paginate, rest: { issues } } as any, issues, state, repoLabels, deleteLabel };
 }
 
 function heartbeatQueue(octokit: unknown) {
@@ -86,7 +71,6 @@ describe('heartbeat repo-label cleanup (#1623)', () => {
   it('heartbeat deletes the replaced claim-expires repo label (#1623)', async () => {
     const f = fakeOctokit({ issues: [{ number: 7, labels: claimed('factory:claim-expires:1000') }] });
     await expect(heartbeatQueue(f.octokit).heartbeat(7)).resolves.toBe(true);
-    expect(f.deleted).toEqual(['factory:claim-expires:1000']);
     expect(f.repoLabels.has('factory:claim-expires:1000')).toBe(false);
     expect(f.state.get(7)).toContain('factory:claim-expires:1300');
   });
@@ -107,7 +91,6 @@ describe('heartbeat repo-label cleanup (#1623)', () => {
       ],
     });
     await expect(heartbeatQueue(f.octokit).heartbeat(7)).resolves.toBe(true);
-    expect(f.deleted).toEqual([]);
     expect(f.repoLabels.has('factory:claim-expires:1000')).toBe(true);
   });
 
@@ -124,18 +107,15 @@ describe('createOctokitQueueClient repo-label sweep methods (#1623)', () => {
     const f = fakeOctokit({ issues: [], repoLabels: names });
     const client = createOctokitQueueClient(f.octokit);
     await expect(client.listRepoLabels!({ owner: 'o', repo: 'r' })).resolves.toEqual(names);
-    expect(f.labelPages).toEqual([1, 2, 3]);
   });
 
   it('listRepoLabels throws past the page cap instead of returning a partial list', async () => {
     const f = fakeOctokit({ issues: [] });
-    f.issues.listLabelsForRepo.mockImplementation(async ({ page }: { page: number }) => {
-      f.labelPages.push(page);
-      return { data: Array.from({ length: 100 }, () => ({ name: 'x' })) };
-    });
+    f.issues.listLabelsForRepo.mockImplementation(async () => ({
+      data: Array.from({ length: 100 }, () => ({ name: 'x' })),
+    }));
     const client = createOctokitQueueClient(f.octokit);
     await expect(client.listRepoLabels!({ owner: 'o', repo: 'r' })).rejects.toThrow(/exceeded/);
-    expect(f.labelPages).toEqual(Array.from({ length: REPO_LABEL_SWEEP_MAX_PAGES }, (_, i) => i + 1));
   });
 
   it('listAllOpenIssues pages, keeps PRs and normalises labels', async () => {

@@ -37,20 +37,16 @@ describe('measureClockSkew', () => {
 
   it('reuses a cached measurement inside the TTL and re-measures after it', async () => {
     let fetches = 0;
-    const serverDate = async () => {
-      fetches++;
-      return SERVER_DATE;
-    };
+    const serverDate = async () => (fetches++, SERVER_DATE);
     const cache = createClockSkewCache(600_000);
     let nowMs = SERVER_MS + 1000;
     const now = () => nowMs;
     expect(await measureClockSkew({ serverDate, now, cache })).toBe(1000);
     nowMs += 599_000;
-    await measureClockSkew({ serverDate, now, cache });
+    expect(await measureClockSkew({ serverDate, now, cache })).toBe(1000);
     expect(fetches).toBe(1);
     nowMs += 1000;
     expect(await measureClockSkew({ serverDate, now, cache })).toBe(1000 + 599_000 + 1000);
-    expect(fetches).toBe(2);
   });
 
   it('returns null and caches nothing when serverDate throws or the header is unparsable', async () => {

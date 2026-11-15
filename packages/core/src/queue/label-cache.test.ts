@@ -8,14 +8,11 @@ const spec = (name: string) => ({ owner: 'o', repo: 'r', name, color: '0e8a16', 
 function octokitWith(existing: string[], createImpl: (input: unknown) => Promise<unknown> = async () => ({})) {
   const pages: Array<{ repo: string; page: number }> = [];
   const created: unknown[] = [];
-  const listLabelsForRepo = async ({ repo, page, per_page }: { repo: string; page: number; per_page: number }) => {
-    pages.push({ repo, page });
-    return { data: existing.slice((page - 1) * per_page, page * per_page).map((name) => ({ name })) };
-  };
-  const createLabel = async (input: unknown) => {
-    created.push(input);
-    return createImpl(input);
-  };
+  const listLabelsForRepo = async ({ repo, page, per_page }: { repo: string; page: number; per_page: number }) => (
+    pages.push({ repo, page }),
+    { data: existing.slice((page - 1) * per_page, page * per_page).map((name) => ({ name })) }
+  );
+  const createLabel = async (input: unknown) => (created.push(input), createImpl(input));
   return { octokit: { rest: { issues: { listLabelsForRepo, createLabel } } } as any, pages, created };
 }
 
@@ -68,18 +65,8 @@ describe('ensureLabel with the repo label cache', () => {
   });
 
   it('falls back to create-then-422 when the label list cannot be read', async () => {
-    const created: unknown[] = [];
-    const octokit: any = {
-      rest: {
-        issues: {
-          listLabelsForRepo: async () => Promise.reject(new Error('403')),
-          createLabel: async (input: unknown) => {
-            created.push(input);
-            return {};
-          },
-        },
-      },
-    };
+    const { octokit, created } = octokitWith([]);
+    octokit.rest.issues.listLabelsForRepo = async () => Promise.reject(new Error('403'));
     await expect(createOctokitQueueClient(octokit).ensureLabel(spec('x'))).resolves.toBe(true);
     expect(created).toEqual([spec('x')]);
   });

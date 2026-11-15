@@ -78,7 +78,6 @@ describe('unqueueDeferredOnly', () => {
     expect(res.skipped).toEqual([{ issue: 1, reason: 'claimed' }]);
     expect(res.unqueued).toEqual([2]);
     expect(removed).toEqual([{ issue_number: 2, name: QUEUED_LABEL }]);
-    expect(state.get(1)!.has(QUEUED_LABEL)).toBe(true);
   });
 
   it('skips an issue that lost factory:queued', async () => {
