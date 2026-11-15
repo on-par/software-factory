@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import { VisualProofConfigSchema } from '../config/visual-proof-section.js';
-import type { CommandResult } from '../utils/command-runner.js';
 import {
   classifyVisualProof,
   runVisualProofCapture,
@@ -11,6 +10,7 @@ import {
   type VisualProofCaptureDeps,
   type VisualProofRoute,
 } from './visual-proof.js';
+import { cmdResult, noisePng } from './visual-proof-test-support.js';
 
 const HEAD = 'a'.repeat(40);
 const RUN = 'run-1';
@@ -79,10 +79,8 @@ describe('classifyVisualProof', () => {
 
   it('reports uncovered UI files as a non-success', () => {
     const r = classifyVisualProof({ changedFiles: ['src/ui/settings/a.ts', 'web/app.css'], config, planRoutes: [] });
-    expect(r).toMatchObject({
-      required: true,
-      diagnostic: 'UI files not covered by any visualProof route: web/app.css',
-    });
+    expect(r).toMatchObject({ required: true, uncovered: ['web/app.css'] });
+    expect(r).not.toHaveProperty('diagnostic');
   });
 
   it('selects a configured plan route and never invents an unconfigured one', () => {
@@ -97,8 +95,10 @@ describe('classifyVisualProof', () => {
 
 describe('validateVisualProofManifest', () => {
   const outDir = resolve('/tmp/out');
-  const png = (size = 4096): Buffer =>
-    Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(size)]);
+  const png = (size = 4096): Buffer => {
+    const real = noisePng(Math.min(size, 4096));
+    return size > 4096 ? Buffer.concat([real, Buffer.alloc(size)]) : real;
+  };
   const capture = (patch: Record<string, unknown> = {}) => ({
     route: '/settings',
     state: 'default',
@@ -128,7 +128,7 @@ describe('validateVisualProofManifest', () => {
           viewport: VIEWPORT,
           finalPath: '/settings',
           file: '0.png',
-          bytes: 4104,
+          bytes: png().length,
         },
       ],
     });
@@ -227,17 +227,7 @@ describe('runVisualProofCapture', () => {
   const logsDir = () => tempDirs.makeSync('vp-test-');
   const qa = { start: ['npm', 'start'], readyPath: '/', readyTimeoutSeconds: 5 };
   const requirement = { required: true as const, routes: [route('/settings')] };
-  const cmdResult = (patch: Partial<CommandResult> = {}): CommandResult => ({
-    command: [],
-    stdout: '',
-    stderr: '',
-    exitCode: 0,
-    killed: false,
-    timedOut: false,
-    ok: true,
-    ...patch,
-  });
-  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(4096)]);
+  const png = noisePng();
   const goodManifest = Buffer.from(
     JSON.stringify({
       headSha: HEAD,
@@ -384,7 +374,10 @@ describe('runVisualProofCapture', () => {
   it('fails when the app answers 200 but the capture command exits non-zero', async () => {
     const { full } = deps({ runCommand: async () => cmdResult({ ok: false, exitCode: 2, stderr: 'browser missing' }) });
     const r = await runVisualProofCapture(input(), full);
-    expect(r).toMatchObject({ status: 'fail', diagnostic: 'capture command exited 2: browser missing' });
+    expect(r).toMatchObject({
+      status: 'fail',
+      diagnostic: 'after 3 attempts: capture command exited 2: browser missing',
+    });
   });
 
   it('fails on a capture timeout', async () => {
@@ -392,7 +385,7 @@ describe('runVisualProofCapture', () => {
       runCommand: async () => cmdResult({ ok: false, timedOut: true, killed: true, exitCode: -1 }),
     });
     const r = await runVisualProofCapture(input(), full);
-    expect(r).toMatchObject({ status: 'fail', diagnostic: 'capture command timed out after 300s' });
+    expect(r).toMatchObject({ status: 'fail', diagnostic: 'after 3 attempts: capture command timed out after 300s' });
   });
 
   it('fails when the manifest is missing or invalid', async () => {
@@ -407,6 +400,6 @@ describe('runVisualProofCapture', () => {
     expect(missing).toMatchObject({ status: 'fail', diagnostic: expect.stringContaining('manifest.json') });
     const wrongHead = Buffer.from(JSON.stringify({ headSha: 'b'.repeat(40), runId: RUN, captures: [] }));
     const stale = await runVisualProofCapture(input(), deps({ readFile: () => wrongHead }).full);
-    expect(stale).toMatchObject({ status: 'fail', diagnostic: 'capture is for another head/run' });
+    expect(stale).toMatchObject({ status: 'fail', diagnostic: 'after 3 attempts: capture is for another head/run' });
   });
 });

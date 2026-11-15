@@ -121,7 +121,7 @@ version: 2
 # Opt-in preview-environment gate run in SHIP after CI is green (#3880).
 # preview: { source: { kind: "deployment", environment: "preview/pr-*" }, command: ["npm", "run", "smoke:preview"] }
 # Opt-in UI visual proof gate run in SHIP (#2232).
-# visualProof: { uiPaths: ["src/ui/**"], routes: [<route>], command: ["<capture>"] }
+# visualProof: { uiPaths: ["src/ui/**"], routes: [{ route: "/items", state: "item-created", assert: "#item-1", paths: ["src/ui/items/**"], steps: [{ click: "#new" }, { fill: "#name", value: "Demo" }, { press: "Enter" }, { waitFor: "#item-1" }], record: "gif" }], command: ["<capture>"] }
 # Test selection for CHECK rework rounds. Unset: every round runs the full suite.
 # tests: { affected: { command: "npx vitest related --run {files}" } }
 # Repo risk policy for the risk receipt and the land risk gate (schema:

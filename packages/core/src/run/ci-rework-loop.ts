@@ -176,38 +176,46 @@ export async function shipWithCiRework(
   const visualProofGate: VisualProofGate | undefined =
     visualProofMode !== 'off' && (visualProofConfig || planRoutes.length > 0 || planRoutesError)
       ? async (pr) => {
-          if (planRoutesError) throw new Error(planRoutesError);
-          const changedFiles = await listChanged(ports.octokit, owner, repoName, pr.prNumber);
-          const requirement = classifyVisualProof({ changedFiles, config: visualProofConfig, planRoutes });
-          const base = { headSha: pr.headSha, runId: ctx.runId, captures: [] };
-          if (!requirement.required) return { status: 'not-required', ...base };
-          let result: VisualProofResult = visualProofConfig
-            ? await runVisualProofCapture({
-                requirement,
-                qa: loadRepoConfig(ports.workspace.path)?.qa ?? null,
-                config: visualProofConfig,
-                port: ctx.appPort,
-                headSha: pr.headSha,
-                runId: ctx.runId,
-                worktree: ports.workspace.path,
-                logsDir: request.logsDir,
-                onPgid: ctx.onPgid,
-              })
-            : { status: 'fail', ...base, diagnostic: requirement.diagnostic };
-          if (result.status === 'pass' && visualProofConfig) {
-            const target = { owner, repo: repoName, prNumber: pr.prNumber, branch: request.branch };
-            result = await attachVisualProof(
-              ports.octokit,
-              { ...target, evidenceBranch: visualProofConfig.evidenceBranch },
-              result,
-            );
+          const target = { owner, repo: repoName, prNumber: pr.prNumber };
+          let result: VisualProofResult;
+          try {
+            if (planRoutesError) throw new Error(planRoutesError);
+            const changedFiles = await listChanged(ports.octokit, owner, repoName, pr.prNumber);
+            const requirement = classifyVisualProof({ changedFiles, config: visualProofConfig, planRoutes });
+            const base = { headSha: pr.headSha, runId: ctx.runId, captures: [] };
+            if (!requirement.required) return { status: 'not-required', ...base };
+            result = visualProofConfig
+              ? await runVisualProofCapture({
+                  requirement,
+                  qa: loadRepoConfig(ports.workspace.path)?.qa ?? null,
+                  config: visualProofConfig,
+                  port: ctx.appPort,
+                  headSha: pr.headSha,
+                  runId: ctx.runId,
+                  worktree: ports.workspace.path,
+                  logsDir: request.logsDir,
+                  onPgid: ctx.onPgid,
+                  mode: visualProofMode,
+                  log: (m) => ports.events('ship')('warn', m),
+                })
+              : { status: 'fail', ...base, diagnostic: requirement.diagnostic };
+            if (result.status === 'pass' && visualProofConfig) {
+              result = await attachVisualProof(
+                ports.octokit,
+                { ...target, branch: request.branch, evidenceBranch: visualProofConfig.evidenceBranch },
+                result,
+              );
+            }
+          } catch (err) {
+            result = {
+              status: 'unavailable',
+              headSha: pr.headSha,
+              runId: ctx.runId,
+              captures: [],
+              diagnostic: err instanceof Error ? err.message : String(err),
+            };
           }
-          await publishVisualProof(
-            ports.octokit,
-            { owner, repo: repoName, prNumber: pr.prNumber },
-            result,
-            visualProofMode,
-          );
+          await publishVisualProof(ports.octokit, target, result, visualProofMode);
           return result;
         }
       : undefined;

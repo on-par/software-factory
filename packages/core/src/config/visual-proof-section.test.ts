@@ -48,3 +48,45 @@ describe('VisualProofConfigSchema (#2232)', () => {
     expect(branch('proof/images')).toBe(true);
   });
 });
+
+describe('VisualProofConfigSchema steps (#4054)', () => {
+  const stateful = {
+    ...route,
+    state: 'item-created',
+    steps: [
+      { goto: '/items' },
+      { click: '#new' },
+      { fill: '#name', value: '' },
+      { press: 'Enter' },
+      { waitFor: '#item-1' },
+    ],
+    record: 'gif',
+  };
+  const parse = (r: unknown) => VisualProofConfigSchema.safeParse({ ...base, routes: [r] });
+
+  it('accepts a stateful route with every step kind', () => {
+    const parsed = parse(stateful);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.routes[0]).toMatchObject({ record: 'gif', steps: stateful.steps });
+  });
+
+  it('rejects an unknown step, a cross-origin goto and record without steps', () => {
+    expect(parse({ ...stateful, steps: [{ hover: '#x' }] }).success).toBe(false);
+    expect(parse({ ...stateful, steps: [{ goto: '//evil.test' }] }).success).toBe(false);
+    expect(parse({ ...stateful, steps: [{ click: '#a', press: 'Enter' }] }).success).toBe(false);
+    expect(parse({ ...stateful, steps: [] }).success).toBe(false);
+    expect(parse({ ...stateful, steps: Array.from({ length: 21 }, () => ({ press: 'Tab' })) }).success).toBe(false);
+    const noSteps = parse({ ...route, record: 'video' });
+    expect(noSteps.success).toBe(false);
+    expect(noSteps.error?.issues[0]?.message).toBe('record needs steps');
+  });
+
+  it('defaults captureAttempts to 3 and leaves stepless routes unchanged', () => {
+    const parsed = VisualProofConfigSchema.parse(base);
+    expect(parsed.captureAttempts).toBe(3);
+    expect(parsed.routes[0]).not.toHaveProperty('steps');
+    expect(parsed.routes[0]).not.toHaveProperty('record');
+    expect(VisualProofConfigSchema.safeParse({ ...base, captureAttempts: 6 }).success).toBe(false);
+    expect(VisualProofConfigSchema.safeParse({ ...base, captureAttempts: 0 }).success).toBe(false);
+  });
+});

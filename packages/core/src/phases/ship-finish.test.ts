@@ -120,6 +120,27 @@ describe('finishShip visual proof gate (#2232)', () => {
     );
   });
 
+  it('advisory visual proof non-pass still only warns', async () => {
+    const gate = async () => proof({ status: 'unavailable', diagnostic: 'start exited' });
+    const { finish } = setup(gate, { visualProofMode: 'advisory' });
+    const r = await finish();
+    expect(r).toMatchObject({ ok: true, visualProof: { status: 'unavailable' } });
+    expect(r).not.toHaveProperty('draft');
+  });
+
+  it('logs the UI files no visualProof route covers', async () => {
+    const gate = async () => proof({ status: 'pass', uncovered: ['web/a.css', 'web/b.css'] });
+    const logged: string[] = [];
+    const log = (level: string, message: string): void => {
+      logged.push(`${level}: ${message}`);
+    };
+    const { finish } = setup(gate, { visualProofMode: 'advisory', log });
+    await finish();
+    expect(logged).toContain(
+      'warn: visual proof coverage: UI files not covered by any visualProof route: web/a.css, web/b.css',
+    );
+  });
+
   it('advisory mode: unavailable proof while CI is pending leaves a ci-pending draft (#4047)', async () => {
     const { finish, graphql } = setup(
       async () => {
