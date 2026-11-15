@@ -8,11 +8,15 @@
   // scripts/verify-env-probe.mjs is run by scripts/verify.sh through node, which knip does not follow (#3332).
   "ignore": ["tools/oxlint/anti-slop/**", "scripts/verify-env-probe.mjs"],
   "workspaces": {
-    "packages/core": { "includeEntryExports": true },
+    "packages/core": {
+      "includeEntryExports": true,
+      "project": ["**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}!", "!**/test-support/**!"],
+    },
     "packages/cli": {
       // `ollama` is an external runtime binary the CLI shells out to;
       // it is never an npm dependency.
       "ignoreBinaries": ["ollama"],
+      "project": ["**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}!", "!**/test-support/**!"],
     },
   },
 }
