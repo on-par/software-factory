@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PipelineTestKit } from '../test-support/index.js';
+import { recordingLog, type LoggedEvent } from '../test-support/recorders.js';
 import { bakBranchName, moveLaneBranchAside } from './lane-branch-aside.js';
 
 const execFile = promisify(execFileCb);
@@ -43,17 +44,21 @@ describe('moveLaneBranchAside', () => {
 
   it.each([['error' as const], [null]])('leaves origin untouched when prStatus is %s', async (prStatus) => {
     const { repoRoot, origin, sha } = await repoWithPushedBranch();
-    const log = vi.fn();
+    const events: LoggedEvent[] = [];
+    const log = recordingLog(events);
     const res = await moveLaneBranchAside(repoRoot, branch, { remoteSha: sha, prStatus, now, log });
     expect(res).toEqual({ bak: `${branch}.bak-20261024`, remoteMoved: false });
     const { stdout } = await execFile('git', ['ls-remote', '--heads', origin, branch], { cwd: repoRoot });
     expect(stdout.trim()).not.toBe('');
-    expect(log).toHaveBeenCalledWith('warn', expect.stringContaining('local only'));
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'warn', msg: expect.stringContaining('local only') }),
+    );
   });
 
   it('warns and does not throw when the origin move fails', async () => {
     const { repoRoot, sha } = await repoWithPushedBranch();
-    const log = vi.fn();
+    const events: LoggedEvent[] = [];
+    const log = recordingLog(events);
     const res = await moveLaneBranchAside(repoRoot, branch, {
       remoteSha: 'f'.repeat(40),
       prStatus: 'absent',
@@ -62,7 +67,9 @@ describe('moveLaneBranchAside', () => {
     });
     expect(res.remoteMoved).toBe(false);
     expect(sha).not.toBe('');
-    expect(log).toHaveBeenCalledWith('warn', expect.stringContaining('could not move origin/'));
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'warn', msg: expect.stringContaining('could not move origin/') }),
+    );
   });
 
   it('rejects naming the branch when the rename fails', async () => {
