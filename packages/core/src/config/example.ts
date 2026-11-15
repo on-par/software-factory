@@ -42,6 +42,8 @@ type Node =
   | { kind: 'unset'; key: string; doc?: string; example: string };
 
 const WRAP = 100;
+const VISUAL_PROOF_HINT =
+  '{ uiPaths: ["src/ui/**"], routes: [{ route: "/items", state: "item-created", assert: "#item-1", paths: ["src/ui/items/**"], steps: [{ click: "#new" }, { fill: "#name", value: "Demo" }, { press: "Enter" }, { waitFor: "#item-1" }], record: "gif" }], command: ["<capture>"] }';
 
 /** Docs for runtime-policy sections whose packaged defaults carry no `comment`. */
 const RUNTIME_NOTES: Record<string, string> = {
@@ -253,7 +255,7 @@ function modelNamespace(): Node[] {
       doc('preview'),
       '{ source: { kind: "deployment", environment: "preview/pr-*" }, command: ["npm", "run", "smoke:preview"] }',
     ),
-    unset('visualProof', doc('visualProof'), '{ uiPaths: ["src/ui/**"], routes: [<route>], command: ["<capture>"] }'),
+    unset('visualProof', doc('visualProof'), VISUAL_PROOF_HINT),
     unset('tests', doc('tests'), '{ affected: { command: "npx vitest related --run {files}" } }'),
     {
       kind: 'object',

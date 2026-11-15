@@ -52,6 +52,12 @@ export async function finishShip(ctx: {
   if (opts.visualProofGate) {
     const sha = await currentSha();
     visualProof = await runVisualProofGate(opts.visualProofGate, { prNumber, headSha: sha }, { log, ciPending });
+    if (visualProof.uncovered?.length) {
+      log(
+        'warn',
+        `visual proof coverage: UI files not covered by any visualProof route: ${visualProof.uncovered.join(', ')}`,
+      );
+    }
     const nonPass = visualProof.status !== 'pass' && visualProof.status !== 'not-required';
     if (nonPass && opts.visualProofMode === 'advisory') {
       log('warn', `${visualProofFailureReason(prNumber, visualProof)} (advisory: not blocking SHIP)`);
