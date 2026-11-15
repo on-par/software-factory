@@ -18,5 +18,12 @@
       "path": "../repo-context/tsconfig.build.json"
     }
   ],
-  "exclude": ["dist", "node_modules", "src/**/*.test.ts", "src/test-support/**", "src/phases/plan-test-helpers.ts"]
+  "exclude": [
+    "dist",
+    "node_modules",
+    "src/**/*.test.ts",
+    "src/test-support/**",
+    "src/phases/plan-test-helpers.ts",
+    "src/checkers/visual-proof-test-helpers.ts"
+  ]
 }

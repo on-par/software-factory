@@ -207,6 +207,10 @@ export async function shipWithCiRework(
               );
             }
           } catch (err) {
+            ports.events('ship')(
+              'warn',
+              `visual proof gate failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+            );
             result = {
               status: 'unavailable',
               headSha: pr.headSha,

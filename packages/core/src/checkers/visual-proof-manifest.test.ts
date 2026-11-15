@@ -4,12 +4,12 @@ import { describe, expect, it } from 'vitest';
 import type { VisualProofStep } from '../config/visual-proof-section.js';
 import {
   describeVisualProofStep,
-  isBlankPng,
   MAX_CLIP_BYTES,
   validateVisualProofManifest,
   type VisualProofRoute,
-} from './visual-proof.js';
-import { noisePng, solidPng } from './visual-proof-test-support.js';
+} from './visual-proof-manifest.js';
+import { isBlankPng } from './visual-proof-png.js';
+import { noisePng, solidPng } from './visual-proof-test-helpers.js';
 
 const HEAD = 'a'.repeat(40);
 const RUN = 'run-1';

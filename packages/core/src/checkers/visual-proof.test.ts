@@ -6,11 +6,11 @@ import { VisualProofConfigSchema } from '../config/visual-proof-section.js';
 import {
   classifyVisualProof,
   runVisualProofCapture,
-  validateVisualProofManifest,
   type VisualProofCaptureDeps,
   type VisualProofRoute,
 } from './visual-proof.js';
-import { cmdResult, noisePng } from './visual-proof-test-support.js';
+import { validateVisualProofManifest } from './visual-proof-manifest.js';
+import { cmdResult, noisePng } from './visual-proof-test-helpers.js';
 
 const HEAD = 'a'.repeat(40);
 const RUN = 'run-1';

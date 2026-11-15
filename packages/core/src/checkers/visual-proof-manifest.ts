@@ -5,7 +5,27 @@ import { z } from 'zod';
 
 import type { VisualProofStep } from '../config/visual-proof-section.js';
 import { isBlankPng } from './visual-proof-png.js';
-import type { VisualProofCapture, VisualProofRoute } from './visual-proof.js';
+
+export interface VisualProofRoute {
+  route: string;
+  state: string;
+  assert: string;
+  viewport: { width: number; height: number };
+  steps?: VisualProofStep[];
+  record?: 'gif' | 'video';
+}
+
+export interface VisualProofCapture {
+  route: string;
+  state: string;
+  viewport: { width: number; height: number };
+  finalPath: string;
+  file: string;
+  bytes: number;
+  before?: { file: string; finalPath: string; bytes: number };
+  steps?: VisualProofStep[];
+  clip?: { file: string; format: 'gif' | 'webm' | 'mp4'; bytes: number };
+}
 
 export const MAX_CLIP_BYTES = 10 * 1024 * 1024;
 const MIN_PNG_BYTES = 2048;

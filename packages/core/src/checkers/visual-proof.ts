@@ -11,31 +11,14 @@ import { childProcessEnv } from '../utils/github-credentials.js';
 import { defaultStartApp, type AppSmokeDeps } from './app-smoke.js';
 import { stripAnsi } from './command-log.js';
 import { runVerificationCommand, VERIFICATION_SCRUBBED_ENV_VARS } from './run-command.js';
-import { MAX_CLIP_BYTES, validateVisualProofManifest } from './visual-proof-manifest.js';
+import {
+  MAX_CLIP_BYTES,
+  validateVisualProofManifest,
+  type VisualProofCapture,
+  type VisualProofRoute,
+} from './visual-proof-manifest.js';
 
-export { describeVisualProofStep, MAX_CLIP_BYTES, validateVisualProofManifest } from './visual-proof-manifest.js';
-export { isBlankPng } from './visual-proof-png.js';
-
-export interface VisualProofRoute {
-  route: string;
-  state: string;
-  assert: string;
-  viewport: { width: number; height: number };
-  steps?: VisualProofStep[];
-  record?: 'gif' | 'video';
-}
-
-export interface VisualProofCapture {
-  route: string;
-  state: string;
-  viewport: { width: number; height: number };
-  finalPath: string;
-  file: string;
-  bytes: number;
-  before?: { file: string; finalPath: string; bytes: number };
-  steps?: VisualProofStep[];
-  clip?: { file: string; format: 'gif' | 'webm' | 'mp4'; bytes: number };
-}
+export type { VisualProofCapture, VisualProofRoute } from './visual-proof-manifest.js';
 
 export type VisualProofRequirement =
   { required: false } | { required: true; routes: VisualProofRoute[]; diagnostic?: string; uncovered?: string[] };

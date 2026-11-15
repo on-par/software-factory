@@ -5,7 +5,8 @@ import type { Octokit } from '@octokit/rest';
 
 import type { VisualProofMode } from '../config/visual-proof-section.js';
 import { upsertMarkedBlock } from '../review/marked-block.js';
-import { describeVisualProofStep, type VisualProofImage, type VisualProofResult } from './visual-proof.js';
+import { describeVisualProofStep } from './visual-proof-manifest.js';
+import type { VisualProofImage, VisualProofResult } from './visual-proof.js';
 
 export const VISUAL_PROOF_STATUS_CONTEXT = 'factory/visual-proof';
 export const VISUAL_PROOF_START = '<!-- factory:visual-proof v1 required -->';
