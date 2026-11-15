@@ -43,7 +43,7 @@ describe('resolveAffectedTestsCommand quotes {files} and falls back on triggers'
     'packages/a/package.json',
     'tsconfig.build.json',
     'Package.json',
-  ])('built-in trigger %s forces the full suite', (trigger) => {
+  ])('built-in manifest, lockfile, test-runner config, CI or migration trigger %s forces the full suite', (trigger) => {
     expect(resolve(['src/a.ts', trigger])).toMatchObject({ kind: 'full', reason: 'trigger', trigger });
   });
 
@@ -56,7 +56,7 @@ describe('resolveAffectedTestsCommand quotes {files} and falls back on triggers'
     expect(resolve(['a.proto'], undefined, { affectedTestsFullOn: ['*.proto'] })).toMatchObject({ kind: 'full' });
   });
 
-  it('caps at 200 files', () => {
+  it('runs the full suite above 200 changed files, where the affected list is too broad to be worth narrowing', () => {
     const files = (n: number) => Array.from({ length: n }, (_, i) => `src/f${i}.ts`);
     expect(resolve(files(MAX_AFFECTED_FILES + 1))).toMatchObject({ kind: 'full', reason: 'too-many-files' });
     expect(resolve(files(MAX_AFFECTED_FILES))).toMatchObject({ kind: 'affected' });

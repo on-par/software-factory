@@ -25,7 +25,7 @@ describe('ReworkHistory', () => {
     expect(await history.priorSignature(640)).toBeUndefined();
   });
 
-  it('records a signature and returns it from a fresh instance reading the same file', async () => {
+  it('records a signature that a fresh instance reads back, so a relaunched run sees the failure the last run parked on', async () => {
     const file = await tmpFile();
     await new ReworkHistory(file).record(640, 'tests:something-failed', ['tests', 'design_smells']);
 
@@ -84,7 +84,7 @@ describe('ReworkHistory', () => {
     expect(await history.priorSignature(1)).toBeUndefined();
   });
 
-  it('treats a corrupt file the same as an empty history rather than throwing', async () => {
+  it('treats a corrupt file the same as an empty history rather than throwing, and the next record heals it', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'rework-history-test-'));
     tempDirs.add(dir);
     const file = join(dir, 'rework-history.json');
@@ -93,7 +93,6 @@ describe('ReworkHistory', () => {
 
     const history = new ReworkHistory(file);
     expect(await history.priorSignature(1)).toBeUndefined();
-    // Recording after a corrupt read should heal the file, not propagate the corruption.
     await history.record(1, 'sig', ['tests']);
     expect(await history.priorSignature(1)).toBe('sig');
   });

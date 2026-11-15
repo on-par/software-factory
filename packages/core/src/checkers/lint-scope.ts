@@ -1,5 +1,3 @@
-// src/checkers/lint-scope.ts — scope lint commands to the change: file lists, merge-base fallback, findings (#1898).
-
 import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
@@ -16,16 +14,11 @@ import type { LintCommand } from './resolve-commands.js';
 export type LintFileListMode = 'replace-dot' | 'include-flag' | 'none';
 
 export interface LintToolProfile {
-  /** 'eslint', 'dotnet format', 'tsc', 'npm run lint', ... */
   tool: string;
   fileList: LintFileListMode;
-  /** Lowercase, no dot. */
   extensions: readonly string[] | 'non-doc';
-  /** Basename patterns; a changed match forces a whole-repo run. */
   configFiles: readonly RegExp[];
-  /** Why this argv is write mode, or null when it is check mode. */
   writeMode(args: readonly string[]): string | null;
-  /** The check-mode form to suggest when writeMode is non-null. */
   checkModeHint: string;
 }
 
@@ -58,7 +51,6 @@ const lacksCheck = (flags: readonly string[]) => (args: readonly string[]) =>
 
 const RUFF_CONFIG = [/^ruff\.toml$/, /^\.ruff\.toml$/, /^pyproject\.toml$/];
 
-/** Keyed by how the tool is invoked once the launcher prefix is stripped. */
 const LINT_TOOL_PROFILES: Record<string, LintToolProfile> = {
   eslint: {
     tool: 'eslint',
@@ -168,7 +160,6 @@ const LINT_TOOL_PROFILES: Record<string, LintToolProfile> = {
 
 const TWO_WORD_TOOLS = new Set(['ruff', 'dotnet', 'go', 'cargo']);
 
-/** Index of the first token after any launcher prefix (`npx`, `pnpm exec`, `uv run`, `python -m`, ...). */
 function skipLauncher(argv: readonly string[]): number {
   const [first, second] = argv;
   if (first === 'npx') {
@@ -183,7 +174,6 @@ function skipLauncher(argv: readonly string[]): number {
   return 0;
 }
 
-/** The profile key and the index of the first argument after the tool name. */
 function matchTool(argv: readonly string[]): { profile: LintToolProfile; argsFrom: number } | null {
   const start = skipLauncher(argv);
   const head = argv[start];
@@ -208,8 +198,7 @@ function describeExtensions(profile: LintToolProfile): string {
   return profile.extensions === 'non-doc' ? 'only docs changed' : profile.extensions.map((e) => `.${e}`).join(', ');
 }
 
-/** Decide how to run one lint command given the changed paths (already filtered to those still on disk). */
-export function scopeLintCommand(cmd: LintCommand, changed: readonly string[]): LintScope {
+export function scopeLintCommand(cmd: LintCommand, changedStillOnDisk: readonly string[]): LintScope {
   const profile = lintToolProfile(cmd);
   if (profile === null) return { kind: 'whole', argv: cmd.argv, profile: null };
   const matched = cmd.label === 'checks.lint' ? matchTool(cmd.argv) : null;
@@ -222,11 +211,14 @@ export function scopeLintCommand(cmd: LintCommand, changed: readonly string[]): 
       reason: `${cmd.label}: skipped — warning: runs ${profile.tool} in write mode (${why}); declare a check-mode command such as \`${profile.checkModeHint}\``,
     };
   }
-  if (changed.some((p) => profile.configFiles.some((re) => re.test(basename(p))))) {
+  const changedConfigForcesWholeRepoRun = changedStillOnDisk.some((p) =>
+    profile.configFiles.some((re) => re.test(basename(p))),
+  );
+  if (changedConfigForcesWholeRepoRun) {
     return { kind: 'whole', argv: cmd.argv, profile };
   }
   const exts = profile.extensions;
-  const matching = changed.filter((p) => {
+  const matching = changedStillOnDisk.filter((p) => {
     const ext = extensionOf(p);
     return exts === 'non-doc' ? !DOC_EXTENSIONS.includes(ext) : exts.includes(ext);
   });
@@ -266,7 +258,6 @@ function normalizeFindingPath(path: string, worktree?: string): string {
   return p.replace(/^\.\//, '');
 }
 
-/** `file:line rule` triples parsed from tool output, deduped, in first-seen order (at most 50). */
 export function extractLintFindings(output: string, worktree?: string): LintFinding[] {
   const found = new Map<string, LintFinding>();
   let eslintFile: string | null = null;
@@ -291,7 +282,6 @@ export function extractLintFindings(output: string, worktree?: string): LintFind
 
 const MAX_RENDERED_FINDINGS = 10;
 
-/** `file:line rule` joined by `; `, at most 10 with a `(+N more)` tail; '' when there are none. */
 export function formatLintFindings(findings: readonly LintFinding[]): string {
   const shown = findings.slice(0, MAX_RENDERED_FINDINGS).map((f) => `${f.file}:${f.line} ${f.rule}`);
   const more = findings.length - shown.length;
@@ -300,7 +290,6 @@ export function formatLintFindings(findings: readonly LintFinding[]): string {
 
 const SHA_PATTERN = /^[0-9a-f]{40,64}$/;
 
-/** Base ref, merge-base SHA and changed files that still exist, or why the diff is unavailable. */
 export async function resolveLintDiff(
   ctx: Pick<CheckerContext, 'worktree' | 'diffBase' | 'parentBaseRef'>,
   run: DiffRunner = defaultDiffRunner,
@@ -333,7 +322,6 @@ export interface MergeBaseWorktreeOptions {
   run: (argv: readonly string[], options: RunCommandOptions) => Promise<CommandResult>;
 }
 
-/** Run `fn` in a temporary detached worktree at the merge base, after the frozen dependency install. Never throws. */
 export async function withMergeBaseWorktree<T>(
   opts: MergeBaseWorktreeOptions,
   fn: (baseWorktree: string) => Promise<T>,
@@ -365,7 +353,7 @@ export async function withMergeBaseWorktree<T>(
         }
         return { ok: true as const, value: await fn(base) };
       } finally {
-        await removeBaseWorktree(run, laneWorktree, base);
+        await removeBaseWorktreeBestEffort(run, laneWorktree, base);
       }
     });
   } catch (e: unknown) {
@@ -373,8 +361,7 @@ export async function withMergeBaseWorktree<T>(
   }
 }
 
-/** Best-effort removal of our worktree; never throws. */
-async function removeBaseWorktree(
+async function removeBaseWorktreeBestEffort(
   run: MergeBaseWorktreeOptions['run'],
   laneWorktree: string,
   base: string,
@@ -388,7 +375,5 @@ async function removeBaseWorktree(
       await rm(base, { recursive: true, force: true });
       await run(['git', 'worktree', 'prune'], { cwd: laneWorktree, timeoutMs: GIT_COMMAND_TIMEOUT_MS });
     }
-  } catch {
-    // cleanup is best-effort
-  }
+  } catch {}
 }

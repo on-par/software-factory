@@ -6,9 +6,7 @@ import type { FailToPassSelector } from './evidence-selector.js';
 import { runnerFromScript, selectorArgs } from './evidence-selector.js';
 
 export interface WorkspaceTestRunner {
-  /** posix path relative to the worktree, no leading ./ or trailing / */
   dir: string;
-  /** workspace package.json name */
   name: string | null;
   runner: 'vitest' | 'jest';
   manager: 'npm' | 'pnpm' | 'yarn';
@@ -16,7 +14,6 @@ export interface WorkspaceTestRunner {
 
 const MAX_WORKSPACES = 200;
 
-/** The package manager when a root `test` script body fans out to the workspaces, else null. */
 export function isWorkspaceTestFanOut(body: string): 'npm' | 'pnpm' | 'yarn' | null {
   const tokens = tokenizeEvidenceCommand(body);
   if (!tokens) return null;
@@ -80,7 +77,6 @@ async function workspaceDirs(worktree: string, patterns: readonly string[]): Pro
   return [...dirs];
 }
 
-/** Workspaces of a fan-out monorepo whose own `test` script runs vitest or jest. Never throws. */
 export async function resolveWorkspaceTestRunners(
   worktree: string,
   packageJson: unknown,
@@ -110,7 +106,6 @@ export async function resolveWorkspaceTestRunners(
   }
 }
 
-/** The workspace with the longest directory prefix of `file`, with the file relative to it. */
 export function ownerWorkspace(
   file: string,
   workspaces: readonly WorkspaceTestRunner[],
@@ -123,7 +118,6 @@ export function ownerWorkspace(
   return best ? { workspace: best, relativeFile: path.slice(best.dir.length + 1) } : null;
 }
 
-/** argv that runs `selector` (file relative to the workspace) with the workspace's runner. */
 export function workspaceSelectorArgv(workspace: WorkspaceTestRunner, selector: FailToPassSelector): string[] {
   const bin = workspace.runner;
   const run = bin === 'vitest' ? [bin, 'run'] : [bin];

@@ -18,9 +18,8 @@ describe('inconclusiveCause', () => {
     expect(inconclusiveCause(fail)).toBe(cause);
   });
 
-  // A signal inside the verify shell (137 SIGKILL, 143 SIGTERM) can be a real crash: it stays red.
   it.each([{ exitCode: 1 }, { exitCode: 2 }, { exitCode: 137 }, { exitCode: 143 }, {}])(
-    '%o is a genuine failure',
+    '%o is a genuine failure (a 137/143 signal inside the verify shell can be a crash caused by the code under test)',
     (fail) => {
       expect(inconclusiveCause(fail)).toBeUndefined();
     },

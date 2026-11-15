@@ -1,12 +1,3 @@
-// src/checkers/baseline-cache.ts — per-base-SHA cache of baseline checker results (#1926)
-//
-// Issues in one lane usually share a base SHA, so re-running the same failing
-// checker on the base for each issue repeats the same slow work. This file-backed
-// cache is keyed by base SHA + a hash of the applied laneEnv + checker name. Each
-// entry also carries a hash of the constitution's checker config, compared on read,
-// so a config fix invalidates it (#2563). Config-validation FAILs are never cached.
-// Entries expire after a TTL, a cached FAIL is dropped when CI is green, and `factory baseline clear` empties it (#3540).
-
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -16,7 +7,6 @@ import { DEFAULT_BASELINE_CACHE_TTL_HOURS } from '../config/base-health.js';
 import { isConfigCheckerOutput } from './index.js';
 import { inconclusiveOutputCause } from './inconclusive.js';
 
-/** laneEnv keys that differ per lane lease or per run and do not describe the environment contract. */
 export const BASELINE_ENV_VOLATILE_KEYS: readonly string[] = [
   'PORT',
   'FACTORY_APP_PORT',
@@ -24,7 +14,6 @@ export const BASELINE_ENV_VOLATILE_KEYS: readonly string[] = [
   'SharedCompilationId',
 ];
 
-/** First 16 hex chars of the SHA-256 of the sorted laneEnv entries, minus the volatile keys. */
 export function hashBaselineEnv(env: Record<string, string> | undefined): string {
   const entries = Object.entries(env ?? {})
     .filter(([key]) => !BASELINE_ENV_VOLATILE_KEYS.includes(key))
@@ -32,7 +21,6 @@ export function hashBaselineEnv(env: Record<string, string> | undefined): string
   return createHash('sha256').update(JSON.stringify(entries)).digest('hex').slice(0, 16);
 }
 
-/** First 16 hex chars of the SHA-256 of the constitution's checker config: a config fix invalidates cached base results (#2563). */
 export function hashBaselineCheckerConfig(constitution: Constitution | null): string {
   const config = {
     checkers: constitution?.checkers ?? null,
@@ -64,7 +52,6 @@ export class BaselineCache {
     private ttlHours: number = DEFAULT_BASELINE_CACHE_TTL_HOURS,
   ) {}
 
-  /** Cached base result for the checker, or undefined on a miss. */
   async get(baseSha: string, envHash: string, configHash: string, checker: string): Promise<CheckerOutput | undefined> {
     const data = await this.read();
     const entry = data.entries[entryKey(baseSha, envHash, checker)];
@@ -88,8 +75,6 @@ export class BaselineCache {
     return output;
   }
 
-  /** Stores PASS/FAIL outputs of checkers that really ran; SKIPs, config-validation FAILs, timeouts (#3186) and
-   *  other inconclusive FAILs (environment exit 78, missing command, no exit code, checker crash) are never cached. */
   async set(baseSha: string, envHash: string, configHash: string, outputs: readonly CheckerOutput[]): Promise<void> {
     const storable = outputs.filter(
       (o) =>
@@ -103,20 +88,18 @@ export class BaselineCache {
     for (const output of storable) {
       data.entries[entryKey(baseSha, envHash, output.checker)] = { output, configHash, recordedAt };
     }
-    await this.write(data);
+    await this.writeLastWriterWinsSinceALostWriteOnlyCausesARerun(data);
   }
 
-  /** Removes one entry; false (and no write) when it is absent. */
   async delete(baseSha: string, envHash: string, checker: string): Promise<boolean> {
     const data = await this.read();
     const key = entryKey(baseSha, envHash, checker);
     if (!(key in data.entries)) return false;
     delete data.entries[key];
-    await this.write(data);
+    await this.writeLastWriterWinsSinceALostWriteOnlyCausesARerun(data);
     return true;
   }
 
-  /** Removes every entry, or those whose base SHA starts with `baseSha`; returns the count and writes only when > 0. */
   async clear(baseSha?: string): Promise<number> {
     const data = await this.read();
     const prefix = baseSha?.toLowerCase();
@@ -125,7 +108,7 @@ export class BaselineCache {
     );
     if (matches.length === 0) return 0;
     for (const key of matches) delete data.entries[key];
-    await this.write(data);
+    await this.writeLastWriterWinsSinceALostWriteOnlyCausesARerun(data);
     return matches.length;
   }
 
@@ -143,11 +126,10 @@ export class BaselineCache {
     }
   }
 
-  private async write(data: BaselineCacheFile): Promise<void> {
+  private async writeLastWriterWinsSinceALostWriteOnlyCausesARerun(data: BaselineCacheFile): Promise<void> {
     await mkdir(dirname(this.file), { recursive: true });
-    // Unique tmp name: lanes run concurrently. A lost concurrent write only causes a later re-run.
-    const tmp = `${this.file}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);
-    await rename(tmp, this.file);
+    const tmpUniqueAcrossConcurrentLanes = `${this.file}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(tmpUniqueAcrossConcurrentLanes, `${JSON.stringify(data, null, 2)}\n`);
+    await rename(tmpUniqueAcrossConcurrentLanes, this.file);
   }
 }

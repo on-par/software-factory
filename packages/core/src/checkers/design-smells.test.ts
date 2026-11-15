@@ -1,5 +1,3 @@
-// src/checkers/design-smells.test.ts — CHECK-phase program-design smell critic (#483).
-
 import { execFile as execFileCb } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -83,7 +81,6 @@ async function makeWorktree(): Promise<string> {
   return dir;
 }
 
-/** Remote-less git repo (no origin/main or origin/master) with one initial commit. */
 async function makeRemoteLessGitRepo(): Promise<{ worktree: string; baseSha: string }> {
   const worktree = await makeWorktree();
   await execFile('git', ['init', '--initial-branch=main'], { cwd: worktree });
@@ -117,7 +114,7 @@ function smell(overrides: Partial<DesignSmell> = {}): DesignSmell {
 }
 
 describe('collectDesignDiff', () => {
-  it('resolves origin/main and issues the three-dot diff with DIFF_EXCLUDES pathspecs', async () => {
+  it('resolves origin/main and issues the three-dot diff with DIFF_EXCLUDES pathspecs so generated/vendored/cache paths never count as implementation', async () => {
     const calls: { argv: readonly string[]; cwd: string }[] = [];
     const run: DiffRunner = async (argv, cwd) => {
       calls.push({ argv, cwd });
@@ -158,7 +155,7 @@ describe('collectDesignDiff', () => {
     expect(committedCall!.cwd).toBe('/worktree');
   });
 
-  it('uses the provided fallbackBaseRef when neither remote base resolves', async () => {
+  it('uses the provided fallbackBaseRef (the pre-build HEAD) when a caller-provided checkout has no remote base', async () => {
     const calls: { argv: readonly string[]; cwd: string }[] = [];
     const run: DiffRunner = async (argv, cwd) => {
       calls.push({ argv, cwd });
@@ -189,7 +186,7 @@ describe('collectDesignDiff', () => {
     expect(result.skipReason).toContain('no fallback base');
   });
 
-  it('reports excludedPaths when the filtered diff is empty but raw changes exist', async () => {
+  it('reports excludedPaths when the filtered diff is empty but raw changes exist, so callers can tell generated/cache-only churn from no change', async () => {
     const run: DiffRunner = async (argv) => {
       if (argv[1] === 'rev-parse') return { ok: true, stdout: '' };
       if (argv.includes('--name-only') && argv.includes('origin/main...HEAD')) {
@@ -603,7 +600,7 @@ describe('parseDesignSmellVerdict', () => {
     expect(reason).toContain('no valid JSON');
   });
 
-  it('salvages valid elements and reports invalid ones when the array is mixed', () => {
+  it('salvages valid elements and reports invalid ones when the array is mixed, so one malformed smell cannot discard its valid siblings', () => {
     const output = JSON.stringify({
       checker: 'design_smells',
       result: 'FAIL',
@@ -707,7 +704,7 @@ describe('renderRejectedSmells', () => {
     return { index: 0, errors: ['kind: Invalid enum value'], ...overrides };
   }
 
-  it('renders the dropped count, index and zod message', () => {
+  it('renders the dropped count, index and zod message so a malformed finding is visible, not silent', () => {
     const rendered = renderRejectedSmells([rejectedSmell({ index: 2, errors: ['kind: Invalid enum value'] })]);
 
     expect(rendered).toContain('1 malformed smell element(s) dropped');
@@ -825,7 +822,7 @@ describe('designSmellsChecker', () => {
     expect(result.details).toContain('error');
   });
 
-  it('fails closed when the critic output is unparsable', async () => {
+  it('fails closed when the critic output is unparsable, because an unreadable verdict is not evidence of a clean diff', async () => {
     const worktree = await makeWorktree();
     const { router } = makeRouter('I could not determine anything.');
 
@@ -941,37 +938,38 @@ describe('designSmellsChecker', () => {
     expect(result.result).toBe('FAIL');
     expect(result.details).toContain('diff was truncated');
   });
-  it('designSmellsChecker prompts with DIFF BASE = captured SHA', { timeout: 120_000 }, async () => {
-    const { worktree, baseSha } = await makeRemoteLessGitRepo();
-    // Excluded churn lives in nested paths (module-adjacent __pycache__ etc.):
-    // the ':!**/…' pathspecs in DIFF_EXCLUDES only match paths with a directory
-    // component, so root-level cache files are a separate (pre-existing) gap.
-    await writeFile(join(worktree, 'app.py'), 'def handler():\n    return "changed"\n');
-    await mkdir(join(worktree, 'pkg', '__pycache__'), { recursive: true });
-    await writeFile(join(worktree, 'pkg', '__pycache__', 'app.cpython-311.pyc'), 'bytecode');
-    await writeFile(join(worktree, 'pkg', 'mod.pyc'), 'bytecode');
-    await mkdir(join(worktree, 'pkg', '.pytest_cache'), { recursive: true });
-    await writeFile(
-      join(worktree, 'pkg', '.pytest_cache', 'CACHEDIR.TAG'),
-      'Signature: 8a477f597d28d172789f06886806bc55',
-    );
-    await execFile('git', ['add', '-A'], { cwd: worktree });
-    await execFile('git', ['commit', '-m', 'python change plus cache churn'], { cwd: worktree });
+  it(
+    'designSmellsChecker prompts with DIFF BASE = captured SHA and hides nested cache churn (DIFF_EXCLUDES ":!**/" pathspecs need a directory component; root-level cache files are a separate pre-existing gap)',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, baseSha } = await makeRemoteLessGitRepo();
+      await writeFile(join(worktree, 'app.py'), 'def handler():\n    return "changed"\n');
+      await mkdir(join(worktree, 'pkg', '__pycache__'), { recursive: true });
+      await writeFile(join(worktree, 'pkg', '__pycache__', 'app.cpython-311.pyc'), 'bytecode');
+      await writeFile(join(worktree, 'pkg', 'mod.pyc'), 'bytecode');
+      await mkdir(join(worktree, 'pkg', '.pytest_cache'), { recursive: true });
+      await writeFile(
+        join(worktree, 'pkg', '.pytest_cache', 'CACHEDIR.TAG'),
+        'Signature: 8a477f597d28d172789f06886806bc55',
+      );
+      await execFile('git', ['add', '-A'], { cwd: worktree });
+      await execFile('git', ['commit', '-m', 'python change plus cache churn'], { cwd: worktree });
 
-    const { router, stub } = makeRouter('{"checker":"design_smells","result":"PASS","smells":[]}');
+      const { router, stub } = makeRouter('{"checker":"design_smells","result":"PASS","smells":[]}');
 
-    const result = await designSmellsChecker(makeContext(worktree, { diffBase: baseSha }), router);
+      const result = await designSmellsChecker(makeContext(worktree, { diffBase: baseSha }), router);
 
-    expect(result.result).toBe('PASS');
-    expect(stub.calls).toHaveLength(1);
-    const prompt = stub.calls[0].prompt;
-    expect(prompt).toContain(`DIFF BASE: ${baseSha}`);
-    expect(prompt).toContain('app.py');
-    expect(prompt).toContain('return "changed"');
-    expect(prompt).not.toContain('__pycache__');
-    expect(prompt).not.toContain('.pyc');
-    expect(prompt).not.toContain('.pytest_cache');
-  });
+      expect(result.result).toBe('PASS');
+      expect(stub.calls).toHaveLength(1);
+      const prompt = stub.calls[0].prompt;
+      expect(prompt).toContain(`DIFF BASE: ${baseSha}`);
+      expect(prompt).toContain('app.py');
+      expect(prompt).toContain('return "changed"');
+      expect(prompt).not.toContain('__pycache__');
+      expect(prompt).not.toContain('.pyc');
+      expect(prompt).not.toContain('.pytest_cache');
+    },
+  );
   it(
     'skips with a reason naming the missing base when no base of any kind resolves',
     { timeout: 120_000 },

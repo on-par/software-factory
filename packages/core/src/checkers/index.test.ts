@@ -94,7 +94,6 @@ function makeContext(worktree: string): CheckerContext {
   };
 }
 
-/** Injected command runner that records argv per call and returns a canned CommandResult. */
 function stubRunner(result: Partial<CommandResult>) {
   const calls: (readonly string[])[] = [];
   const run = async (argv: readonly string[]) => {
@@ -120,7 +119,6 @@ function makeRouter(output: string): { router: ModelRouter; stub: StubModelExecu
 
 const LANE_ENV = { PORT: '3142', FACTORY_APP_PORT: '3142', FACTORY_BASE_URL: 'http://127.0.0.1:3142' };
 
-/** package.json whose `scriptKey` script exits 0 only when the lane env (PORT/FACTORY_APP_PORT/FACTORY_BASE_URL) was forwarded into its process env. */
 function envAssertingPackageJson(scriptKey: string): string {
   const check =
     "process.env.PORT === '3142' && process.env.FACTORY_APP_PORT === '3142' && process.env.FACTORY_BASE_URL === 'http://127.0.0.1:3142'";
@@ -133,8 +131,7 @@ function envAssertingPackageJson(scriptKey: string): string {
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 
-/** npx resolves tsc by walking up from cwd — symlink the repo's real typescript install into the worktree. */
-async function linkTypescript(worktree: string): Promise<void> {
+async function linkRepoTypescriptWhereNpxWalksUpFromCwd(worktree: string): Promise<void> {
   const binDir = join(worktree, 'node_modules', '.bin');
   await mkdir(binDir, { recursive: true });
   await symlink(join(repoRoot, 'node_modules', 'typescript'), join(worktree, 'node_modules', 'typescript'), 'dir');
@@ -323,7 +320,7 @@ describe('testsChecker', () => {
       expect(timeouts).toEqual([1_200_000]);
     });
 
-    it('says the command timed out and after how long', async () => {
+    it('leads with the timeout and its length so a kill never reads as a real test failure', async () => {
       const worktree = await makeWorktree({ 'scripts/verify.sh': '#!/bin/bash\n' });
       const { run } = timingRunner({ ok: false, exitCode: -1, killed: true, timedOut: true });
 
@@ -787,7 +784,7 @@ describe('lintChecker', () => {
       'tsconfig.json': '{"compilerOptions":{"strict":true,"noEmit":true},"include":["index.ts"]}',
       'index.ts': 'export const x: number = 1;\n',
     });
-    await linkTypescript(worktree);
+    await linkRepoTypescriptWhereNpxWalksUpFromCwd(worktree);
 
     const result = await lintChecker(makeContext(worktree));
 
@@ -800,7 +797,7 @@ describe('lintChecker', () => {
       'tsconfig.json': '{"compilerOptions":{"strict":true,"noEmit":true},"include":["index.ts"]}',
       'index.ts': 'export const x: number = "not a number";\n',
     });
-    await linkTypescript(worktree);
+    await linkRepoTypescriptWhereNpxWalksUpFromCwd(worktree);
 
     const result = await lintChecker(makeContext(worktree));
 
@@ -870,20 +867,21 @@ describe('linksChecker', () => {
       ['combined metacharacters', "a'b $(touch pwned); `touch pwned`.html"],
     ] as const;
 
-    it.each(adversarialNames)('handles a filename with %s without executing it', async (_label, name) => {
-      const worktree = await makeWorktree({
-        [name]: '<html><body><a href="#">click</a><a href="https://example.com">ok</a></body></html>',
-      });
+    it.each(adversarialNames)(
+      'reads a filename with %s as data, counting its placeholder link, without executing it anywhere',
+      async (_label, name) => {
+        const worktree = await makeWorktree({
+          [name]: '<html><body><a href="#">click</a><a href="https://example.com">ok</a></body></html>',
+        });
 
-      const result = await linksChecker(makeContext(worktree));
+        const result = await linksChecker(makeContext(worktree));
 
-      // The file was read as data: its placeholder link was counted.
-      expect(result.result).toBe('FAIL');
-      expect(result.broken).toBeGreaterThanOrEqual(1);
-      // No command execution side effect anywhere plausible.
-      expect(await fileExists(join(worktree, 'pwned'))).toBe(false);
-      expect(await fileExists(join(process.cwd(), 'pwned'))).toBe(false);
-    });
+        expect(result.result).toBe('FAIL');
+        expect(result.broken).toBeGreaterThanOrEqual(1);
+        expect(await fileExists(join(worktree, 'pwned'))).toBe(false);
+        expect(await fileExists(join(process.cwd(), 'pwned'))).toBe(false);
+      },
+    );
 
     it('handles metacharacters in directory names during traversal', async () => {
       const worktree = await makeWorktree({
@@ -1254,7 +1252,6 @@ describe('runCustomChecker', () => {
   });
 });
 
-/** A constitution whose `checkers` frontmatter bypassed the parser's typing (#2582). */
 function malformedConstitution(checkers: unknown): Constitution {
   const base: Constitution = { product: 'p', version: 1, checkers: [], body: '', path: 'p.md', source: 'bundled' };
   return Object.assign(base, { checkers });
@@ -1275,7 +1272,7 @@ describe('isConfigCheckerOutput (#2582)', () => {
 
 describe('runAllCheckers', () => {
   it(
-    'aggregates built-ins and custom checkers and fails closed on unknown checker names',
+    'runs worker_output plus declared custom checkers, drops undeclared built-ins and fails closed on unknown checker names',
     { timeout: 60000 },
     async () => {
       const constitutionDir = await mkdtemp(join(tmpdir(), 'checker-test-constitution-'));
@@ -1293,7 +1290,7 @@ describe('runAllCheckers', () => {
 
       const summary = await runAllCheckers(makeContext(worktree), router, constitution);
 
-      expect(summary.total).toBe(3); // worker_output + custom_style + not_a_real_checker (undeclared built-ins dropped)
+      expect(summary.total).toBe(3);
       expect(summary.passes + summary.failures + summary.skips).toBe(summary.total);
       expect(summary.results.map((result) => result.checker)).toContain('custom_style');
       const unknown = summary.results.find((result) => result.checker === 'not_a_real_checker');
@@ -1337,23 +1334,27 @@ describe('runAllCheckers', () => {
     expect(isConfigCheckerOutput(fails[0]!)).toBe(true);
   });
 
-  it('fails closed on an unknown checker alone, blocking a clean pass', { timeout: 60000 }, async () => {
-    const constitutionDir = await mkdtemp(join(tmpdir(), 'checker-test-constitution-'));
-    tempDirs.add(constitutionDir);
-    await writeFile(
-      join(constitutionDir, 'myproduct.md'),
-      '---\nproduct: myproduct\ncheckers:\n  - ghost_checker\n---\nBody standard text\n',
-    );
-    const worktree = await makeWorktree();
-    const { router, stub } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
-    const constitution = new ConstitutionLoader(constitutionDir).resolve(worktree, 'myproduct');
+  it(
+    'fails closed on an unknown checker alone, blocking a clean pass, without routing it to the custom-checker agent',
+    { timeout: 60000 },
+    async () => {
+      const constitutionDir = await mkdtemp(join(tmpdir(), 'checker-test-constitution-'));
+      tempDirs.add(constitutionDir);
+      await writeFile(
+        join(constitutionDir, 'myproduct.md'),
+        '---\nproduct: myproduct\ncheckers:\n  - ghost_checker\n---\nBody standard text\n',
+      );
+      const worktree = await makeWorktree();
+      const { router, stub } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+      const constitution = new ConstitutionLoader(constitutionDir).resolve(worktree, 'myproduct');
 
-    const summary = await runAllCheckers(makeContext(worktree), router, constitution);
+      const summary = await runAllCheckers(makeContext(worktree), router, constitution);
 
-    expect(summary.failures).toBeGreaterThanOrEqual(1);
-    expect(summary.results.some((r) => r.checker === 'ghost_checker' && r.result === 'FAIL')).toBe(true);
-    expect(stub.calls).toHaveLength(0); // unknown names must NOT be routed to the custom-checker agent
-  });
+      expect(summary.failures).toBeGreaterThanOrEqual(1);
+      expect(summary.results.some((r) => r.checker === 'ghost_checker' && r.result === 'FAIL')).toBe(true);
+      expect(stub.calls).toHaveLength(0);
+    },
+  );
 
   it("runs exactly the default-code constitution's declared checkers (#2455)", { timeout: 60000 }, async () => {
     const worktree = await makeWorktree();
@@ -1502,7 +1503,7 @@ describe('runAllCheckers', () => {
     }
   });
 
-  it('emits one checker_started/checker_completed pair with a durationMs around every checker, PASS or FAIL', async () => {
+  it('emits one checker_started/checker_completed pair with a durationMs around every checker, PASS or FAIL, including the fail-closed unknown checker', async () => {
     const constitutionDir = await mkdtemp(join(tmpdir(), 'checker-test-constitution-'));
     tempDirs.add(constitutionDir);
     await writeFile(
@@ -1523,7 +1524,6 @@ describe('runAllCheckers', () => {
     for (const call of completed) {
       expect(call[2].durationMs).toEqual(expect.any(Number));
     }
-    // The fail-closed unknown-checker path still gets its own started/completed pair.
     expect(completed.some(([, msg]) => typeof msg === 'string' && msg.includes('not_a_real_checker'))).toBe(true);
   });
 
@@ -1561,12 +1561,9 @@ describe('runAllCheckers', () => {
   );
 
   it(
-    'probes the worktree exactly once per round even when several checkers consume the probe facts',
+    'probes the worktree exactly once per round and checkers read probe.htmlFiles instead of walking the disk',
     { timeout: 60000 },
     async () => {
-      // The worktree has three HTML files but the probe reports only one — a
-      // linksChecker that walked the disk instead of consuming probe.htmlFiles
-      // would see all three and report linksChecked = 3.
       const worktree = await makeWorktree({
         'a.html': '<a href="https://example.com">ok</a>',
         'b.html': '<a href="https://example.com/b">ok</a>',
@@ -1669,7 +1666,7 @@ describe('requireRunnableChecker (#2493)', () => {
     details: "design critic unavailable: All models failed for task 'check_design'",
   };
 
-  it('fails a required check that no model could run and warns about the environment', () => {
+  it('fails a required check that no model could run, so no PR is marked ready without it, and warns about the environment', () => {
     const logs: Array<[string, string]> = [];
     const out = requireRunnableChecker(unavailable, constitution(), (type, msg) => logs.push([type, msg]));
     expect(out.result).toBe('FAIL');

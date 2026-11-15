@@ -77,7 +77,6 @@ export function resolveEvidenceAllowlist(
   for (const [name, body] of Object.entries(scripts)) {
     if (isValidName(name) && typeof body === 'string') result.set(name, [manager, 'run', name]);
   }
-  // Declared CHECK commands (`checks.build|test|lint`) beat same-named scripts; explicit `commands` beat both.
   for (const [name, body] of Object.entries(repoConfig?.checks ?? {})) {
     const argv = typeof body === 'string' ? tokenizeEvidenceCommand(body) : null;
     if (argv) result.set(name, argv);

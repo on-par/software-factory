@@ -6,7 +6,6 @@ import type { EvidenceCommandLifecycle } from './evidence-plan.js';
 
 export interface EvidenceSideEffectsGuard extends EvidenceCommandLifecycle {
   finish(options?: { evidenceFailed?: boolean }): Promise<CheckerOutput>;
-  /** One line per evidence command that left live process groups (all were sent to killAll) (#3749). */
   leakReport(): string[];
 }
 

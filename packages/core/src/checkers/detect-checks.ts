@@ -1,8 +1,3 @@
-// src/checkers/detect-checks.ts — `factory init --detect-checks`: find a repo's build/test/lint commands.
-// Deterministic heuristics run first (solution files, go.mod, Cargo.toml, package.json scripts, ...) plus a scan of the docs for
-// commands that call a real script in the repo. When that is ambiguous, an agent reads the docs, CI
-// workflows and scripts gathered here and proposes the commands; the CLI dry-runs and confirms them.
-
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join, normalize, sep } from 'node:path';
 
@@ -16,11 +11,8 @@ export type CheckProposal = ChecksConfig;
 export const CHECK_KINDS: readonly CheckKind[] = ['build', 'test', 'lint'];
 
 export interface CheckHeuristics {
-  /** Commands guessed from the build system files at the repo root. */
   guessed: CheckProposal;
-  /** Commands the docs (README, AGENTS.md, CONTRIBUTING) show that run a script present in the repo. */
   documented: CheckProposal;
-  /** Why the heuristics alone are not trusted; empty means the guess can be used as-is. */
   ambiguities: string[];
 }
 
@@ -33,7 +25,6 @@ const KIND_PATTERNS: readonly [CheckKind, RegExp][] = [
   ['build', /build|compile/i],
 ];
 
-/** Quote a single argv token for a shell-free command string when it holds whitespace. */
 function quoteToken(token: string): string {
   return /\s/.test(token) ? `"${token}"` : token;
 }
@@ -45,7 +36,6 @@ interface Ecosystem {
 
 const NPM_PLACEHOLDER_TEST = /no test specified/i;
 
-/** package.json scripts as a Node proposal, matching CHECK's resolve-commands (#3603). */
 async function nodeProposal(repoRoot: string, entries: readonly string[]): Promise<CheckProposal> {
   if (!entries.includes('package.json')) return {};
   let scripts: unknown;
@@ -60,10 +50,10 @@ async function nodeProposal(repoRoot: string, entries: readonly string[]): Promi
   const has = (k: string): boolean => typeof s[k] === 'string' && (s[k] as string).trim() !== '';
   const proposal: CheckProposal = {};
   if (has('build')) proposal.build = 'npm run build';
-  // CHECK prefers scripts/verify.sh|ps1 over npm test; a declared checks.test would override it.
-  const verify =
+  const checkPrefersVerifyScriptOverNpmTest =
     (await fileExists(join(repoRoot, 'scripts/verify.sh'))) || (await fileExists(join(repoRoot, 'scripts/verify.ps1')));
-  if (has('test') && !NPM_PLACEHOLDER_TEST.test(s.test as string) && !verify) proposal.test = 'npm test';
+  if (has('test') && !NPM_PLACEHOLDER_TEST.test(s.test as string) && !checkPrefersVerifyScriptOverNpmTest)
+    proposal.test = 'npm test';
   if (has('lint')) proposal.lint = 'npm run lint';
   return proposal;
 }
@@ -82,8 +72,10 @@ async function guessEcosystems(
     const target = solutions[0] ?? (projects.length === 1 ? projects[0] : undefined);
     if (target) {
       const t = quoteToken(target);
-      // An .editorconfig carries the repo's style rules; `dotnet format` enforces them (#3600).
-      const lint = entries.includes('.editorconfig') ? { lint: `dotnet format ${t} --verify-no-changes` } : {};
+      const editorconfigStyleRulesEnforcedByDotnetFormat = entries.includes('.editorconfig');
+      const lint = editorconfigStyleRulesEnforcedByDotnetFormat
+        ? { lint: `dotnet format ${t} --verify-no-changes` }
+        : {};
       found.push({ name: '.NET', proposal: { build: `dotnet build ${t}`, test: `dotnet test ${t}`, ...lint } });
     } else if (projects.length > 1) {
       ambiguities.push(`several project files at the root and no solution (${projects.join(', ')})`);
@@ -100,15 +92,14 @@ async function guessEcosystems(
   } else if (entries.includes('pom.xml')) {
     found.push({ name: 'Maven', proposal: { build: 'mvn -B compile', test: 'mvn -B test' } });
   }
-  // package.json is a fallback: a tooling package.json beside another build system does not make it ambiguous.
-  if (found.length === 0) {
+  const noOtherBuildSystemSoPackageJsonIsTheFallback = found.length === 0;
+  if (noOtherBuildSystemSoPackageJsonIsTheFallback) {
     const node = await nodeProposal(repoRoot, entries);
     if (Object.keys(node).length > 0) found.push({ name: 'Node', proposal: node });
   }
   return found;
 }
 
-/** Candidate command lines in a Markdown doc: inline code spans and the lines of fenced code blocks. */
 function docCommandLines(text: string): string[] {
   const lines: string[] = [];
   let fenced = false;
@@ -123,7 +114,6 @@ function docCommandLines(text: string): string[] {
   return lines.map((line) => line.trim().replace(/^(\$|>|PS>|PS [^>]*>)\s+/, ''));
 }
 
-/** The repo-relative script a command runs (`pwsh ./x/run-tests.ps1` → `x/run-tests.ps1`), when it exists. */
 async function scriptOf(repoRoot: string, argv: readonly string[]): Promise<string | null> {
   const launcher = argv[0]!;
   const candidate = SCRIPT_LAUNCHERS.has(launcher)
@@ -137,7 +127,6 @@ async function scriptOf(repoRoot: string, argv: readonly string[]): Promise<stri
   return (await fileExists(join(repoRoot, rel))) ? rel : null;
 }
 
-/** Doc files as they are spelled on disk (matched case-insensitively), root first, then docs/. */
 async function docFiles(repoRoot: string): Promise<string[]> {
   const files: string[] = [];
   for (const dir of ['', 'docs']) {
@@ -167,7 +156,6 @@ async function documentedCommands(repoRoot: string): Promise<CheckProposal> {
   return documented;
 }
 
-/** Deterministic first pass: build-system guesses, documented script commands, and what makes them ambiguous. */
 export async function detectCheckHeuristics(repoRoot: string): Promise<CheckHeuristics> {
   const entries = await readdir(repoRoot).catch(() => [] as string[]);
   const ambiguities: string[] = [];
@@ -185,7 +173,6 @@ export async function detectCheckHeuristics(repoRoot: string): Promise<CheckHeur
   return { guessed, documented, ambiguities };
 }
 
-/** Best proposal without an agent: the guess, with each documented script command winning over it. */
 export function heuristicProposal(h: CheckHeuristics): CheckProposal {
   return { ...h.guessed, ...h.documented };
 }
@@ -204,7 +191,6 @@ async function listFiles(dir: string): Promise<string[]> {
   return files.slice(0, MAX_DIR_FILES);
 }
 
-/** Files the agent reads, repo-relative: docs, CI workflows, scripts and build entry points. */
 export async function detectionSourceFiles(repoRoot: string): Promise<string[]> {
   const files = [...(await docFiles(repoRoot)), 'Makefile', 'package.json', 'build.ps1', 'build.sh', 'global.json'];
   for (const dir of ['.github/workflows', 'scripts', '.githooks', 'build', 'eng']) {
@@ -215,7 +201,6 @@ export async function detectionSourceFiles(repoRoot: string): Promise<string[]> 
   return present;
 }
 
-/** The prompt for the detection agent: the repo's own files inline, so the call needs no tools. */
 export async function buildDetectChecksPrompt(repoRoot: string, h: CheckHeuristics): Promise<string> {
   const entries = (await readdir(repoRoot).catch(() => [] as string[])).sort();
   const sections: string[] = [];
@@ -253,11 +238,9 @@ export async function buildDetectChecksPrompt(repoRoot: string, h: CheckHeuristi
 export interface DetectedChecks {
   proposal: CheckProposal;
   notes?: string;
-  /** Proposed values dropped because they were not one shell-free command. */
   rejected: string[];
 }
 
-/** The agent's JSON reply as a proposal; null when no object with a check key is found. */
 export function parseDetectedChecks(output: string): DetectedChecks | null {
   const objects = extractJsonObjects(output)
     .map((c) => c.value)
