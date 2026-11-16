@@ -1,8 +1,16 @@
 import { withSliceState } from '@on-par/factory-core/internal';
 import type { SlicePlan, StackPullReviews } from '@on-par/factory-core/internal';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { createQueuePreflightOps, preflightQueuedIssue } from './index.js';
+
+const counting = <R>(result: R) => {
+  const state = { count: 0 };
+  return { state, fn: async () => (state.count++, result) };
+};
+const logging =
+  <A extends unknown[], R>(log: A[], result: R) =>
+  async (...a: A) => (log.push(a), result);
 
 const baseDeps = {
   expectedHeadRepoFullName: 'on-par/software-factory',
@@ -43,23 +51,26 @@ describe('queue preflight restack detection (#3368)', () => {
   });
 
   it('returns restack when the open slice branch still holds the merged head', async () => {
-    const branchContains = vi.fn(async () => true);
+    const checked: string[][] = [];
+    const branchContains = logging(checked, true);
     await expect(preflightQueuedIssue({ number: 7, labels: [] }, deps({ branchContains }))).resolves.toEqual({
       kind: 'restack',
       mergedIndex: 1,
       mergedPrNumber: 81,
     });
-    expect(branchContains).toHaveBeenCalledWith('merged-head', 'factory/7-slice-2');
+    expect(checked).toEqual([['merged-head', 'factory/7-slice-2']]);
   });
 
   it('detects a merge recorded in the same pass and saves the plan first', async () => {
-    const saveSlicePlan = vi.fn(async () => {});
+    const saved: SlicePlan[] = [];
+    const saveSlicePlan = async (_issue: number, plan: SlicePlan) => void saved.push(plan);
     const out = await preflightQueuedIssue(
       { number: 7, labels: [] },
       deps({ branchContains: async () => true, saveSlicePlan }),
     );
     expect(out.kind).toBe('restack');
-    expect(saveSlicePlan).toHaveBeenCalledTimes(1);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]!.slices[0]).toMatchObject({ state: 'merged', prNumber: 81 });
   });
 
   it('falls through to the existing flow when the branch no longer holds the merged head', async () => {
@@ -69,11 +80,11 @@ describe('queue preflight restack detection (#3368)', () => {
   });
 
   it('skips detection in slice mode', async () => {
-    const branchContains = vi.fn(async () => true);
+    const checks = counting(true);
     await expect(
-      preflightQueuedIssue({ number: 7, labels: [] }, deps({ stackMode: false, branchContains })),
+      preflightQueuedIssue({ number: 7, labels: [] }, deps({ stackMode: false, branchContains: checks.fn })),
     ).resolves.toEqual({ kind: 'defer' });
-    expect(branchContains).not.toHaveBeenCalled();
+    expect(checks.state.count).toBe(0);
   });
 
   it('parks when the check throws', async () => {
@@ -103,9 +114,10 @@ describe('queue preflight branchContains (#3368)', () => {
       ['behind', false],
       ['diverged', false],
     ] as const) {
-      const compare = vi.fn(async () => ({ data: { status } }));
+      const compared: unknown[][] = [];
+      const compare = logging(compared, { data: { status } });
       await expect(opsFor(compare).branchContains('abc', 'factory/7-slice-2')).resolves.toBe(want);
-      expect(compare).toHaveBeenCalledWith({ owner: 'o', repo: 'r', basehead: 'abc...factory/7-slice-2' });
+      expect(compared).toEqual([[{ owner: 'o', repo: 'r', basehead: 'abc...factory/7-slice-2' }]]);
     }
   });
 
@@ -117,9 +129,10 @@ describe('queue preflight branchContains (#3368)', () => {
   });
 
   it('getPullRefs maps a slice PR to its head ref, base ref and head SHA', async () => {
-    const get = vi.fn(async () => ({
+    const asked: unknown[][] = [];
+    const get = logging(asked, {
       data: { head: { ref: 'factory/7-slice-2', sha: 'h2' }, base: { ref: 'main' }, body: 'text' },
-    }));
+    });
     const ops = createQueuePreflightOps({ rest: { pulls: { get } } } as never, 'o', 'r');
     await expect(ops.getPullRefs(82)).resolves.toEqual({
       headRef: 'factory/7-slice-2',
@@ -127,6 +140,6 @@ describe('queue preflight branchContains (#3368)', () => {
       headSha: 'h2',
       body: 'text',
     });
-    expect(get).toHaveBeenCalledWith({ owner: 'o', repo: 'r', pull_number: 82 });
+    expect(asked).toEqual([[{ owner: 'o', repo: 'r', pull_number: 82 }]]);
   });
 });

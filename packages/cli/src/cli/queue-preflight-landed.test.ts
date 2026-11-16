@@ -1,8 +1,13 @@
 import { withSliceState } from '@on-par/factory-core/internal';
 import type { SlicePlan, StackPullReviews } from '@on-par/factory-core/internal';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { preflightQueuedIssue } from './index.js';
+
+const counting = <R>(result: R) => {
+  const state = { count: 0 };
+  return { state, fn: async () => (state.count++, result) };
+};
 
 const baseDeps = {
   expectedHeadRepoFullName: 'on-par/software-factory',
@@ -44,13 +49,13 @@ describe('queue preflight already-landed work (#3375)', () => {
 
   it('skips the merged-PR lookup when a slice plan exists', async () => {
     for (const plan of [slicePlan(), withSliceState(withSliceState(slicePlan(), 1, 'merged', 81), 2, 'merged', 82)]) {
-      const getMergedClosingPr = vi.fn(async () => 900);
+      const lookups = counting(900);
       const out = await preflightQueuedIssue(
         { number: 7, labels: [] },
-        { ...baseDeps, findSlicePlan: async () => foundPlan(plan), getMergedClosingPr },
+        { ...baseDeps, findSlicePlan: async () => foundPlan(plan), getMergedClosingPr: lookups.fn },
       );
       expect(out).toEqual({ kind: 'build' });
-      expect(getMergedClosingPr).not.toHaveBeenCalled();
+      expect(lookups.state.count).toBe(0);
     }
   });
 
@@ -66,7 +71,7 @@ describe('queue preflight already-landed work (#3375)', () => {
   });
 
   it('does not call the merged-PR lookup when an open PR exists', async () => {
-    const getMergedClosingPr = vi.fn(async () => 900);
+    const lookups = counting(900);
     const out = await preflightQueuedIssue(
       { number: 7, labels: [] },
       {
@@ -77,10 +82,10 @@ describe('queue preflight already-landed work (#3375)', () => {
           headSha: 'abc',
           headRepoFullName: 'on-par/software-factory',
         }),
-        getMergedClosingPr,
+        getMergedClosingPr: lookups.fn,
       },
     );
     expect(out).toEqual({ kind: 'adopt', branch: 'factory/7-x' });
-    expect(getMergedClosingPr).not.toHaveBeenCalled();
+    expect(lookups.state.count).toBe(0);
   });
 });

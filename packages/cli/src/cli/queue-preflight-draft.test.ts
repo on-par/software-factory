@@ -3,9 +3,10 @@ import { join } from 'node:path';
 import type { StackPullReviews } from '@on-par/factory-core/internal';
 import { claimIterateCommand, createFileIterateStore } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { preflightQueuedIssue } from './index.js';
+
 import {
   classifyFactoryDraft,
   makeDraftAdoptionOps,
@@ -18,6 +19,11 @@ const tmp = createTempDirs();
 afterEach(async () => {
   await tmp.cleanup();
 });
+
+const deferrals = () => {
+  const deferred: unknown[][] = [];
+  return { deferred, onDeferred: (...a: unknown[]) => void deferred.push(a) };
+};
 
 const baseDeps = {
   expectedHeadRepoFullName: 'on-par/software-factory',
@@ -48,12 +54,20 @@ const baseDeps = {
 const parked = { kind: 'park', reason: 'PR #71 is draft or its draft state is unavailable' };
 
 function fakeOps(over: Partial<Record<keyof DraftAdoptionOps, unknown>> = {}) {
-  return {
-    classify: vi.fn(async () => 'factory' as const),
-    probeCi: vi.fn(async () => 'success' as const),
-    queueCiRework: vi.fn(async () => {}),
+  const seen = { classify: 0, probeCi: 0, rework: [] as Array<[number, number]> };
+  const ops = {
+    classify: async () => {
+      seen.classify++;
+      return 'factory' as const;
+    },
+    probeCi: async () => {
+      seen.probeCi++;
+      return 'success' as const;
+    },
+    queueCiRework: async (issue: number, pr: number) => void seen.rework.push([issue, pr]),
     ...over,
   };
+  return { ...ops, seen };
 }
 
 const run = (draftAdoption: unknown, overrides: Record<string, unknown> = {}) =>
@@ -63,36 +77,36 @@ describe('factory draft adoption (#4039)', () => {
   it('adopts a factory draft with no draftReason and green CI', async () => {
     const ops = fakeOps();
     await expect(run(ops)).resolves.toEqual({ kind: 'adopt', branch: 'factory/7-x' });
-    expect(ops.queueCiRework).not.toHaveBeenCalled();
+    expect(ops.seen.rework).toEqual([]);
   });
 
   it('queues CI rework for an unparked ci-failed draft instead of parking it as draft', async () => {
-    const ops = fakeOps({ probeCi: vi.fn(async () => 'failure' as const) });
+    const ops = fakeOps({ probeCi: async () => 'failure' as const });
     await expect(run(ops)).resolves.toEqual({ kind: 'build' });
-    expect(ops.queueCiRework).toHaveBeenCalledWith(7, 71);
+    expect(ops.seen.rework).toEqual([[7, 71]]);
   });
 
   it('adopts a factory draft with pending CI so land watches CI', async () => {
     for (const outcome of ['timeout', 'no-checks'] as const) {
-      const ops = fakeOps({ probeCi: vi.fn(async () => outcome) });
+      const ops = fakeOps({ probeCi: async () => outcome });
       await expect(run(ops)).resolves.toEqual({ kind: 'adopt', branch: 'factory/7-x' });
     }
   });
 
   it('parks a requested draft as today without probing CI', async () => {
-    const ops = fakeOps({ classify: vi.fn(async () => 'requested' as const) });
+    const ops = fakeOps({ classify: async () => 'requested' as const });
     await expect(run(ops)).resolves.toEqual(parked);
-    expect(ops.probeCi).not.toHaveBeenCalled();
+    expect(ops.seen.probeCi).toBe(0);
   });
 
   it('parks a draft whose head is not a factory commit as today', async () => {
-    const ops = fakeOps({ classify: vi.fn(async () => 'not-factory' as const) });
+    const ops = fakeOps({ classify: async () => 'not-factory' as const });
     await expect(run(ops)).resolves.toEqual(parked);
-    expect(ops.probeCi).not.toHaveBeenCalled();
+    expect(ops.seen.probeCi).toBe(0);
   });
 
   it('parks as today when the draft classification fails', async () => {
-    const ops = fakeOps({ classify: vi.fn(async () => Promise.reject(new Error('boom'))) });
+    const ops = fakeOps({ classify: async () => Promise.reject(new Error('boom')) });
     await expect(run(ops)).resolves.toEqual(parked);
   });
 
@@ -101,17 +115,19 @@ describe('factory draft adoption (#4039)', () => {
   });
 
   it('defers when the CI probe or the rework queue fails', async () => {
-    const onDeferred = vi.fn();
-    const probeFails = fakeOps({ probeCi: vi.fn(async () => Promise.reject(new Error('net'))) });
+    const { deferred, onDeferred } = deferrals();
+    const probeFails = fakeOps({ probeCi: async () => Promise.reject(new Error('net')) });
     await expect(run(probeFails, { onDeferred })).resolves.toEqual({ kind: 'defer' });
-    expect(onDeferred).toHaveBeenCalledTimes(1);
+    expect(deferred).toHaveLength(1);
+    expect(deferred[0]![1]).toContain('CI probe for factory draft PR #71 failed');
 
     const queueFails = fakeOps({
-      probeCi: vi.fn(async () => 'failure' as const),
-      queueCiRework: vi.fn(async () => Promise.reject(new Error('disk'))),
+      probeCi: async () => 'failure' as const,
+      queueCiRework: async () => Promise.reject(new Error('disk')),
     });
     await expect(run(queueFails, { onDeferred })).resolves.toEqual({ kind: 'defer' });
-    expect(onDeferred).toHaveBeenCalledTimes(2);
+    expect(deferred).toHaveLength(2);
+    expect(deferred[1]![1]).toContain('queuing CI rework failed');
   });
 
   it('keeps the ci-pending path ahead of the new adoption', async () => {
@@ -120,7 +136,7 @@ describe('factory draft adoption (#4039)', () => {
       kind: 'adopt',
       branch: 'factory/7-x',
     });
-    expect(ops.classify).not.toHaveBeenCalled();
+    expect(ops.seen.classify).toBe(0);
   });
 });
 

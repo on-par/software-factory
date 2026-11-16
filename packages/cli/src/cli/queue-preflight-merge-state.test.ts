@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { preflightQueuedIssue } from './index.js';
 import { makeQueuePreflightOps } from './queue-preflight.js';
@@ -7,15 +7,20 @@ type LandState = { isDraft?: boolean; mergeStateStatus?: string };
 
 const harness = (results: Array<LandState | Error>) => {
   const queue = [...results];
-  const getLandState = vi.fn(async () => {
+  const rec = { landReads: 0, slept: [] as number[], watched: [] as string[], deferred: [] as unknown[][] };
+  const getLandState = async () => {
+    rec.landReads++;
     const next = queue.shift();
     if (next === undefined) throw new Error('unexpected extra land-state read');
     if (next instanceof Error) throw next;
     return next;
-  });
-  const sleep = vi.fn(async (_ms: number) => {});
-  const watch = vi.fn(async (_ref: string) => 'success' as const);
-  const onDeferred = vi.fn();
+  };
+  const sleep = async (ms: number) => void rec.slept.push(ms);
+  const watch = async (ref: string) => {
+    rec.watched.push(ref);
+    return 'success' as const;
+  };
+  const onDeferred = (...args: unknown[]) => void rec.deferred.push(args);
   const deps = {
     expectedHeadRepoFullName: 'on-par/software-factory',
     findSlicePlan: async () => ({ status: 'not-found' as const }),
@@ -44,7 +49,7 @@ const harness = (results: Array<LandState | Error>) => {
     sleep,
     onDeferred,
   };
-  return { deps, getLandState, sleep, watch, onDeferred };
+  return { deps, rec };
 };
 
 const issue = { number: 7, labels: [] };
@@ -55,8 +60,8 @@ describe('queue preflight merge-state re-read (#3323)', () => {
   it("preflight doesn't park an open PR whose merge state is UNKNOWN then CLEAN (ship-it #294, 2026-10-19)", async () => {
     const h = harness([unknown, clean]);
     await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({ kind: 'adopt', branch: 'factory/7-x' });
-    expect(h.watch).toHaveBeenCalledWith('abc123');
-    expect(h.sleep.mock.calls).toEqual([[2000]]);
+    expect(h.rec.watched).toEqual(['abc123']);
+    expect(h.rec.slept).toEqual([2000]);
   });
 
   it('adopts with syncMain when the merge state stays UNKNOWN on all 4 reads', async () => {
@@ -66,10 +71,10 @@ describe('queue preflight merge-state re-read (#3323)', () => {
       branch: 'factory/7-x',
       syncMain: true,
     });
-    expect(h.onDeferred).not.toHaveBeenCalled();
-    expect(h.sleep.mock.calls).toEqual([[2000], [5000], [10000]]);
-    expect(h.getLandState).toHaveBeenCalledTimes(4);
-    expect(h.watch).not.toHaveBeenCalled();
+    expect(h.rec.deferred).toEqual([]);
+    expect(h.rec.slept).toEqual([2000, 5000, 10000]);
+    expect(h.rec.landReads).toBe(4);
+    expect(h.rec.watched).toEqual([]);
   });
 
   it('adopts with syncMain when mergeStateStatus is missing on all reads', async () => {
@@ -100,7 +105,7 @@ describe('queue preflight merge-state re-read (#3323)', () => {
     const out = await preflightQueuedIssue(issue, h.deps);
     expect(out.kind).toBe('park');
     expect(out.kind === 'park' && out.reason).toContain('merge-state lookup failed');
-    expect(h.sleep).not.toHaveBeenCalled();
+    expect(h.rec.slept).toEqual([]);
   });
 
   it('adopts DIRTY with syncMain and skips the CI watch', async () => {
@@ -110,9 +115,9 @@ describe('queue preflight merge-state re-read (#3323)', () => {
       branch: 'factory/7-x',
       syncMain: true,
     });
-    expect(h.watch).not.toHaveBeenCalled();
-    expect(h.getLandState).toHaveBeenCalledTimes(1);
-    expect(h.sleep).not.toHaveBeenCalled();
+    expect(h.rec.watched).toEqual([]);
+    expect(h.rec.landReads).toBe(1);
+    expect(h.rec.slept).toEqual([]);
   });
 
   it('adopts with syncMain, without a watch, when a re-read reveals DIRTY after UNKNOWN', async () => {
@@ -122,7 +127,7 @@ describe('queue preflight merge-state re-read (#3323)', () => {
       branch: 'factory/7-x',
       syncMain: true,
     });
-    expect(h.watch).not.toHaveBeenCalled();
+    expect(h.rec.watched).toEqual([]);
   });
 
   it('parks a draft revealed by a re-read while the state is still UNKNOWN', async () => {
@@ -143,7 +148,7 @@ describe('queue preflight merge-state re-read (#3323)', () => {
     const fallback = makeQueuePreflightOps({} as never, 'o', 'r', { watch });
     expect(typeof fallback.sleep).toBe('function');
     await fallback.sleep?.(0);
-    const custom = vi.fn(async (_ms: number) => {});
+    const custom = async (_ms: number) => {};
     expect(makeQueuePreflightOps({} as never, 'o', 'r', { watch, sleep: custom }).sleep).toBe(custom);
   });
 });
