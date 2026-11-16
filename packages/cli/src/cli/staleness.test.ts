@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
   checkDistFreshness,
@@ -149,119 +149,76 @@ describe('checkDistFreshness', () => {
 });
 
 describe('runStalenessGuard', () => {
-  const error = vi.fn();
-  const warn = vi.fn();
+  let errors: string[];
+  let warns: string[];
+  beforeEach(() => {
+    errors = [];
+    warns = [];
+  });
+  const error = (m: string) => void errors.push(m);
+  const warn = (m: string) => void warns.push(m);
+  const guard = (entryUrl: string, env: Record<string, string>, cmd: string, deps: StalenessDeps) =>
+    runStalenessGuard({ entryUrl, env, argv: ['node', 'cli.js', cmd], error, warn, deps });
 
   it('returns null and touches no deps when entry is under src/', () => {
-    error.mockClear();
-    warn.mockClear();
+    const touched: string[] = [];
     const deps: StalenessDeps = {
-      exists: vi.fn(),
-      readFile: vi.fn(),
-      listFiles: vi.fn(),
-      mtimeMs: vi.fn(),
+      exists: () => (touched.push('exists'), false),
+      readFile: () => (touched.push('readFile'), ''),
+      listFiles: () => (touched.push('listFiles'), []),
+      mtimeMs: () => (touched.push('mtimeMs'), 0),
     };
-    const result = runStalenessGuard({
-      entryUrl: 'file:///repo/packages/cli/src/cli/index.ts',
-      env: {},
-      argv: ['node', 'cli.js', 'run'],
-      error,
-      warn,
-      deps,
-    });
+    const result = guard('file:///repo/packages/cli/src/cli/index.ts', {}, 'run', deps);
     expect(result).toBeNull();
-    expect(deps.exists).not.toHaveBeenCalled();
+    expect(touched).toEqual([]);
   });
 
   it('returns null when entry is under dist/ but no workspace root exists above it', () => {
     const deps = fakeDeps({ '/nowhere/package.json': T0 }, { '/nowhere/package.json': JSON.stringify({}) });
-    const result = runStalenessGuard({
-      entryUrl: 'file:///nowhere/packages/cli/dist/cli/index.js',
-      env: {},
-      argv: ['node', 'cli.js', 'run'],
-      error,
-      warn,
-      deps,
-    });
+    const result = guard('file:///nowhere/packages/cli/dist/cli/index.js', {}, 'run', deps);
     expect(result).toBeNull();
   });
 
   it('returns 2 and calls error with npm run build and stale package names when stale', () => {
-    error.mockClear();
-    warn.mockClear();
     const tree = baseTree();
     tree['/repo/packages/core/src/phases/build.ts'] = T1 + 1000;
     const deps = fakeDeps(tree, baseContents);
-    const result = runStalenessGuard({
-      entryUrl: 'file:///repo/packages/cli/dist/cli/index.js',
-      env: {},
-      argv: ['node', 'cli.js', 'run'],
-      error,
-      warn,
-      deps,
-    });
+    const result = guard('file:///repo/packages/cli/dist/cli/index.js', {}, 'run', deps);
     expect(result).toBe(2);
-    expect(error).toHaveBeenCalledTimes(1);
-    expect(error.mock.calls[0][0]).toContain('npm run build');
-    expect(error.mock.calls[0][0]).toContain('core');
-    expect(warn).not.toHaveBeenCalled();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('npm run build');
+    expect(errors[0]).toContain('core');
+    expect(warns).toEqual([]);
   });
 
   it('returns null and warns when FACTORY_ALLOW_STALE=1', () => {
-    error.mockClear();
-    warn.mockClear();
     const tree = baseTree();
     tree['/repo/packages/core/src/phases/build.ts'] = T1 + 1000;
     const deps = fakeDeps(tree, baseContents);
-    const result = runStalenessGuard({
-      entryUrl: 'file:///repo/packages/cli/dist/cli/index.js',
-      env: { FACTORY_ALLOW_STALE: '1' },
-      argv: ['node', 'cli.js', 'run'],
-      error,
-      warn,
-      deps,
-    });
+    const result = guard('file:///repo/packages/cli/dist/cli/index.js', { FACTORY_ALLOW_STALE: '1' }, 'run', deps);
     expect(result).toBeNull();
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(error).not.toHaveBeenCalled();
+    expect(warns).toHaveLength(1);
+    expect(errors).toEqual([]);
   });
 
   it('returns null and warns when argv[2] is doctor', () => {
-    error.mockClear();
-    warn.mockClear();
     const tree = baseTree();
     tree['/repo/packages/core/src/phases/build.ts'] = T1 + 1000;
     const deps = fakeDeps(tree, baseContents);
-    const result = runStalenessGuard({
-      entryUrl: 'file:///repo/packages/cli/dist/cli/index.js',
-      env: {},
-      argv: ['node', 'cli.js', 'doctor'],
-      error,
-      warn,
-      deps,
-    });
+    const result = guard('file:///repo/packages/cli/dist/cli/index.js', {}, 'doctor', deps);
     expect(result).toBeNull();
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(error).not.toHaveBeenCalled();
+    expect(warns).toHaveLength(1);
+    expect(errors).toEqual([]);
   });
 
   it('returns null and warns when argv[2] is --version', () => {
-    error.mockClear();
-    warn.mockClear();
     const tree = baseTree();
     tree['/repo/packages/core/src/phases/build.ts'] = T1 + 1000;
     const deps = fakeDeps(tree, baseContents);
-    const result = runStalenessGuard({
-      entryUrl: 'file:///repo/packages/cli/dist/cli/index.js',
-      env: {},
-      argv: ['node', 'cli.js', '--version'],
-      error,
-      warn,
-      deps,
-    });
+    const result = guard('file:///repo/packages/cli/dist/cli/index.js', {}, '--version', deps);
     expect(result).toBeNull();
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(error).not.toHaveBeenCalled();
+    expect(warns).toHaveLength(1);
+    expect(errors).toEqual([]);
   });
 });
 

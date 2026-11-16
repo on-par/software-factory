@@ -86,9 +86,11 @@ describe('cli', () => {
 
     it('without --local-queue, counts pending work via GitHub Issues and exits 2 when nothing is queued', async () => {
       rmSync(paths().queue, { force: true });
+      const requests: unknown[] = [];
+      h.octokit.rest.issues.listForRepo = (async (p: unknown) => (requests.push(p), { data: [] })) as never;
       const res = await runMain('supervise', '--now');
       expect(res).toEqual({ exited: true, code: 2 });
-      expect(h.octokit.rest.issues.listForRepo).toHaveBeenCalled();
+      expect(requests.length).toBeGreaterThan(0);
     });
 
     it('auto-merge flag: factory supervise --auto-merge records the override for the cycles it drives', async () => {
@@ -104,6 +106,10 @@ describe('cli', () => {
       process.env.FACTORY_RESUME_AT = '0.4';
       process.env.FACTORY_USAGE_POLL = '60';
       writeFileSync(paths().queue, 'app 1\n');
+      const usageOpts: unknown[] = [];
+      coreFakes.watchUsage = (async (o: unknown) => {
+        usageOpts.push(o);
+      }) as typeof coreFakes.watchUsage;
       const res = await runMain(
         'supervise',
         '--now',
@@ -114,7 +120,7 @@ describe('cli', () => {
         '15',
       );
       expect(res.exited).toBe(false);
-      expect(coreFakes.watchUsage).toHaveBeenCalledWith(expect.objectContaining({ stopAt: 0.7, pollMs: 15_000 }));
+      expect(usageOpts).toContainEqual(expect.objectContaining({ stopAt: 0.7, pollMs: 15_000 }));
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('flag: --usage-threshold');
       expect(events).toContain('flag: --usage-poll');

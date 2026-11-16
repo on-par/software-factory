@@ -29,24 +29,24 @@ const freshPlan = (): SlicePlan => ({
 });
 const branch = (k: number) => `factory/7-slice-${k}`;
 
-const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+const lines: string[] = [];
+vi.spyOn(console, 'log').mockImplementation((...a) => void lines.push(a.join(' ')));
+vi.spyOn(console, 'error').mockImplementation((...a) => void lines.push(a.join(' ')));
 afterEach(() => {
-  logSpy.mockClear();
-  errSpy.mockClear();
+  lines.length = 0;
 });
-const logged = () => logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+const logged = () => lines.join('\n');
 
 /** A ship fake that reports slice k's ready outcome on call k (after `offset` sizing calls). */
 function fakeShip(failOn?: number) {
   let call = 0;
   const bases: Array<string | undefined> = [];
-  const ship = vi.fn(async (base: string | undefined, onOutcome: (o: RunOutcome) => void) => {
+  const ship = async (base: string | undefined, onOutcome: (o: RunOutcome) => void) => {
     call++;
     bases.push(base);
     if (call === failOn) throw new Error(`slice ${call} failed hard`);
     onOutcome({ state: 'ready', branch: branch(call), prNumber: 100 + call } as RunOutcome);
-  });
+  };
   return { ship, bases };
 }
 
@@ -66,25 +66,24 @@ describe('runIssueStack (#3798)', () => {
     const reads = [undefined, freshPlan()];
     const bases: Array<string | undefined> = [];
     let call = 0;
-    const ship = vi.fn(async (base: string | undefined, onOutcome: (o: RunOutcome) => void) => {
+    const ship = async (base: string | undefined, onOutcome: (o: RunOutcome) => void) => {
       call++;
       bases.push(base);
       if (call === 1) throw new Error('issue #7 sliced into 3');
       onOutcome({ state: 'ready', branch: branch(call - 1), prNumber: 100 + call - 1 } as RunOutcome);
-    });
+    };
     await runIssueStack(7, undefined, { ...graphDeps, readSlicePlan: async () => reads.shift(), ship });
 
-    expect(ship).toHaveBeenCalledTimes(4);
     expect(bases).toEqual([undefined, undefined, branch(1), branch(2)]);
   });
 
   it('skips slice 3 with stack stopped after slice 2 fails and exits 1', async () => {
-    const { ship } = fakeShip(2);
+    const { ship, bases } = fakeShip(2);
     const err = await runIssueStack(7, undefined, { ...graphDeps, readSlicePlan: async () => freshPlan(), ship }).catch(
       (e: unknown) => e,
     );
 
-    expect(ship).toHaveBeenCalledTimes(2);
+    expect(bases).toHaveLength(2);
     expect(logged()).toContain('slice 3/3 skipped: stack stopped: slice 2/3 failed');
     expect(err).toBeInstanceOf(CliExitError);
     expect((err as CliExitError).code).toBe(1);
@@ -115,10 +114,11 @@ describe('runIssueStack (#3798)', () => {
   });
 
   it('returns after one run when the issue fits', async () => {
-    const ship = vi.fn(async () => {});
+    const bases: unknown[] = [];
+    const ship = async (b?: string) => void bases.push(b);
     await runIssueStack(7, undefined, { ...graphDeps, readSlicePlan: async () => undefined, ship });
 
-    expect(ship).toHaveBeenCalledTimes(1);
+    expect(bases).toHaveLength(1);
   });
 
   it('rethrows the sizing failure when no plan was recorded', async () => {
@@ -134,10 +134,11 @@ describe('runIssueStack (#3798)', () => {
   it('reports every slice already built', async () => {
     let plan = freshPlan();
     for (const k of [1, 2, 3]) plan = withSliceState(plan, k, 'merged', 100 + k, branch(k));
-    const ship = vi.fn(async () => {});
+    const bases: unknown[] = [];
+    const ship = async (b?: string) => void bases.push(b);
     await runIssueStack(7, undefined, { ...graphDeps, readSlicePlan: async () => plan, ship });
 
-    expect(ship).not.toHaveBeenCalled();
+    expect(bases).toHaveLength(0);
     expect(logged()).toContain('every slice of #7 is already built');
   });
 });
@@ -199,16 +200,16 @@ describe('issue dependency graph', () => {
     ]);
   });
   it('rejects an issue cycle before building', async () => {
-    const shipMember = vi.fn();
+    const built: number[] = [];
     await expect(
       runIssueStack(1, undefined, {
         ...graphDeps,
         list: async () => [item(1)],
-        shipMember,
+        shipMember: async (n) => void built.push(n),
         readSlicePlan: async () => undefined,
         ship: async () => {},
       }),
     ).rejects.toMatchObject({ code: 2 });
-    expect(shipMember).not.toHaveBeenCalled();
+    expect(built).toEqual([]);
   });
 });
