@@ -3,8 +3,6 @@ import { dirname, join } from 'node:path';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 
-export type TempWorktrees = ReturnType<typeof createTempWorktrees>;
-
 export function createTempWorktrees(prefix: string) {
   const dirs = createTempDirs();
   return {
