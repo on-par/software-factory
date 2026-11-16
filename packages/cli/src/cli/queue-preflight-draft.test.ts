@@ -6,7 +6,6 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { preflightQueuedIssue } from './index.js';
-
 import {
   classifyFactoryDraft,
   makeDraftAdoptionOps,
@@ -19,11 +18,6 @@ const tmp = createTempDirs();
 afterEach(async () => {
   await tmp.cleanup();
 });
-
-const deferrals = () => {
-  const deferred: unknown[][] = [];
-  return { deferred, onDeferred: (...a: unknown[]) => void deferred.push(a) };
-};
 
 const baseDeps = {
   expectedHeadRepoFullName: 'on-par/software-factory',
@@ -56,14 +50,8 @@ const parked = { kind: 'park', reason: 'PR #71 is draft or its draft state is un
 function fakeOps(over: Partial<Record<keyof DraftAdoptionOps, unknown>> = {}) {
   const seen = { classify: 0, probeCi: 0, rework: [] as Array<[number, number]> };
   const ops = {
-    classify: async () => {
-      seen.classify++;
-      return 'factory' as const;
-    },
-    probeCi: async () => {
-      seen.probeCi++;
-      return 'success' as const;
-    },
+    classify: async () => (seen.classify++, 'factory' as const),
+    probeCi: async () => (seen.probeCi++, 'success' as const),
     queueCiRework: async (issue: number, pr: number) => void seen.rework.push([issue, pr]),
     ...over,
   };
@@ -115,7 +103,8 @@ describe('factory draft adoption (#4039)', () => {
   });
 
   it('defers when the CI probe or the rework queue fails', async () => {
-    const { deferred, onDeferred } = deferrals();
+    const deferred: unknown[][] = [];
+    const onDeferred = (...a: unknown[]) => void deferred.push(a);
     const probeFails = fakeOps({ probeCi: async () => Promise.reject(new Error('net')) });
     await expect(run(probeFails, { onDeferred })).resolves.toEqual({ kind: 'defer' });
     expect(deferred).toHaveLength(1);

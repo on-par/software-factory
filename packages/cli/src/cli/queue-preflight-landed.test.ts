@@ -4,10 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { preflightQueuedIssue } from './index.js';
 
-const counting = <R>(result: R) => {
-  const state = { count: 0 };
-  return { state, fn: async () => (state.count++, result) };
-};
+const counting = <R>(result: R, state = { count: 0 }) => ({ state, fn: async () => (state.count++, result) });
 
 const baseDeps = {
   expectedHeadRepoFullName: 'on-par/software-factory',

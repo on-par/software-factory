@@ -16,10 +16,7 @@ const harness = (results: Array<LandState | Error>) => {
     return next;
   };
   const sleep = async (ms: number) => void rec.slept.push(ms);
-  const watch = async (ref: string) => {
-    rec.watched.push(ref);
-    return 'success' as const;
-  };
+  const watch = async (ref: string) => (rec.watched.push(ref), 'success' as const);
   const onDeferred = (...args: unknown[]) => void rec.deferred.push(args);
   const deps = {
     expectedHeadRepoFullName: 'on-par/software-factory',

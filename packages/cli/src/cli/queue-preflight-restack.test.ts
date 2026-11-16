@@ -4,10 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createQueuePreflightOps, preflightQueuedIssue } from './index.js';
 
-const counting = <R>(result: R) => {
-  const state = { count: 0 };
-  return { state, fn: async () => (state.count++, result) };
-};
+const counting = <R>(result: R, state = { count: 0 }) => ({ state, fn: async () => (state.count++, result) });
 const logging =
   <A extends unknown[], R>(log: A[], result: R) =>
   async (...a: A) => (log.push(a), result);
@@ -52,12 +49,8 @@ describe('queue preflight restack detection (#3368)', () => {
 
   it('returns restack when the open slice branch still holds the merged head', async () => {
     const checked: string[][] = [];
-    const branchContains = logging(checked, true);
-    await expect(preflightQueuedIssue({ number: 7, labels: [] }, deps({ branchContains }))).resolves.toEqual({
-      kind: 'restack',
-      mergedIndex: 1,
-      mergedPrNumber: 81,
-    });
+    const out = await preflightQueuedIssue({ number: 7, labels: [] }, deps({ branchContains: logging(checked, true) }));
+    expect(out).toEqual({ kind: 'restack', mergedIndex: 1, mergedPrNumber: 81 });
     expect(checked).toEqual([['merged-head', 'factory/7-slice-2']]);
   });
 

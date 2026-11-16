@@ -33,10 +33,7 @@ function harness(
 ) {
   const pulls = over.pulls ?? {};
   const rec = { landReads: 0, deferred: [] as unknown[][] };
-  const getLandState = async () => {
-    rec.landReads++;
-    return { isDraft: false, mergeStateStatus: 'CLEAN' };
-  };
+  const getLandState = async () => (rec.landReads++, { isDraft: false, mergeStateStatus: 'CLEAN' });
   const onDeferred = (...args: unknown[]) => void rec.deferred.push(args);
   const deps: QueuePreflightOps = {
     expectedHeadRepoFullName: REPO,

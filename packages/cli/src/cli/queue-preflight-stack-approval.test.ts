@@ -3,14 +3,11 @@ import type { SlicePlan, StackPullReviews } from '@on-par/factory-core/internal'
 import { describe, expect, it } from 'vitest';
 import { createQueuePreflightOps, preflightQueuedIssue } from './index.js';
 
-const counting = <R>(result: R) => {
-  const state = { count: 0 };
-  return { state, fn: async () => (state.count++, result) };
-};
-const deferrals = () => {
-  const deferred: unknown[][] = [];
-  return { deferred, onDeferred: (...a: unknown[]) => void deferred.push(a) };
-};
+const counting = <R>(result: R, state = { count: 0 }) => ({ state, fn: async () => (state.count++, result) });
+const deferrals = (deferred: unknown[][] = []) => ({
+  deferred,
+  onDeferred: (...a: unknown[]) => void deferred.push(a),
+});
 
 const baseDeps = {
   expectedHeadRepoFullName: 'on-par/software-factory',
@@ -88,114 +85,81 @@ describe('stack approval gate (#3366)', () => {
     ...over,
   });
 
+  const preflight = (over: Record<string, unknown> = {}) =>
+    preflightQueuedIssue({ number: 7, labels: [] }, stackDeps(over));
+
   it('builds the next stack slice once the slice below is approved (#3349)', async () => {
-    await expect(preflightQueuedIssue({ number: 7, labels: [] }, stackDeps())).resolves.toEqual({ kind: 'build' });
+    await expect(preflight()).resolves.toEqual({ kind: 'build' });
   });
 
-  it('defers a stack slice and names its PR while the slice below awaits approval (#3366)', async () => {
+  it.each([
+    ['awaits approval', async () => ({ headSha: 'h501', selfId: 1, reviews: [] }), ['#501', 'slice 1/3']],
+    [
+      'changes were requested',
+      async () => ({ ...approved(), reviews: [{ reviewerId: 2, state: 'CHANGES_REQUESTED', commitId: 'h501' }] }),
+      ['changes requested'],
+    ],
+    ['the review lookup fails', async () => Promise.reject(new Error('boom')), ['stack approval lookup failed']],
+  ])('defers a stack slice and names why when %s (#3366)', async (_name, getPullReviews, parts) => {
     const { deferred, onDeferred } = deferrals();
-    const result = await preflightQueuedIssue(
-      { number: 7, labels: [] },
-      stackDeps({ onDeferred, getPullReviews: async () => ({ headSha: 'h501', selfId: 1, reviews: [] }) }),
-    );
-    expect(result).toEqual({ kind: 'defer' });
+    await expect(preflight({ onDeferred, getPullReviews })).resolves.toEqual({ kind: 'defer' });
     expect(deferred).toHaveLength(1);
     expect(deferred[0]![0]).toBe(7);
-    expect(deferred[0]![1]).toContain('#501');
-    expect(deferred[0]![1]).toContain('slice 1/3');
-  });
-
-  it('defers and names the PR when changes were requested', async () => {
-    const { deferred, onDeferred } = deferrals();
-    const result = await preflightQueuedIssue(
-      { number: 7, labels: [] },
-      stackDeps({
-        onDeferred,
-        getPullReviews: async () => ({
-          headSha: 'h501',
-          selfId: 1,
-          reviews: [{ reviewerId: 2, state: 'CHANGES_REQUESTED', commitId: 'h501' }],
-        }),
-      }),
-    );
-    expect(result).toEqual({ kind: 'defer' });
-    expect(deferred).toEqual([[7, expect.stringContaining('changes requested')]]);
-  });
-
-  it('defers with a message when the review lookup fails', async () => {
-    const { deferred, onDeferred } = deferrals();
-    const result = await preflightQueuedIssue(
-      { number: 7, labels: [] },
-      stackDeps({ onDeferred, getPullReviews: async () => Promise.reject(new Error('boom')) }),
-    );
-    expect(result).toEqual({ kind: 'defer' });
-    expect(deferred).toEqual([[7, expect.stringContaining('stack approval lookup failed')]]);
+    for (const part of parts) expect(deferred[0]![1]).toContain(part);
   });
 
   it('defers when the slice above is not pending', async () => {
     const plan = withSliceState(stackPlan(), 2, 'not-built');
-    const result = await preflightQueuedIssue(
-      { number: 7, labels: [] },
-      stackDeps({ findSlicePlan: async () => foundPlan(plan) }),
-    );
+    const result = await preflight({ findSlicePlan: async () => foundPlan(plan) });
     expect(result).toEqual({ kind: 'defer' });
   });
 
   it('slice mode keeps deferring an approved open slice until it merges (#3366)', async () => {
     const reviews = counting(approved());
-    const result = await preflightQueuedIssue(
-      { number: 7, labels: [] },
-      stackDeps({ stackMode: false, getPullReviews: reviews.fn }),
-    );
+    const result = await preflight({ stackMode: false, getPullReviews: reviews.fn });
     expect(result).toEqual({ kind: 'defer' });
     expect(reviews.state.count).toBe(0);
   });
 
   it('adopts before reading reviews when stack auto-merge is ready', async () => {
     const reviews = counting(approved());
-    const result = await preflightQueuedIssue(
-      { number: 7, labels: [] },
-      stackDeps({
-        autoMergeStack: true,
-        getPullReviews: reviews.fn,
-        getPullRefs: async () => ({ headRef: 'b', baseRef: 'main', headSha: 's' }),
-      }),
-    );
+    const result = await preflight({
+      autoMergeStack: true,
+      getPullReviews: reviews.fn,
+      getPullRefs: async () => ({ headRef: 'b', baseRef: 'main', headSha: 's' }),
+    });
     expect(result.kind).toBe('adopt');
     expect(reviews.state.count).toBe(0);
   });
 
   it('builds when auto-merge is on but the base is not main yet and the slice is approved', async () => {
-    const result = await preflightQueuedIssue(
-      { number: 7, labels: [] },
-      stackDeps({ autoMergeStack: true, getPullRefs: async () => ({ headRef: 'b', baseRef: 'x', headSha: 's' }) }),
-    );
+    const result = await preflight({
+      autoMergeStack: true,
+      getPullRefs: async () => ({ headRef: 'b', baseRef: 'x', headSha: 's' }),
+    });
     expect(result).toEqual({ kind: 'build' });
   });
 
   it('parks an auto-merge slice when PR refs cannot be read', async () => {
     const watches = counting('success' as const);
-    const result = await preflightQueuedIssue(
-      { number: 7, labels: [] },
-      stackDeps({
-        autoMergeStack: true,
-        getPullRefs: async () => {
-          throw new Error('refs unavailable');
-        },
-        watch: watches.fn,
-      }),
-    );
+    const result = await preflight({
+      autoMergeStack: true,
+      getPullRefs: async () => {
+        throw new Error('refs unavailable');
+      },
+      watch: watches.fn,
+    });
     expect(result).toEqual({ kind: 'park', reason: 'slice 1/3 PR #501 ref lookup failed: refs unavailable' });
     expect(watches.state.count).toBe(0);
   });
 
   it('parks an auto-merge slice when its CI watch fails', async () => {
     const watched: string[] = [];
-    const watch = async (ref: string): Promise<'success'> => {
-      watched.push(ref);
-      throw new Error('CI unavailable');
-    };
-    const result = await preflightQueuedIssue({ number: 7, labels: [] }, stackDeps({ autoMergeStack: true, watch }));
+    const watch = async (ref: string): Promise<'success'> => (
+      watched.push(ref),
+      Promise.reject(new Error('CI unavailable'))
+    );
+    const result = await preflight({ autoMergeStack: true, watch });
     expect(result).toEqual({ kind: 'park', reason: 'CI watch for slice 1/3 PR #501 failed: CI unavailable' });
     expect(watched).toEqual(['s']);
   });
@@ -212,10 +176,7 @@ describe('stack approval gate (#3366)', () => {
           : [{ user: null, state: 'APPROVED', commit_id: null }],
     });
     let identity = 0;
-    const getAuthenticated = async () => {
-      identity++;
-      return { data: { id: 42 } };
-    };
+    const getAuthenticated = async () => (identity++, { data: { id: 42 } });
     const octokit = reviewOctokit(listReviews, { getAuthenticated });
     const ops = createQueuePreflightOps(octokit, 'o', 'r', { stackMode: true });
     expect(ops.stackMode).toBe(true);
@@ -243,10 +204,7 @@ describe('stack approval gate (#3366)', () => {
       throw Object.assign(new Error('Resource not accessible by integration'), { status: 403 });
     };
     let viewerReads = 0;
-    const graphql = async () => {
-      viewerReads++;
-      return { viewer: { login: 'factory-app[bot]', databaseId: 9001 } };
-    };
+    const graphql = async () => (viewerReads++, { viewer: { login: 'factory-app[bot]', databaseId: 9001 } });
     const octokit = reviewOctokit(
       listReviews,
       { getAuthenticated, getByUsername: async () => ({ data: reviewsBot }) },

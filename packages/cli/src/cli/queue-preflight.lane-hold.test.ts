@@ -2,11 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { StackPullReviews } from '@on-par/factory-core/internal';
 import { preflightQueuedIssue } from './index.js';
 
-const deferrals = () => {
-  const deferred: unknown[][] = [];
-  return { deferred, onDeferred: (...a: unknown[]) => void deferred.push(a) };
-};
-
 describe('queue preflight lane-file hold (#3576)', () => {
   const baseDeps = {
     expectedHeadRepoFullName: 'on-par/software-factory',
@@ -30,15 +25,10 @@ describe('queue preflight lane-file hold (#3576)', () => {
 
   it('defers an issue whose lane-file hold is still live (#3576)', async () => {
     const looked: string[] = [];
-    const { deferred, onDeferred } = deferrals();
-    const readIssueBody = async () => {
-      looked.push('readIssueBody');
-      return '';
-    };
-    const findOpenPR = async () => {
-      looked.push('findOpenPR');
-      return undefined;
-    };
+    const deferred: unknown[][] = [];
+    const onDeferred = (...a: unknown[]) => void deferred.push(a);
+    const readIssueBody = async () => (looked.push('readIssueBody'), '');
+    const findOpenPR = async () => (looked.push('findOpenPR'), undefined);
     const laneFileHold = async () => ({ holder: 3232, file: 'src/a.ts' });
     await expect(
       preflightQueuedIssue(
@@ -60,10 +50,7 @@ describe('queue preflight lane-file hold (#3576)', () => {
     ],
   ])('falls through to the normal decision with %s (#3576)', async (_name, laneFileHold) => {
     const read: number[] = [];
-    const readIssueBody = async (n: number) => {
-      read.push(n);
-      return 'no prerequisites';
-    };
+    const readIssueBody = async (n: number) => (read.push(n), 'no prerequisites');
     await expect(
       preflightQueuedIssue({ number: 7, labels: ['factory:queued'] }, { ...baseDeps, readIssueBody, laneFileHold }),
     ).resolves.toEqual({ kind: 'build' });

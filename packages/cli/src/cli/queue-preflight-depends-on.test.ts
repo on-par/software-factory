@@ -2,11 +2,6 @@ import type { StackPullReviews } from '@on-par/factory-core/internal';
 import { describe, expect, it } from 'vitest';
 import { preflightQueuedIssue } from './index.js';
 
-const deferrals = () => {
-  const deferred: unknown[][] = [];
-  return { deferred, onDeferred: (...a: unknown[]) => void deferred.push(a) };
-};
-
 describe('queue preflight Depends on prerequisites', () => {
   const baseDeps = {
     expectedHeadRepoFullName: 'on-par/software-factory',
@@ -30,15 +25,10 @@ describe('queue preflight Depends on prerequisites', () => {
 
   it('defers a queued issue whose Depends on prerequisite is still open (#3915)', async () => {
     const looked: string[] = [];
-    const { deferred, onDeferred } = deferrals();
-    const findSlicePlan = async () => {
-      looked.push('findSlicePlan');
-      return { status: 'not-found' as const };
-    };
-    const findOpenPR = async () => {
-      looked.push('findOpenPR');
-      return undefined;
-    };
+    const deferred: unknown[][] = [];
+    const onDeferred = (...a: unknown[]) => void deferred.push(a);
+    const findSlicePlan = async () => (looked.push('findSlicePlan'), { status: 'not-found' as const });
+    const findOpenPR = async () => (looked.push('findOpenPR'), undefined);
     const result = await preflightQueuedIssue(
       { number: 3893, labels: [] },
       {
