@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { getFactoryPaths } from '@on-par/factory-core';
 import { nextRecheckAt, readAwaitingCi, resolveAwaitingCiCapMs, upsertAwaitingCi } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { recheckDueAwaitingCi, type AwaitingCiLaneOps } from './awaiting-ci-recheck.js';
 import { AwaitingCiError } from './land-pr.js';
@@ -25,7 +25,10 @@ async function awaitingCiLane(capHours?: number) {
   const parkedIssues: string[] = [];
   const released: Array<[number, string]> = [];
   const verdicts: Array<'pending' | 'green'> = [];
-  const merge = vi.fn(async () => {});
+  const merged: Array<[unknown, string]> = [];
+  const merge = async (rec: unknown, sha: string) => {
+    merged.push([rec, sha]);
+  };
   const recheck = (ops: AwaitingCiLaneOps) =>
     recheckDueAwaitingCi({
       ...ops,
@@ -56,23 +59,32 @@ async function awaitingCiLane(capHours?: number) {
     recordAwaitingCi: (rec) => upsertAwaitingCi(file, rec),
     reapWorktree: async () => {},
   });
-  return { clock, t0, file, events, parkedIssues, released, verdicts, merge, recheck };
+  return { clock, t0, file, events, parkedIssues, released, verdicts, merged, recheck };
 }
 
 describe('runLane awaiting-ci (#3208)', () => {
   it.each([false, true])('continues after reap and sweep failures when park release fails: %s', async (failRelease) => {
     const dir = dirs.makeSync('lane-awaiting-ci-errors-');
     const paths = getFactoryPaths(dir);
-    const emitEvent = vi.fn();
-    const releaseIssue = vi.fn(async () => {
+    const events: Array<{ file: string; type: string; issue: number | string; msg: string; data: unknown }> = [];
+    const emitEvent = (file: string, type: string, issue: number | string, msg: string, data?: unknown) => {
+      events.push({ file, type, issue, msg, data });
+    };
+    const released: Array<[number, string]> = [];
+    const releaseIssue = async (issue: number, outcome: string) => {
+      released.push([issue, outcome]);
       if (failRelease) throw new Error('label unavailable');
-    });
-    const reapWorktree = vi.fn(async () => {
+    };
+    const reaped: number[] = [];
+    const reapWorktree = async (issue: number) => {
+      reaped.push(issue);
       throw new Error('reap failed');
-    });
-    const sweepFinished = vi.fn(async () => {
+    };
+    const swept: number[] = [];
+    const sweepFinished = async (issue: number) => {
+      swept.push(issue);
       throw new Error('sweep failed');
-    });
+    };
     await runLane('app', [], '/repo', 'o/r', paths, {
       pathExists: () => false,
       emitEvent,
@@ -87,23 +99,19 @@ describe('runLane awaiting-ci (#3208)', () => {
         );
       },
     });
-    expect(reapWorktree).toHaveBeenCalledWith(9);
-    expect(sweepFinished).toHaveBeenCalledWith(9);
-    expect(releaseIssue).toHaveBeenCalledWith(9, 'parked');
-    expect(emitEvent).toHaveBeenCalledWith(
-      paths.events,
-      failRelease ? 'fail' : 'parked',
-      9,
-      expect.any(String),
-      expect.any(Object),
+    expect(reaped).toContain(9);
+    expect(swept).toContain(9);
+    expect(released).toContainEqual([9, 'parked']);
+    expect(events).toContainEqual(
+      expect.objectContaining({ file: paths.events, type: failRelease ? 'fail' : 'parked', issue: 9 }),
     );
-    expect(emitEvent).toHaveBeenCalledWith(
-      paths.events,
-      'lane-done',
-      'app',
-      expect.stringContaining(failRelease ? '0 parked' : '1 parked'),
-      { lane: 'app' },
-    );
+    expect(events).toContainEqual({
+      file: paths.events,
+      type: 'lane-done',
+      issue: 'app',
+      msg: expect.stringContaining(failRelease ? '0 parked' : '1 parked'),
+      data: { lane: 'app' },
+    });
   });
   it('a PR whose CI never started waits as awaiting-ci and merges when CI arrives late', async () => {
     const lane = await awaitingCiLane();
@@ -115,7 +123,13 @@ describe('runLane awaiting-ci (#3208)', () => {
     expect(rec.nextRecheckAt).toBe(lane.t0 + 2 * MIN);
     expect(nextRecheckAt(lane.t0, 3)).toBe(lane.t0 + 45 * MIN);
 
-    const ops: AwaitingCiLaneOps = { park: vi.fn(), emit: () => {} };
+    const parks: unknown[][] = [];
+    const ops: AwaitingCiLaneOps = {
+      park: async (...a: unknown[]) => {
+        parks.push(a);
+      },
+      emit: () => {},
+    };
     lane.verdicts.push('pending', 'pending', 'green');
     const due: number[] = [];
     for (const offset of [2 * MIN, 5 * MIN, 15 * MIN]) {
@@ -124,9 +138,9 @@ describe('runLane awaiting-ci (#3208)', () => {
       due.push(...(await readAwaitingCi(lane.file)).map((r) => r.nextRecheckAt - lane.t0));
     }
     expect(due).toEqual([5 * MIN, 15 * MIN]);
-    expect(lane.merge).toHaveBeenCalledWith(expect.objectContaining({ issue: 5 }), 'abc');
+    expect(lane.merged).toEqual([[expect.objectContaining({ issue: 5 }), 'abc']]);
     expect(await readAwaitingCi(lane.file)).toEqual([]);
-    expect(ops.park).not.toHaveBeenCalled();
+    expect(parks).toEqual([]);
   });
 
   it.each([
@@ -134,13 +148,16 @@ describe('runLane awaiting-ci (#3208)', () => {
     [2, 2],
   ])('an awaiting-ci PR with no checks past the cap parks as ci-never-started (cap hours %s)', async (cap, hours) => {
     const lane = await awaitingCiLane(cap);
-    const park = vi.fn(async () => {});
+    const parks: unknown[][] = [];
+    const park = async (...a: unknown[]) => {
+      parks.push(a);
+    };
     lane.clock.t = lane.t0 + hours * HOUR - MIN;
     await lane.recheck({ park, emit: () => {} });
-    expect(park).not.toHaveBeenCalled();
+    expect(parks).toEqual([]);
     lane.clock.t = lane.t0 + hours * HOUR + 30 * MIN;
     await lane.recheck({ park, emit: () => {} });
-    expect(park).toHaveBeenCalledWith(expect.objectContaining({ issue: 5 }), 'ci-never-started', expect.any(String));
+    expect(parks).toEqual([[expect.objectContaining({ issue: 5 }), 'ci-never-started', expect.any(String)]]);
     expect(await readAwaitingCi(lane.file)).toEqual([]);
   });
 

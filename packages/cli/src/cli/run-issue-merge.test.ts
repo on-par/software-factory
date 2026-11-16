@@ -17,8 +17,10 @@ import {
   MergeGatedError,
 } from './land-pr.js';
 import { BaseCiPendingError } from './merge-base-gate.js';
+import { captureConsole } from './test-support/console-capture.js';
 import {
   MERGE_EXIT,
+  type DriveToMergeDeps,
   type DriveToMergeInput,
   driveToMerge,
   exitForMerge,
@@ -40,14 +42,23 @@ const input = (extra: Partial<DriveToMergeInput> = {}): DriveToMergeInput => ({
 
 afterEach(() => vi.restoreAllMocks());
 
+function recordWaitMerge(impl: () => Promise<void> = async () => {}) {
+  const calls: unknown[][] = [];
+  const waitMerge = (async (...a: unknown[]) => {
+    calls.push(a);
+    return impl();
+  }) as NonNullable<DriveToMergeDeps['waitMerge']>;
+  return { waitMerge, calls };
+}
+
 describe('driveToMerge', () => {
   it('merges a green ungated PR and returns merged', async () => {
-    const waitMerge = vi.fn(async (..._a: any[]) => {});
+    const { waitMerge, calls } = recordWaitMerge();
     const result = await driveToMerge(input(), { waitMerge });
     expect(result).toMatchObject({ kind: 'merged', prNumber: 55 });
-    expect(waitMerge.mock.calls[0]?.[0]).toBe(9);
-    expect(waitMerge.mock.calls[0]?.[1]).toBe('ship-it/9-x');
-    const deps = waitMerge.mock.calls[0]?.[5] as any;
+    expect(calls[0]?.[0]).toBe(9);
+    expect(calls[0]?.[1]).toBe('ship-it/9-x');
+    const deps = calls[0]?.[5] as any;
     expect(deps).toMatchObject({ landBranch: 'ship-it/9-x', holdWhenGated: true, mergeOverrides: { auto: true } });
     expect(deps.mergeOverrides.admin).toBeUndefined();
     expect(deps.issueless).toBeUndefined();
@@ -55,9 +66,9 @@ describe('driveToMerge', () => {
   });
 
   it('forwards issueless for briefs', async () => {
-    const waitMerge = vi.fn(async (..._a: any[]) => {});
+    const { waitMerge, calls } = recordWaitMerge();
     await driveToMerge(input({ issueless: true }), { waitMerge });
-    expect((waitMerge.mock.calls[0]![5] as any).issueless).toBe(true);
+    expect((calls[0]![5] as any).issueless).toBe(true);
   });
 
   it('a high-risk hold exits held and names the risk gate', async () => {
@@ -70,21 +81,24 @@ describe('driveToMerge', () => {
   });
 
   it('a no-auto-merge label exits held immediately instead of polling', async () => {
-    const sleep = vi.fn(async (..._a: any[]) => {});
-    const waitMerge = vi.fn(async () => {
+    const slept: number[] = [];
+    const sleep = async (ms: number) => {
+      slept.push(ms);
+    };
+    const { waitMerge, calls } = recordWaitMerge(async () => {
       throw new MergeGatedError('gated', 9, 0, 'no-auto-merge');
     });
     const result = await driveToMerge(input(), { waitMerge, sleep });
     expect(result).toMatchObject({ kind: 'held', gate: 'no-auto-merge', prNumber: 55 });
-    expect(sleep).not.toHaveBeenCalled();
-    expect(waitMerge).toHaveBeenCalledTimes(1);
+    expect(slept).toEqual([]);
+    expect(calls).toHaveLength(1);
   });
 
   it('a draft PR exits held without landing', async () => {
-    const waitMerge = vi.fn();
+    const { waitMerge, calls } = recordWaitMerge();
     const outcome = { state: 'ready', route, branch: 'b', reworkRounds: 0, prNumber: 3, draft: true } as const;
     expect(await driveToMerge(input({ outcome }), { waitMerge })).toMatchObject({ kind: 'held', gate: 'draft' });
-    expect(waitMerge).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
   });
 
   it('a non-final stack slice exits held', async () => {
@@ -96,12 +110,12 @@ describe('driveToMerge', () => {
   });
 
   it('red CI exits ci-failed and never merges even with admin', async () => {
-    const waitMerge = vi.fn(async (..._a: any[]) => {
+    const { waitMerge, calls } = recordWaitMerge(async () => {
       throw new CiFailedError('red', 55);
     });
     const result = await driveToMerge(input({ admin: true }), { waitMerge });
     expect(result).toMatchObject({ kind: 'ci-failed', prNumber: 55 });
-    expect((waitMerge.mock.calls[0]![5] as any).mergeOverrides).toEqual({ auto: true, admin: true });
+    expect((calls[0]![5] as any).mergeOverrides).toEqual({ auto: true, admin: true });
     expect(() => exitForMerge(result, 'x')).toThrow(expect.objectContaining({ code: MERGE_EXIT.ciFailed }));
   });
 
@@ -114,15 +128,15 @@ describe('driveToMerge', () => {
 
   it('a ci-failed park after SHIP CI rework exits ci-failed', async () => {
     const outcome = { state: 'parked', reason: 'ci-failed', prNumber: 8 } as const;
-    const waitMerge = vi.fn();
+    const { waitMerge, calls } = recordWaitMerge();
     expect(await driveToMerge(input({ outcome }), { waitMerge })).toMatchObject({ kind: 'ci-failed', prNumber: 8 });
-    expect(waitMerge).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
     const infra = { state: 'parked', reason: 'ci-infra' } as const;
     expect((await driveToMerge(input({ outcome: infra }), { waitMerge })).kind).toBe('ci-failed');
   });
 
   it('a park before any PR exits failed-before-pr without landing', async () => {
-    const waitMerge = vi.fn();
+    const { waitMerge, calls } = recordWaitMerge();
     const outcomes: any[] = [
       undefined,
       { state: 'parked', reason: 'fail' },
@@ -138,27 +152,29 @@ describe('driveToMerge', () => {
     const withPr = await driveToMerge(input({ outcome: outcomes[2] }), { waitMerge });
     expect(withPr).toMatchObject({ prNumber: 4 });
     expect(withPr.detail).toContain('escalate');
-    expect(waitMerge).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
   });
 
   it('CI still pending at the deadline exits timed-out', async () => {
     let t = 0;
-    const sleep = vi.fn(async (ms: number) => {
+    const slept: number[] = [];
+    const sleep = async (ms: number) => {
+      slept.push(ms);
       t += ms;
-    });
+    };
     const errors = [
       new AwaitingCiError('pending', 55, 'sha'),
       new CiUnverifiedError('unk', 55),
       new BaseCiPendingError(),
     ];
     let n = 0;
-    const waitMerge = vi.fn(async () => {
+    const { waitMerge, calls } = recordWaitMerge(async () => {
       throw errors[n++ % 3];
     });
     const result = await driveToMerge(input({ timeoutMs: 150 }), { waitMerge, now: () => t, sleep, pollMs: 100 });
     expect(result).toMatchObject({ kind: 'timed-out', prNumber: 55 });
-    expect(sleep).toHaveBeenCalledTimes(2);
-    expect(waitMerge).toHaveBeenCalledTimes(3);
+    expect(slept).toEqual([100, 100]);
+    expect(calls).toHaveLength(3);
   });
 
   it('retries a pending CI until it turns green', async () => {
@@ -172,15 +188,17 @@ describe('driveToMerge', () => {
 
   it('a land that keeps deferring retries until the deadline, then exits land-deferred with the count', async () => {
     let t = 0;
-    const sleep = vi.fn(async (ms: number) => {
+    const slept: number[] = [];
+    const sleep = async (ms: number) => {
+      slept.push(ms);
       t += ms;
-    });
+    };
     const waitMerge = vi.fn(async () => {
       throw new LandDeferredError('base kept moving', 55, 'ship-it/9-x');
     });
     const result = await driveToMerge(input({ timeoutMs: 150 }), { waitMerge, now: () => t, sleep, pollMs: 100 });
     expect(result).toMatchObject({ kind: 'land-deferred', prNumber: 55, deferrals: 3, detail: 'base kept moving' });
-    expect(sleep).toHaveBeenCalledTimes(2);
+    expect(slept).toHaveLength(2);
   });
 
   it('an aborted wait exits timed-out', async () => {
@@ -204,12 +222,12 @@ describe('driveToMerge', () => {
   });
 
   it('defaults the deadline to the caller-supplied timeout', async () => {
-    const waitMerge = vi.fn(async () => {
+    const { waitMerge, calls } = recordWaitMerge(async () => {
       throw new AwaitingCiError('pending', 55, 'sha');
     });
-    const result = await driveToMerge(input({ timeoutMs: 0 }), { waitMerge, now: () => 5, sleep: vi.fn() });
+    const result = await driveToMerge(input({ timeoutMs: 0 }), { waitMerge, now: () => 5, sleep: async () => {} });
     expect(result.kind).toBe('timed-out');
-    expect(waitMerge).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(1);
   });
 });
 
@@ -235,9 +253,9 @@ describe('parseMergeTimeout', () => {
 
 describe('exitForMerge', () => {
   it('exitForMerge does not throw for merged', () => {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { lines } = captureConsole('log');
     expect(() => exitForMerge({ kind: 'merged', prNumber: 55, detail: 'merged' }, 'issue #9')).not.toThrow();
-    expect(log.mock.calls[0]?.[0]).toContain('merged PR #55 for issue #9');
+    expect(lines[0]).toContain('merged PR #55 for issue #9');
   });
 
   it('maps each non-merged kind to its code', () => {

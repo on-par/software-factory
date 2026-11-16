@@ -1,19 +1,33 @@
 // packages/cli/src/cli/run-issue-stack-flags.test.ts — `factory run-issue --stack` flag handling (#3798)
 import { describe, expect, it, vi } from 'vitest';
 
-import {
-  errored,
-  h,
-  installShipHarness,
-  logged,
-  phases,
-  runMainWith,
-  setupWorktree,
-} from './test-support/ship-harness.js';
+import type { CliDeps } from './index.js';
+import { errored, h, installShipHarness, logged, runMainWith } from './test-support/ship-harness.js';
 
 installShipHarness();
 
 const runMain = (...args: string[]) => runMainWith(undefined, ...args);
+
+type PlanOpts = Parameters<NonNullable<CliDeps['planPhase']>>[0];
+
+function recordPlans() {
+  const planOpts: PlanOpts[] = [];
+  const deps: CliDeps = {
+    planPhase: async (o) => {
+      planOpts.push(o);
+      return h.planResult;
+    },
+  };
+  return { planOpts, deps };
+}
+
+function recordStarts() {
+  const starts: Array<string | undefined> = [];
+  h.setupWorktreeImpl = async (_r, _b, _w, start) => {
+    starts.push(start);
+  };
+  return starts;
+}
 
 describe('run-issue --stack (#3798)', () => {
   it('--stack --no-pr exits 2 with a one-line error', async () => {
@@ -54,8 +68,9 @@ describe('run-issue --stack (#3798)', () => {
 
   it('--size-gate stack passes sizeGateMode stack to planPhase', async () => {
     h.octokit.request = vi.fn().mockResolvedValue({ data: [] });
-    await runMain('run-issue', '5', '--size-gate', 'stack');
-    const call = phases.planPhase.mock.calls.at(-1)?.[0];
+    const r = recordPlans();
+    await runMainWith(r.deps, 'run-issue', '5', '--size-gate', 'stack');
+    const call = r.planOpts.at(-1);
     expect(call?.sizeGateMode).toBe('stack');
     expect(call?.enforceSizeGate).toBe(true);
   });
@@ -64,17 +79,21 @@ describe('run-issue --stack (#3798)', () => {
     h.octokit.request = vi.fn(async (_route: string, params: { issue_number: number }) => ({
       data: params.issue_number === 5 ? [{ number: 4, state: 'open', repository: { full_name: h.ghRepo } }] : [],
     }));
-    h.octokit.rest.issues.get.mockImplementation(async ({ issue_number }: { issue_number: number }) => ({
-      data: { title: `Issue ${issue_number}`, body: `Work ${issue_number}` },
-    }));
-    const result = await runMain('run-issue', '5', '--stack', '--base-branch', 'main');
+    const fetched: number[] = [];
+    h.octokit.rest.issues.get.mockImplementation(async ({ issue_number }: { issue_number: number }) => {
+      fetched.push(issue_number);
+      return {
+        data: { title: `Issue ${issue_number}`, body: `Work ${issue_number}` },
+      };
+    });
+    const r = recordPlans();
+    const starts = recordStarts();
+    const result = await runMainWith(r.deps, 'run-issue', '5', '--stack', '--base-branch', 'main');
     expect(result.exited).toBe(false);
-    expect(
-      h.octokit.rest.issues.get.mock.calls.map((call: [{ issue_number: number }]) => call[0].issue_number),
-    ).toEqual(expect.arrayContaining([4, 5]));
-    expect(phases.planPhase.mock.calls.map(([opts]) => opts.parkOverBudget)).toEqual([true, true]);
-    expect(setupWorktree.mock.calls[0]?.[3]).toBe('origin/main');
-    expect(setupWorktree.mock.calls[1]?.[3]).toContain('origin/');
+    expect(fetched).toEqual(expect.arrayContaining([4, 5]));
+    expect(r.planOpts.map((o) => o.parkOverBudget)).toEqual([true, true]);
+    expect(starts[0]).toBe('origin/main');
+    expect(starts[1]).toContain('origin/');
   });
 
   it('parks an over-budget chain member and skips later issues', async () => {
@@ -82,19 +101,21 @@ describe('run-issue --stack (#3798)', () => {
       data: params.issue_number === 5 ? [{ number: 4, state: 'open' }] : [],
     }));
     h.planResult = { ok: false, route: 'claude', escalate: 'plan scope exceeds the bounded-build budget' };
-    const result = await runMain('run-issue', '5', '--size-gate', 'stack');
+    const r = recordPlans();
+    const result = await runMainWith(r.deps, 'run-issue', '5', '--size-gate', 'stack');
     expect(result.code).toBe(1);
-    expect(phases.planPhase).toHaveBeenCalledTimes(1);
-    expect(phases.planPhase.mock.calls[0]?.[0].parkOverBudget).toBe(true);
+    expect(r.planOpts).toHaveLength(1);
+    expect(r.planOpts[0]?.parkOverBudget).toBe(true);
     expect(logged()).toContain('issue #5 skipped');
   });
 
   it('--stack --base-branch starts the first run from origin/<base>', async () => {
     h.octokit.request = vi.fn().mockResolvedValue({ data: [] });
     h.octokit.rest.issues.listComments.mockResolvedValue({ data: [] });
+    const starts = recordStarts();
     const res = await runMain('run-issue', '5', '--stack', '--base-branch', 'feat/x');
 
     expect(res.exited).toBe(false);
-    expect(setupWorktree.mock.calls[0]?.[3]).toBe('origin/feat/x');
+    expect(starts[0]).toBe('origin/feat/x');
   });
 });
