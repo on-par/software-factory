@@ -145,15 +145,16 @@ describe('runMigrate', () => {
   it('round-trips effective config without a post-migration deprecation warning', async () => {
     const repoRoot = tempRepo();
     writeV1Fixture(repoRoot);
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const warnings: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => warnings.push(args.join(' ')));
     const before = effective(repoRoot);
-    expect(warn).toHaveBeenCalledOnce();
+    expect(warnings).toHaveLength(1);
 
     await runMigrate(repoRoot);
-    warn.mockClear();
+    warnings.length = 0;
 
     expect(effective(repoRoot)).toEqual(before);
-    expect(warn).not.toHaveBeenCalled();
+    expect(warnings).toEqual([]);
   });
 
   it('is idempotent and dry-run writes nothing', async () => {

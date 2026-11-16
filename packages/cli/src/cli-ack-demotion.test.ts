@@ -10,7 +10,7 @@ import { main } from './cli/index.js';
 const tmp = createTempDirs();
 let repo: string;
 let cwd: string;
-let logSpy: ReturnType<typeof vi.spyOn>;
+let logLines: string[];
 
 beforeEach(() => {
   cwd = process.cwd();
@@ -18,7 +18,8 @@ beforeEach(() => {
   execSync('git init -q', { cwd: repo });
   mkdirSync(join(repo, '.factory', 'state'), { recursive: true });
   process.chdir(repo);
-  logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  logLines = [];
+  vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => logLines.push(args.join(' ')));
 });
 
 afterEach(async () => {
@@ -27,7 +28,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-const logged = () => logSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+const logged = () => logLines.join('\n');
 
 describe('factory classifier ack-demotion (#1959)', () => {
   it('says there is nothing to acknowledge', async () => {

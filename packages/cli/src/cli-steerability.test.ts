@@ -10,8 +10,7 @@ import { main } from './cli/index.js';
 const tmp = createTempDirs();
 let repo: string;
 let cwd: string;
-let logSpy: ReturnType<typeof vi.spyOn>;
-let errSpy: ReturnType<typeof vi.spyOn>;
+const logLines: string[] = [];
 
 beforeEach(() => {
   cwd = process.cwd();
@@ -19,8 +18,9 @@ beforeEach(() => {
   execSync('git init -q', { cwd: repo });
   mkdirSync(join(repo, '.factory', 'state', 'runs'), { recursive: true });
   process.chdir(repo);
-  logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-  errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  logLines.length = 0;
+  vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => logLines.push(args.join(' ')));
+  vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => logLines.push(args.join(' ')));
   process.exitCode = undefined;
 });
 
@@ -31,8 +31,7 @@ afterEach(async () => {
   process.exitCode = undefined;
 });
 
-const logged = () => logSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
-const errored = () => errSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+const logged = () => logLines.join('\n');
 const runMain = (...args: string[]) => main(['node', 'factory', ...args]);
 
 function seedRun(issue: number, lane: string, steerTs: string[]) {
@@ -91,13 +90,13 @@ describe('report --steerability (#3403)', () => {
   it('without --steerability exits 2', async () => {
     await runMain('report');
     expect(process.exitCode).toBe(2);
-    expect(errored()).toContain('factory: report requires --steerability');
+    expect(logged()).toContain('factory: report requires --steerability');
   });
 
   it('classifier report includes the steerability section and --json carries steerability', async () => {
     await runMain('classifier', 'report');
     expect(logged()).toContain('Steerability (steers per merged PR):');
-    logSpy.mockClear();
+    logLines.length = 0;
     await runMain('classifier', 'report', '--json');
     expect(JSON.parse(logged().trim()).steerability.schemaVersion).toBe(1);
   });

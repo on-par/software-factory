@@ -250,22 +250,21 @@ describe('cli', () => {
 
     it('does nothing when the proxy feature is disabled', async () => {
       const events: any[] = [];
-      const createProxy = vi.fn();
-      const result = await startLaneProxy(
-        paths,
-        { ...settings, enabled: false },
-        { createProxy, emitEvent: (...args: any[]) => events.push(args) },
-      );
+      const createProxy = (): never => {
+        throw new Error('createProxy must not run when disabled');
+      };
+      const emitEvent = (...args: any[]) => events.push(args);
+      const result = await startLaneProxy(paths, { ...settings, enabled: false }, { createProxy, emitEvent });
 
       expect(result.proxy).toBeUndefined();
-      expect(createProxy).not.toHaveBeenCalled();
       expect(events).toHaveLength(0);
     });
 
     it('starts the proxy, writes proxy state, and emits exactly one environment_proxy event on success', async () => {
       const events: any[] = [];
       const stubProxy = { server: {} as any, port: 80, start: async () => 80, stop: async () => {} };
-      const createProxy = vi.fn(() => stubProxy);
+      const proxyCalls: unknown[] = [];
+      const createProxy = (opts: unknown) => (proxyCalls.push(opts), stubProxy);
 
       const result = await startLaneProxy(paths, settings, {
         createProxy,
@@ -273,11 +272,7 @@ describe('cli', () => {
       });
 
       expect(result.proxy).toBe(stubProxy);
-      expect(createProxy).toHaveBeenCalledWith({
-        registryFile: paths.ports,
-        domain: 'factory.localhost',
-        port: 80,
-      });
+      expect(proxyCalls).toEqual([{ registryFile: paths.ports, domain: 'factory.localhost', port: 80 }]);
       expect(events).toEqual([
         [paths.events, 'environment_proxy', 'all', expect.stringContaining('lane proxy listening on 127.0.0.1:80')],
       ]);
@@ -377,17 +372,18 @@ describe('cli', () => {
     });
 
     it('returns undefined and logs a skip for a docker-sandbox lane, never reaching acquirePortLease', () => {
-      const log = vi.fn();
+      const logged: unknown[][] = [];
+      const log = (...args: unknown[]) => logged.push(args);
 
       const acquirer = resolveEnvironmentAcquirer(
         baseOpts({ laneSandboxRuntime: 'docker-sandbox', worktree: '/repo/.worktrees/654', log }),
       );
 
       expect(acquirer).toBeUndefined();
-      expect(log).toHaveBeenCalledWith(
+      expect(logged).toContainEqual([
         'environment_lease',
         expect.stringContaining('docker-sandbox lane /repo/.worktrees/654 binds its port inside its own microVM'),
-      );
+      ]);
       expect(readPortLeases(paths.ports)).toEqual([]);
     });
 
@@ -2701,8 +2697,10 @@ describe('cli', () => {
     };
 
     it('preflight defers a queued issue whose Prerequisite is still open (#3258 on 10/19)', async () => {
-      const touched = vi.fn();
-      const events = vi.fn();
+      const touched: string[] = [];
+      const untouched = (name: string) => async (): Promise<never> =>
+        Promise.reject(new Error(String(touched.push(name)) + name));
+      const deferred: unknown[][] = [];
       await expect(
         preflightQueuedIssue(
           { number: 3258, labels: [] },
@@ -2710,15 +2708,15 @@ describe('cli', () => {
             ...preflightDeps,
             readIssueBody: async () => 'Prerequisite: #3256',
             getPrerequisiteState: async () => ({ state: 'open' as const, mergedClosingPr: false }),
-            findSlicePlan: touched,
-            findOpenPR: touched,
-            watch: touched,
-            onDeferred: events,
+            findSlicePlan: untouched('findSlicePlan'),
+            findOpenPR: untouched('findOpenPR'),
+            watch: untouched('watch'),
+            onDeferred: (...args: unknown[]) => deferred.push(args),
           },
         ),
       ).resolves.toEqual({ kind: 'defer' });
-      expect(events).toHaveBeenCalledWith(3258, 'waiting for prerequisites: #3256', 'open-prerequisites');
-      expect(touched).not.toHaveBeenCalled();
+      expect(deferred).toEqual([[3258, 'waiting for prerequisites: #3256', 'open-prerequisites']]);
+      expect(touched).toEqual([]);
     });
 
     it('claims through preflight after a prerequisite closes with a merged PR', async () => {
@@ -2764,7 +2762,7 @@ describe('cli', () => {
     });
 
     it('defers prerequisite lookup failures without claiming or parking', async () => {
-      const onDeferred = vi.fn();
+      const deferred: unknown[][] = [];
       const result = await preflightQueuedIssue(
         { number: 3258, labels: [] },
         {
@@ -2773,11 +2771,11 @@ describe('cli', () => {
           getPrerequisiteState: async () => {
             throw new Error('rate limited');
           },
-          onDeferred,
+          onDeferred: (...args: unknown[]) => deferred.push(args),
         },
       );
       expect(result).toEqual({ kind: 'defer' });
-      expect(onDeferred).toHaveBeenCalledWith(3258, expect.stringContaining('rate limited'));
+      expect(deferred).toEqual([[3258, expect.stringContaining('rate limited')]]);
     });
   });
 
@@ -2794,8 +2792,13 @@ describe('cli', () => {
       held: [],
     };
     const cfg = (autoGcOnRun: boolean): any => ({ worktree: { autoGcOnRun, gcTtlDays: 7 } });
+    const emitted: unknown[][] = [];
+    const swept: unknown[] = [];
+    const emitEvent = (...args: unknown[]) => emitted.push(args);
+    const sweep = async (...a: unknown[]) => swept.push(a) && idleReport;
 
     beforeEach(async () => {
+      emitted.length = swept.length = 0;
       tmp = await mkdtemp(join(tmpdir(), 'sweep-between-'));
       lanePaths = {
         events: join(tmp, 'events.ndjson'),
@@ -2809,8 +2812,6 @@ describe('cli', () => {
     });
 
     it('does nothing when worktree.autoGcOnRun is false', async () => {
-      const sweep = vi.fn();
-      const emitEvent = vi.fn();
       const result = await sweepBetweenLaneIssues(7, 'app', tmp, 'o/r', lanePaths, {
         loadConfig: () => cfg(false),
         sweep: sweep as any,
@@ -2819,15 +2820,13 @@ describe('cli', () => {
       });
 
       expect(result).toBe('disabled');
-      expect(sweep).not.toHaveBeenCalled();
-      expect(emitEvent).not.toHaveBeenCalled();
+      expect(swept).toEqual([]);
+      expect(emitted).toEqual([]);
     });
 
     it('skips without stealing when another lane holds the land lock', async () => {
       await mkdir(lanePaths.mergeLock, { recursive: true });
       await writeFile(join(lanePaths.mergeLock, 'pid'), String(process.pid));
-      const sweep = vi.fn();
-      const emitEvent = vi.fn();
       const result = await sweepBetweenLaneIssues(7, 'app', tmp, 'o/r', lanePaths, {
         loadConfig: () => cfg(true),
         sweep: sweep as any,
@@ -2836,13 +2835,12 @@ describe('cli', () => {
       });
 
       expect(result).toBe('land-in-progress');
-      expect(sweep).not.toHaveBeenCalled();
-      expect(emitEvent.mock.calls.filter((c) => c[1] === 'worktree-gc')).toHaveLength(0);
+      expect(swept).toEqual([]);
+      expect(emitted.filter((c) => c[1] === 'worktree-gc')).toHaveLength(0);
       expect(existsSync(lanePaths.mergeLock)).toBe(true);
     });
 
     it('stays quiet when nothing was removed and releases both locks', async () => {
-      const emitEvent = vi.fn();
       const result = await sweepBetweenLaneIssues(7, 'app', tmp, 'o/r', lanePaths, {
         loadConfig: () => cfg(true),
         sweep: (async () => idleReport) as any,
@@ -2851,13 +2849,12 @@ describe('cli', () => {
       });
 
       expect(result).toBe('swept');
-      expect(emitEvent.mock.calls.filter((c) => c[1] === 'worktree-gc')).toHaveLength(0);
+      expect(emitted.filter((c) => c[1] === 'worktree-gc')).toHaveLength(0);
       expect(existsSync(lanePaths.mergeLock)).toBe(false);
       expect(existsSync(lanePaths.gitLock)).toBe(false);
     });
 
     it('logs one worktree-gc event when it removed something', async () => {
-      const emitEvent = vi.fn();
       const log = vi.spyOn(console, 'log').mockImplementation(() => {});
       try {
         const result = await sweepBetweenLaneIssues(7, 'app', tmp, 'o/r', lanePaths, {
@@ -2880,7 +2877,7 @@ describe('cli', () => {
         });
 
         expect(result).toBe('swept');
-        const gc = emitEvent.mock.calls.filter((c) => c[1] === 'worktree-gc');
+        const gc = emitted.filter((c) => c[1] === 'worktree-gc');
         expect(gc).toHaveLength(1);
         expect(gc[0][2]).toBe(7);
         expect(gc[0][3]).toMatch(/removed 1 stale worktree\(s\), kept/);
@@ -2891,7 +2888,6 @@ describe('cli', () => {
     });
 
     it('never throws: a failing sweep becomes a warn event', async () => {
-      const emitEvent = vi.fn();
       const result = await sweepBetweenLaneIssues(7, 'app', tmp, 'o/r', lanePaths, {
         loadConfig: () => cfg(true),
         sweep: (async () => {
@@ -2902,7 +2898,7 @@ describe('cli', () => {
       });
 
       expect(result).toBe('failed');
-      const warns = emitEvent.mock.calls.filter((c) => c[1] === 'warn');
+      const warns = emitted.filter((c) => c[1] === 'warn');
       expect(warns).toHaveLength(1);
       expect(warns[0][3]).toContain('mid-run worktree gc failed: boom');
     });
@@ -2917,56 +2913,58 @@ describe('cli', () => {
       paginate: async (fn: any, args: any) => (await fn(args)).data,
       'issues.listForRepo': listForRepo,
     });
+    const recorders = (source: () => string | undefined) => {
+      let tokenReads = 0;
+      const builtWith: string[] = [];
+      const token = () => (tokenReads++, source());
+      return { builtWith, token, reads: () => tokenReads, octokit: (t: string) => builtWith.push(t) && fake };
+    };
 
     it('--local-queue reads the file and never resolves a token or builds octokit', async () => {
-      const token = vi.fn(() => 'ghp_x');
-      const octokit = vi.fn(() => fake);
+      const { token, octokit, builtWith, reads } = recorders(() => 'ghp_x');
       const reader = tuiQueueReader({ ...base, localQueue: true, token, octokit });
       expect(reader.source).toBe('local file');
       expect(await reader.read()).toEqual({ entries: [] });
-      expect(token).not.toHaveBeenCalled();
-      expect(octokit).not.toHaveBeenCalled();
+      expect(reads()).toBe(0);
+      expect(builtWith).toEqual([]);
     });
 
     it('GitHub path resolves the token up front and builds octokit exactly once across reads', async () => {
-      const token = vi.fn(() => 'ghp_x');
-      const octokit = vi.fn(() => fake);
+      const { token, octokit, builtWith, reads } = recorders(() => 'ghp_x');
       const reader = tuiQueueReader({ ...base, localQueue: false, token, octokit });
-      expect(token).toHaveBeenCalledTimes(1);
-      expect(octokit).toHaveBeenCalledWith('ghp_x');
+      expect(reads()).toBe(1);
+      expect(builtWith).toEqual(['ghp_x']);
       const first = await reader.read();
       await reader.read();
       expect(first.entries).toEqual([{ lane: 'ops', issue: 5, title: 'Five', status: 'queued' }]);
-      expect(octokit).toHaveBeenCalledTimes(1);
-      expect(token).toHaveBeenCalledTimes(1);
+      expect(builtWith).toEqual(['ghp_x']);
+      expect(reads()).toBe(1);
     });
 
     it('with no token at startup, reports it per read and recovers once a token appears', async () => {
       let current: string | undefined = undefined;
-      const token = vi.fn(() => current);
-      const octokit = vi.fn(() => fake);
+      const { token, octokit, builtWith } = recorders(() => current);
       const reader = tuiQueueReader({ ...base, localQueue: false, token, octokit });
       expect(reader.pollMs).toBe(30_000);
       expect(await reader.read()).toEqual({ entries: [], error: 'no GitHub token — run `gh auth login`' });
-      expect(octokit).not.toHaveBeenCalled();
+      expect(builtWith).toEqual([]);
 
       current = 'ghp_late';
       expect((await reader.read()).entries).toHaveLength(1);
-      expect(octokit).toHaveBeenCalledTimes(1);
-      expect(octokit).toHaveBeenCalledWith('ghp_late');
+      expect(builtWith).toEqual(['ghp_late']);
       await reader.read();
-      expect(octokit).toHaveBeenCalledTimes(1);
+      expect(builtWith).toEqual(['ghp_late']);
     });
 
     it('with no detected repo, never touches the token and reports why', async () => {
-      const token = vi.fn(() => 'ghp_x');
+      const { token, reads } = recorders(() => 'ghp_x');
       const reader = tuiQueueReader({ ...base, repo: undefined, localQueue: false, token });
       expect(reader.pollMs).toBe(30_000);
       expect(await reader.read()).toEqual({
         entries: [],
         error: 'repo detection failed — run inside a GitHub-backed checkout',
       });
-      expect(token).not.toHaveBeenCalled();
+      expect(reads()).toBe(0);
     });
   });
 
@@ -3699,7 +3697,8 @@ describe('withRepoRunLock', () => {
   });
 
   it('passes through a non-RunLockHeldError failure unchanged, without emitting an event', async () => {
-    const emitEvent = vi.fn();
+    const emitted: unknown[][] = [];
+    const emitEvent = (...args: unknown[]) => emitted.push(args);
 
     await expect(
       withRepoRunLock(paths, 'factory run', async () => 'unreachable', {
@@ -3710,7 +3709,7 @@ describe('withRepoRunLock', () => {
       }),
     ).rejects.toThrow('boom');
 
-    expect(emitEvent).not.toHaveBeenCalled();
+    expect(emitted).toEqual([]);
   });
 
   it('emits lock-stolen through emitEvent when the injected runLock reclaims a dead holder', async () => {

@@ -1,90 +1,85 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it, type Mock, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { type EntryIo, readCliVersion, runEntry } from './entry.js';
 
-function recordingIo(): EntryIo & { error: Mock<(msg: string) => void>; exit: Mock<(code: number) => void> } {
-  return { error: vi.fn(), exit: vi.fn() };
+function recordingEntry(fail = false) {
+  const events: string[] = [];
+  const io: EntryIo = {
+    error: (m) => events.push(`error:${m}`),
+    exit: (c) => events.push(`exit:${c}`),
+  };
+  const main = async () => {
+    events.push('main');
+    if (fail) throw new Error('boom');
+  };
+  return { io, events, main };
 }
 
 describe('runEntry', () => {
   it('runs main once and does not error or exit when main resolves', async () => {
-    const io = recordingIo();
-    const main = vi.fn(async () => {});
+    const { io, events, main } = recordingEntry();
 
     await runEntry(main, io);
 
-    expect(main).toHaveBeenCalledTimes(1);
-    expect(io.error).not.toHaveBeenCalled();
-    expect(io.exit).not.toHaveBeenCalled();
+    expect(events).toEqual(['main']);
   });
 
   it('prints the error message and exits 1 when main rejects', async () => {
-    const io = recordingIo();
-    const main = vi.fn(async () => {
-      throw new Error('boom');
-    });
+    const { io, events, main } = recordingEntry(true);
 
     await runEntry(main, io);
 
-    expect(io.error).toHaveBeenCalledWith('boom');
-    expect(io.exit).toHaveBeenCalledWith(1);
-    expect(io.error.mock.invocationCallOrder[0]).toBeLessThan(io.exit.mock.invocationCallOrder[0]);
+    expect(events).toEqual(['main', 'error:boom', 'exit:1']);
   });
 
   it('uses the default io when none is given and main resolves', async () => {
-    const main = vi.fn(async () => {});
+    let runs = 0;
 
-    await runEntry(main);
+    await runEntry(async () => {
+      runs += 1;
+    });
 
-    expect(main).toHaveBeenCalledTimes(1);
+    expect(runs).toBe(1);
   });
 
   it('refuses to start on a Node major below the minimum without calling main', async () => {
-    const io = recordingIo();
-    const main = vi.fn(async () => {});
+    const { io, events, main } = recordingEntry();
 
     await runEntry(main, io, 'v20.11.1', undefined, { NVM_DIR: '/x/.nvm' });
 
-    expect(main).not.toHaveBeenCalled();
-    expect(io.error).toHaveBeenCalledTimes(1);
-    expect(io.error.mock.calls[0][0]).toContain('needs Node.js 24 or newer (found v20.11.1)');
-    expect(io.error.mock.calls[0][0]).toContain('nvm install 24');
-    expect(io.exit).toHaveBeenCalledWith(1);
-    expect(io.error.mock.invocationCallOrder[0]).toBeLessThan(io.exit.mock.invocationCallOrder[0]);
+    expect(events).toHaveLength(2);
+    expect(events[0]).toContain('needs Node.js 24 or newer (found v20.11.1)');
+    expect(events[0]).toContain('nvm install 24');
+    expect(events[1]).toBe('exit:1');
   });
 
   it('points at nodejs.org/download when nvm is absent without calling main', async () => {
-    const io = recordingIo();
-    const main = vi.fn(async () => {});
+    const { io, events, main } = recordingEntry();
 
     await runEntry(main, io, 'v20.11.1', '1.2.3', {});
 
-    expect(main).not.toHaveBeenCalled();
-    expect(io.error.mock.calls[0][0]).toContain('https://nodejs.org/download');
-    expect(io.error.mock.calls[0][0]).not.toContain('nvm install');
-    expect(io.exit).toHaveBeenCalledWith(1);
+    expect(events).toEqual([expect.any(String), 'exit:1']);
+    expect(events).not.toContain('main');
+    expect(events[0]).toContain('https://nodejs.org/download');
+    expect(events[0]).not.toContain('nvm install');
   });
 
   it('pins the CLI version in the reinstall line without calling main', async () => {
-    const io = recordingIo();
-    const main = vi.fn(async () => {});
+    const { io, events, main } = recordingEntry();
 
     await runEntry(main, io, 'v20.11.1', '1.2.3');
 
-    expect(main).not.toHaveBeenCalled();
-    expect(io.error.mock.calls[0][0]).toContain('@on-par/factory-cli@1.2.3');
-    expect(io.exit).toHaveBeenCalledWith(1);
+    expect(events).not.toContain('main');
+    expect(events[0]).toContain('@on-par/factory-cli@1.2.3');
+    expect(events[1]).toBe('exit:1');
   });
 
   it('runs main at the minimum version', async () => {
-    const io = recordingIo();
-    const main = vi.fn(async () => {});
+    const { io, events, main } = recordingEntry();
 
     await runEntry(main, io, 'v24.0.0');
 
-    expect(main).toHaveBeenCalledTimes(1);
-    expect(io.error).not.toHaveBeenCalled();
-    expect(io.exit).not.toHaveBeenCalled();
+    expect(events).toEqual(['main']);
   });
 });
 

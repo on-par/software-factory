@@ -10,8 +10,8 @@ import { main } from './cli/index.js';
 const tmp = createTempDirs();
 let repo: string;
 let cwd: string;
-let logSpy: ReturnType<typeof vi.spyOn>;
-let errSpy: ReturnType<typeof vi.spyOn>;
+const logLines: string[] = [];
+const errLines: string[] = [];
 
 beforeEach(() => {
   cwd = process.cwd();
@@ -19,8 +19,9 @@ beforeEach(() => {
   execSync('git init -q', { cwd: repo });
   mkdirSync(join(repo, '.factory', 'state'), { recursive: true });
   process.chdir(repo);
-  logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-  errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  logLines.length = errLines.length = 0;
+  vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => logLines.push(a.join(' ')));
+  vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => errLines.push(a.join(' ')));
   process.exitCode = undefined;
 });
 
@@ -31,8 +32,8 @@ afterEach(async () => {
   process.exitCode = undefined;
 });
 
-const logged = () => logSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
-const errored = () => errSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+const logged = () => logLines.join('\n');
+const errored = () => errLines.join('\n');
 const runMain = (...args: string[]) => main(['node', 'factory', ...args]);
 
 function seedCosts(rows: Array<{ ts: string; issue: string; task: string; model: string; cost: number }>) {
