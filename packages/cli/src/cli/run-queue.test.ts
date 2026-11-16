@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { createRunQueue } from './run-queue.js';
 
@@ -34,7 +34,9 @@ describe('createRunQueue draft adoption wiring (#4039)', () => {
           createLabel: async () => ({}),
         },
         checks: {
-          listForRef: vi.fn(async () => ({ data: { check_runs: [{ status: 'completed', conclusion: 'success' }] } })),
+          listForRef: async ({ ref }: any) => ({
+            data: { check_runs: [{ status: 'completed', conclusion: ref === 'abc123' ? 'success' : 'failure' }] },
+          }),
         },
       },
       paginate: async () => [
@@ -69,6 +71,5 @@ describe('createRunQueue draft adoption wiring (#4039)', () => {
     });
     await queue().claimNext('app');
     expect(probed).toBe('success');
-    expect(octokit.rest.checks.listForRef).toHaveBeenCalledWith(expect.objectContaining({ ref: 'abc123' }));
   });
 });

@@ -9,7 +9,7 @@ import {
 import { fakeOctokit } from '@on-par/factory-core/testing';
 import type { Octokit } from '@octokit/rest';
 import { workKeyFromIssue } from '@on-par/factory-core';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { LaneParkError } from './index.js';
 import { CiInfraError, CiUnverifiedError, LandConflictError } from './land-pr.js';
@@ -23,19 +23,22 @@ type Stored = { id: number; body: string; user: { id: number } };
 
 function commentStoreOctokit(seed: Stored[]) {
   const comments = [...seed];
+  const ops: string[] = [];
   let rejecting = false;
-  const updateComment = vi.fn(async (a: { comment_id: number; body: string }) => {
+  const updateComment = async (a: { comment_id: number; body: string }) => {
+    ops.push(`update:${a.comment_id}`);
     if (rejecting) throw new Error('github 502');
     const hit = comments.find((c) => c.id === a.comment_id);
     if (hit) hit.body = a.body;
     return {};
-  });
-  const createComment = vi.fn(async (a: { body: string }) => {
+  };
+  const createComment = async (a: { body: string }) => {
+    ops.push('create');
     if (rejecting) throw new Error('github 502');
     comments.push({ id: 100 + comments.length, body: a.body, user: { id: 1 } });
     return { data: { id: 100 + comments.length } };
-  });
-  const listComments = vi.fn(async () => ({ data: comments }));
+  };
+  const listComments = async () => (ops.push('list'), { data: comments });
   const octokit = fakeOctokit({
     'users.getAuthenticated': async () => ({ data: { id: 1 } }),
     'issues.listComments': listComments,
@@ -43,7 +46,7 @@ function commentStoreOctokit(seed: Stored[]) {
     'issues.createComment': createComment,
     paginate: async (fn: (a: unknown) => Promise<{ data: unknown[] }>, a: unknown) => (await fn(a)).data,
   }).octokit as Octokit;
-  return { octokit, reject: () => (rejecting = true), comments, updateComment, createComment, listComments };
+  return { octokit, reject: () => (rejecting = true), comments, ops };
 }
 
 const marker = `<!-- factory-issue-state v1 issue:${N} -->`;
@@ -60,8 +63,7 @@ async function seedComment(reason: 'fail' | 'blocked', fake: ReturnType<typeof c
     input: { issue: workKeyFromIssue(N), reason, message: 'old', runId: 'r0', branch: 'old' },
   });
   fake.comments[0].id = 42;
-  fake.updateComment.mockClear();
-  fake.createComment.mockClear();
+  fake.ops.length = 0;
 }
 
 async function park(
@@ -71,7 +73,8 @@ async function park(
   overrides: RunLaneDeps = {},
 ) {
   const events: { kind: string; message: string }[] = [];
-  const releaseIssue = vi.fn(async () => {});
+  const released: Array<[number, string]> = [];
+  const releaseIssue = async (...a: [number, string]) => void released.push(a);
   await runLane('app', [N], '/repo', 'on-par/software-factory', paths, {
     ship: async (_i, _o, ctx) => {
       ship?.(ctx);
@@ -89,7 +92,7 @@ async function park(
     pathExists: () => false,
     ...overrides,
   });
-  return { events, releaseIssue };
+  return { events, released };
 }
 
 describe('land-time park comment', () => {
@@ -100,8 +103,7 @@ describe('land-time park comment', () => {
     expect(stateLine(fake.comments, 'reason')).toBe('ci-failed');
     expect(stateLine(fake.comments, 'branch')).toBe(`factory/${N}-x`);
     expect(stateLine(fake.comments, 'park-sha')).toBe('abc123');
-    expect(fake.updateComment).toHaveBeenCalledWith(expect.objectContaining({ comment_id: 42 }));
-    expect(fake.createComment).not.toHaveBeenCalled();
+    expect(fake.ops.filter((o) => o !== 'list')).toEqual(['update:42']);
     expect(fake.comments).toHaveLength(1);
   });
 
@@ -113,9 +115,8 @@ describe('land-time park comment', () => {
     async (err, reason) => {
       const fake = commentStoreOctokit([]);
       await park(err, fake);
-      expect(fake.createComment).toHaveBeenCalledTimes(1);
-      const body = fake.createComment.mock.calls[0][0].body;
-      expect(body).toContain(marker);
+      expect(fake.ops.filter((o) => o !== 'list')).toEqual(['create']);
+      expect(fake.comments[0].body).toContain(marker);
       expect(stateLine(fake.comments, 'reason')).toBe(reason);
     },
   );
@@ -124,8 +125,8 @@ describe('land-time park comment', () => {
     const fake = commentStoreOctokit([]);
     await seedComment('fail', fake);
     fake.reject();
-    const { events, releaseIssue } = await park(new CiUnverifiedError('CI unverified', 353), fake);
-    expect(releaseIssue).toHaveBeenCalledWith(N, 'parked');
+    const { events, released } = await park(new CiUnverifiedError('CI unverified', 353), fake);
+    expect(released).toEqual([[N, 'parked']]);
     expect(events.some((e) => e.kind === 'parked')).toBe(true);
     expect(events.some((e) => e.kind === 'warn' && e.message.includes('could not post the issue park comment'))).toBe(
       true,
@@ -163,7 +164,8 @@ describe('land-time park comment', () => {
     const fake = commentStoreOctokit([]);
     await seedComment('blocked', fake);
     await park(new CiUnverifiedError('CI unverified', 353), fake);
-    const listBlockedBy = vi.fn(async () => []);
+    const blockedLookups: unknown[] = [];
+    const listBlockedBy = async (...a: unknown[]) => (blockedLookups.push(a), []);
     const client = Object.assign({} as QueueGitHubClient, {
       listOpenIssuesWithLabels: async () => [{ number: N, labels: [PARKED_LABEL] }],
     });
@@ -175,7 +177,7 @@ describe('land-time park comment', () => {
     };
     const out = await pollBlockedParks({ client, owner: 'on-par', repo: 'software-factory', store });
     expect(out).toEqual([{ issue: N, outcome: 'skipped', detail: 'reason ci-failed' }]);
-    expect(listBlockedBy).not.toHaveBeenCalled();
+    expect(blockedLookups).toEqual([]);
   });
 
   it('a runIssue park does not write the comment twice', async () => {
@@ -193,8 +195,6 @@ describe('land-time park comment', () => {
       pathExists: () => false,
     });
     expect(events).toContain('parked');
-    expect(fake.listComments).not.toHaveBeenCalled();
-    expect(fake.updateComment).not.toHaveBeenCalled();
-    expect(fake.createComment).not.toHaveBeenCalled();
+    expect(fake.ops).toEqual([]);
   });
 });

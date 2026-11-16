@@ -114,7 +114,8 @@ describe('withRunReport', () => {
     const s = setup();
     const originalLog = console.log;
     const originalInfo = console.info;
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errLines: unknown[][] = [];
+    vi.spyOn(console, 'error').mockImplementation((...a) => void errLines.push(a));
     let during: typeof console.log | undefined;
     await withRunReport(
       { json: true },
@@ -127,8 +128,8 @@ describe('withRunReport', () => {
       s.deps,
     );
     expect(during).not.toBe(originalLog);
-    expect(err).toHaveBeenCalledWith('progress line');
-    expect(err).toHaveBeenCalledWith('info line');
+    expect(errLines).toContainEqual(['progress line']);
+    expect(errLines).toContainEqual(['info line']);
     expect(console.log).toBe(originalLog);
     expect(console.info).toBe(originalInfo);
     expect(s.out.join('')).not.toContain('progress line');
@@ -205,18 +206,20 @@ describe('withRunReport', () => {
     const s = setup();
     const blocker = join(s.root, 'file');
     writeFileSync(blocker, 'x');
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errLines: unknown[][] = [];
+    vi.spyOn(console, 'error').mockImplementation((...a) => void errLines.push(a));
     await withRunReport({ export: join(blocker, 'sub') }, s.ctx, async () => {}, s.deps);
-    expect(err).toHaveBeenCalledWith(expect.stringContaining('--export failed'));
+    expect(errLines.some(([l]) => String(l).includes('--export failed'))).toBe(true);
   });
 
   it("without --json stdout receives exactly the run's own console.log output", async () => {
     const s = setup();
     const originalLog = console.log;
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logLines: unknown[][] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...a) => void logLines.push(a));
     const spied = console.log;
     await withRunReport({}, s.ctx, async () => console.log('hello'), s.deps);
-    expect(log).toHaveBeenCalledWith('hello');
+    expect(logLines).toEqual([['hello']]);
     expect(console.log).toBe(spied);
     expect(s.out).toEqual([]);
     log.mockRestore();

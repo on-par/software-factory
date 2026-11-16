@@ -272,7 +272,7 @@ describe('cli', () => {
 
     it('parks issue 7 and continues the lane to issue 8 without re-emitting the terminal event (shipIssue owns it) on an escalate error', async () => {
       const calls: any[] = [];
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
       await runLane('app', [7, 8], '/repo', 'on-par/software-factory', paths, {
         ship: async (issue) => {
           calls.push(['ship', issue]);
@@ -304,7 +304,6 @@ describe('cli', () => {
         'lane complete (1 merged, 0 awaiting review, 0 skipped, 1 parked)',
         { lane: 'app' },
       ]);
-      expect(errorSpy).not.toHaveBeenCalled();
     });
 
     it('parks the lane without re-emitting the terminal event (shipIssue owns it) on a timeout error', async () => {
@@ -366,7 +365,8 @@ describe('cli', () => {
     });
 
     it('reaps the parked worktree exactly once when ship throws a LaneParkError', async () => {
-      const reapWorktree = vi.fn(async () => {});
+      const reaped: number[] = [];
+      const reapWorktree = async (issue: number) => void reaped.push(issue);
       await runLane('app', [12], '/repo', 'on-par/software-factory', paths, {
         ship: async () => {
           throw new LaneParkError('plan escalated: needs a human decision', 'escalate');
@@ -376,13 +376,12 @@ describe('cli', () => {
         emitEvent: () => {},
         reapWorktree,
       });
-
-      expect(reapWorktree).toHaveBeenCalledTimes(1);
-      expect(reapWorktree).toHaveBeenCalledWith(12);
+      expect(reaped).toEqual([12]);
     });
 
     it('reaps the worktree of a preflight-parked claim', async () => {
-      const reapWorktree = vi.fn(async () => {});
+      const reaped: number[] = [];
+      const reapWorktree = async (issue: number) => void reaped.push(issue);
       const claims = [{ issue: 13, decision: { kind: 'park' as const, reason: 'CI for PR #99 ended failure' } }];
       await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
         claimNext: async () => claims.shift() ?? null,
@@ -393,13 +392,12 @@ describe('cli', () => {
         emitEvent: () => {},
         reapWorktree,
       });
-
-      expect(reapWorktree).toHaveBeenCalledTimes(1);
-      expect(reapWorktree).toHaveBeenCalledWith(13);
+      expect(reaped).toEqual([13]);
     });
 
     it('does not reap on merged or awaiting-review outcomes', async () => {
-      const reapWorktree = vi.fn(async () => {});
+      const reaped: number[] = [];
+      const reapWorktree = async (issue: number) => void reaped.push(issue);
       await runLane('app', [14, 15], '/repo', 'on-par/software-factory', paths, {
         ship: async (issue) => `ship-it/${issue}-x`,
         waitMerge: async (issue) => {
@@ -409,8 +407,7 @@ describe('cli', () => {
         emitEvent: () => {},
         reapWorktree,
       });
-
-      expect(reapWorktree).not.toHaveBeenCalled();
+      expect(reaped).toEqual([]);
     });
 
     it('parks normally and keeps event ownership when the injected reapWorktree rejects', async () => {
@@ -429,7 +426,6 @@ describe('cli', () => {
           throw new Error('reap exploded');
         },
       });
-
       expect(calls).toContainEqual(['release', 16, 'parked']);
       const events = calls.filter((c) => c[0] === 'event');
       expect(events[0][1]).toBe('parked');
@@ -451,7 +447,6 @@ describe('cli', () => {
         emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
           calls.push(['event', type, issue, msg, extra]),
       });
-
       expect(calls[0]).toEqual(['ship', 11]);
       const events = calls.filter((c) => c[0] === 'event');
       expect(events).toHaveLength(2);

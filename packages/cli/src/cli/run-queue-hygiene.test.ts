@@ -14,6 +14,7 @@ describe('cli', () => {
   describe('run queue hygiene', () => {
     it('unqueues a deferred-only queue and logs queue_deferred_only once (#3660)', async () => {
       rmSync(paths().queue, { force: true });
+      const removed: Array<[number, string]> = [];
       const labelsByIssue = new Map([
         [3460, ['factory:queued', 'factory:lane:app', 'factory:order:1']],
         [3463, ['factory:queued', 'factory:lane:app', 'factory:order:2']],
@@ -34,7 +35,7 @@ describe('cli', () => {
       h.octokit.rest.issues.listLabelsForRepo = vi.fn(async () => ({ data: [] }));
       h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
       h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
-      h.octokit.rest.issues.removeLabel = vi.fn(async () => ({}));
+      h.octokit.rest.issues.removeLabel = vi.fn(async (a: any) => (removed.push([a.issue_number, a.name]), {}));
       h.octokit.graphql = vi.fn(async (query: string) => {
         if (!query.includes('QueuePrerequisite')) {
           return { repository: { pullRequest: { id: 'PR_ID', isDraft: false, mergeStateStatus: 'CLEAN' } } };
@@ -45,9 +46,7 @@ describe('cli', () => {
       const res = await runMain('run');
       expect(res.exited).toBe(false);
       for (const issue_number of [3460, 3463]) {
-        expect(h.octokit.rest.issues.removeLabel).toHaveBeenCalledWith(
-          expect.objectContaining({ issue_number, name: 'factory:queued' }),
-        );
+        expect(removed).toContainEqual([issue_number, 'factory:queued']);
       }
       const lines = readFileSync(paths().events, 'utf-8')
         .split('\n')
@@ -60,6 +59,8 @@ describe('cli', () => {
 
     it('releases an expired GitHub claim at the start of every run cycle and restores factory:queued (#3660)', async () => {
       rmSync(paths().queue, { force: true });
+      const removed: Array<[number, string]> = [];
+      const added: Array<[number, string[]]> = [];
       const expired = `factory:claim-expires:${Math.floor(Date.now() / 1000) - 7200}`;
       const labels = [
         'factory:in-progress',
@@ -74,18 +75,14 @@ describe('cli', () => {
       h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: labels.map((name) => ({ name })) }));
       h.octokit.rest.issues.listLabelsForRepo = vi.fn(async () => ({ data: [] }));
       h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
-      h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
-      h.octokit.rest.issues.removeLabel = vi.fn(async () => ({}));
+      h.octokit.rest.issues.addLabels = vi.fn(async (a: any) => (added.push([a.issue_number, a.labels]), {}));
+      h.octokit.rest.issues.removeLabel = vi.fn(async (a: any) => (removed.push([a.issue_number, a.name]), {}));
 
       await runMain('run');
       for (const name of ['factory:in-progress', 'factory:claimed-by:dead-host-1', expired]) {
-        expect(h.octokit.rest.issues.removeLabel).toHaveBeenCalledWith(
-          expect.objectContaining({ issue_number: 3339, name }),
-        );
+        expect(removed).toContainEqual([3339, name]);
       }
-      expect(h.octokit.rest.issues.addLabels).toHaveBeenCalledWith(
-        expect.objectContaining({ issue_number: 3339, labels: ['factory:queued'] }),
-      );
+      expect(added).toContainEqual([3339, ['factory:queued']]);
       expect(readFileSync(paths().events, 'utf-8')).toContain('"type":"claim_expired_released"');
     });
   });
