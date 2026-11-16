@@ -6,36 +6,36 @@ import { baseChecksVerdict } from './base-health-ci.js';
 import { createMergeBaseGate } from './merge-base-gate.js';
 
 const dirs = createTempDirs();
+const recorder = (logged: string[][] = []) => ({ logged, log: (...a: string[]) => void logged.push(a) });
 afterEach(() => dirs.cleanup());
 
 describe('merge base gate', () => {
   it('uses the default timer before retrying pending CI', async () => {
     vi.useFakeTimers();
     try {
-      const verdict = vi
-        .fn()
-        .mockResolvedValueOnce({ green: false, state: 'pending', reason: 'running' })
-        .mockResolvedValueOnce({ green: true });
+      let polls = 0;
+      const verdict = async () =>
+        (++polls === 1 ? { green: false, state: 'pending', reason: 'running' } : { green: true }) as never;
       const gate = createMergeBaseGate({
         file: join(dirs.makeSync('merge-timer-'), 'state'),
         repo: 'o/r',
-        log: vi.fn(),
+        log: () => {},
         head: async () => 'base',
         verdict,
       });
       const checking = gate.check();
       await vi.advanceTimersByTimeAsync(4_999);
-      expect(verdict).toHaveBeenCalledTimes(1);
+      expect(polls).toBe(1);
       await vi.advanceTimersByTimeAsync(1);
       await expect(checking).resolves.toBeUndefined();
-      expect(verdict).toHaveBeenCalledTimes(2);
+      expect(polls).toBe(2);
     } finally {
       vi.useRealTimers();
     }
   });
   it('waits for pending CI, blocks failure, and clears a recorded pause only on green', async () => {
     const dir = dirs.makeSync('merge-gate-');
-    const log = vi.fn();
+    const { logged, log } = recorder();
     let state: 'green' | 'pending' | 'failed' = 'pending';
     let now = 0;
     const gate = createMergeBaseGate({
@@ -55,19 +55,19 @@ describe('merge base gate', () => {
     state = 'failed';
     await expect(gate.check()).rejects.toThrow();
     await expect(gate.check()).rejects.toThrow();
-    expect(log.mock.calls.filter(([kind]) => kind === 'red-main')).toHaveLength(1);
+    expect(logged.filter(([k]) => k === 'red-main')).toHaveLength(1);
     state = 'pending';
     await expect(gate.check()).rejects.toThrow();
     state = 'green';
     await gate.check();
-    expect(log.mock.calls.filter(([kind]) => kind === 'red-main-cleared')).toHaveLength(1);
+    expect(logged.filter(([k]) => k === 'red-main-cleared')).toHaveLength(1);
   });
   it('leaves pending CI open at the deadline and allows repositories with no code-health checks', async () => {
     let now = 0;
     const gate = createMergeBaseGate({
       file: join(dirs.makeSync('merge-unused-'), 'state.json'),
       repo: 'empty',
-      log: vi.fn(),
+      log: () => {},
       head: async () => 'base',
       verdict: async () => ({ green: false, state: 'pending', reason: 'running' }),
       now: () => now,
@@ -80,7 +80,7 @@ describe('merge base gate', () => {
     const noChecks = createMergeBaseGate({
       file: join(dirs.makeSync('merge-unused-'), 'state.json'),
       repo: 'empty',
-      log: vi.fn(),
+      log: recorder().log,
       head: async () => 'base',
       verdict: async () => ({ green: false, noCodeHealthChecks: true, reason: 'none' }),
     });
@@ -88,7 +88,7 @@ describe('merge base gate', () => {
   });
   it('pauses on a failed descendant and retains the pause across gate instances', async () => {
     const dir = dirs.makeSync('merge-descendant-');
-    const log = vi.fn();
+    const { logged, log } = recorder();
     const opts = {
       file: join(dir, 'state'),
       repo: 'o/r',
@@ -100,11 +100,12 @@ describe('merge base gate', () => {
     createMergeBaseGate(opts).record('merge');
     await expect(createMergeBaseGate(opts).check()).rejects.toThrow('failed');
     await expect(createMergeBaseGate(opts).check()).rejects.toThrow('pause');
-    expect(log).toHaveBeenCalledTimes(1);
+    expect(logged.map(([k]) => k)).toEqual(['red-main']);
   });
   it('fails closed when the base or ancestry lookup fails', async () => {
     const dir = dirs.makeSync('merge-lookup-');
-    const base = { file: join(dir, 'state'), repo: 'o/r', log: vi.fn() };
+    const { logged, log } = recorder();
+    const base = { file: join(dir, 'state'), repo: 'o/r', log };
     const verdict = async () => ({ green: false, state: 'failed' as const, reason: 'failure' });
     const head = async () => {
       throw new Error('offline');
@@ -116,11 +117,12 @@ describe('merge base gate', () => {
     const gate = createMergeBaseGate({ ...base, head: async () => 'child', verdict, descends });
     gate.record('merge');
     await expect(gate.check()).rejects.toThrow('ancestry lookup failed');
-    expect(base.log).not.toHaveBeenCalled();
+    expect(logged).toEqual([]);
   });
   describe('missing required context (#3870)', () => {
     const missing = { green: false, state: 'pending' as const, reason: 'missing test', missing: ['test'] };
-    const gateFor = (verdict: () => Promise<typeof missing>, log = vi.fn()) => {
+    const gateFor = (verdict: () => Promise<typeof missing>) => {
+      const { logged, log } = recorder();
       let now = 0;
       const gate = createMergeBaseGate({
         file: join(dirs.makeSync('merge-missing-'), 'state.json'),
@@ -133,7 +135,7 @@ describe('merge base gate', () => {
           now += ms;
         },
       });
-      return { gate, log, elapsed: () => now };
+      return { gate, logged, elapsed: () => now };
     };
     it('still waits the full deadline when a missing context is mixed with a pending run', async () => {
       const { gate, elapsed } = gateFor(async () => ({ green: false, state: 'pending', reason: 'missing a' }) as never);
@@ -141,20 +143,19 @@ describe('merge base gate', () => {
       expect(elapsed()).toBe(30 * 60_000);
     });
     it("returns to the failed path when the missing context's run appears and fails during the grace", async () => {
-      const verdict = vi
-        .fn()
-        .mockResolvedValueOnce(missing)
-        .mockResolvedValue({ green: false, state: 'failed', reason: 'test failure' });
-      const { gate, log } = gateFor(verdict);
+      let polls = 0;
+      const verdict = async () =>
+        (++polls === 1 ? missing : { green: false, state: 'failed', reason: 'test failure' }) as never;
+      const { gate, logged } = gateFor(verdict);
       await expect(gate.check()).rejects.toThrow('failed');
-      expect(log).not.toHaveBeenCalled();
+      expect(logged).toEqual([]);
     });
     it('still throws the pause when the entry is paused and the verdict is missing-only', async () => {
       const dir = dirs.makeSync('merge-missing-pause-');
       const opts = {
         file: join(dir, 'state.json'),
         repo: 'o/r',
-        log: vi.fn(),
+        log: () => {},
         head: async () => 'child',
         descends: async () => true,
       };
@@ -184,7 +185,7 @@ describe('merge base gate', () => {
     } as never;
     const setup = () => {
       const file = join(dirs.makeSync('merge-skipped-'), 'merge-base-health.json');
-      const log = vi.fn();
+      const { logged, log } = recorder();
       let now = 0;
       const gate = createMergeBaseGate({
         file,
@@ -199,27 +200,26 @@ describe('merge base gate', () => {
         },
       });
       const entry = () => (JSON.parse(readFileSync(file, 'utf8')) as Record<string, { paused?: boolean }>)['o/r'];
-      return { file, log, gate, entry };
+      return { file, logged, gate, entry };
     };
     it.each(['skipped', 'neutral'])(
       'does not pause after a recorded merge when the required check is %s (#3871)',
       async (c) => {
         conclusion = c;
-        const { gate, log, entry } = setup();
+        const { gate, logged, entry } = setup();
         gate.record('aaaa1111');
         await expect(gate.check(false)).resolves.toBeUndefined();
         await expect(gate.check(false)).resolves.toBeUndefined();
-        expect(log.mock.calls.filter(([kind]) => kind === 'red-main')).toHaveLength(0);
+        expect(logged.filter(([k]) => k === 'red-main')).toEqual([]);
         expect(entry()?.paused).not.toBe(true);
       },
     );
     it('clears an existing skipped-reason pause on the next check (#3871)', async () => {
       conclusion = 'skipped';
-      const { file, log, gate, entry } = setup();
+      const { file, logged, gate, entry } = setup();
       writeFileSync(file, JSON.stringify({ 'o/r': { repo: 'o/r', merge: 'aaaa1111', paused: true } }));
       await expect(gate.check(false)).resolves.toBeUndefined();
-      expect(log).toHaveBeenCalledTimes(1);
-      expect(log).toHaveBeenCalledWith('red-main-cleared', expect.any(String));
+      expect(logged).toEqual([['red-main-cleared', expect.any(String)]]);
       expect(entry()?.paused).toBe(false);
     });
     it('still pauses on a failed required check (control)', async () => {

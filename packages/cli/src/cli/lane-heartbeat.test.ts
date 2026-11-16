@@ -7,8 +7,10 @@ import { ClaimLostError, createClaimLease, withHeartbeat } from './lane-heartbea
 const LEASE = 15 * 60 * 1000;
 const TICK = 5 * 60 * 1000;
 
-function leaseAt(clock: { t: number }, onRenewFailed = vi.fn()) {
-  return { lease: createClaimLease(7, { leaseMs: LEASE, now: () => clock.t, onRenewFailed }), onRenewFailed };
+function leaseAt(clock: { t: number }) {
+  const failures: number[] = [];
+  const onRenewFailed = (n: number) => failures.push(n);
+  return { lease: createClaimLease(7, { leaseMs: LEASE, now: () => clock.t, onRenewFailed }), failures };
 }
 
 describe('createClaimLease', () => {
@@ -30,16 +32,16 @@ describe('createClaimLease', () => {
 
   it('a failure before expiry is reported with a count, and a success resets it', () => {
     const clock = { t: 0 };
-    const { lease, onRenewFailed } = leaseAt(clock);
+    const { lease, failures } = leaseAt(clock);
     clock.t = TICK;
     lease.renewFailed('x');
     clock.t = 2 * TICK;
     lease.renewFailed('y');
-    expect(onRenewFailed.mock.calls.map((c) => c[0])).toEqual([1, 2]);
+    expect(failures).toEqual([1, 2]);
     expect(lease.lost).toBeUndefined();
     lease.renewed(true);
     lease.renewFailed('z');
-    expect(onRenewFailed.mock.calls.at(-1)?.[0]).toBe(1);
+    expect(failures.at(-1)).toBe(1);
   });
 
   it('a success extends the confirmed expiry', () => {
@@ -54,13 +56,13 @@ describe('createClaimLease', () => {
 
   it('a failure at the confirmed expiry loses the lease as lapsed, then stops logging', () => {
     const clock = { t: 0 };
-    const { lease, onRenewFailed } = leaseAt(clock);
+    const { lease, failures } = leaseAt(clock);
     clock.t = LEASE;
     lease.renewFailed('x');
     expect(lease.lost?.kind).toBe('lapsed');
     expect(lease.signal.aborted).toBe(true);
     lease.renewFailed('again');
-    expect(onRenewFailed).toHaveBeenCalledTimes(1);
+    expect(failures).toEqual([1]);
   });
 });
 
@@ -70,9 +72,10 @@ describe('withHeartbeat with a lease', () => {
   it('throws without running work when the lease is already lost', async () => {
     const { lease } = leaseAt({ t: 0 });
     lease.renewed(false);
-    const work = vi.fn(async () => 1);
+    let ran = false;
+    const work = async () => ((ran = true), 1);
     await expect(withHeartbeat(7, async () => true, work, lease)).rejects.toBeInstanceOf(ClaimLostError);
-    expect(work).not.toHaveBeenCalled();
+    expect(ran).toBe(false);
   });
 
   it('hands work a never-aborted signal when there is no heartbeat', async () => {

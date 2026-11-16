@@ -27,6 +27,8 @@ class ExitError extends Error {
 }
 
 let exitSpy: any, logSpy: any, errSpy: any;
+let calls: Array<[string, any]> = [];
+const of = (key: string) => calls.filter(([k]) => k === key).map(([, a]) => a);
 const savedEnv: Record<string, string | undefined> = {};
 const tmp = createTempDirs();
 
@@ -74,8 +76,8 @@ function defaultOctokit() {
           data: { head: { sha: 'abc123' }, base: { ref: 'main' }, merge_commit_sha: 'merged', body: 'Closes #5' },
         })),
         listFiles: vi.fn(async () => ({ data: [{ filename: 'docs/x.md' }] })),
-        update: vi.fn(async () => ({})),
-        merge: vi.fn(async () => ({})),
+        update: async (a: any) => (calls.push(['update', a]), {}),
+        merge: async (a: any) => (calls.push(['merge', a]), {}),
       },
       git: { deleteRef: vi.fn(async () => ({})) },
       repos: {
@@ -166,6 +168,7 @@ beforeEach(() => {
     throw new Error('no cli available');
   };
   h.octokit = defaultOctokit();
+  calls = [];
   // landIssue reads the filing policy for the no-auto-merge gate (#1720).
   h.factoryConfig = {
     merge: { auto: false, comment: '' },
@@ -194,7 +197,7 @@ beforeEach(() => {
   exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
     throw new ExitError(code ?? 0);
   }) as any);
-  logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  logSpy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => void calls.push(['log', a.join(' ')]));
   errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
@@ -214,14 +217,11 @@ afterEach(async () => {
 describe('land risk receipt', () => {
   it('publishes the risk receipt on the PR before merging', async () => {
     await runMain('land', '5');
-    const { update, merge } = h.octokit.rest.pulls;
-    expect(update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        pull_number: 77,
-        body: expect.stringMatching(/<!-- factory:risk-receipt v1 -->[\s\S]*\*\*Tier: low\*\*/),
-      }),
-    );
-    expect(update.mock.invocationCallOrder[0]).toBeLessThan(merge.mock.invocationCallOrder[0]);
+    expect(of('update')[0]).toMatchObject({
+      pull_number: 77,
+      body: expect.stringMatching(/<!-- factory:risk-receipt v1 -->[\s\S]*\*\*Tier: low\*\*/),
+    });
+    expect(calls.map(([k]) => k).join()).toMatch(/update.*merge/);
   });
 
   it('still merges when the risk receipt cannot be published', async () => {
@@ -229,7 +229,7 @@ describe('land risk receipt', () => {
       throw new Error('boom');
     });
     await runMain('land', '5');
-    expect(h.octokit.rest.pulls.merge).toHaveBeenCalled();
+    expect(of('merge')).toHaveLength(1);
     const events = readFileSync(paths().events, 'utf-8')
       .trim()
       .split('\n')
@@ -244,15 +244,15 @@ describe('land risk receipt', () => {
       "version: 2\nrisk:\n  rules:\n    - id: sf-docs-high\n      tier: high\n      globs: ['docs/**']\n",
     );
     await runMain('land', '5');
-    expect(logSpy).toHaveBeenCalledWith('risk policy: .factory/config.yaml `risk` (1 rule)');
-    const body = h.octokit.rest.pulls.update.mock.calls[0][0].body;
+    expect(of('log')).toContain('risk policy: .factory/config.yaml `risk` (1 rule)');
+    const body = of('update')[0].body;
     expect(body).toMatch(/\*\*Tier: high\*\*/);
     expect(body).toContain('sf-docs-high');
   });
 
   it('prints that no risk policy is configured', async () => {
     await runMain('land', '5');
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('no risk policy configured'));
-    expect(h.octokit.rest.pulls.update.mock.calls[0][0].body).toMatch(/\*\*Tier: low\*\*/);
+    expect(of('log').join('\n')).toContain('no risk policy configured');
+    expect(of('update')[0].body).toMatch(/\*\*Tier: low\*\*/);
   });
 });

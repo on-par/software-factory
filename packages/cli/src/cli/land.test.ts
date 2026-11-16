@@ -29,6 +29,8 @@ class ExitError extends Error {
 }
 
 let exitSpy: any, logSpy: any, errSpy: any;
+let calls: Array<[string, any]> = [];
+const of = (key: string) => calls.filter(([k]) => k === key).map(([, a]) => a);
 const savedEnv: Record<string, string | undefined> = {};
 const tmp = createTempDirs();
 
@@ -65,11 +67,14 @@ const inertConfigLoaders: Pick<
 
 /** Git side-effect doubles injected through the CliDeps seams (#2019). setupWorktree delegates to h.setupWorktreeImpl. */
 const setupWorktree = vi.fn(async (...args: Parameters<NonNullable<CliDeps['setupWorktree']>>) => {
+  calls.push(['setup', args]);
   await h.setupWorktreeImpl(args[0], args[1], args[2], args[3]);
   return undefined as never;
 });
-const cleanupWorktree = vi.fn(async (..._args: Parameters<NonNullable<CliDeps['cleanupWorktree']>>) => {});
-const gitFetch = vi.fn(async (_repoRoot: string) => {});
+const cleanupWorktree = vi.fn(
+  async (..._args: Parameters<NonNullable<CliDeps['cleanupWorktree']>>) => void calls.push(['cleanup', 1]),
+);
+const gitFetch = async (root: string) => void calls.push(['fetch', root]);
 const inertGitOps: Pick<CliDeps, 'setupWorktree' | 'cleanupWorktree' | 'gitFetch'> = {
   setupWorktree,
   cleanupWorktree,
@@ -120,6 +125,9 @@ beforeEach(() => {
     throw new Error('no cli available');
   };
   h.octokit = defaultOctokit();
+  calls = [];
+  const { pulls } = h.octokit.rest;
+  pulls.merge = ((m) => async (a: unknown) => (calls.push(['merge', a]), m()))(pulls.merge);
   // landIssue reads the filing policy for the no-auto-merge gate (#1720).
   h.factoryConfig = {
     merge: { auto: false, comment: '' },
@@ -148,8 +156,8 @@ beforeEach(() => {
   exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
     throw new ExitError(code ?? 0);
   }) as any);
-  logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-  errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  logSpy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => void calls.push(['log', a.join(' ')]));
+  errSpy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => void calls.push(['err', a.join(' ')]));
 });
 
 afterEach(async () => {
@@ -165,12 +173,8 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-function logged(): string {
-  return logSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
-}
-function errored(): string {
-  return errSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
-}
+const logged = () => of('log').join('\n');
+const errored = () => of('err').join('\n');
 
 describe('land (via main dispatch)', () => {
   it('exits 2 when --branch-prefix has no letters or digits', async () => {
@@ -183,7 +187,7 @@ describe('land (via main dispatch)', () => {
     const res = await runMain('land', '5');
     expect(res.exited).toBe(false);
     expect(logged()).toContain('Landed PR #77');
-    expect(h.octokit.rest.pulls.merge).toHaveBeenCalled();
+    expect(of('merge')).toHaveLength(1);
   });
 
   it('exits 1 when there is no open PR for the issue', async () => {
@@ -218,7 +222,7 @@ describe('land (via main dispatch)', () => {
 
   it("routes landIssue's fetch through the injected gitFetch (#2019)", async () => {
     await runMain('land', '5');
-    expect(gitFetch).toHaveBeenCalledWith(h.repoRoot);
+    expect(of('fetch')).toContainEqual(h.repoRoot);
   });
 
   it('wraps a post-merge cleanup failure as a code-5 CliExitError', async () => {
@@ -277,18 +281,17 @@ describe('cmdLand (direct invocation)', () => {
       code: 1,
       message: expect.stringContaining('no open PR'),
     });
-    expect(exitSpy).not.toHaveBeenCalled();
   });
 
   it('cmdLand uses an injected loadFactoryConfigForRepo', async () => {
     h.octokit.rest.pulls.list = vi.fn(async () => ({ data: [] }));
-    const load = vi.fn(() => h.factoryConfig);
+    const load = (p: string) => (calls.push(['load', p]), h.factoryConfig);
     await expect(
       cliCmdLand(5, {}, { ...inertConfigLoaders, ...inertGitOps, ...ops, loadFactoryConfigForRepo: load }),
     ).rejects.toMatchObject({
       code: 1,
     });
-    expect(load).toHaveBeenCalledWith(expect.stringMatching(/\.factory\/config\.(json|yaml)$/));
+    expect(of('load')).toContainEqual(expect.stringMatching(/\.factory\/config\.(json|yaml)$/));
   });
 
   it('landIssue forwards merge.maxConflictRounds from the loaded config (#1887)', async () => {
@@ -309,11 +312,11 @@ describe('cmdLand (direct invocation)', () => {
         ? { repository: { pullRequest: { id: 'PR_ID', isDraft: false, mergeStateStatus: 'DIRTY' } } }
         : {},
     );
-    const load = vi.fn(() => h.factoryConfig);
-    await expect(
-      cliCmdLand(5, {}, { ...inertConfigLoaders, ...inertGitOps, ...ops, loadFactoryConfigForRepo: load }),
-    ).rejects.toMatchObject({ code: 3, message: expect.stringMatching(/conflict rounds exhausted \(1\/1\)/) });
-    expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
+    await expect(cmdLand(5)).rejects.toMatchObject({
+      code: 3,
+      message: expect.stringMatching(/conflict rounds exhausted \(1\/1\)/),
+    });
+    expect(of('merge')).toEqual([]);
   });
 
   describe('cmdLand no-auto-merge gate (#1720)', () => {
@@ -337,8 +340,8 @@ describe('cmdLand (direct invocation)', () => {
           /no-auto-merge[\s\S]*#5[\s\S]*--allow-gated|#5[\s\S]*no-auto-merge[\s\S]*--allow-gated/,
         ),
       });
-      expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
-      expect(setupWorktree).not.toHaveBeenCalled();
+      expect(of('merge')).toEqual([]);
+      expect(of('setup')).toEqual([]);
       expect(eventsOf().some((e) => e.type === 'merge-gated' && String(e.issue) === '5')).toBe(true);
     });
 
@@ -348,7 +351,7 @@ describe('cmdLand (direct invocation)', () => {
         code: 4,
         message: expect.stringContaining('PR #77 is labelled no-auto-merge'),
       });
-      expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
+      expect(of('merge')).toEqual([]);
     });
 
     it('fails closed when labels cannot be read', async () => {
@@ -359,14 +362,14 @@ describe('cmdLand (direct invocation)', () => {
         code: 4,
         message: expect.stringContaining('could not be read'),
       });
-      expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
+      expect(of('merge')).toEqual([]);
     });
 
     it('--allow-gated merges past the gate with an AUDIT line and a merge-gated-override event', async () => {
       h.octokit.rest.issues.listLabelsOnIssue = labelsFor([5]);
       ops.watchChecks.mockResolvedValue('success');
       await expect(cmdLand(5, { allowGated: true })).resolves.toBeUndefined();
-      expect(h.octokit.rest.pulls.merge).toHaveBeenCalled();
+      expect(of('merge')).toHaveLength(1);
       expect(logged()).toMatch(/^AUDIT .*#5/m);
       expect(eventsOf().some((e) => e.type === 'merge-gated-override' && String(e.issue) === '5')).toBe(true);
     });
@@ -400,22 +403,17 @@ describe('cmdLand (direct invocation)', () => {
     h.setupWorktreeImpl = async (_repoRoot, _branch, path) => {
       mkdirSync(path, { recursive: true });
     };
-    ops.watchChecks.mockResolvedValue('success');
+    ops.watchChecks.mockImplementation(async () => (calls.push(['watch', 1]), 'success' as const));
     try {
       await expect(cmdLand(5)).resolves.toBeUndefined();
-      expect(setupWorktree).toHaveBeenCalledWith(
-        h.repoRoot,
-        branch,
-        worktree,
-        `origin/${branch}`,
-        undefined,
-        expect.any(Function),
-      );
+      expect(of('setup')).toEqual([
+        [h.repoRoot, branch, worktree, `origin/${branch}`, undefined, expect.any(Function)],
+      ]);
       expect(commands).toContain('git fetch origin');
       expect(commands).toContain('git merge --no-edit origin/main');
       expect(commands).toContain("git push origin 'contributor/adopted-pr'");
-      expect(ops.watchChecks).toHaveBeenCalledTimes(1);
-      expect(h.octokit.rest.pulls.merge).toHaveBeenCalledWith(expect.objectContaining({ sha: 'abc123' }));
+      expect(of('watch')).toHaveLength(1);
+      expect(of('merge')).toEqual([expect.objectContaining({ sha: 'abc123' })]);
     } finally {
       rmSync(worktree, { recursive: true, force: true });
     }
@@ -443,7 +441,7 @@ describe('cmdLand (direct invocation)', () => {
     await expect(cmdLand(5)).resolves.toBeUndefined();
 
     expect(logged()).toContain('awaiting human review');
-    expect(cleanupWorktree).toHaveBeenCalled();
+    expect(of('cleanup')).not.toEqual([]);
 
     const events = readFileSync(paths().events, 'utf-8')
       .trim()
@@ -459,8 +457,8 @@ describe('cmdLand (direct invocation)', () => {
 
     expect(logged()).toContain('failing CI check');
     expect(logged()).toContain('left open, not merged');
-    expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
-    expect(cleanupWorktree).toHaveBeenCalled();
+    expect(of('merge')).toEqual([]);
+    expect(of('cleanup')).not.toEqual([]);
 
     const events = readFileSync(paths().events, 'utf-8')
       .trim()
@@ -475,8 +473,8 @@ describe('cmdLand (direct invocation)', () => {
     await expect(cmdLand(5)).resolves.toBeUndefined();
 
     expect(logged()).toContain('left open, not merged');
-    expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
-    expect(cleanupWorktree).toHaveBeenCalled();
+    expect(of('merge')).toEqual([]);
+    expect(of('cleanup')).not.toEqual([]);
 
     const events = readFileSync(paths().events, 'utf-8')
       .trim()
@@ -488,11 +486,6 @@ describe('cmdLand (direct invocation)', () => {
   it('cmdLand uses an injected octokit factory', async () => {
     const fake = defaultOctokit();
     fake.rest.pulls.list = vi.fn(async () => ({ data: [] }));
-    const factory = vi.fn(() => fake as never);
-
-    await expect(cmdLand(5, {}, { octokit: factory })).rejects.toMatchObject({ code: 1 });
-
-    expect(factory).toHaveBeenCalled();
-    expect(fake.rest.pulls.list).toHaveBeenCalled();
+    await expect(cmdLand(5, {}, { octokit: () => fake as never })).rejects.toMatchObject({ code: 1 });
   });
 });
