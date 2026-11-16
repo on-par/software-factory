@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { errored, h, installCliCommandsHarness, logged, paths, runMain } from './test-support/cli-commands-harness.js';
-import { type IssueCallArgs, record } from './test-support/call-recorder.js';
 
 installCliCommandsHarness();
+const record = (r: unknown = {}, c: any[] = []) => Object.assign(async (a: unknown) => (c.push(a), r), { calls: c });
 
 describe('cli commands (via main dispatch)', () => {
   describe('queue migrate', () => {
@@ -30,7 +30,7 @@ describe('cli commands (via main dispatch)', () => {
       expect(res.exited).toBe(false);
       expect(readFileSync(paths().queue, 'utf-8')).toBe(source);
       expect(logged()).toContain('queue migrated — 3 issue(s)');
-      expect(h.octokit.rest.issues.addLabels.calls.map((a: IssueCallArgs) => [a.issue_number, a.labels])).toEqual([
+      expect(h.octokit.rest.issues.addLabels.calls.map((a: any) => [a.issue_number, a.labels])).toEqual([
         [1055, ['factory:queued', 'factory:lane:daw', 'factory:order:1']],
         [200, ['factory:queued', 'factory:lane:docs', 'factory:order:1']],
         [993, ['factory:queued', 'factory:lane:daw', 'factory:order:2']],
@@ -43,8 +43,7 @@ describe('cli commands (via main dispatch)', () => {
 
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('queue not found');
-      expect(h.octokit.rest.issues.createLabel.calls).toEqual([]);
-      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
+      expect([h.octokit.rest.issues.createLabel.calls, h.octokit.rest.issues.addLabels.calls]).toEqual([[], []]);
     });
 
     it('rejects an invalid local queue before creating or applying labels', async () => {
@@ -54,8 +53,7 @@ describe('cli commands (via main dispatch)', () => {
 
       expect(res).toEqual({ exited: true, code: 1 });
       expect(errored()).toContain('queue is invalid');
-      expect(h.octokit.rest.issues.createLabel.calls).toEqual([]);
-      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
+      expect([h.octokit.rest.issues.createLabel.calls, h.octokit.rest.issues.addLabels.calls]).toEqual([[], []]);
     });
 
     it('rejects a queue with a duplicate issue number before any GitHub call', async () => {

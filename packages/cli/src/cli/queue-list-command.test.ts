@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { errored, h, installCliCommandsHarness, logged, runMain } from './test-support/cli-commands-harness.js';
-import { record } from './test-support/call-recorder.js';
 
 installCliCommandsHarness();
+const record = (r: unknown = {}, c: any[] = []) => Object.assign(async (a: unknown) => (c.push(a), r), { calls: c });
 
 describe('cli commands (via main dispatch)', () => {
   describe('queue list', () => {

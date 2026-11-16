@@ -3,9 +3,9 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { errored, h, installCliCommandsHarness, logged, paths, runMain } from './test-support/cli-commands-harness.js';
-import { type IssueCallArgs, record } from './test-support/call-recorder.js';
 
 installCliCommandsHarness();
+const record = (r: unknown = {}, c: any[] = []) => Object.assign(async (a: unknown) => (c.push(a), r), { calls: c });
 
 describe('cli commands (via main dispatch)', () => {
   describe('queue add', () => {
@@ -25,8 +25,7 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('queue', 'add', lane, '1');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('lane');
-      expect(h.octokit.rest.issues.createLabel.calls).toEqual([]);
-      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
+      expect([h.octokit.rest.issues.createLabel.calls, h.octokit.rest.issues.addLabels.calls]).toEqual([[], []]);
       expect(h.octokit.rest.issues.listForRepo.calls).toEqual([]);
     });
 
@@ -74,8 +73,7 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('queue', 'add', 'daw', 'notanumber');
 
       expect(res).toEqual({ exited: true, code: 2 });
-      expect(h.octokit.rest.issues.createLabel.calls).toEqual([]);
-      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
+      expect([h.octokit.rest.issues.createLabel.calls, h.octokit.rest.issues.addLabels.calls]).toEqual([[], []]);
     });
 
     it('--json prints exactly one JSON object with orders and created labels', async () => {
@@ -103,7 +101,7 @@ describe('cli commands (via main dispatch)', () => {
 
       const json = JSON.parse(logged());
       expect(json.issues[0]).toEqual({ number: 1, outcome: 'already-queued', order: 5, labelsAdded: [] });
-      expect(h.octokit.rest.issues.addLabels.calls.map((a: IssueCallArgs) => a.issue_number)).toEqual([2]);
+      expect(h.octokit.rest.issues.addLabels.calls.map((a: any) => a.issue_number)).toEqual([2]);
     });
 
     it('--json reports no created labels when they already exist (422)', async () => {
