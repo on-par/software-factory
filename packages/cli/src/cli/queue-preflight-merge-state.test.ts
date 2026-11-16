@@ -53,6 +53,15 @@ const harness = (results: Array<LandState | Error>) => {
 };
 
 const issue = { number: 7, labels: [] };
+
+const expectSyncMainAdopt = async (h: ReturnType<typeof harness>) => {
+  await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({
+    kind: 'adopt',
+    branch: 'factory/7-x',
+    syncMain: true,
+  });
+  expect(h.rec.watched).toEqual([]);
+};
 const clean = { isDraft: false, mergeStateStatus: 'CLEAN' };
 const unknown = { isDraft: false, mergeStateStatus: 'UNKNOWN' };
 
@@ -110,24 +119,14 @@ describe('queue preflight merge-state re-read (#3323)', () => {
 
   it('adopts DIRTY with syncMain and skips the CI watch', async () => {
     const h = harness([{ isDraft: false, mergeStateStatus: 'DIRTY' }]);
-    await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({
-      kind: 'adopt',
-      branch: 'factory/7-x',
-      syncMain: true,
-    });
-    expect(h.rec.watched).toEqual([]);
+    await expectSyncMainAdopt(h);
     expect(h.rec.landReads).toBe(1);
     expect(h.rec.slept).toEqual([]);
   });
 
   it('adopts with syncMain, without a watch, when a re-read reveals DIRTY after UNKNOWN', async () => {
     const h = harness([unknown, { isDraft: false, mergeStateStatus: 'DIRTY' }]);
-    await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({
-      kind: 'adopt',
-      branch: 'factory/7-x',
-      syncMain: true,
-    });
-    expect(h.rec.watched).toEqual([]);
+    await expectSyncMainAdopt(h);
   });
 
   it('parks a draft revealed by a re-read while the state is still UNKNOWN', async () => {

@@ -74,6 +74,9 @@ function harness(
   return { deps, rec };
 }
 
+const expectWaitingOnPrerequisite = (deferred: unknown[][]) =>
+  expect(deferred).toEqual([[6, 'waiting for prerequisites: #5', 'open-prerequisites']]);
+
 const stackedOwn = (over: Partial<PullInfo> = {}): Record<number, PullInfo> => ({
   60: {
     state: 'open',
@@ -95,7 +98,7 @@ describe('queue preflight: stacking on an open prerequisite PR (#3916)', () => {
   it('defers when the open prerequisite has no open factory PR', async () => {
     const h = harness({ findOpenPR: async () => undefined });
     await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({ kind: 'defer' });
-    expect(h.rec.deferred).toEqual([[6, 'waiting for prerequisites: #5', 'open-prerequisites']]);
+    expectWaitingOnPrerequisite(h.rec.deferred);
   });
 
   it('defers when the prerequisite PR is a human branch', async () => {
@@ -120,7 +123,7 @@ describe('queue preflight: stacking on an open prerequisite PR (#3916)', () => {
   it('defers as before when queue.stackOnOpenPrerequisite is false', async () => {
     const h = harness({ stackOn: false });
     await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({ kind: 'defer' });
-    expect(h.rec.deferred).toEqual([[6, 'waiting for prerequisites: #5', 'open-prerequisites']]);
+    expectWaitingOnPrerequisite(h.rec.deferred);
   });
 
   it('never adopts a stacked PR for landing while its base is a prerequisite branch', async () => {
