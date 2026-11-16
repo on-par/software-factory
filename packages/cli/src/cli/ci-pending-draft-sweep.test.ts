@@ -100,19 +100,25 @@ function setup(
 ) {
   const { octokit } = commentStoreOctokit(pulls, comments);
   const logs: { type: EventKind; issue: number; msg: string }[] = [];
+  const calls = {
+    probed: [] as unknown[],
+    ready: [] as string[],
+    landed: [] as Array<[number, string]>,
+    reworked: [] as Array<[number, number]>,
+  };
   const deps: CiPendingDraftSweepDeps = {
     octokit,
     ghRepo: REPO,
     branchPrefix: 'factory',
     mergeEnabled: () => true,
-    probeCi: vi.fn(async () => verdict),
-    markReady: vi.fn(async () => {}),
-    land: vi.fn(async () => {}),
-    queueRework: vi.fn(async () => ({ outcome: 'queued' as const })),
+    probeCi: async (pr) => (calls.probed.push(pr), verdict),
+    markReady: async (id) => void calls.ready.push(id),
+    land: async (issue, branch) => void calls.landed.push([issue, branch]),
+    queueRework: async (issue, pr) => (calls.reworked.push([issue, pr]), { outcome: 'queued' as const }),
     log: (type, issue, msg) => logs.push({ type, issue, msg }),
     ...over,
   };
-  return { deps, logs, comments };
+  return { deps, logs, comments, calls };
 }
 
 const draftOf = async (
@@ -128,12 +134,15 @@ const draftOf = async (
 describe('sweepCiPendingDrafts (#3932)', () => {
   it('marks a green CI-pending draft ready and lands it through waitForMerge', async () => {
     const comments = { 5: [await stateComment(statePayload(42, 5))] };
-    const { deps, logs } = setup([{ number: 5, issue: 42 }], comments);
+    const { deps, logs, calls } = setup([{ number: 5, issue: 42 }], comments);
     const results = await sweepCiPendingDrafts(deps);
     expect(results).toEqual([{ pr: 5, issue: 42, action: 'landed' }]);
-    expect(deps.probeCi).toHaveBeenCalledWith({ headSha: SHA, baseRef: 'main' });
-    expect(deps.markReady).toHaveBeenCalledWith('PR_5');
-    expect(deps.land).toHaveBeenCalledWith(42, 'factory/42-thing');
+    expect(calls).toEqual({
+      probed: [{ headSha: SHA, baseRef: 'main' }],
+      ready: ['PR_5'],
+      landed: [[42, 'factory/42-thing']],
+      reworked: [],
+    });
     expect(logs.map((l) => l.type)).toContain('ready');
     const saved = await draftOf(comments, 5, 42);
     expect(saved).toMatchObject({ status: 'awaiting-review' });
@@ -151,7 +160,7 @@ describe('sweepCiPendingDrafts (#3932)', () => {
   });
 
   it('logs merge-gated and only marks ready when auto-merge is off', async () => {
-    const { deps, logs } = setup(
+    const { deps, logs, calls } = setup(
       [{ number: 5, issue: 42 }],
       { 5: [await stateComment(statePayload(42, 5))] },
       {
@@ -159,8 +168,8 @@ describe('sweepCiPendingDrafts (#3932)', () => {
       },
     );
     expect(await sweepCiPendingDrafts(deps)).toEqual([{ pr: 5, issue: 42, action: 'merge-gated' }]);
-    expect(deps.markReady).toHaveBeenCalled();
-    expect(deps.land).not.toHaveBeenCalled();
+    expect(calls.ready).toEqual(['PR_5']);
+    expect(calls.landed).toEqual([]);
     expect(logs.some((l) => l.type === 'merge-gated' && l.msg.includes('auto-merge off'))).toBe(true);
   });
 
@@ -190,10 +199,10 @@ describe('sweepCiPendingDrafts (#3932)', () => {
 
   it('queues CI rework for a red CI-pending draft', async () => {
     const comments = { 5: [await stateComment(statePayload(42, 5))] };
-    const { deps, logs } = setup([{ number: 5, issue: 42 }], comments, {}, 'failure');
+    const { deps, logs, calls } = setup([{ number: 5, issue: 42 }], comments, {}, 'failure');
     expect(await sweepCiPendingDrafts(deps)).toEqual([{ pr: 5, issue: 42, action: 'ci-rework' }]);
-    expect(deps.queueRework).toHaveBeenCalledWith(42, 5);
-    expect(deps.markReady).not.toHaveBeenCalled();
+    expect(calls.reworked).toEqual([[42, 5]]);
+    expect(calls.ready).toEqual([]);
     expect(logs.some((l) => l.type === 'rework')).toBe(true);
     expect(await draftOf(comments, 5, 42)).not.toHaveProperty('draftReason');
   });
@@ -215,9 +224,9 @@ describe('sweepCiPendingDrafts (#3932)', () => {
 
   it('leaves a still-pending CI-pending draft and keeps its reason', async () => {
     const comments = { 5: [await stateComment(statePayload(42, 5))] };
-    const { deps, logs } = setup([{ number: 5, issue: 42 }], comments, {}, 'timeout');
+    const { deps, logs, calls } = setup([{ number: 5, issue: 42 }], comments, {}, 'timeout');
     expect(await sweepCiPendingDrafts(deps)).toEqual([{ pr: 5, issue: 42, action: 'still-pending' }]);
-    expect(deps.markReady).not.toHaveBeenCalled();
+    expect(calls.ready).toEqual([]);
     expect(logs[0]?.msg).toBe('PR #5: CI still pending; left as draft');
     expect(await draftOf(comments, 5, 42)).toMatchObject({ draftReason: 'ci-pending' });
   });
@@ -237,18 +246,18 @@ describe('sweepCiPendingDrafts (#3932)', () => {
   });
 
   it('leaves a requested draft untouched', async () => {
-    const { deps } = setup([{ number: 5, issue: 42 }], {
+    const { deps, calls } = setup([{ number: 5, issue: 42 }], {
       5: [await stateComment(statePayload(42, 5, { draftReason: 'requested' }))],
     });
     expect(await sweepCiPendingDrafts(deps)).toEqual([]);
-    expect(deps.probeCi).not.toHaveBeenCalled();
+    expect(calls.probed).toEqual([]);
   });
 
   it('leaves a draft with no draftReason untouched', async () => {
     const { draftReason: _omit, ...plain } = statePayload(42, 5);
-    const { deps } = setup([{ number: 5, issue: 42 }], { 5: [await stateComment(plain)] });
+    const { deps, calls } = setup([{ number: 5, issue: 42 }], { 5: [await stateComment(plain)] });
     expect(await sweepCiPendingDrafts(deps)).toEqual([]);
-    expect(deps.probeCi).not.toHaveBeenCalled();
+    expect(calls.probed).toEqual([]);
   });
 
   it('leaves a draft with no trusted run state untouched', async () => {
@@ -256,8 +265,7 @@ describe('sweepCiPendingDrafts (#3932)', () => {
     expect(await sweepCiPendingDrafts(forged.deps)).toEqual([]);
     const none = setup([{ number: 5, issue: 42 }], {});
     expect(await sweepCiPendingDrafts(none.deps)).toEqual([]);
-    expect(forged.deps.probeCi).not.toHaveBeenCalled();
-    expect(none.deps.probeCi).not.toHaveBeenCalled();
+    expect([forged.calls.probed, none.calls.probed]).toEqual([[], []]);
   });
 
   it('leaves a state recorded for another PR untouched', async () => {
@@ -272,7 +280,7 @@ describe('sweepCiPendingDrafts (#3932)', () => {
       7: [await stateComment(statePayload(44, 7))],
       8: [await stateComment(statePayload(45, 8))],
     };
-    const { deps } = setup(
+    const { deps, calls } = setup(
       [
         { number: 5, issue: 42, draft: false },
         { number: 6, issue: 43, ref: 'feature/43-thing' },
@@ -283,7 +291,7 @@ describe('sweepCiPendingDrafts (#3932)', () => {
       { protectedIssues: new Set([44]) },
     );
     expect(await sweepCiPendingDrafts(deps)).toEqual([]);
-    expect(deps.probeCi).not.toHaveBeenCalled();
+    expect(calls.probed).toEqual([]);
   });
 
   it('skips a draft whose issue is in flight on a lane', async () => {
@@ -329,9 +337,10 @@ describe('runCiPendingDraftSweep (#3932)', () => {
         }),
       },
     });
-    const graphql = vi.fn(async () => ({}));
-    Object.assign(octokit, { graphql });
-    const waitMerge = vi.fn<typeof waitForMerge>(async () => {});
+    const graphqlQueries: unknown[] = [];
+    Object.assign(octokit, { graphql: async (q: unknown) => (graphqlQueries.push(q), {}) });
+    const waits: unknown[][] = [];
+    const waitMerge: typeof waitForMerge = async (...a) => void waits.push(a);
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       await runCiPendingDraftSweep(paths, REPO, () => octokit, {
@@ -343,13 +352,17 @@ describe('runCiPendingDraftSweep (#3932)', () => {
     } finally {
       log.mockRestore();
     }
-    expect(waitMerge).toHaveBeenCalledWith(42, 'factory/42-thing', root, REPO, paths, {
-      landBranch: 'factory/42-thing',
-      holdWhenGated: true,
-      syncMain: true,
-      mergeOverrides: { auto: true },
-    });
-    expect(graphql).toHaveBeenCalledOnce();
+    expect(waits).toEqual([
+      [
+        42,
+        'factory/42-thing',
+        root,
+        REPO,
+        paths,
+        { landBranch: 'factory/42-thing', holdWhenGated: true, syncMain: true, mergeOverrides: { auto: true } },
+      ],
+    ]);
+    expect(graphqlQueries).toHaveLength(1);
     expect(readFileSync(paths.events, 'utf8')).toContain('marked ready');
   });
 

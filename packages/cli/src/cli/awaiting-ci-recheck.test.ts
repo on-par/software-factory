@@ -1,9 +1,9 @@
 import { join } from 'node:path';
 import { type AwaitingCiRecord, readAwaitingCi, upsertAwaitingCi } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { recheckDueAwaitingCi, type AwaitingCiRecheckDeps } from './awaiting-ci-recheck.js';
+import { recheckDueAwaitingCi, type AwaitingCiParkReason, type AwaitingCiRecheckDeps } from './awaiting-ci-recheck.js';
 
 const dirs = createTempDirs();
 afterEach(() => dirs.cleanup());
@@ -28,18 +28,20 @@ async function harness(overrides: Partial<AwaitingCiRecheckDeps> = {}, records: 
   for (const rec of records) await upsertAwaitingCi(file, rec);
   const clock = { t: T0 };
   const events: Array<[string, number, string]> = [];
+  const merged: Array<[AwaitingCiRecord, string]> = [];
+  const parked: Array<[AwaitingCiRecord, AwaitingCiParkReason, string]> = [];
   const deps: AwaitingCiRecheckDeps = {
     file,
     now: () => clock.t,
     capMs: 24 * HOUR,
     getPr: async () => ({ state: 'open', merged: false, headSha: 'new-sha', baseRef: 'main' }),
     verdict: async () => ({ state: 'pending', missing: [], pending: [], failed: [], total: 0 }),
-    merge: vi.fn(async () => {}),
-    park: vi.fn(async () => {}),
+    merge: async (rec, sha) => void merged.push([rec, sha]),
+    park: async (rec, reason, msg) => void parked.push([rec, reason, msg]),
     emit: (kind, issue, msg) => events.push([kind, issue, msg]),
     ...overrides,
   };
-  return { deps, clock, events, run: () => recheckDueAwaitingCi(deps), read: () => readAwaitingCi(file) };
+  return { clock, events, merged, parked, run: () => recheckDueAwaitingCi(deps), read: () => readAwaitingCi(file) };
 }
 
 describe('recheckDueAwaitingCi (#3208)', () => {
@@ -57,9 +59,9 @@ describe('recheckDueAwaitingCi (#3208)', () => {
     });
     h.clock.t = T0 + 3 * HOUR;
     await h.run();
-    expect(h.deps.merge).toHaveBeenCalledWith(expect.objectContaining({ issue: 1, branch: 'factory/1' }), 'new-sha');
+    expect(h.merged).toEqual([[expect.objectContaining({ issue: 1, branch: 'factory/1' }), 'new-sha']]);
     expect(await h.read()).toEqual([]);
-    expect(h.deps.park).not.toHaveBeenCalled();
+    expect(h.parked).toEqual([]);
     expect(h.events.map((e) => e[0])).toEqual(['ship']);
   });
 
@@ -69,11 +71,7 @@ describe('recheckDueAwaitingCi (#3208)', () => {
     });
     h.clock.t = T0 + 3 * MIN;
     await h.run();
-    expect(h.deps.park).toHaveBeenCalledWith(
-      expect.objectContaining({ issue: 1 }),
-      'ci-failed',
-      expect.stringContaining('lint'),
-    );
+    expect(h.parked).toEqual([[expect.objectContaining({ issue: 1 }), 'ci-failed', expect.stringContaining('lint')]]);
     expect(await h.read()).toEqual([]);
   });
 
@@ -85,18 +83,20 @@ describe('recheckDueAwaitingCi (#3208)', () => {
       expect.objectContaining({ attempts: 1, nextRecheckAt: T0 + 5 * MIN, headSha: 'new-sha' }),
     ]);
     expect(h.events[0][0]).toBe('awaiting-ci');
-    expect(h.deps.park).not.toHaveBeenCalled();
+    expect(h.parked).toEqual([]);
   });
 
   it('parks ci-never-started past the cap when no check run ever registered', async () => {
     const h = await harness();
     h.clock.t = T0 + 24 * HOUR;
     await h.run();
-    expect(h.deps.park).toHaveBeenCalledWith(
-      expect.objectContaining({ issue: 1 }),
-      'ci-never-started',
-      'PR #101 head new-sha: no CI run ever registered after 24 h — a CI or config problem, not a failing build',
-    );
+    expect(h.parked).toEqual([
+      [
+        expect.objectContaining({ issue: 1 }),
+        'ci-never-started',
+        'PR #101 head new-sha: no CI run ever registered after 24 h — a CI or config problem, not a failing build',
+      ],
+    ]);
     expect(await h.read()).toEqual([]);
   });
 
@@ -106,11 +106,9 @@ describe('recheckDueAwaitingCi (#3208)', () => {
     });
     h.clock.t = T0 + 25 * HOUR;
     await h.run();
-    expect(h.deps.park).toHaveBeenCalledWith(
-      expect.anything(),
-      'ci-failed',
-      expect.stringContaining('CI still pending after 25 h'),
-    );
+    expect(h.parked).toEqual([
+      [expect.anything(), 'ci-failed', expect.stringContaining('CI still pending after 25 h')],
+    ]);
   });
 
   it.each([
@@ -122,16 +120,15 @@ describe('recheckDueAwaitingCi (#3208)', () => {
     await h.run();
     expect(await h.read()).toEqual([]);
     expect(h.events[0][2]).toContain(word);
-    expect(h.deps.merge).not.toHaveBeenCalled();
-    expect(h.deps.park).not.toHaveBeenCalled();
+    expect([h.merged, h.parked]).toEqual([[], []]);
   });
 
   it('reschedules instead of merging when the pinned merge is refused because the head moved', async () => {
     const h = await harness({
       verdict: async () => ({ state: 'green', missing: [], pending: [], failed: [], total: 1 }),
-      merge: vi.fn(async () => {
+      merge: async () => {
         throw new Error('Head branch was modified');
-      }),
+      },
     });
     h.clock.t = T0 + 3 * MIN;
     await h.run();

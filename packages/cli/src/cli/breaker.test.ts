@@ -89,12 +89,12 @@ describe('runBreakerResetCommand', () => {
 describe('cmdBreakerReset', () => {
   it('resolves the repo root through PROGRAM_HANDLERS.getRepoRoot and prints to stdout', async () => {
     const { root, breaker } = await setupRepo();
-    const getRepoRoot = vi.spyOn(PROGRAM_HANDLERS, 'getRepoRoot').mockResolvedValue(root);
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(PROGRAM_HANDLERS, 'getRepoRoot').mockResolvedValue(root);
+    const lines: unknown[] = [];
+    vi.spyOn(console, 'log').mockImplementation((m) => void lines.push(m));
     await cmdBreakerReset('anthropic');
-    expect(getRepoRoot).toHaveBeenCalledOnce();
     expect(await breaker.status('anthropic')).toEqual({ open: false });
-    expect(log).toHaveBeenCalledWith('reset the anthropic breaker (local_auth)');
+    expect(lines).toEqual(['reset the anthropic breaker (local_auth)']);
   });
 
   it('is the PROGRAM_HANDLERS entry program-advanced wires to `factory breaker reset`', () => {

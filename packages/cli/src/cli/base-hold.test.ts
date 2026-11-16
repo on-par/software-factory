@@ -3,13 +3,14 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
 
 import {
   BASE_HOLD_CI_RECHECK_MS,
   type BaseHold,
+  type BaseHoldCleared,
   createBaseHoldGate,
   deleteBaseHold,
   evaluateBaseHold,
@@ -103,6 +104,11 @@ describe('formatBaseHoldStatus (#2351)', () => {
   });
 });
 
+const recordVerdict = (green = true, reason = 'ok') => {
+  const asked: string[] = [];
+  return { asked, verdict: async (sha: string) => (asked.push(sha), { green, reason }) };
+};
+
 const SHA_HELD = 'a'.repeat(40);
 const SHA_NEW = 'b'.repeat(40);
 const gateHold: BaseHold = { ...hold, baseSha: SHA_HELD };
@@ -121,30 +127,31 @@ describe('base hold gate (#2349)', () => {
   });
 
   describe('evaluateBaseHold', () => {
-    const mkDeps = (sha: string | null | Error = SHA_HELD, green: boolean | Error = false) => ({
-      currentBaseSha: vi.fn(async () => {
+    const mkDeps = (sha: string | null | Error = SHA_HELD, green: boolean | Error = false, seen: string[] = []) => ({
+      seen,
+      currentBaseSha: async () => {
+        seen.push('sha');
         if (sha instanceof Error) throw sha;
         return sha;
-      }),
-      requiredChecksVerdict: vi.fn(async () => {
+      },
+      requiredChecksVerdict: async () => {
+        seen.push('verdict');
         if (green instanceof Error) throw green;
         return { green, reason: green ? 'ok' : 'ci failure' };
-      }),
+      },
     });
 
     it('claims with no hold file and calls no dep', async () => {
       const deps = mkDeps();
       expect(await evaluateBaseHold(file, hold.repo, deps)).toEqual({ kind: 'claim' });
-      expect(deps.currentBaseSha).toHaveBeenCalledTimes(0);
-      expect(deps.requiredChecksVerdict).toHaveBeenCalledTimes(0);
+      expect(deps.seen).toEqual([]);
     });
 
     it('claims for a hold on another repo and calls no dep', async () => {
       writeBaseHold(file, gateHold);
       const deps = mkDeps();
       expect(await evaluateBaseHold(file, 'other/repo', deps)).toEqual({ kind: 'claim' });
-      expect(deps.currentBaseSha).toHaveBeenCalledTimes(0);
-      expect(deps.requiredChecksVerdict).toHaveBeenCalledTimes(0);
+      expect(deps.seen).toEqual([]);
     });
 
     it('holds on the same SHA with CI not green', async () => {
@@ -187,57 +194,60 @@ describe('base hold gate (#2349)', () => {
   describe('createBaseHoldGate', () => {
     it('holds when origin/main moved off the held SHA and the new SHA is not green (#3620)', async () => {
       writeBaseHold(file, gateHold);
-      const requiredChecksVerdict = vi.fn(async () => ({ green: false, reason: 'ci pending' }));
+      const { asked, verdict } = recordVerdict(false, 'ci pending');
       const gate = createBaseHoldGate({
         file,
         repo: hold.repo,
         git: async () => `${SHA_NEW}\trefs/heads/main\n`,
-        requiredChecksVerdict,
+        requiredChecksVerdict: verdict,
       });
       expect(await gate()).toEqual({ kind: 'hold', hold: gateHold, ciReason: 'ci pending', currentSha: SHA_NEW });
       expect(existsSync(file)).toBe(true);
-      expect(requiredChecksVerdict).toHaveBeenCalledWith(SHA_NEW);
+      expect(asked).toEqual([SHA_NEW]);
     });
 
     it('claims when origin/main moved off the held SHA and the new SHA is green', async () => {
       writeBaseHold(file, gateHold);
-      const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
+      const { asked, verdict } = recordVerdict();
       const gate = createBaseHoldGate({
         file,
         repo: hold.repo,
         git: async () => `${SHA_NEW}\trefs/heads/main\n`,
-        requiredChecksVerdict,
+        requiredChecksVerdict: verdict,
       });
       expect(await gate()).toEqual({ kind: 'claim' });
       expect(existsSync(file)).toBe(false);
-      expect(requiredChecksVerdict).toHaveBeenCalledTimes(1);
+      expect(asked).toEqual([SHA_NEW]);
     });
 
     it('claims when the held SHA is unchanged but its CI is green', async () => {
       writeBaseHold(file, gateHold);
-      const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
+      const { asked, verdict } = recordVerdict();
       const gate = createBaseHoldGate({
         file,
         repo: hold.repo,
         git: async () => `${SHA_HELD}\trefs/heads/main\n`,
-        requiredChecksVerdict,
+        requiredChecksVerdict: verdict,
       });
       expect(await gate()).toEqual({ kind: 'claim' });
-      expect(requiredChecksVerdict).toHaveBeenCalledWith(SHA_HELD);
+      expect(asked).toEqual([SHA_HELD]);
       expect(existsSync(file)).toBe(false);
     });
 
     it('holds when the held SHA is unchanged and CI is failing', async () => {
       writeBaseHold(file, gateHold);
-      const git = vi.fn(async () => `${SHA_HELD}\trefs/heads/main\n`);
+      const cmds: string[] = [];
       const gate = createBaseHoldGate({
         file,
         repo: hold.repo,
-        git,
+        git: async (cmd: string) => {
+          cmds.push(cmd);
+          return `${SHA_HELD}\trefs/heads/main\n`;
+        },
         requiredChecksVerdict: async () => ({ green: false, reason: 'ci failure' }),
       });
       expect(await gate()).toEqual({ kind: 'hold', hold: gateHold, ciReason: 'ci failure' });
-      expect(git).toHaveBeenCalledWith('git ls-remote origin refs/heads/main');
+      expect(cmds).toEqual(['git ls-remote origin refs/heads/main']);
     });
   });
 });
@@ -275,10 +285,10 @@ describe('ci-awaiting base hold (#3186)', () => {
 
   it('holds without any CI lookup before ciRecheckAfter', async () => {
     writeBaseHold(file, awaiting);
-    const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
+    const { asked, verdict: requiredChecksVerdict } = recordVerdict();
     const d = deps({ requiredChecksVerdict, now: () => T0 });
     expect(await evaluateBaseHold(file, hold.repo, d)).toEqual({ kind: 'hold', hold: awaiting });
-    expect(requiredChecksVerdict).not.toHaveBeenCalled();
+    expect(asked).toEqual([]);
   });
 
   it.each([
@@ -300,46 +310,52 @@ describe('ci-awaiting base hold (#3186)', () => {
 
   it('after the time, a green strict verdict clears with ci-green', async () => {
     writeBaseHold(file, awaiting);
-    const onCleared = vi.fn();
+    const cleared: BaseHoldCleared[] = [];
     const d = deps({
       requiredChecksVerdict: async () => ({ green: true, reason: 'ok' }),
       now: () => T0 + 2000,
-      onCleared,
+      onCleared: (c) => cleared.push(c),
     });
     expect(await evaluateBaseHold(file, hold.repo, d)).toEqual({ kind: 'claim' });
-    expect(onCleared).toHaveBeenCalledWith({ hold: awaiting, reason: 'ci-green', currentSha: SHA });
+    expect(cleared).toEqual([{ hold: awaiting, reason: 'ci-green', currentSha: SHA }]);
     expect(existsSync(file)).toBe(false);
   });
 
   it('a moved SHA clears with sha-changed before any backoff', async () => {
     writeBaseHold(file, awaiting);
-    const onCleared = vi.fn();
-    const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
-    const d = deps({ currentBaseSha: async () => 'c'.repeat(40), now: () => T0, onCleared, requiredChecksVerdict });
+    const cleared: BaseHoldCleared[] = [];
+    const d = deps({
+      currentBaseSha: async () => 'c'.repeat(40),
+      now: () => T0,
+      onCleared: (c) => cleared.push(c),
+      requiredChecksVerdict: async () => ({ green: true, reason: 'ok' }),
+    });
     expect(await evaluateBaseHold(file, hold.repo, d)).toEqual({ kind: 'claim' });
-    expect(onCleared.mock.calls[0][0].reason).toBe('sha-changed');
+    expect(cleared).toEqual([expect.objectContaining({ reason: 'sha-changed' })]);
   });
 
   it('a hold without the field is judged by the same strict verdict, without backoff', async () => {
     writeBaseHold(file, { ...hold, baseSha: SHA });
-    const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
-    const d = deps({ requiredChecksVerdict });
+    const { asked, verdict } = recordVerdict();
+    const d = deps({
+      requiredChecksVerdict: verdict,
+    });
     expect(await evaluateBaseHold(file, hold.repo, d)).toEqual({ kind: 'claim' });
-    expect(requiredChecksVerdict).toHaveBeenCalledWith(SHA);
+    expect(asked).toEqual([SHA]);
   });
 
   it('createBaseHoldGate forwards requiredChecksVerdict and now', async () => {
     writeBaseHold(file, awaiting);
-    const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
+    const { asked, verdict } = recordVerdict();
     const gate = createBaseHoldGate({
       file,
       repo: hold.repo,
       git: async () => `${SHA}\trefs/heads/main\n`,
-      requiredChecksVerdict,
+      requiredChecksVerdict: verdict,
       now: () => T0 + 2000,
     });
     expect(await gate()).toEqual({ kind: 'claim' });
-    expect(requiredChecksVerdict).toHaveBeenCalledWith(SHA);
+    expect(asked).toEqual([SHA]);
   });
 });
 
@@ -364,11 +380,9 @@ describe('base hold gate (#3195)', () => {
     await tempDirs.cleanup();
   });
 
+  type Runs = Array<{ name: string; status: string; conclusion: string | null }>;
   // Mirrors core's evaluateRequiredChecks(['ci'], runs): internal.ts is at its max-lines ceiling, so it is not re-exported.
-  const evaluateRequiredChecks = (
-    required: string[],
-    runs: Array<{ name: string; status: string; conclusion: string | null }>,
-  ) => {
+  const evaluateRequiredChecks = (required: string[], runs: Runs) => {
     const run = runs.find((r) => r.name === required[0]);
     const green = run?.status === 'completed' && run.conclusion === 'success';
     return {
@@ -378,7 +392,7 @@ describe('base hold gate (#3195)', () => {
     };
   };
 
-  const gateFor = (runs: Array<{ name: string; status: string; conclusion: string | null }>, onCleared?: () => void) =>
+  const gateFor = (runs: Runs, onCleared?: (c: BaseHoldCleared) => void) =>
     createBaseHoldGate({
       file,
       repo: hold.repo,
@@ -388,14 +402,9 @@ describe('base hold gate (#3195)', () => {
     });
 
   it('clears a tests hold on 8fdcb345 when required ci is green despite a failed scheduled pipeline-integration', async () => {
-    const onCleared = vi.fn();
-    expect(await gateFor(baseRuns, onCleared)()).toEqual({ kind: 'claim' });
-    expect(onCleared).toHaveBeenCalledWith({
-      hold: testsHold,
-      reason: 'ci-green',
-      currentSha: SHA,
-      basis: 'required checks: ci',
-    });
+    const cleared: BaseHoldCleared[] = [];
+    expect(await gateFor(baseRuns, (c) => cleared.push(c))()).toEqual({ kind: 'claim' });
+    expect(cleared).toEqual([{ hold: testsHold, reason: 'ci-green', currentSha: SHA, basis: 'required checks: ci' }]);
     expect(existsSync(file)).toBe(false);
   });
 
@@ -452,26 +461,25 @@ describe('confirmedLocally base hold (#3287)', () => {
 
   it('a confirmedLocally hold is kept on green CI and cleared only when the SHA changes', async () => {
     writeBaseHold(file, confirmed);
-    const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
-    const onCleared = vi.fn();
+    const cleared: BaseHoldCleared[] = [];
+    const { asked, verdict: requiredChecksVerdict } = recordVerdict();
     const decision = await evaluateBaseHold(file, hold.repo, {
       currentBaseSha: async () => SHA,
       requiredChecksVerdict,
-      onCleared,
+      onCleared: (c) => cleared.push(c),
     });
     expect(decision.kind).toBe('hold');
-    expect(requiredChecksVerdict).not.toHaveBeenCalled();
+    expect([asked, cleared]).toEqual([[], []]);
     expect(existsSync(file)).toBe(true);
-    expect(onCleared).not.toHaveBeenCalled();
 
     const moved = await evaluateBaseHold(file, hold.repo, {
       currentBaseSha: async () => 'c'.repeat(40),
       requiredChecksVerdict,
-      onCleared,
+      onCleared: (c) => cleared.push(c),
     });
-    expect(requiredChecksVerdict).toHaveBeenCalledWith('c'.repeat(40));
+    expect(asked).toEqual(['c'.repeat(40)]);
     expect(moved).toEqual({ kind: 'claim' });
     expect(existsSync(file)).toBe(false);
-    expect(onCleared.mock.calls[0][0].reason).toBe('sha-changed');
+    expect(cleared).toEqual([expect.objectContaining({ reason: 'sha-changed' })]);
   });
 });
