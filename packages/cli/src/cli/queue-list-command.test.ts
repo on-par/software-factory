@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { errored, h, installCliCommandsHarness, logged, runMain } from './test-support/cli-commands-harness.js';
 
 installCliCommandsHarness();
+const record = (r: unknown = {}, c: any[] = []) => Object.assign(async (a: unknown) => (c.push(a), r), { calls: c });
 
 describe('cli commands (via main dispatch)', () => {
   describe('queue list', () => {
@@ -18,9 +19,9 @@ describe('cli commands (via main dispatch)', () => {
         if (cmd.includes('gh repo view')) return h.ghRepo;
         return '';
       };
-      h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
-      h.octokit.rest.issues.removeLabel = vi.fn(async () => ({}));
-      h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
+      h.octokit.rest.issues.addLabels = record();
+      h.octokit.rest.issues.removeLabel = record();
+      h.octokit.rest.issues.createLabel = record();
     });
 
     const twoLanes = (): void => {
@@ -53,9 +54,9 @@ describe('cli commands (via main dispatch)', () => {
         ],
         orderConflicts: [],
       });
-      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
-      expect(h.octokit.rest.issues.removeLabel).not.toHaveBeenCalled();
-      expect(h.octokit.rest.issues.createLabel).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
+      expect(h.octokit.rest.issues.removeLabel.calls).toEqual([]);
+      expect(h.octokit.rest.issues.createLabel.calls).toEqual([]);
     });
 
     it('--lane returns only that lane', async () => {
@@ -122,14 +123,14 @@ describe('cli commands (via main dispatch)', () => {
     });
 
     it('exits 2 without --json and makes no GitHub call', async () => {
-      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listForRepo = record({ data: [] });
 
       const res = await runMain('queue', 'list');
 
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('requires --json');
       expect(logged()).toBe('');
-      expect(h.octokit.rest.issues.listForRepo).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.listForRepo.calls).toEqual([]);
     });
   });
 });

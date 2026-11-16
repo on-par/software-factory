@@ -1,5 +1,5 @@
 import type { StackPullReviews } from '@on-par/factory-core/internal';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { createQueuePreflightOps, preflightQueuedIssue } from './index.js';
 
@@ -35,7 +35,8 @@ describe('ci-pending drafts (#3968)', () => {
   const parked = { kind: 'park', reason: 'PR #71 is draft or its draft state is unavailable' };
 
   it('adopts a draft PR whose trusted run state is ci-pending without a CI watch', async () => {
-    const watch = vi.fn(async () => 'success' as const);
+    const watched: string[] = [];
+    const watch = async (sha: string) => (watched.push(sha), 'success' as const);
     await expect(
       run({
         getLandState: async () => ({ isDraft: true, mergeStateStatus: 'BLOCKED' }),
@@ -43,7 +44,7 @@ describe('ci-pending drafts (#3968)', () => {
         watch,
       }),
     ).resolves.toEqual({ kind: 'adopt', branch: 'contributor/real-head' });
-    expect(watch).not.toHaveBeenCalled();
+    expect(watched).toEqual([]);
 
     await expect(
       run({
@@ -53,7 +54,7 @@ describe('ci-pending drafts (#3968)', () => {
         watch,
       }),
     ).resolves.toEqual({ kind: 'adopt', branch: 'contributor/real-head' });
-    expect(watch).not.toHaveBeenCalled();
+    expect(watched).toEqual([]);
   });
 
   it('parks a draft PR whose run state is not ci-pending or cannot be read', async () => {
@@ -63,9 +64,10 @@ describe('ci-pending drafts (#3968)', () => {
       parked,
     );
     await expect(run({ getLandState })).resolves.toEqual(parked);
-    const ciPendingDraft = vi.fn(async () => true);
+    const checked: unknown[] = [];
+    const ciPendingDraft = async () => checked.push(true) > 0;
     await expect(run({ getLandState: async () => ({ isDraft: undefined }), ciPendingDraft })).resolves.toEqual(parked);
-    expect(ciPendingDraft).not.toHaveBeenCalled();
+    expect(checked).toEqual([]);
   });
 
   it('makeQueuePreflightOps().ciPendingDraft is false when no run-state comment is found', async () => {

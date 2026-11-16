@@ -1,7 +1,7 @@
 // packages/cli/src/cli/queue-clear.test.ts — `factory queue clear` preview and exit codes (#1693).
 
 import type { QueueClearPreview, QueueClearResult } from '@on-par/factory-core/internal';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { formatQueueClearPreview, formatQueueClearResult, runQueueClear } from './queue-clear.js';
 
@@ -75,6 +75,10 @@ describe('formatQueueClearResult', () => {
   });
 });
 
+const tracked =
+  <T>(log: string[], name: string, fn: () => Promise<T>) =>
+  async () => (log.push(name), fn());
+
 describe('runQueueClear', () => {
   const previewClear = async () => preview;
   const clear = async () => result;
@@ -98,14 +102,16 @@ describe('runQueueClear', () => {
   });
 
   it('--yes clears via clear() and exits 0', async () => {
-    const clearSpy = vi.fn(clear);
-    const previewSpy = vi.fn(previewClear);
-    const res = await runQueueClear({ previewClear: previewSpy, clear: clearSpy, yes: true });
+    const calls: string[] = [];
+    const res = await runQueueClear({
+      previewClear: tracked(calls, 'preview', previewClear),
+      clear: tracked(calls, 'clear', clear),
+      yes: true,
+    });
     expect(res.exitCode).toBe(0);
     expect(res.message).toBeUndefined();
     expect(res.report).toContain(formatQueueClearResult(result));
-    expect(clearSpy).toHaveBeenCalledOnce();
-    expect(previewSpy).not.toHaveBeenCalled();
+    expect(calls).toEqual(['clear']);
   });
 
   it('--yes exits 1 after printing every line when an issue failed', async () => {
@@ -121,10 +127,10 @@ describe('runQueueClear', () => {
   });
 
   it('--dry-run with --yes previews and never calls clear()', async () => {
-    const clearSpy = vi.fn(clear);
-    const res = await runQueueClear({ previewClear, clear: clearSpy, dryRun: true, yes: true });
+    const calls: string[] = [];
+    const res = await runQueueClear({ previewClear, clear: tracked(calls, 'clear', clear), dryRun: true, yes: true });
     expect(res.report).toContain('dry run');
-    expect(clearSpy).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
   });
 
   it.each([{}, { dryRun: true }, { yes: true }])('reports an empty queue with exit 0 (%j)', async (flags) => {
