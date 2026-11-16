@@ -1,29 +1,19 @@
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { chmod } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createTempDirs } from '../harness/temp-dir.js';
 import type { CommandResult } from '../utils/command-runner.js';
+import { createTempWorktrees } from '../test-support/temp-worktree.js';
 import { inconclusiveOutputCause } from './inconclusive.js';
 import { type CheckerContext, resolveTestsCommand, testsChecker } from './index.js';
 
-const tempDirs = createTempDirs();
+const { makeWorktree, cleanup } = createTempWorktrees('verify-ps1-test-');
 const PS1_ARGV = ['pwsh', '-NoProfile', '-NonInteractive', '-File', 'scripts/verify.ps1'];
 
 afterEach(async () => {
-  await tempDirs.cleanup();
+  await cleanup();
 });
-
-async function makeWorktree(files: Record<string, string> = {}): Promise<string> {
-  const dir = await tempDirs.make('verify-ps1-test-');
-  for (const [path, contents] of Object.entries(files)) {
-    const fullPath = join(dir, path);
-    await mkdir(dirname(fullPath), { recursive: true });
-    await writeFile(fullPath, contents);
-  }
-  return dir;
-}
 
 function makeContext(worktree: string): CheckerContext {
   return { worktree, specPath: join(worktree, 'no-such-spec.md'), constitutionBody: 'test constitution' };

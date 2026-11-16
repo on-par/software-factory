@@ -1,24 +1,16 @@
-import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createTempDirs } from '../harness/temp-dir.js';
 import type { CommandResult } from '../utils/command-runner.js';
+import { createTempWorktrees } from '../test-support/temp-worktree.js';
 import { compileChecker, resolveCompileCommand, type CheckerContext } from './index.js';
 
-const tmp = createTempDirs();
+const { makeWorktree, cleanup } = createTempWorktrees('compile-timeout-');
 
 afterEach(async () => {
-  await tmp.cleanup();
+  await cleanup();
 });
-
-async function makeWorktree(files: Record<string, string>): Promise<string> {
-  const dir = await tmp.make('compile-timeout-');
-  await mkdir(dir, { recursive: true });
-  for (const [path, contents] of Object.entries(files)) await writeFile(join(dir, path), contents);
-  return dir;
-}
 
 const BUILD_PKG = JSON.stringify({ scripts: { build: 'x' } });
 

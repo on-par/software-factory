@@ -157,7 +157,7 @@ describe('sweepWorktrees', () => {
   let repoRoot: string;
   let parentDir: string;
 
-  function makeWorktree(name: string, ageMs?: number): string {
+  function makeGcWorktree(name: string, ageMs?: number): string {
     const path = join(parentDir, name);
     mkdirSync(path, { recursive: true });
     writeFileSync(join(path, '.git'), 'gitdir: /somewhere');
@@ -181,7 +181,7 @@ describe('sweepWorktrees', () => {
 
   it('reaps both a legacy sibling worktree and one under the shared worktree root (#1758)', async () => {
     const { repoRoot: root } = setup();
-    const legacy = makeWorktree(`${basename(root)}-factory-ship-it-5`);
+    const legacy = makeGcWorktree(`${basename(root)}-factory-ship-it-5`);
     const shared = join(parentDir, 'home', '.factory', 'worktrees', 'o', 'r', `${basename(root)}-factory-ship-it-6`);
     mkdirSync(shared, { recursive: true });
     writeFileSync(join(shared, '.git'), 'gitdir: /somewhere');
@@ -203,7 +203,7 @@ describe('sweepWorktrees', () => {
 
   it('never issues remove commands for the main worktree or non-factory-named worktrees, and skips resolving origin/main', async () => {
     setup();
-    const otherWorktree = makeWorktree('some-other-worktree');
+    const otherWorktree = makeGcWorktree('some-other-worktree');
     const commands: string[] = [];
     const runCommand = async (cmd: string) => {
       commands.push(cmd);
@@ -225,7 +225,7 @@ describe('sweepWorktrees', () => {
   it('removes a merged worktree, scrubbing credentials before the remove command runs', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-5`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
     writeFileSync(join(wt, '.env'), 'SECRET=1');
 
     const commands: string[] = [];
@@ -263,7 +263,7 @@ describe('sweepWorktrees', () => {
   it('classifies a remote-gone branch when ancestor check fails and ls-remote is empty', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-6`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -290,9 +290,9 @@ describe('sweepWorktrees', () => {
 
   it('treats lane worktrees on the resolved prefix as candidates, not manual or legacy ship-it branches', async () => {
     const { repoRoot: root } = setup();
-    const newWt = makeWorktree(`${basename(root)}-factory-factory-21`);
-    const legacyWt = makeWorktree(`${basename(root)}-ship-it-22`);
-    const manualWt = makeWorktree(`${basename(root)}-scratch`);
+    const newWt = makeGcWorktree(`${basename(root)}-factory-factory-21`);
+    const legacyWt = makeGcWorktree(`${basename(root)}-ship-it-22`);
+    const manualWt = makeGcWorktree(`${basename(root)}-scratch`);
 
     const commands: string[] = [];
     const runCommand = async (cmd: string) => {
@@ -320,7 +320,7 @@ describe('sweepWorktrees', () => {
   it('keeps a fresh worktree with a live remote branch and unmerged head', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-7`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -347,7 +347,7 @@ describe('sweepWorktrees', () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-8`;
     const eightDaysMs = 8 * 24 * 60 * 60 * 1000;
-    const wt = makeWorktree(wtName, eightDaysMs);
+    const wt = makeGcWorktree(wtName, eightDaysMs);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -373,7 +373,7 @@ describe('sweepWorktrees', () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-9`;
     const eightDaysMs = 8 * 24 * 60 * 60 * 1000;
-    const wt = makeWorktree(wtName, eightDaysMs);
+    const wt = makeGcWorktree(wtName, eightDaysMs);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -398,7 +398,7 @@ describe('sweepWorktrees', () => {
   it('dry-run reports candidates without mutating anything', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-10`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
     writeFileSync(join(wt, '.env'), 'SECRET=1');
 
     const commands: string[] = [];
@@ -433,7 +433,7 @@ describe('sweepWorktrees', () => {
   it('falls back to rmSync when git worktree remove fails', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-11`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -464,7 +464,7 @@ describe('sweepWorktrees', () => {
   it('keeps a fresh worktree whose HEAD is still origin/main even when --is-ancestor succeeds', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-12`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const commands: string[] = [];
     const runCommand = async (cmd: string) => {
@@ -496,7 +496,7 @@ describe('sweepWorktrees', () => {
   it('keeps a never-pushed lane created from an older origin/main that is an ancestor of the current tip', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-13`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -525,7 +525,7 @@ describe('sweepWorktrees', () => {
   it('keeps every worktree when origin/main cannot be resolved', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-14`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -589,7 +589,7 @@ describe('sweepWorktrees', () => {
   it('keeps a lane parked before SHIP that has commits but was never pushed', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-16`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -618,7 +618,7 @@ describe('sweepWorktrees', () => {
   it('still removes a merged lane whose branch was pushed', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-17`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -646,7 +646,7 @@ describe('sweepWorktrees', () => {
   it('accepts an origin-ref reflog entry as prior-push evidence for remote-gone', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-18`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -677,7 +677,7 @@ describe('sweepWorktrees', () => {
   it('accepts a configured upstream as prior-push evidence for remote-gone', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-19`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -711,7 +711,7 @@ describe('sweepWorktrees', () => {
   it('does not treat branch.<branch>.merge auto-set to the start point (refs/heads/main) by worktree creation as push evidence', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-20`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -749,7 +749,7 @@ describe('sweepWorktrees', () => {
   it('never probes for push evidence on a detached worktree', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-21`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const commands: string[] = [];
     const runCommand = async (cmd: string) => {
@@ -782,7 +782,7 @@ describe('sweepWorktrees', () => {
   it('deletes the branch of a merged worktree after git worktree prune', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-30`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const commands: string[] = [];
     const runCommand = async (cmd: string) => {
@@ -818,7 +818,7 @@ describe('sweepWorktrees', () => {
   it('deletes the branch of a remote-gone worktree', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-31`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const commands: string[] = [];
     const runCommand = async (cmd: string) => {
@@ -855,7 +855,7 @@ describe('sweepWorktrees', () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-32`;
     const eightDaysMs = 8 * 24 * 60 * 60 * 1000;
-    const wt = makeWorktree(wtName, eightDaysMs);
+    const wt = makeGcWorktree(wtName, eightDaysMs);
 
     const commands: string[] = [];
     const runCommand = async (cmd: string) => {
@@ -884,7 +884,7 @@ describe('sweepWorktrees', () => {
   it('warns and does not fail the sweep when git branch -D fails', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-33`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -923,7 +923,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   let repoRoot: string;
   let parentDir: string;
 
-  function makeWorktree(name: string): string {
+  function makeGcWorktree(name: string): string {
     const path = join(parentDir, name);
     mkdirSync(path, { recursive: true });
     writeFileSync(join(path, '.git'), 'gitdir: /somewhere');
@@ -971,7 +971,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   it('removes a worktree whose branch has a merged PR on GitHub with zero local push evidence', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-21`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const { octokit, pullsParams } = sweepOctokit(async () => ({
       data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
@@ -1019,7 +1019,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   it('keeps a worktree whose branch has an open PR even when local evidence would say merged', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-22`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const { octokit } = sweepOctokit(async () => ({ data: [{ number: 1, state: 'open' }] }));
     const runCommand = async (cmd: string) => {
@@ -1049,7 +1049,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   it('removes a closed-not-merged PR worktree when the remote branch is gone', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-23`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const { octokit } = sweepOctokit(async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }));
     const runCommand = async (cmd: string) => {
@@ -1078,7 +1078,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   it('keeps a closed-not-merged PR worktree of a claimed issue while the remote branch is still live', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-24`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const { octokit } = sweepOctokit(
       async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }),
@@ -1111,7 +1111,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   it('quarantines (never removes) a closed-not-merged, unclaimed-issue worktree even with a live remote branch', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-200`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const { octokit } = sweepOctokit(async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }));
     const commands: string[] = [];
@@ -1146,7 +1146,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   it('removes a closed-not-merged PR worktree whose HEAD is an ancestor of origin/main', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-25`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const { octokit } = sweepOctokit(async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }));
     const runCommand = async (cmd: string) => {
@@ -1175,7 +1175,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   it('falls back to local evidence and still removes merged when the GitHub query throws', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-26`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const { octokit } = sweepOctokit(async () => {
       throw new Error('rate limited');
@@ -1209,7 +1209,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   it('falls back to local evidence when no PR exists for the branch', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-27`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const { octokit } = sweepOctokit(async () => ({ data: [] }));
     const runCommand = async (cmd: string) => {
@@ -1241,7 +1241,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   it('keeps a GitHub-merged worktree with uncommitted tracked changes', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-28`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const { octokit } = sweepOctokit(async () => ({
       data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
@@ -1273,7 +1273,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   it('keeps a GitHub-merged worktree when the cleanliness probe itself fails', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-28b`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const { octokit } = sweepOctokit(async () => ({
       data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
@@ -1302,7 +1302,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   it('uses local evidence when octokit is present but no repo is given', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-28c`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const { octokit, pullsParams } = sweepOctokit(async () => ({
       data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
@@ -1334,7 +1334,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   it('keeps a dirty worktree on the local fallback path', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-29`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -1366,7 +1366,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   it('tears down a candidate microVM via the injected sandbox before removing its worktree', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-8`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const order: string[] = [];
     const runCommand = async (cmd: string) => {
@@ -1406,7 +1406,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   it('never touches the sandbox when no sandbox descriptor is injected', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-9`;
-    const wt = makeWorktree(wtName);
+    const wt = makeGcWorktree(wtName);
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
@@ -1437,7 +1437,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('reaps a clean parked-issue worktree despite an open PR and deletes the branch on PR evidence', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-41`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-41`);
 
       const { octokit, issueParams } = sweepOctokit(
         () => ({ data: [{ number: 9, state: 'open' }] }),
@@ -1465,7 +1465,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('reaps a clean closed-issue worktree but keeps its never-pushed branch', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-42`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-42`);
 
       const { octokit } = sweepOctokit(
         () => ({ data: [] }),
@@ -1498,7 +1498,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('keeps a dirty worktree even when its issue is parked', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-43`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-43`);
 
       const { octokit } = sweepOctokit(
         () => ({ data: [{ number: 9, state: 'open' }] }),
@@ -1525,7 +1525,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('keeps an open unlabeled issue with an open PR (the ADR-0027 rule is preserved)', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-44`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-44`);
 
       const { octokit } = sweepOctokit(() => ({ data: [{ number: 9, state: 'open' }] }));
       const runCommand = async (cmd: string) => {
@@ -1546,8 +1546,8 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('admits a legacy <repo>-ship-it-<n> path on a lane branch but never a manual worktree', async () => {
       const { repoRoot: root } = setup();
-      const legacy = makeWorktree(`${basename(root)}-ship-it-9`);
-      const manual = makeWorktree(`${basename(root)}-manual-x`);
+      const legacy = makeGcWorktree(`${basename(root)}-ship-it-9`);
+      const manual = makeGcWorktree(`${basename(root)}-manual-x`);
 
       const { octokit, issueParams } = sweepOctokit(
         () => ({ data: [{ number: 3, state: 'open' }] }),
@@ -1579,7 +1579,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('warns and falls back to the PR-state rules when the issue query throws', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-45`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-45`);
 
       const { octokit } = sweepOctokit(
         () => ({ data: [{ number: 9, state: 'open' }] }),
@@ -1608,7 +1608,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     describe('issue-query-failure warn dedup (#1354)', () => {
       it('suppresses the repeated warning across loop iterations, with a one-line count summary', async () => {
         const { repoRoot: root } = setup();
-        const wt = makeWorktree(`${basename(root)}-factory-ship-it-9678562`);
+        const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-9678562`);
 
         const { octokit } = sweepOctokit(
           () => ({ data: [] }),
@@ -1647,8 +1647,8 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
       it('still warns in full for a different failing issue after another is already suppressed', async () => {
         const { repoRoot: root } = setup();
-        const wtA = makeWorktree(`${basename(root)}-factory-ship-it-9678562`);
-        const wtB = makeWorktree(`${basename(root)}-factory-ship-it-9872774`);
+        const wtA = makeGcWorktree(`${basename(root)}-factory-ship-it-9678562`);
+        const wtB = makeGcWorktree(`${basename(root)}-factory-ship-it-9872774`);
 
         const { octokit } = sweepOctokit(
           () => ({ data: [] }),
@@ -1702,7 +1702,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
       it('clears suppression once the worktree is gone, so a later reappearance warns in full again', async () => {
         const { repoRoot: root } = setup();
-        const wt = makeWorktree(`${basename(root)}-factory-ship-it-9678562`);
+        const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-9678562`);
 
         const { octokit } = sweepOctokit(
           () => ({ data: [] }),
@@ -1733,7 +1733,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
           { runCommand: withoutWorktree, octokit, issueWarnDedup },
         );
 
-        const wt2 = makeWorktree(`${basename(root)}-factory-ship-it-9678562-b`);
+        const wt2 = makeGcWorktree(`${basename(root)}-factory-ship-it-9678562-b`);
         const reappeared = async (cmd: string) => {
           if (cmd === 'git worktree list --porcelain') {
             return { stdout: laneListing(root, wt2, 'factory/9678562-ghost') };
@@ -1755,8 +1755,8 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('memoizes the issue probe across two worktrees of the same issue', async () => {
       const { repoRoot: root } = setup();
-      const wtA = makeWorktree(`${basename(root)}-factory-ship-it-46`);
-      const wtB = makeWorktree(`${basename(root)}-ship-it-46`);
+      const wtA = makeGcWorktree(`${basename(root)}-factory-ship-it-46`);
+      const wtB = makeGcWorktree(`${basename(root)}-ship-it-46`);
 
       const { octokit, issueParams } = sweepOctokit(
         () => ({ data: [{ number: 9, state: 'open' }] }),
@@ -1784,7 +1784,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('honors a custom branch prefix when parsing lane issue numbers', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-lane-47`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-lane-47`);
 
       const { octokit, issueParams } = sweepOctokit(
         () => ({ data: [{ number: 9, state: 'open' }] }),
@@ -1826,7 +1826,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('flags a worktree whose lane issue 404s, without removing it', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-50`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-50`);
 
       const { octokit, issueParams } = sweepOctokit(
         () => ({ data: [] }),
@@ -1850,7 +1850,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('does not flag a worktree whose lane issue exists', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-51`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-51`);
 
       const { octokit } = sweepOctokit(() => ({ data: [] }));
       const { runCommand } = noOtherReasonRunCommand(root, wt, 'factory/51-live');
@@ -1866,7 +1866,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('reports unverifiable, not flagged, on a non-404 API error (rate limit)', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-52`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-52`);
 
       const { octokit } = sweepOctokit(
         () => ({ data: [] }),
@@ -1889,7 +1889,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('keeps a worktree with an open PR outside dry-run, even on a 404 issue (open PR is authoritative)', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-53`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-53`);
 
       const { octokit } = sweepOctokit(
         () => ({ data: [{ number: 1, state: 'open' }] }),
@@ -1912,7 +1912,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('quarantines (never removes) a real-mode worktree whose lane issue 404s, with no hard-evidence reason', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-54`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-54`);
 
       const { octokit } = sweepOctokit(
         () => ({ data: [] }),
@@ -1942,8 +1942,8 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('quarantines only the flagged worktree, leaving a healthy sibling untouched (#1355 acceptance)', async () => {
       const { repoRoot: root } = setup();
-      const ghost = makeWorktree(`${basename(root)}-factory-ship-it-55`);
-      const healthy = makeWorktree(`${basename(root)}-factory-ship-it-56`);
+      const ghost = makeGcWorktree(`${basename(root)}-factory-ship-it-55`);
+      const healthy = makeGcWorktree(`${basename(root)}-factory-ship-it-56`);
 
       const pullsList = vi.fn(async () => ({ data: [] }));
       const issuesGet = vi.fn(async (params: { issue_number: number }) => {
@@ -2000,7 +2000,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('flags a merged-PR worktree whose issue has no active claim label', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-60`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-60`);
 
       const { octokit } = sweepOctokit(
         () => ({ data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
@@ -2018,7 +2018,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('flags a closed (unmerged) PR worktree whose issue has no active claim label', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-61`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-61`);
 
       const { octokit } = sweepOctokit(
         () => ({ data: [{ number: 2, state: 'closed' }] }),
@@ -2038,7 +2038,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('does not flag an open-PR worktree, even without a claim label', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-62`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-62`);
 
       const { octokit } = sweepOctokit(
         () => ({ data: [{ number: 3, state: 'open' }] }),
@@ -2056,7 +2056,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('does not flag a merged-PR worktree whose issue carries an active claim label', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-63`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-63`);
 
       const { octokit } = sweepOctokit(
         () => ({ data: [{ number: 4, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
@@ -2074,7 +2074,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('flags a merged-PR worktree whose claim label carries an expired lease (#1501)', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-66`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-66`);
 
       const expiredLabel = claimExpiresLabel(Math.floor(Date.now() / 1000) - 3600);
       const { octokit } = sweepOctokit(
@@ -2093,7 +2093,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('does not flag a merged-PR worktree whose claim label carries a live (unexpired) lease', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-67`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-67`);
 
       const liveLabel = claimExpiresLabel(Math.floor(Date.now() / 1000) + 3600);
       const { octokit } = sweepOctokit(
@@ -2112,7 +2112,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('does not flag on a claim-label lookup error (fail-safe)', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-64`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-64`);
 
       const { octokit } = sweepOctokit(
         () => ({ data: [{ number: 5, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
@@ -2134,7 +2134,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     it('keeps outside dry-run via merged-PR hard evidence, pre-empting the #1355 claim-check tier', async () => {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-65`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-65`);
 
       const { octokit, issueParams } = sweepOctokit(
         () => ({ data: [{ number: 6, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
@@ -2164,7 +2164,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     function harness(opts: { unpushed?: string; beyondBase?: string; dirty?: boolean; openPr?: boolean }) {
       const { repoRoot: root } = setup();
-      const wt = makeWorktree(`${basename(root)}-factory-ship-it-61`);
+      const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-61`);
       const { octokit } = sweepOctokit(
         () => ({ data: opts.openPr ? [{ number: 5, state: 'open' }] : [] }),
         DECOMPOSED_ISSUE,

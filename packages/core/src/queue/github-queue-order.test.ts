@@ -9,53 +9,9 @@ import {
   QUEUED_LABEL,
   queueOrderLabel,
   type QueueGitHubClient,
-  type QueueIssue,
   type QueueOrderConflict,
 } from './github-queue.js';
-import { fakeIssueComments } from './fake-issue-comments.js';
-
-function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
-  const state = new Map<number, Set<string>>(issues.map((i) => [i.number, new Set(i.labels)]));
-  const createdLabels = new Set<string>();
-  const calls: string[] = [];
-
-  const client: QueueGitHubClient = {
-    async listOpenIssuesWithLabels({ labels }) {
-      calls.push('listOpenIssuesWithLabels');
-      const result: QueueIssue[] = [];
-      for (const [number, labelSet] of state) {
-        if (labels.every((l) => labelSet.has(l))) {
-          result.push({ number, labels: [...labelSet] });
-        }
-      }
-      return result;
-    },
-    async getIssueLabels({ issue_number }) {
-      calls.push('getIssueLabels');
-      return [...(state.get(issue_number) ?? new Set<string>())];
-    },
-    async addLabels({ issue_number, labels }) {
-      calls.push('addLabels');
-      // Yield before mutating so concurrent claimNext calls can interleave — this is
-      // what makes the simulated-race tests below an actual race, not a fixed order.
-      await Promise.resolve();
-      const set = state.get(issue_number) ?? new Set<string>();
-      for (const label of labels) set.add(label);
-      state.set(issue_number, set);
-    },
-    async removeLabel({ issue_number, name }) {
-      calls.push('removeLabel');
-      state.get(issue_number)?.delete(name);
-    },
-    ...fakeIssueComments(),
-    async ensureLabel({ name }) {
-      calls.push('ensureLabel');
-      createdLabels.add(name);
-      return false;
-    },
-  };
-  return { state, createdLabels, calls, client };
-}
+import { createFakeStore } from '../test-support/fake-queue-store.js';
 
 const conflictQueue = (client: QueueGitHubClient) => {
   const seen: QueueOrderConflict[] = [];

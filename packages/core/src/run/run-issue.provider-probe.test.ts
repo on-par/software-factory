@@ -1,5 +1,4 @@
-import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -18,6 +17,7 @@ import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouterError } from '../router/executor-error.js';
 import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
+import { makeRepo } from '../test-support/git-repo.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import type { ProviderProbe } from './provider-probe.js';
@@ -76,22 +76,6 @@ const tempDirs = createTempDirs();
 const dir = tempDirs.makeSync('run-issue-provider-failover-');
 afterAll(() => tempDirs.cleanup());
 let counter = 0;
-
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
-}
-
-function makeRepo(): string {
-  counter += 1;
-  const repo = join(dir, `repo-${counter}`);
-  execFileSync('git', ['init', '-q', repo]);
-  git(repo, 'config', 'user.email', 't@example.com');
-  git(repo, 'config', 'user.name', 'T');
-  writeFileSync(join(repo, 'a.txt'), 'a');
-  git(repo, 'add', '.');
-  git(repo, 'commit', '-q', '-m', 'start');
-  return repo;
-}
 
 const request: RunRequest = {
   issue: 1,
@@ -177,7 +161,7 @@ async function run(setup: Setup) {
   const ports: RunPorts = {
     router,
     octokit: {} as Octokit,
-    workspace: { path: makeRepo(), dispose: async () => {} } as Workspace,
+    workspace: { path: makeRepo(tempDirs, 'run-issue-repo-', { 'a.txt': 'a' }), dispose: async () => {} } as Workspace,
     events: () => (type: string, msg: string) => {
       events.push([type, msg]);
     },

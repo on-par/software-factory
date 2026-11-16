@@ -17,6 +17,7 @@ import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouterError } from '../router/executor-error.js';
 import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
+import { makeRepo } from '../test-support/git-repo.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
@@ -82,18 +83,6 @@ let counter = 0;
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
-}
-
-function makeRepo(): string {
-  counter += 1;
-  const repo = join(dir, `repo-${counter}`);
-  execFileSync('git', ['init', '-q', repo]);
-  git(repo, 'config', 'user.email', 't@example.com');
-  git(repo, 'config', 'user.name', 'T');
-  writeFileSync(join(repo, 'a.txt'), 'a');
-  git(repo, 'add', '.');
-  git(repo, 'commit', '-q', '-m', 'start');
-  return repo;
 }
 
 const request: RunRequest = {
@@ -178,7 +167,10 @@ async function run(setup: Setup = {}) {
   const ports: RunPorts = {
     router,
     octokit: {} as Octokit,
-    workspace: { path: setup.workspace ?? makeRepo(), dispose: async () => {} } as Workspace,
+    workspace: {
+      path: setup.workspace ?? makeRepo(tempDirs, 'run-issue-repo-', { 'a.txt': 'a' }),
+      dispose: async () => {},
+    } as Workspace,
     events: () => (type: string, msg: string, extra?: { providerFailover?: unknown }) => {
       events.push([type, msg]);
       if (type === 'provider_failover') failovers.push(extra?.providerFailover);
@@ -198,7 +190,7 @@ const types = (events: Array<[string, string]>) => events.map(([t]) => t);
 
 describe('runIssue — provider failover at the phase boundary (#3338)', () => {
   it('a usage cap mid-BUILD reruns BUILD from its start on the next provider (2026-10-20)', async () => {
-    const repo = makeRepo();
+    const repo = makeRepo(tempDirs, 'run-issue-repo-', { 'a.txt': 'a' });
     const startSha = git(repo, 'rev-parse', 'HEAD');
     const seen: Array<{ head: string; partial: boolean; model?: string; route: string }> = [];
     const { outcome, failovers, builds, events } = await run({
@@ -320,7 +312,7 @@ describe('runIssue — provider failover at the phase boundary (#3338)', () => {
   });
 
   it('a usage cap in CHECK reruns CHECK from its start on the next provider and clears the skip set (#3338)', async () => {
-    const repo = makeRepo();
+    const repo = makeRepo(tempDirs, 'run-issue-repo-', { 'a.txt': 'a' });
     const startSha = git(repo, 'rev-parse', 'HEAD');
     const heads: string[] = [];
     const skipsDuring: Array<ReadonlySet<string> | undefined> = [];

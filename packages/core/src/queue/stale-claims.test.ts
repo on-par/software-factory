@@ -2,69 +2,15 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  claimedByLabel,
-  claimExpiresLabel,
-  IN_PROGRESS_LABEL,
-  type QueueGitHubClient,
-  type QueueIssue,
-} from './github-queue.js';
+import { claimedByLabel, claimExpiresLabel, IN_PROGRESS_LABEL, type QueueIssue } from './github-queue.js';
+import { createFakeStore } from '../test-support/fake-queue-store.js';
 import { defaultClockSkewCache } from './clock-skew.js';
 import type { OrphanClaimLabelSweep } from './claim-label-sweep.js';
 import { findStaleClaims, releaseStaleClaims } from './stale-claims.js';
-import { fakeIssueComments } from './fake-issue-comments.js';
 
 const NOW_MS = 1_700_000_000_000;
 const NOW_SECONDS = Math.floor(NOW_MS / 1000);
 const now = () => NOW_MS;
-
-function createFakeStore(issues: Array<{ number: number; labels: string[] }>, repoLabels: string[] = []) {
-  const deletedRepoLabels: string[] = [];
-  const repoLabelSet = new Set(repoLabels);
-  const writes: string[] = [];
-  const state = new Map<number, Set<string>>(issues.map((i) => [i.number, new Set(i.labels)]));
-
-  const client: QueueGitHubClient = {
-    async listOpenIssuesWithLabels({ labels }) {
-      const result: QueueIssue[] = [];
-      for (const [number, labelSet] of state) {
-        if (labels.every((l) => labelSet.has(l))) {
-          result.push({ number, labels: [...labelSet] });
-        }
-      }
-      return result;
-    },
-    async getIssueLabels({ issue_number }) {
-      return [...(state.get(issue_number) ?? new Set<string>())];
-    },
-    async addLabels({ issue_number, labels }) {
-      writes.push(`add #${issue_number}`);
-      const set = state.get(issue_number) ?? new Set<string>();
-      for (const label of labels) set.add(label);
-      state.set(issue_number, set);
-    },
-    async removeLabel({ issue_number, name }) {
-      writes.push(`remove #${issue_number}:${name}`);
-      state.get(issue_number)?.delete(name);
-    },
-    ...fakeIssueComments(),
-    async ensureLabel() {
-      return false;
-    },
-    async listRepoLabels() {
-      return [...repoLabelSet];
-    },
-    async deleteRepoLabel({ name }) {
-      deletedRepoLabels.push(name);
-      repoLabelSet.delete(name);
-    },
-    async listAllOpenIssues() {
-      return [...state].map(([number, set]) => ({ number, labels: [...set] }));
-    },
-  };
-
-  return { state, client, deletedRepoLabels, repoLabelSet, writes };
-}
 
 describe('findStaleClaims', () => {
   it('returns an issue whose lease has expired', () => {
@@ -112,9 +58,10 @@ describe('findStaleClaims', () => {
 describe('releaseStaleClaims', () => {
   it('removes factory:in-progress and the lease label, re-adds factory:queued, leaves lane/order labels', async () => {
     const label = claimExpiresLabel(NOW_SECONDS - 60);
-    const { state, client } = createFakeStore([
-      { number: 1, labels: [IN_PROGRESS_LABEL, label, 'factory:lane:default', 'factory:order:3'] },
-    ]);
+    const { state, client } = createFakeStore(
+      [{ number: 1, labels: [IN_PROGRESS_LABEL, label, 'factory:lane:default', 'factory:order:3'] }],
+      [],
+    );
 
     const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
 
@@ -123,7 +70,7 @@ describe('releaseStaleClaims', () => {
   });
 
   it('returns [] and performs no writes when nothing is stale', async () => {
-    const { client, writes } = createFakeStore([{ number: 1, labels: [] }]);
+    const { client, writes } = createFakeStore([{ number: 1, labels: [] }], []);
 
     const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
 
@@ -134,10 +81,13 @@ describe('releaseStaleClaims', () => {
   it('records released: false with the error message when one issue fails, and still releases the other', async () => {
     const label1 = claimExpiresLabel(NOW_SECONDS - 60);
     const label2 = claimExpiresLabel(NOW_SECONDS - 30);
-    const { state, client } = createFakeStore([
-      { number: 1, labels: [IN_PROGRESS_LABEL, label1] },
-      { number: 2, labels: [IN_PROGRESS_LABEL, label2, 'factory:lane:default', 'factory:order:1'] },
-    ]);
+    const { state, client } = createFakeStore(
+      [
+        { number: 1, labels: [IN_PROGRESS_LABEL, label1] },
+        { number: 2, labels: [IN_PROGRESS_LABEL, label2, 'factory:lane:default', 'factory:order:1'] },
+      ],
+      [],
+    );
     const originalRemoveLabel = client.removeLabel.bind(client);
     client.removeLabel = async (input) => {
       if (input.issue_number === 1) throw new Error('boom');
@@ -154,12 +104,20 @@ describe('releaseStaleClaims', () => {
   });
 
   it('leaves a parked issue with an expired lease parked and unqueued (#3193)', async () => {
-    const { state, client } = createFakeStore([
-      {
-        number: 1,
-        labels: [IN_PROGRESS_LABEL, claimExpiresLabel(NOW_SECONDS - 60), 'factory:parked', 'factory:lane:self-repair'],
-      },
-    ]);
+    const { state, client } = createFakeStore(
+      [
+        {
+          number: 1,
+          labels: [
+            IN_PROGRESS_LABEL,
+            claimExpiresLabel(NOW_SECONDS - 60),
+            'factory:parked',
+            'factory:lane:self-repair',
+          ],
+        },
+      ],
+      [],
+    );
 
     const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
 
@@ -169,12 +127,15 @@ describe('releaseStaleClaims', () => {
 
   it('removes the stale claimant labels, in-progress and the expired lease and reports released', async () => {
     const label = claimExpiresLabel(NOW_SECONDS - 60);
-    const { state, client } = createFakeStore([
-      {
-        number: 42,
-        labels: [IN_PROGRESS_LABEL, claimedByLabel('host-a-1'), label, 'factory:lane:default', 'factory:order:1'],
-      },
-    ]);
+    const { state, client } = createFakeStore(
+      [
+        {
+          number: 42,
+          labels: [IN_PROGRESS_LABEL, claimedByLabel('host-a-1'), label, 'factory:lane:default', 'factory:order:1'],
+        },
+      ],
+      [],
+    );
 
     const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
 
@@ -185,9 +146,10 @@ describe('releaseStaleClaims', () => {
   it('skips and reports renewed when the fresh read shows a heartbeat-renewed lease', async () => {
     const stale = claimExpiresLabel(NOW_SECONDS - 60);
     const renewed = claimExpiresLabel(NOW_SECONDS + 600);
-    const { state, client, writes } = createFakeStore([
-      { number: 42, labels: [IN_PROGRESS_LABEL, claimedByLabel('host-a-1'), renewed] },
-    ]);
+    const { state, client, writes } = createFakeStore(
+      [{ number: 42, labels: [IN_PROGRESS_LABEL, claimedByLabel('host-a-1'), renewed] }],
+      [],
+    );
     client.listOpenIssuesWithLabels = async () => [
       { number: 42, labels: [IN_PROGRESS_LABEL, claimedByLabel('host-a-1'), stale] },
     ];
@@ -236,7 +198,7 @@ describe('releaseStaleClaims orphan lease-label sweep (#1623)', () => {
 
   it('releaseStaleClaims still returns releases when the sweep throws', async () => {
     const stale = claimExpiresLabel(NOW_SECONDS - 60);
-    const { client } = createFakeStore([{ number: 1, labels: [IN_PROGRESS_LABEL, claimedByLabel('h-1'), stale] }]);
+    const { client } = createFakeStore([{ number: 1, labels: [IN_PROGRESS_LABEL, claimedByLabel('h-1'), stale] }], []);
     client.listRepoLabels = async () => {
       throw new Error('rate limited');
     };
@@ -335,7 +297,7 @@ describe('releaseStaleClaims clock skew guard (#3149)', () => {
   });
 
   it('never consults the probe when nothing is stale', async () => {
-    const { client } = createFakeStore([{ number: 1, labels: [] }]);
+    const { client } = createFakeStore([{ number: 1, labels: [] }], []);
     let probes = 0;
     const clockSkewMs = async () => (probes++, 300_000);
     await releaseStaleClaims({ client, owner: 'o', repo: 'r', now, clockSkewMs });

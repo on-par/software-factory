@@ -50,7 +50,7 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-function makeWorktree(): string {
+function makeEmptyWorktree(): string {
   const dir = mkdtempSync(join(tmpdir(), 'ollama-agentic-'));
   tempDirs.push(dir);
   return dir;
@@ -98,17 +98,17 @@ describe('CodingHarness contract: OllamaAgenticHarness', () => {
   const cases = codingHarnessContractCases({
     success: () => ({
       harness: new OllamaAgenticHarness(stubFetch([firstGreenProposal()]), okExec),
-      request: { model: 'local-agentic-model', registry, worktree: makeWorktree() },
+      request: { model: 'local-agentic-model', registry, worktree: makeEmptyWorktree() },
     }),
     timeout: () => ({
       harness: new OllamaAgenticHarness(async () => {
         throw Object.assign(new Error('timed out'), { name: 'TimeoutError' });
       }, okExec),
-      request: { model: 'local-agentic-model', registry, worktree: makeWorktree() },
+      request: { model: 'local-agentic-model', registry, worktree: makeEmptyWorktree() },
     }),
     emptyOutput: () => ({
       harness: new OllamaAgenticHarness(stubFetch(['', '']), okExec),
-      request: { model: 'local-agentic-model', registry, worktree: makeWorktree() },
+      request: { model: 'local-agentic-model', registry, worktree: makeEmptyWorktree() },
     }),
     failure: () => ({
       harness: new OllamaAgenticHarness(
@@ -121,7 +121,7 @@ describe('CodingHarness contract: OllamaAgenticHarness', () => {
         }),
         okExec,
       ),
-      request: { model: 'local-agentic-model', registry, worktree: makeWorktree() },
+      request: { model: 'local-agentic-model', registry, worktree: makeEmptyWorktree() },
     }),
   });
   for (const contractCase of cases) it(contractCase.name, contractCase.run);
@@ -129,7 +129,7 @@ describe('CodingHarness contract: OllamaAgenticHarness', () => {
 
 describe('OllamaAgenticHarness first-green fixture', () => {
   it('applies the recorded proposal and sends the patch schema as format to constrain decoding', async () => {
-    const worktree = makeWorktree();
+    const worktree = makeEmptyWorktree();
     const fetchFn = stubFetch([firstGreenProposal()]);
     const harness = new OllamaAgenticHarness(fetchFn, okExec);
 
@@ -152,7 +152,7 @@ describe('OllamaAgenticHarness first-green fixture', () => {
 
 describe('OllamaAgenticHarness env forwarding', () => {
   it('forwards request.env verbatim to the verify-command execFn opts', async () => {
-    const worktree = makeWorktree();
+    const worktree = makeEmptyWorktree();
     const fetchFn = stubFetch([firstGreenProposal()]);
     const calls: any[] = [];
     const exec: OllamaAgenticExecFn = async (cmd, opts) => {
@@ -179,7 +179,7 @@ describe('OllamaAgenticHarness env forwarding', () => {
   });
 
   it('leaves opts.env undefined when the request has no env', async () => {
-    const worktree = makeWorktree();
+    const worktree = makeEmptyWorktree();
     const fetchFn = stubFetch([firstGreenProposal()]);
     const calls: any[] = [];
     const exec: OllamaAgenticExecFn = async (cmd, opts) => {
@@ -194,7 +194,7 @@ describe('OllamaAgenticHarness env forwarding', () => {
   });
 
   it('forwards request.onPgid to the verify-command execFn opts', async () => {
-    const worktree = makeWorktree();
+    const worktree = makeEmptyWorktree();
     const fetchFn = stubFetch([firstGreenProposal()]);
     const calls: any[] = [];
     const exec: OllamaAgenticExecFn = async (cmd, opts) => {
@@ -212,7 +212,7 @@ describe('OllamaAgenticHarness env forwarding', () => {
 
 describe('OllamaAgenticHarness repair', () => {
   it('recovers from invalid JSON on the first attempt', async () => {
-    const worktree = makeWorktree();
+    const worktree = makeEmptyWorktree();
     const fetchFn = stubFetch(['not json at all', firstGreenProposal()]);
     const harness = new OllamaAgenticHarness(fetchFn, okExec);
 
@@ -228,7 +228,7 @@ describe('OllamaAgenticHarness repair', () => {
 
 describe('OllamaAgenticHarness malformed output after repair', () => {
   it('writes an auditable trace and rejects with a classified reason', async () => {
-    const worktree = makeWorktree();
+    const worktree = makeEmptyWorktree();
     const fetchFn = stubFetch(['not json', 'still not json']);
     const harness = new OllamaAgenticHarness(fetchFn, okExec);
 
@@ -251,7 +251,7 @@ describe('OllamaAgenticHarness malformed output after repair', () => {
 
 describe('OllamaAgenticHarness unsafe paths', () => {
   it('rejects a proposal that escapes the worktree without writing outside it', async () => {
-    const parent = makeWorktree();
+    const parent = makeEmptyWorktree();
     const worktree = join(parent, 'nested');
     await mkdir(worktree, { recursive: true });
 
@@ -278,7 +278,7 @@ describe('OllamaAgenticHarness unsafe paths', () => {
 
 describe('OllamaAgenticHarness apply failures', () => {
   it('repairs then fails when the find text is never present, leaving the file unchanged', async () => {
-    const worktree = makeWorktree();
+    const worktree = makeEmptyWorktree();
     const targetPath = join(worktree, 'src', 'file.txt');
     await mkdir(dirname(targetPath), { recursive: true });
     await writeFile(targetPath, 'original content\n');
@@ -304,7 +304,7 @@ describe('OllamaAgenticHarness apply failures', () => {
   });
 
   it('rejects an ambiguous find that matches more than one location, leaving the file unchanged', async () => {
-    const worktree = makeWorktree();
+    const worktree = makeEmptyWorktree();
     const targetPath = join(worktree, 'src', 'file.txt');
     await mkdir(dirname(targetPath), { recursive: true });
     const original = 'const x = 1;\nconst x = 1;\n';
@@ -333,7 +333,7 @@ describe('OllamaAgenticHarness apply failures', () => {
   });
 
   it('carries the ambiguity explanation into the repair prompt, then succeeds with a unique find', async () => {
-    const worktree = makeWorktree();
+    const worktree = makeEmptyWorktree();
     const targetPath = join(worktree, 'src', 'file.txt');
     await mkdir(dirname(targetPath), { recursive: true });
     await writeFile(targetPath, 'const x = 1;\nconst x = 1;\n');
@@ -362,7 +362,7 @@ describe('OllamaAgenticHarness apply failures', () => {
   });
 
   it('treats overlapping matches as ambiguous', async () => {
-    const worktree = makeWorktree();
+    const worktree = makeEmptyWorktree();
     const targetPath = join(worktree, 'src', 'file.txt');
     await mkdir(dirname(targetPath), { recursive: true });
     const original = 'aaa\n';
@@ -429,7 +429,7 @@ describe('validateVerifyCommand', () => {
 
 describe('OllamaAgenticHarness verify command allowlist', () => {
   it('executes an allowed compound command exactly as proposed', async () => {
-    const worktree = makeWorktree();
+    const worktree = makeEmptyWorktree();
     const proposal = JSON.stringify({
       summary: 'add first-green marker',
       changes: [
@@ -457,7 +457,7 @@ describe('OllamaAgenticHarness verify command allowlist', () => {
   });
 
   async function runWithVerifyCommand(verifyCommand: string) {
-    const worktree = makeWorktree();
+    const worktree = makeEmptyWorktree();
     const badProposal = JSON.stringify({
       summary: 'add file',
       changes: [{ file: 'docs/x.md', find: '', replace: 'content' }],
@@ -493,7 +493,7 @@ describe('OllamaAgenticHarness verify command allowlist', () => {
   });
 
   it('rejects an unknown command and asks the repair prompt for a permitted one', async () => {
-    const worktree = makeWorktree();
+    const worktree = makeEmptyWorktree();
     const badProposal = JSON.stringify({
       summary: 'add file',
       changes: [
@@ -530,7 +530,7 @@ describe('OllamaAgenticHarness verify command allowlist', () => {
 
 describe('OllamaAgenticHarness verify failures', () => {
   it('rejects with a classified reason and no repair attempt', async () => {
-    const worktree = makeWorktree();
+    const worktree = makeEmptyWorktree();
     const fetchFn = stubFetch([firstGreenProposal()]);
     const failingExec: OllamaAgenticExecFn = async () => {
       throw Object.assign(new Error('exit 1'), { stderr: 'FAIL' });

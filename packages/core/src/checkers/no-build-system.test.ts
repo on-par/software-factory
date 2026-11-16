@@ -12,7 +12,7 @@ const tempDirs = createTempDirs();
 
 afterEach(() => tempDirs.cleanup());
 
-async function makeRepo(files: Record<string, string>): Promise<CheckerContext> {
+async function makeCheckerContext(files: Record<string, string>): Promise<CheckerContext> {
   const worktree = await tempDirs.make('no-build-system-');
   for (const [name, contents] of Object.entries(files)) await writeFile(join(worktree, name), contents);
   return { worktree, specPath: join(worktree, 'no-such-spec.md'), constitutionBody: 'test constitution' };
@@ -24,7 +24,7 @@ function out(checker: string, result: CheckerOutput['result']): CheckerOutput {
 
 describe('no build system (#3566)', () => {
   it('a repo with no build files skips compile and lint and never says all checkers passed', async () => {
-    const ctx = await makeRepo({ 'App.csproj': '<Project Sdk="Microsoft.NET.Sdk"></Project>' });
+    const ctx = await makeCheckerContext({ 'App.csproj': '<Project Sdk="Microsoft.NET.Sdk"></Project>' });
 
     const compile = await compileChecker(ctx);
     const lint = await lintChecker(ctx);
@@ -43,7 +43,7 @@ describe('no build system (#3566)', () => {
   });
 
   it('a Node repo with build, test and lint scripts keeps PASS results and the All checkers passed summary', async () => {
-    const ctx = await makeRepo({
+    const ctx = await makeCheckerContext({
       'package.json': JSON.stringify({ scripts: { build: 'exit 0', test: 'exit 0', lint: 'exit 0' } }),
     });
 

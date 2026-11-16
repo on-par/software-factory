@@ -299,7 +299,6 @@
     "production|files|packages/cli/src/cli/__fixtures__/open-pr.ts|packages/cli/src/cli/__fixtures__/open-pr.ts",
     "production|files|packages/core/src/failure/index.ts|packages/core/src/failure/index.ts",
     "production|files|packages/core/src/filing/upstream-send.ts|packages/core/src/filing/upstream-send.ts",
-    "production|files|packages/core/src/hosted/store-contract.ts|packages/core/src/hosted/store-contract.ts",
     "production|files|packages/core/src/phases/plan-test-helpers.ts|packages/core/src/phases/plan-test-helpers.ts",
     "production|files|packages/core/src/phases/stack-review-change.ts|packages/core/src/phases/stack-review-change.ts",
     "production|files|packages/core/src/public-api-keys.ts|packages/core/src/public-api-keys.ts",

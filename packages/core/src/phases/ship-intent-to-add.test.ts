@@ -46,7 +46,7 @@ const models: ModelsConfig = {
 };
 const routes: RoutesConfig = { version: 1, routes: {} };
 
-async function makeRepo(): Promise<{ worktree: string; specPath: string }> {
+async function makeRepoWithOrigin(): Promise<{ worktree: string; specPath: string }> {
   const worktree = await tempDirs.make('ship-intent-to-add-');
   const remote = await tempDirs.make('ship-intent-to-add-origin-');
   await mkdir(join(worktree, 'packages/x/src'), { recursive: true });
@@ -113,7 +113,7 @@ function octokitForPr(calls: string[]) {
 
 describe('SHIP after CHECK intent-to-add', () => {
   it('SHIP commits the exact tree enumerated during CHECK from an intent-to-add index', async () => {
-    const { worktree, specPath } = await makeRepo();
+    const { worktree, specPath } = await makeRepoWithOrigin();
     await writeFile(join(worktree, 'packages/x/src/new.ts'), 'new content\n');
     await writeFile(join(worktree, 'packages/x/src/edit.ts'), 'edited content\n');
     await unlink(join(worktree, 'packages/x/src/remove.ts'));
