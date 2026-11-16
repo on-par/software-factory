@@ -4,12 +4,7 @@ import { dirname, join } from 'node:path';
 
 import type { TempDirs } from '../harness/temp-dir.js';
 
-export function makeRepo(
-  dirs: TempDirs,
-  prefix: string,
-  files: Readonly<Record<string, string>>,
-  message = 'start',
-): string {
+export function makeRepo(dirs: TempDirs, prefix: string, files: Readonly<Record<string, string>>, message = 'start') {
   const repo = dirs.makeSync(prefix);
   const git = (args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
   git(['init', '-q']);

@@ -3,15 +3,12 @@ import { dirname, join } from 'node:path';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 
-export interface TempWorktrees {
-  makeWorktree(files?: Readonly<Record<string, string>>): Promise<string>;
-  cleanup(): Promise<void>;
-}
+export type TempWorktrees = ReturnType<typeof createTempWorktrees>;
 
-export function createTempWorktrees(prefix: string): TempWorktrees {
+export function createTempWorktrees(prefix: string) {
   const dirs = createTempDirs();
   return {
-    async makeWorktree(files = {}) {
+    async makeWorktree(files: Readonly<Record<string, string>> = {}) {
       const dir = await dirs.make(prefix);
       for (const [path, contents] of Object.entries(files)) {
         const fullPath = join(dir, path);

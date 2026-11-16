@@ -13,6 +13,14 @@ export function baseJobInput(overrides: Partial<CreateHostedJobInput> = {}): Cre
   };
 }
 
+export function leaseInput(jobId: string, runnerId: string, leaseId: string) {
+  return { jobId, runnerId, leaseId, ttlMs: 60_000, heartbeatIntervalMs: 5_000 };
+}
+
+export function pollInput(runnerId: string, leaseId: string) {
+  return { runnerId, capabilities: ['git', 'node'], leaseId, ttlMs: 60_000, heartbeatIntervalMs: 5_000 };
+}
+
 export function describeHostedRunnerContractCases(makeStore: (options: HostedJobStoreOptions) => HostedJobStore): void {
   it('registers runners and reads them back, refreshing heartbeat (AC#1 registry)', () => {
     let clock = 1_000;
@@ -41,13 +49,7 @@ export function describeHostedRunnerContractCases(makeStore: (options: HostedJob
     store.create(baseJobInput({ jobId: 'job-needs-git', requiredCapabilities: ['git'] }));
     store.registerRunner({ runnerId: 'runner-1', capabilities: ['git', 'node'] });
 
-    const poll = store.pollForLease({
-      runnerId: 'runner-1',
-      capabilities: ['git', 'node'],
-      leaseId: 'lease-1',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
+    const poll = store.pollForLease(pollInput('runner-1', 'lease-1'));
     expect(poll.ok).toBe(true);
     if (poll.ok) {
       expect(poll.job.request.jobId).toBe('job-needs-git');
@@ -55,26 +57,14 @@ export function describeHostedRunnerContractCases(makeStore: (options: HostedJob
     }
     expect(store.getRunner('runner-1')?.available).toBe(false);
 
-    const second = store.pollForLease({
-      runnerId: 'runner-1',
-      capabilities: ['git', 'node'],
-      leaseId: 'lease-2',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
+    const second = store.pollForLease(pollInput('runner-1', 'lease-2'));
     expect(second).toEqual({ ok: false, reason: 'no-match' });
   });
 
   it('records a structured result and releases the lease on complete/fail (AC#3 result + release)', () => {
     const store = makeStore({ now: () => 1_000 });
     store.create(baseJobInput());
-    store.acquireLease({
-      jobId: 'job-1',
-      runnerId: 'runner-1',
-      leaseId: 'lease-1',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
+    store.acquireLease(leaseInput('job-1', 'runner-1', 'lease-1'));
 
     const completed = store.complete('job-1', 'lease-1', 'done summary');
     expect(completed.ok).toBe(true);
@@ -88,13 +78,7 @@ export function describeHostedRunnerContractCases(makeStore: (options: HostedJob
     }
 
     store.create(baseJobInput({ jobId: 'job-2' }));
-    store.acquireLease({
-      jobId: 'job-2',
-      runnerId: 'runner-2',
-      leaseId: 'lease-2',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
+    store.acquireLease(leaseInput('job-2', 'runner-2', 'lease-2'));
     const failed = store.fail('job-2', 'lease-2', 'boom');
     expect(failed.ok).toBe(true);
     if (failed.ok) {
@@ -106,13 +90,7 @@ export function describeHostedRunnerContractCases(makeStore: (options: HostedJob
   it('complete retains exitCode, logsTail, and artifacts from an optional detail (#902)', () => {
     const store = makeStore({ now: () => 1_000 });
     store.create(baseJobInput());
-    store.acquireLease({
-      jobId: 'job-1',
-      runnerId: 'runner-1',
-      leaseId: 'lease-1',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
+    store.acquireLease(leaseInput('job-1', 'runner-1', 'lease-1'));
 
     const artifacts = [{ name: 'build.log', ref: '/artifacts/job-1/build.log', kind: 'log' }];
     const completed = store.complete('job-1', 'lease-1', 'done summary', {
@@ -134,13 +112,7 @@ export function describeHostedRunnerContractCases(makeStore: (options: HostedJob
   it('fail retains failurePhase, exitCode, and logsTail from an optional detail (#902)', () => {
     const store = makeStore({ now: () => 1_000 });
     store.create(baseJobInput());
-    store.acquireLease({
-      jobId: 'job-1',
-      runnerId: 'runner-1',
-      leaseId: 'lease-1',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
+    store.acquireLease(leaseInput('job-1', 'runner-1', 'lease-1'));
 
     const failed = store.fail('job-1', 'lease-1', 'boom', {
       failurePhase: 'run',
@@ -162,13 +134,7 @@ export function describeHostedRunnerContractCases(makeStore: (options: HostedJob
     const store = makeStore({ now: () => 1_000 });
     store.create(baseJobInput());
     store.registerRunner({ runnerId: 'runner-1', capabilities: ['git', 'node'] });
-    const poll = store.pollForLease({
-      runnerId: 'runner-1',
-      capabilities: ['git', 'node'],
-      leaseId: 'lease-1',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
+    const poll = store.pollForLease(pollInput('runner-1', 'lease-1'));
     expect(poll.ok).toBe(true);
     expect(store.getRunner('runner-1')?.available).toBe(false);
 
@@ -199,13 +165,7 @@ export function describeHostedRunnerContractCases(makeStore: (options: HostedJob
     expect(store.getRunner('runner-1')?.available).toBe(true);
 
     store.registerRunner({ runnerId: 'runner-2', capabilities: ['git', 'node'] });
-    const repoll = store.pollForLease({
-      runnerId: 'runner-2',
-      capabilities: ['git', 'node'],
-      leaseId: 'lease-2',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
+    const repoll = store.pollForLease(pollInput('runner-2', 'lease-2'));
     expect(repoll.ok).toBe(true);
   });
 
@@ -213,20 +173,8 @@ export function describeHostedRunnerContractCases(makeStore: (options: HostedJob
     const store = makeStore({ now: () => 1_000 });
     store.create(baseJobInput());
     store.create(baseJobInput({ jobId: 'job-2' }));
-    store.acquireLease({
-      jobId: 'job-1',
-      runnerId: 'r',
-      leaseId: 'lease-1',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
-    store.acquireLease({
-      jobId: 'job-2',
-      runnerId: 'r2',
-      leaseId: 'lease-2',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
+    store.acquireLease(leaseInput('job-1', 'r', 'lease-1'));
+    store.acquireLease(leaseInput('job-2', 'r2', 'lease-2'));
     store.complete('job-2', 'lease-2');
 
     expect(store.reclaimExpired()).toEqual([]);
@@ -237,13 +185,7 @@ export function describeHostedRunnerContractCases(makeStore: (options: HostedJob
   it('records cleanup proof as a lease-free "cleaned" event on a known job', () => {
     const store = makeStore({ now: () => 1_000 });
     store.create(baseJobInput());
-    store.acquireLease({
-      jobId: 'job-1',
-      runnerId: 'r',
-      leaseId: 'lease-1',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
+    store.acquireLease(leaseInput('job-1', 'r', 'lease-1'));
     store.complete('job-1', 'lease-1');
 
     const result = store.recordCleanup('job-1', 'docker rm -f sf-job-job-1 ok');
@@ -267,13 +209,7 @@ export function describeHostedRunnerContractCases(makeStore: (options: HostedJob
     const store = makeStore({ now: () => 1_000 });
     store.create(baseJobInput());
     store.registerRunner({ runnerId: 'r', capabilities: ['git', 'node'] });
-    store.acquireLease({
-      jobId: 'job-1',
-      runnerId: 'r',
-      leaseId: 'lease-1',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
+    store.acquireLease(leaseInput('job-1', 'r', 'lease-1'));
 
     const result = store.cancel('job-1', 'operator request');
     expect(result.ok).toBe(true);
@@ -294,13 +230,7 @@ export function describeHostedRunnerContractCases(makeStore: (options: HostedJob
   it('cancel is idempotent and does not overwrite the canceled result; a stale lease holder cannot finalize after cancel (#903)', () => {
     const store = makeStore({ now: () => 1_000 });
     store.create(baseJobInput());
-    store.acquireLease({
-      jobId: 'job-1',
-      runnerId: 'r',
-      leaseId: 'lease-1',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
+    store.acquireLease(leaseInput('job-1', 'r', 'lease-1'));
     store.cancel('job-1', 'first cancel');
 
     const secondCancel = store.cancel('job-1', 'second cancel');
@@ -327,13 +257,7 @@ export function describeHostedRunnerContractCases(makeStore: (options: HostedJob
     const store = makeStore({ now: () => 1_000 });
     store.create(baseJobInput());
     store.registerRunner({ runnerId: 'r', capabilities: ['git', 'node'] });
-    store.acquireLease({
-      jobId: 'job-1',
-      runnerId: 'r',
-      leaseId: 'lease-1',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
+    store.acquireLease(leaseInput('job-1', 'r', 'lease-1'));
 
     const result = store.reclaimJob('job-1', 'runner heartbeat stale');
     expect(result.ok).toBe(true);
@@ -353,13 +277,7 @@ export function describeHostedRunnerContractCases(makeStore: (options: HostedJob
     const store = makeStore({ now: () => 1_000 });
     store.create(baseJobInput());
     store.create(baseJobInput({ jobId: 'job-2' }));
-    store.acquireLease({
-      jobId: 'job-2',
-      runnerId: 'r',
-      leaseId: 'lease-2',
-      ttlMs: 60_000,
-      heartbeatIntervalMs: 5_000,
-    });
+    store.acquireLease(leaseInput('job-2', 'r', 'lease-2'));
     store.complete('job-2', 'lease-2');
 
     expect(store.reclaimJob('job-1', 'reason')).toEqual({ ok: false, reason: 'not-leased' });

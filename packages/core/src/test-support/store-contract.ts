@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { HostedJobStore, HostedJobStoreOptions } from '../hosted/store.js';
-import { baseJobInput, describeHostedRunnerContractCases } from './store-contract-runners.js';
+import { baseJobInput, describeHostedRunnerContractCases, leaseInput } from './store-contract-runners.js';
 
 export function describeHostedJobStoreContract(
   label: string,
@@ -49,26 +49,14 @@ export function describeHostedJobStoreContract(
       const store = makeStore({ now: () => 1_000 });
       store.create(baseJobInput());
 
-      const first = store.acquireLease({
-        jobId: 'job-1',
-        runnerId: 'runner-a',
-        leaseId: 'lease-1',
-        ttlMs: 60_000,
-        heartbeatIntervalMs: 5_000,
-      });
+      const first = store.acquireLease(leaseInput('job-1', 'runner-a', 'lease-1'));
       expect(first.ok).toBe(true);
       if (first.ok) {
         expect(first.job.request.status).toBe('leased');
         expect(first.lease.leaseId).toBe('lease-1');
       }
 
-      const second = store.acquireLease({
-        jobId: 'job-1',
-        runnerId: 'runner-b',
-        leaseId: 'lease-2',
-        ttlMs: 60_000,
-        heartbeatIntervalMs: 5_000,
-      });
+      const second = store.acquireLease(leaseInput('job-1', 'runner-b', 'lease-2'));
       expect(second).toMatchObject({ ok: false, reason: 'lease-held' });
     });
 
@@ -96,13 +84,7 @@ export function describeHostedJobStoreContract(
     it('finalizes exactly once by the lease holder (AC#3)', () => {
       const store = makeStore({ now: () => 1_000 });
       store.create(baseJobInput());
-      store.acquireLease({
-        jobId: 'job-1',
-        runnerId: 'r',
-        leaseId: 'lease-1',
-        ttlMs: 60_000,
-        heartbeatIntervalMs: 5_000,
-      });
+      store.acquireLease(leaseInput('job-1', 'r', 'lease-1'));
 
       const hb = store.heartbeat('job-1', 'lease-1');
       expect(hb).toMatchObject({ ok: true, alreadyTerminal: false });
@@ -121,13 +103,7 @@ export function describeHostedJobStoreContract(
     it('fails a job by the lease holder with the reason recorded', () => {
       const store = makeStore({ now: () => 1_000 });
       store.create(baseJobInput({ jobId: 'job-2' }));
-      store.acquireLease({
-        jobId: 'job-2',
-        runnerId: 'r',
-        leaseId: 'lease-1',
-        ttlMs: 60_000,
-        heartbeatIntervalMs: 5_000,
-      });
+      store.acquireLease(leaseInput('job-2', 'r', 'lease-1'));
 
       const failed = store.fail('job-2', 'lease-1', 'runner crashed');
       expect(failed).toMatchObject({ ok: true, alreadyTerminal: false });
@@ -142,13 +118,7 @@ export function describeHostedJobStoreContract(
     it('treats duplicate terminal updates as harmless and auditable (AC#4)', () => {
       const store = makeStore({ now: () => 1_000 });
       store.create(baseJobInput());
-      store.acquireLease({
-        jobId: 'job-1',
-        runnerId: 'r',
-        leaseId: 'lease-1',
-        ttlMs: 60_000,
-        heartbeatIntervalMs: 5_000,
-      });
+      store.acquireLease(leaseInput('job-1', 'r', 'lease-1'));
       store.complete('job-1', 'lease-1');
 
       const secondComplete = store.complete('job-1', 'lease-1');
@@ -171,13 +141,7 @@ export function describeHostedJobStoreContract(
     it('rejects a mismatched-lease finalize on a non-terminal job and an unknown job', () => {
       const store = makeStore({ now: () => 1_000 });
       store.create(baseJobInput());
-      store.acquireLease({
-        jobId: 'job-1',
-        runnerId: 'r',
-        leaseId: 'lease-1',
-        ttlMs: 60_000,
-        heartbeatIntervalMs: 5_000,
-      });
+      store.acquireLease(leaseInput('job-1', 'r', 'lease-1'));
 
       expect(store.complete('job-1', 'wrong-lease')).toMatchObject({ ok: false, reason: 'lease-mismatch' });
       expect(store.complete('missing-job', 'lease-1')).toMatchObject({ ok: false, reason: 'job-not-found' });
@@ -214,13 +178,7 @@ export function describeHostedJobStoreContract(
           ),
       ).toHaveLength(2);
 
-      const release = store.acquireLease({
-        jobId: 'job-1',
-        runnerId: 'r2',
-        leaseId: 'lease-2',
-        ttlMs: 60_000,
-        heartbeatIntervalMs: 5_000,
-      });
+      const release = store.acquireLease(leaseInput('job-1', 'r2', 'lease-2'));
       expect(release.ok).toBe(true);
       if (release.ok) {
         expect(release.lease.leaseId).toBe('lease-2');
