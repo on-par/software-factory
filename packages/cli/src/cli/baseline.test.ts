@@ -87,8 +87,9 @@ describe('factory baseline clear (#3540)', () => {
     const file = getFactoryPaths(repo).baselineCache;
     await new BaselineCache(file).set(SHA_A, 'env', 'cfg', [checkerOut('tests')]);
     vi.spyOn(PROGRAM_HANDLERS, 'getRepoRoot').mockResolvedValue(repo);
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const lines: unknown[] = [];
+    vi.spyOn(console, 'log').mockImplementation((m) => void lines.push(m));
     await cmdBaselineClear({});
-    expect(log).toHaveBeenCalledWith('removed 1 baseline cache entry');
+    expect(lines).toEqual(['removed 1 baseline cache entry']);
   });
 });

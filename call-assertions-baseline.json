@@ -1,12 +1,5 @@
 {
   "packages/cli/src/cli-commands.test.ts": 104,
-  "packages/cli/src/cli/awaiting-ci-recheck.test.ts": 8,
-  "packages/cli/src/cli/awaiting-ci-wiring.test.ts": 2,
-  "packages/cli/src/cli/base-hold-clear.test.ts": 16,
-  "packages/cli/src/cli/base-hold.test.ts": 18,
-  "packages/cli/src/cli/baseline.test.ts": 1,
-  "packages/cli/src/cli/breaker.test.ts": 2,
-  "packages/cli/src/cli/ci-pending-draft-sweep.test.ts": 15,
   "packages/cli/src/cli/classifier-backtest-command.test.ts": 2,
   "packages/cli/src/cli/classifier-backtest.test.ts": 2,
   "packages/cli/src/cli/daemon-preflight.test.ts": 8,
