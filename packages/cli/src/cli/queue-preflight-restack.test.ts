@@ -63,7 +63,7 @@ describe('queue preflight restack detection (#3368)', () => {
     );
     expect(out.kind).toBe('restack');
     expect(saved).toHaveLength(1);
-    expect(saved[0]!.slices[0]).toMatchObject({ state: 'merged', prNumber: 81 });
+    expect(saved[0]?.slices[0]).toMatchObject({ state: 'merged', prNumber: 81 });
   });
 
   it('falls through to the existing flow when the branch no longer holds the merged head', async () => {

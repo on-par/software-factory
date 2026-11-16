@@ -64,10 +64,16 @@ const slicePlan = (): SlicePlan => {
 };
 const foundPlan = (plan: SlicePlan) => ({ status: 'found' as const, commentId: 5, plan });
 
-const reviewOctokit = (listReviews: unknown, users: unknown, extra: Record<string, unknown> = {}): any => ({
-  ...extra,
-  rest: { pulls: { get: async () => ({ data: { head: { sha: 'abc' } } }), listReviews }, users },
-});
+type PreflightOctokit = Parameters<typeof createQueuePreflightOps>[0];
+const reviewOctokit = (
+  listReviews: (opts: { page?: number }) => Promise<{ data: unknown[] }>,
+  users: Record<string, () => Promise<unknown>>,
+  extra: Record<string, unknown> = {},
+): PreflightOctokit =>
+  Object.assign({} as PreflightOctokit, {
+    ...extra,
+    rest: { pulls: { get: async () => ({ data: { head: { sha: 'abc' } } }), listReviews }, users },
+  });
 
 describe('stack approval gate (#3366)', () => {
   const stackPlan = (): SlicePlan => withSliceState(slicePlan(), 1, 'pr-open', 501);
@@ -104,8 +110,9 @@ describe('stack approval gate (#3366)', () => {
     const { deferred, onDeferred } = deferrals();
     await expect(preflight({ onDeferred, getPullReviews })).resolves.toEqual({ kind: 'defer' });
     expect(deferred).toHaveLength(1);
-    expect(deferred[0]![0]).toBe(7);
-    for (const part of parts) expect(deferred[0]![1]).toContain(part);
+    const [[issue, message]] = deferred as [[number, string]];
+    expect(issue).toBe(7);
+    for (const part of parts) expect(message).toContain(part);
   });
 
   it('defers when the slice above is not pending', async () => {

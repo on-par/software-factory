@@ -108,7 +108,7 @@ describe('factory draft adoption (#4039)', () => {
     const probeFails = fakeOps({ probeCi: async () => Promise.reject(new Error('net')) });
     await expect(run(probeFails, { onDeferred })).resolves.toEqual({ kind: 'defer' });
     expect(deferred).toHaveLength(1);
-    expect(deferred[0]![1]).toContain('CI probe for factory draft PR #71 failed');
+    expect(String(deferred[0]?.[1])).toContain('CI probe for factory draft PR #71 failed');
 
     const queueFails = fakeOps({
       probeCi: async () => 'failure' as const,
@@ -116,7 +116,7 @@ describe('factory draft adoption (#4039)', () => {
     });
     await expect(run(queueFails, { onDeferred })).resolves.toEqual({ kind: 'defer' });
     expect(deferred).toHaveLength(2);
-    expect(deferred[1]![1]).toContain('queuing CI rework failed');
+    expect(String(deferred[1]?.[1])).toContain('queuing CI rework failed');
   });
 
   it('keeps the ci-pending path ahead of the new adoption', async () => {
