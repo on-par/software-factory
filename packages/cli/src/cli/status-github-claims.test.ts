@@ -103,12 +103,12 @@ describe('cli status', () => {
       h.execSyncImpl = () => {
         throw new Error('gh not authenticated');
       };
-      const listForRepo = vi.fn(async () => ({ data: [] }));
-      h.octokit.rest.issues.listForRepo = listForRepo;
+      const requests: unknown[] = [];
+      h.octokit.rest.issues.listForRepo = (async (p: unknown) => (requests.push(p), { data: [] })) as never;
 
       await runMain('status');
       expect(activeBand()).toContain('(no queue file)');
-      expect(listForRepo).not.toHaveBeenCalledWith(expect.objectContaining({ labels: 'factory:in-progress' }));
+      expect(requests).not.toContainEqual(expect.objectContaining({ labels: 'factory:in-progress' }));
     });
 
     it('reports a GitHub claim lookup failure in the Active band without crashing', async () => {

@@ -30,6 +30,11 @@ function fakeSignals(): ShutdownSignals & EventEmitter {
   return new EventEmitter();
 }
 
+function exitRecorder(also: (code: number) => void = () => {}) {
+  const exits: number[] = [];
+  return { exits, exit: (code: number) => (exits.push(code), also(code)) };
+}
+
 const tick = () => new Promise((r) => setImmediate(r));
 
 describe('installShutdown export flush', () => {
@@ -37,9 +42,7 @@ describe('installShutdown export flush', () => {
     const signals = fakeSignals();
     const order: string[] = [];
     const lines: string[] = [];
-    const exit = vi.fn((code: number) => {
-      order.push(`exit ${code}`);
-    });
+    const { exits, exit } = exitRecorder((code) => order.push(`exit ${code}`));
     installShutdown(new AbortController(), {
       stopFile: () => '/unused',
       writeStop: () => {},
@@ -54,27 +57,27 @@ describe('installShutdown export flush', () => {
         return flushExports();
       },
     });
-    return { signals, order, lines, exit };
+    return { signals, order, lines, exits };
   }
 
   it.each(['SIGINT', 'SIGTERM'] as const)('%s awaits flushExports before exit 130', async (sig) => {
-    const { signals, order, exit } = setup(async () => {
+    const { signals, order, exits } = setup(async () => {
       await tick();
       order.push('flushed');
       return [];
     });
     signals.emit(sig, sig);
-    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+    await vi.waitFor(() => expect(exits).toEqual([130]));
     expect(order).toEqual(['kill', `flush ${sig}`, 'flushed', 'exit 130']);
   });
 
   it('a hung flush is abandoned after the guard and still exits 130', async () => {
     vi.useFakeTimers();
     try {
-      const { signals, lines, exit } = setup(() => new Promise(() => {}));
+      const { signals, lines, exits } = setup(() => new Promise(() => {}));
       signals.emit('SIGINT', 'SIGINT');
       await vi.advanceTimersByTimeAsync(SHUTDOWN_FLUSH_GUARD_MS + 1);
-      expect(exit).toHaveBeenCalledWith(130);
+      expect(exits).toEqual([130]);
       expect(lines.join('\n')).toContain(`flush timed out after ${SHUTDOWN_FLUSH_GUARD_MS} ms — records may be lost`);
     } finally {
       vi.useRealTimers();
@@ -82,18 +85,18 @@ describe('installShutdown export flush', () => {
   });
 
   it('incomplete flush reports are logged', async () => {
-    const { signals, lines, exit } = setup(async () => [
+    const { signals, lines, exits } = setup(async () => [
       { runId: 'run-9', sessionId: 'abcd', complete: false, sent: 1, dropped: 2, failed: 3, retries: 0 },
       { runId: 'run-ok', sessionId: 'efgh', complete: true, sent: 4, dropped: 0, failed: 0, retries: 0 },
     ]);
     signals.emit('SIGTERM', 'SIGTERM');
-    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+    await vi.waitFor(() => expect(exits).toEqual([130]));
     expect(lines).toContain('factory: command output export incomplete for run run-9: 2 dropped, 3 failed');
     expect(lines.join('\n')).not.toContain('run-ok');
   });
 
   it('a report carrying an error prints the reason instead of counts', async () => {
-    const { signals, lines, exit } = setup(async () => [
+    const { signals, lines, exits } = setup(async () => [
       {
         runId: 'run-err',
         sessionId: 'ijkl',
@@ -106,20 +109,20 @@ describe('installShutdown export flush', () => {
       },
     ]);
     signals.emit('SIGTERM', 'SIGTERM');
-    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+    await vi.waitFor(() => expect(exits).toEqual([130]));
     expect(lines).toContain('factory: command output export failed for run run-err: boom');
   });
 
   it('a rejecting flush never blocks exit', async () => {
-    const { signals, exit } = setup(() => Promise.reject(new Error('boom')));
+    const { signals, exits } = setup(() => Promise.reject(new Error('boom')));
     signals.emit('SIGINT', 'SIGINT');
-    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+    await vi.waitFor(() => expect(exits).toEqual([130]));
   });
 
   it('with no active export session the default flush is a no-op', async () => {
     const signals = fakeSignals();
     const lines: string[] = [];
-    const exit = vi.fn();
+    const { exits, exit } = exitRecorder();
     installShutdown(new AbortController(), {
       stopFile: () => '/unused',
       writeStop: () => {},
@@ -129,7 +132,7 @@ describe('installShutdown export flush', () => {
       killTracked: async () => {},
     });
     signals.emit('SIGINT', 'SIGINT');
-    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+    await vi.waitFor(() => expect(exits).toEqual([130]));
     expect(signals.listenerCount('SIGINT')).toBe(1);
     expect(lines.filter((l) => l.includes('command output export'))).toEqual([]);
   });
@@ -145,9 +148,7 @@ describe('installShutdown', () => {
       if (signal === 'SIGKILL') alive.delete(-pid);
     };
     const signals = fakeSignals();
-    const exit = vi.fn((code: number) => {
-      calls.push(`exit ${code}`);
-    });
+    const { exits, exit } = exitRecorder((code) => calls.push(`exit ${code}`));
     installShutdown(new AbortController(), {
       stopFile: () => '/unused',
       writeStop: () => {},
@@ -167,7 +168,7 @@ describe('installShutdown', () => {
         }),
     });
     signals.emit('SIGINT', 'SIGINT');
-    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+    await vi.waitFor(() => expect(exits).toEqual([130]));
     const grace = calls.indexOf('grace');
     expect(grace).toBeGreaterThan(0);
     expect(calls.filter((c) => c.endsWith('SIGTERM')).sort()).toEqual(['-910001 SIGTERM', '-910002 SIGTERM']);
@@ -185,7 +186,7 @@ describe('installShutdown', () => {
       const path = join(dir, 'state', 'STOP');
       const controller = new AbortController();
       const signals = fakeSignals();
-      const exit = vi.fn();
+      const { exits, exit } = exitRecorder();
       installShutdown(controller, {
         stopFile: () => path,
         signals,
@@ -194,7 +195,7 @@ describe('installShutdown', () => {
         killTracked: async () => [],
       });
       signals.emit('SIGTERM', 'SIGTERM');
-      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+      await vi.waitFor(() => expect(exits).toEqual([130]));
       expect(existsSync(path)).toBe(true);
       expect(readStopMarker(path)?.source).toBe('manual');
       expect(controller.signal.aborted).toBe(true);
@@ -205,7 +206,7 @@ describe('installShutdown', () => {
       const path = join(dir, 'STOP');
       writeFileSync(path, 'existing');
       const signals = fakeSignals();
-      const exit = vi.fn();
+      const { exits, exit } = exitRecorder();
       installShutdown(new AbortController(), {
         stopFile: () => path,
         signals,
@@ -214,14 +215,14 @@ describe('installShutdown', () => {
         killTracked: async () => [],
       });
       signals.emit('SIGINT', 'SIGINT');
-      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+      await vi.waitFor(() => expect(exits).toEqual([130]));
       expect(readFileSync(path, 'utf8')).toBe('existing');
     });
 
     it('still sweeps and exits when the STOP path cannot be resolved', async () => {
       const signals = fakeSignals();
-      const exit = vi.fn();
-      const killTracked = vi.fn(async () => []);
+      const { exits, exit } = exitRecorder();
+      const killArgs: unknown[] = [];
       installShutdown(new AbortController(), {
         stopFile: () => {
           throw new Error('not a repo');
@@ -229,32 +230,31 @@ describe('installShutdown', () => {
         signals,
         exit,
         log: () => {},
-        killTracked,
+        killTracked: async (o) => (killArgs.push(o), []),
       });
       signals.emit('SIGINT', 'SIGINT');
-      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
-      expect(killTracked).toHaveBeenCalledWith({ graceMs: 3000 });
+      await vi.waitFor(() => expect(exits).toEqual([130]));
+      expect(killArgs).toEqual([{ graceMs: 3000 }]);
     });
   });
 
   it('a second signal during shutdown exits 130 immediately', async () => {
     const signals = fakeSignals();
-    const exit = vi.fn();
-    const killTracked = vi.fn(() => new Promise<never>(() => {}));
+    const { exits, exit } = exitRecorder();
+    let sweeps = 0;
     installShutdown(new AbortController(), {
       stopFile: () => '/unused',
       writeStop: () => {},
       signals,
       exit,
       log: () => {},
-      killTracked,
+      killTracked: () => (sweeps++, new Promise<never>(() => {})),
     });
     signals.emit('SIGINT', 'SIGINT');
-    await vi.waitFor(() => expect(killTracked).toHaveBeenCalled());
+    await vi.waitFor(() => expect(sweeps).toBe(1));
     signals.emit('SIGINT', 'SIGINT');
     await tick();
-    expect(exit).toHaveBeenCalledTimes(1);
-    expect(exit).toHaveBeenCalledWith(130);
+    expect(exits).toEqual([130]);
   });
 
   it('dispose removes the SIGINT and SIGTERM listeners', () => {
@@ -298,7 +298,7 @@ describe('installShutdown', () => {
       await new Promise((r) => setTimeout(r, 300)); // let sh install its trap
       const signals = fakeSignals();
       let outcomes: Array<{ forced?: boolean }> = [];
-      const exit = vi.fn();
+      const { exits, exit } = exitRecorder();
       installShutdown(new AbortController(), {
         stopFile: () => '/unused',
         writeStop: () => {},
@@ -312,7 +312,7 @@ describe('installShutdown', () => {
         },
       });
       signals.emit('SIGINT', 'SIGINT');
-      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130), { timeout: 5000 });
+      await vi.waitFor(() => expect(exits).toEqual([130]), { timeout: 5000 });
       await vi.waitFor(() => expect(defaultIsProcessGroupAlive(pid)).toBe(false), { timeout: 2000 });
       expect(outcomes.some((o) => o.forced)).toBe(true);
     }, 10000);

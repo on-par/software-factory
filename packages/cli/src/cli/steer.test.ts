@@ -238,6 +238,7 @@ describe('parseSteerRef', () => {
 describe('cmdSteer runtime wiring', () => {
   let root: string;
   let lines: string[];
+  let repoRootLookups: number;
   let rt: SteerRuntime;
   const rootFile = () => runStateFile(getFactoryPaths(root).runs, workKeyFromIssue(42));
 
@@ -245,8 +246,9 @@ describe('cmdSteer runtime wiring', () => {
     root = await tmp.make('steer-repo-');
     await writeIssueRunState(rootFile(), fixture());
     lines = [];
+    repoRootLookups = 0;
     rt = {
-      getRepoRoot: vi.fn(async () => root),
+      getRepoRoot: async () => (repoRootLookups++, root),
       gitUserName: async () => ' Pat \n',
       env: { USER: 'pat-user' },
       now: () => TS,
@@ -281,7 +283,7 @@ describe('cmdSteer runtime wiring', () => {
       code: 2,
       message: expect.stringContaining('factory: steer — invalid reference'),
     });
-    expect(rt.getRepoRoot).not.toHaveBeenCalled();
+    expect(repoRootLookups).toBe(0);
     await expect(cmdSteer('999', { message: 'x' }, rt)).rejects.toMatchObject({
       code: 1,
       message: 'factory: steer — no run found for 999',
@@ -303,12 +305,13 @@ describe('cmdSteer runtime wiring', () => {
   });
 
   it('is wired into the CLI entry point', async () => {
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errs: string[] = [];
+    const errSpy = vi.spyOn(console, 'error').mockImplementation((...a) => void errs.push(a.join(' ')));
     process.exitCode = undefined;
     try {
       await main(['node', 'factory', 'steer', 'abc', '--message', 'x']);
       expect(process.exitCode).toBe(2);
-      expect(errSpy.mock.calls.flat().join('\n')).toContain("factory: steer — invalid reference 'abc'");
+      expect(errs.join('\n')).toContain("factory: steer — invalid reference 'abc'");
     } finally {
       process.exitCode = undefined;
       errSpy.mockRestore();

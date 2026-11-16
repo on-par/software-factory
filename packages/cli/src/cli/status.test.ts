@@ -279,10 +279,13 @@ describe('cli', () => {
         ].join('\n'),
       );
       writeFileSync(paths().stop, '');
+      const fullAccess: unknown[] = [];
+      const base = coreFakes.ModelRouter;
+      coreFakes.ModelRouter = function () {
+        return Object.assign(new base(), { setCodexFullAccessTasks: (t: unknown) => void fullAccess.push(t) });
+      } as typeof base;
       await runMain('status');
-      expect(vi.mocked(coreFakes.ModelRouter).mock.results.at(-1)?.value.setCodexFullAccessTasks).toHaveBeenCalledWith(
-        [],
-      );
+      expect(fullAccess).toEqual([[]]);
       const out = logged();
       expect(out).toContain('on-par/software-factory');
       expect(out).toContain('Product: alpha');
@@ -458,14 +461,14 @@ describe('cli', () => {
       h.execSyncImpl = () => {
         throw new Error('gh not authenticated');
       };
-      const listForRepo = vi.fn(async () => ({ data: [] }));
-      h.octokit.rest.issues.listForRepo = listForRepo;
+      const requests: unknown[] = [];
+      h.octokit.rest.issues.listForRepo = (async (p: unknown) => (requests.push(p), { data: [] })) as never;
 
       await runMain('status');
       const out = logged();
       const queueBand = out.slice(out.indexOf('== Queue =='), out.indexOf('== Health =='));
       expect(queueBand).toContain('no GitHub token');
-      expect(listForRepo).not.toHaveBeenCalled();
+      expect(requests).toEqual([]);
     });
 
     it('shows an open provider breaker under Health without mutating the breaker file', async () => {
