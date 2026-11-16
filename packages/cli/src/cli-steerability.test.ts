@@ -10,8 +10,7 @@ import { main } from './cli/index.js';
 const tmp = createTempDirs();
 let repo: string;
 let cwd: string;
-let logLines: string[];
-let errLines: string[];
+const logLines: string[] = [];
 
 beforeEach(() => {
   cwd = process.cwd();
@@ -19,10 +18,9 @@ beforeEach(() => {
   execSync('git init -q', { cwd: repo });
   mkdirSync(join(repo, '.factory', 'state', 'runs'), { recursive: true });
   process.chdir(repo);
-  logLines = [];
+  logLines.length = 0;
   vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => logLines.push(args.join(' ')));
-  errLines = [];
-  vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => errLines.push(args.join(' ')));
+  vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => logLines.push(args.join(' ')));
   process.exitCode = undefined;
 });
 
@@ -34,7 +32,6 @@ afterEach(async () => {
 });
 
 const logged = () => logLines.join('\n');
-const errored = () => errLines.join('\n');
 const runMain = (...args: string[]) => main(['node', 'factory', ...args]);
 
 function seedRun(issue: number, lane: string, steerTs: string[]) {
@@ -93,7 +90,7 @@ describe('report --steerability (#3403)', () => {
   it('without --steerability exits 2', async () => {
     await runMain('report');
     expect(process.exitCode).toBe(2);
-    expect(errored()).toContain('factory: report requires --steerability');
+    expect(logged()).toContain('factory: report requires --steerability');
   });
 
   it('classifier report includes the steerability section and --json carries steerability', async () => {

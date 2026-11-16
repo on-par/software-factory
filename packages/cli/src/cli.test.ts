@@ -267,10 +267,7 @@ describe('cli', () => {
       const events: any[] = [];
       const stubProxy = { server: {} as any, port: 80, start: async () => 80, stop: async () => {} };
       const proxyCalls: unknown[] = [];
-      const createProxy = (opts: unknown) => {
-        proxyCalls.push(opts);
-        return stubProxy;
-      };
+      const createProxy = (opts: unknown) => (proxyCalls.push(opts), stubProxy);
 
       const result = await startLaneProxy(paths, settings, {
         createProxy,
@@ -2704,10 +2701,8 @@ describe('cli', () => {
 
     it('preflight defers a queued issue whose Prerequisite is still open (#3258 on 10/19)', async () => {
       const touched: string[] = [];
-      const untouched = (name: string) => async (): Promise<never> => {
-        touched.push(name);
-        throw new Error(`unexpected ${name}`);
-      };
+      const untouched = (name: string) => async (): Promise<never> =>
+        Promise.reject(new Error(String(touched.push(name)) + name));
       const deferred: unknown[][] = [];
       await expect(
         preflightQueuedIssue(
@@ -2800,14 +2795,13 @@ describe('cli', () => {
       held: [],
     };
     const cfg = (autoGcOnRun: boolean): any => ({ worktree: { autoGcOnRun, gcTtlDays: 7 } });
-    let emitted: unknown[][];
-    let swept: unknown[];
+    const emitted: unknown[][] = [];
+    const swept: unknown[] = [];
     const emitEvent = (...args: unknown[]) => emitted.push(args);
     const sweep = async (...a: unknown[]) => swept.push(a) && idleReport;
 
     beforeEach(async () => {
-      emitted = [];
-      swept = [];
+      emitted.length = swept.length = 0;
       tmp = await mkdtemp(join(tmpdir(), 'sweep-between-'));
       lanePaths = {
         events: join(tmp, 'events.ndjson'),
@@ -2925,15 +2919,8 @@ describe('cli', () => {
     const recorders = (source: () => string | undefined) => {
       let tokenReads = 0;
       const builtWith: string[] = [];
-      return {
-        builtWith,
-        reads: () => tokenReads,
-        token: () => {
-          tokenReads += 1;
-          return source();
-        },
-        octokit: (t: string) => builtWith.push(t) && fake,
-      };
+      const token = () => (tokenReads++, source());
+      return { builtWith, token, reads: () => tokenReads, octokit: (t: string) => builtWith.push(t) && fake };
     };
 
     it('--local-queue reads the file and never resolves a token or builds octokit', async () => {

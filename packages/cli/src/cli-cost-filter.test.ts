@@ -10,8 +10,8 @@ import { main } from './cli/index.js';
 const tmp = createTempDirs();
 let repo: string;
 let cwd: string;
-let logLines: string[];
-let errLines: string[];
+const logLines: string[] = [];
+const errLines: string[] = [];
 
 beforeEach(() => {
   cwd = process.cwd();
@@ -19,10 +19,9 @@ beforeEach(() => {
   execSync('git init -q', { cwd: repo });
   mkdirSync(join(repo, '.factory', 'state'), { recursive: true });
   process.chdir(repo);
-  logLines = [];
-  vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => logLines.push(args.join(' ')));
-  errLines = [];
-  vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => errLines.push(args.join(' ')));
+  logLines.length = errLines.length = 0;
+  vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => logLines.push(a.join(' ')));
+  vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => errLines.push(a.join(' ')));
   process.exitCode = undefined;
 });
 
