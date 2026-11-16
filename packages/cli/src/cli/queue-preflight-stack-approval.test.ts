@@ -4,10 +4,6 @@ import { describe, expect, it } from 'vitest';
 import { createQueuePreflightOps, preflightQueuedIssue } from './index.js';
 
 const counting = <R>(result: R, state = { count: 0 }) => ({ state, fn: async () => (state.count++, result) });
-const deferrals = (deferred: unknown[][] = []) => ({
-  deferred,
-  onDeferred: (...a: unknown[]) => void deferred.push(a),
-});
 
 const baseDeps = {
   expectedHeadRepoFullName: 'on-par/software-factory',
@@ -70,8 +66,7 @@ const reviewOctokit = (
   users: Record<string, () => Promise<unknown>>,
   extra: Record<string, unknown> = {},
 ): PreflightOctokit =>
-  Object.assign({} as PreflightOctokit, {
-    ...extra,
+  Object.assign({} as PreflightOctokit, extra, {
     rest: { pulls: { get: async () => ({ data: { head: { sha: 'abc' } } }), listReviews }, users },
   });
 
@@ -107,7 +102,8 @@ describe('stack approval gate (#3366)', () => {
     ],
     ['the review lookup fails', async () => Promise.reject(new Error('boom')), ['stack approval lookup failed']],
   ])('defers a stack slice and names why when %s (#3366)', async (_name, getPullReviews, parts) => {
-    const { deferred, onDeferred } = deferrals();
+    const deferred: unknown[][] = [];
+    const onDeferred = (...a: unknown[]) => void deferred.push(a);
     await expect(preflight({ onDeferred, getPullReviews })).resolves.toEqual({ kind: 'defer' });
     expect(deferred).toHaveLength(1);
     const [[issue, message]] = deferred as [[number, string]];
@@ -117,14 +113,12 @@ describe('stack approval gate (#3366)', () => {
 
   it('defers when the slice above is not pending', async () => {
     const plan = withSliceState(stackPlan(), 2, 'not-built');
-    const result = await preflight({ findSlicePlan: async () => foundPlan(plan) });
-    expect(result).toEqual({ kind: 'defer' });
+    await expect(preflight({ findSlicePlan: async () => foundPlan(plan) })).resolves.toEqual({ kind: 'defer' });
   });
 
   it('slice mode keeps deferring an approved open slice until it merges (#3366)', async () => {
     const reviews = counting(approved());
-    const result = await preflight({ stackMode: false, getPullReviews: reviews.fn });
-    expect(result).toEqual({ kind: 'defer' });
+    await expect(preflight({ stackMode: false, getPullReviews: reviews.fn })).resolves.toEqual({ kind: 'defer' });
     expect(reviews.state.count).toBe(0);
   });
 
@@ -212,11 +206,8 @@ describe('stack approval gate (#3366)', () => {
     };
     let viewerReads = 0;
     const graphql = async () => (viewerReads++, { viewer: { login: 'factory-app[bot]', databaseId: 9001 } });
-    const octokit = reviewOctokit(
-      listReviews,
-      { getAuthenticated, getByUsername: async () => ({ data: reviewsBot }) },
-      { graphql },
-    );
+    const users = { getAuthenticated, getByUsername: async () => ({ data: reviewsBot }) };
+    const octokit = reviewOctokit(listReviews, users, { graphql });
     const ops = createQueuePreflightOps(octokit, 'o', 'r', { stackMode: true });
     const pull = await ops.getPullReviews(5);
     expect(pull.selfId).toBe(9001);
