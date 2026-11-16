@@ -272,7 +272,8 @@ describe('cli', () => {
 
     it('parks issue 7 and continues the lane to issue 8 without re-emitting the terminal event (shipIssue owns it) on an escalate error', async () => {
       const calls: any[] = [];
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const consoleErrors: unknown[][] = [];
+      vi.spyOn(console, 'error').mockImplementation((...a) => void consoleErrors.push(a));
       await runLane('app', [7, 8], '/repo', 'on-par/software-factory', paths, {
         ship: async (issue) => {
           calls.push(['ship', issue]);
@@ -304,7 +305,7 @@ describe('cli', () => {
         'lane complete (1 merged, 0 awaiting review, 0 skipped, 1 parked)',
         { lane: 'app' },
       ]);
-      expect(errorSpy).not.toHaveBeenCalled();
+      expect(consoleErrors).toEqual([]);
     });
 
     it('parks the lane without re-emitting the terminal event (shipIssue owns it) on a timeout error', async () => {
@@ -366,7 +367,8 @@ describe('cli', () => {
     });
 
     it('reaps the parked worktree exactly once when ship throws a LaneParkError', async () => {
-      const reapWorktree = vi.fn(async () => {});
+      const reaped: number[] = [];
+      const reapWorktree = async (issue: number) => void reaped.push(issue);
       await runLane('app', [12], '/repo', 'on-par/software-factory', paths, {
         ship: async () => {
           throw new LaneParkError('plan escalated: needs a human decision', 'escalate');
@@ -377,12 +379,12 @@ describe('cli', () => {
         reapWorktree,
       });
 
-      expect(reapWorktree).toHaveBeenCalledTimes(1);
-      expect(reapWorktree).toHaveBeenCalledWith(12);
+      expect(reaped).toEqual([12]);
     });
 
     it('reaps the worktree of a preflight-parked claim', async () => {
-      const reapWorktree = vi.fn(async () => {});
+      const reaped: number[] = [];
+      const reapWorktree = async (issue: number) => void reaped.push(issue);
       const claims = [{ issue: 13, decision: { kind: 'park' as const, reason: 'CI for PR #99 ended failure' } }];
       await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
         claimNext: async () => claims.shift() ?? null,
@@ -394,12 +396,12 @@ describe('cli', () => {
         reapWorktree,
       });
 
-      expect(reapWorktree).toHaveBeenCalledTimes(1);
-      expect(reapWorktree).toHaveBeenCalledWith(13);
+      expect(reaped).toEqual([13]);
     });
 
     it('does not reap on merged or awaiting-review outcomes', async () => {
-      const reapWorktree = vi.fn(async () => {});
+      const reaped: number[] = [];
+      const reapWorktree = async (issue: number) => void reaped.push(issue);
       await runLane('app', [14, 15], '/repo', 'on-par/software-factory', paths, {
         ship: async (issue) => `ship-it/${issue}-x`,
         waitMerge: async (issue) => {
@@ -410,7 +412,7 @@ describe('cli', () => {
         reapWorktree,
       });
 
-      expect(reapWorktree).not.toHaveBeenCalled();
+      expect(reaped).toEqual([]);
     });
 
     it('parks normally and keeps event ownership when the injected reapWorktree rejects', async () => {

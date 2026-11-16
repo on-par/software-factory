@@ -4,14 +4,15 @@ import { rmSync } from 'node:fs';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { h, installShipHarness, ops, paths, phases, runMainWith } from './test-support/ship-harness.js';
+import { h, installShipHarness, paths, phases, runMainWith } from './test-support/ship-harness.js';
 
 installShipHarness();
 
 const runMain = (...args: string[]) => runMainWith(undefined, ...args);
 
 // One remote-queued issue on lane 'app', with label writes reflected back to the queue reads.
-function queueIssue(issue: number, body: string): void {
+function queueIssue(issue: number, body: string): any[] {
+  const posted: any[] = [];
   rmSync(paths().queue, { force: true });
   const labels = new Set(['factory:queued', 'factory:lane:app', 'factory:order:1']);
   h.octokit.rest.issues.listForRepo = vi.fn(async () => ({
@@ -31,13 +32,14 @@ function queueIssue(issue: number, body: string): void {
     labels.delete(name);
     return {};
   });
-  h.octokit.rest.issues.createComment = vi.fn(async () => ({ data: { id: 1 } }));
+  h.octokit.rest.issues.createComment = vi.fn(async (c: any) => (posted.push(c), { data: { id: 1 } }));
   h.octokit.paginate = async (fn: any, args: any) => (await fn(args)).data;
+  return posted;
 }
 
 describe('factory run park comment (#3534)', () => {
   it('a queue preflight park on a remote run upserts the issue park comment through the run octokit', async () => {
-    queueIssue(3600, 'Prerequisite: #3599');
+    const posted = queueIssue(3600, 'Prerequisite: #3599');
     h.octokit.graphql = vi.fn(async (query: string) =>
       query.includes('QueuePrerequisite')
         ? {
@@ -53,8 +55,8 @@ describe('factory run park comment (#3534)', () => {
 
     const res = await runMain('run');
     expect(res.exited).toBe(false);
-    expect(h.octokit.rest.issues.createComment).toHaveBeenCalledTimes(1);
-    const [comment] = h.octokit.rest.issues.createComment.mock.calls[0];
+    expect(posted).toHaveLength(1);
+    const [comment] = posted;
     expect(comment.issue_number).toBe(3600);
     expect(comment.body).toContain('<!-- factory-issue-state v1 issue:3600 -->');
     expect(comment.body).toContain('reason: escalate');
@@ -63,7 +65,7 @@ describe('factory run park comment (#3534)', () => {
 
   it('a land-time ci-failed park reads the park sha from the pushed origin branch', async () => {
     const branch = 'factory/3601-issue-3601';
-    queueIssue(3601, 'b');
+    const posted = queueIssue(3601, 'b');
     h.factoryConfig.merge = { auto: true, comment: '' };
     h.factoryConfig.filing = {
       enabled: false,
@@ -91,7 +93,9 @@ describe('factory run park comment (#3534)', () => {
     h.octokit.rest.pulls.get = vi.fn(async () => {
       throw new Error('checks api down');
     });
+    const execs: string[] = [];
     h.execImpl = (cmd: string) => {
+      execs.push(cmd);
       if (cmd.includes('refs/remotes/origin/')) return '  0123abcd\n';
       if (cmd.includes('rev-parse')) return h.repoRoot;
       if (cmd.includes('gh repo view')) return h.ghRepo;
@@ -100,12 +104,8 @@ describe('factory run park comment (#3534)', () => {
 
     const res = await runMainWith({ loadRepoConfig: () => ({ classifier: { trustTier: 'T2' } }) as never }, 'run');
     expect(res.exited).toBe(false);
-    expect(ops.exec).toHaveBeenCalledWith(`git rev-parse --verify "refs/remotes/origin/${branch}"`, {
-      cwd: h.repoRoot,
-    });
-    const park = h.octokit.rest.issues.createComment.mock.calls
-      .map(([c]: any) => c)
-      .find((c: any) => c.body.includes('<!-- factory-issue-state v1 issue:3601 -->'));
+    expect(execs).toContain(`git rev-parse --verify "refs/remotes/origin/${branch}"`);
+    const park = posted.find((c) => c.body.includes('<!-- factory-issue-state v1 issue:3601 -->'));
     expect(park?.issue_number).toBe(3601);
     expect(park?.body).toContain('reason: ci-failed');
     expect(park?.body).toContain(`branch: ${branch}`);

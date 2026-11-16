@@ -22,10 +22,13 @@ async function lane(prevDeferrals: number, extra: Partial<RunLaneDeps> = {}) {
   const paths = { ...getFactoryPaths(dir), events: join(dir, 'events.ndjson'), stop: join(dir, 'STOP') };
   const events: Array<[string, number | string, string]> = [];
   const released: Array<[number, string]> = [];
-  const closeParkedPr = vi.fn(async () => {});
-  const octokit = vi.fn(() => ({}) as Octokit);
+  const closed: Array<[number, string, string]> = [];
+  const closeParkedPr = async (...a: [number, string, string]) => void closed.push(a);
+  let octokitGets = 0;
+  const octokit = () => (octokitGets++, {} as Octokit);
+  const recorded: Array<[LandDeferredError, number, string]> = [];
   const order: string[] = [];
-  const recordLandDeferred = vi.fn(async (err: LandDeferredError, issue: number, branch: string) => ({
+  const decide = async (err: LandDeferredError, issue: number, branch: string) => ({
     ...decideLandDeferral(
       prevDeferrals === 0
         ? undefined
@@ -42,7 +45,7 @@ async function lane(prevDeferrals: number, extra: Partial<RunLaneDeps> = {}) {
       { now: NOW, maxDeferrals: 3 },
     ),
     maxDeferrals: 3,
-  }));
+  });
   await runLane('app', [5], '/repo', 'on-par/software-factory', paths, {
     ship: async () => 'factory/5-x',
     waitMerge: async () => {
@@ -60,39 +63,39 @@ async function lane(prevDeferrals: number, extra: Partial<RunLaneDeps> = {}) {
       order.push('claimNext');
       return null;
     },
-    recordLandDeferred,
+    recordLandDeferred: async (err, issue, branch) => (recorded.push([err, issue, branch]), decide(err, issue, branch)),
     octokit,
     closeParkedPr,
     reapWorktree: async () => {},
     ...extra,
   });
-  return { events, released, closeParkedPr, octokit, recordLandDeferred, order };
+  return { events, released, closed, recorded, octokitGets: () => octokitGets, order };
 }
 
 describe('runLane land-deferred (#3957)', () => {
   it('a land-deferred outcome records the deferral, settles done and adds no factory:parked label', async () => {
     const r = await lane(0);
-    expect(r.recordLandDeferred).toHaveBeenCalledWith(expect.any(LandDeferredError), 5, 'factory/5-x');
+    expect(r.recorded).toEqual([[expect.any(LandDeferredError), 5, 'factory/5-x']]);
     expect(r.released).toEqual([[5, 'done']]);
     expect(r.events.some(([type]) => type === 'parked' || type === 'ci-failed')).toBe(false);
     const deferred = r.events.find(([type]) => type === 'land-deferred');
     expect(deferred?.[2]).toContain('PR #7 deferred (1/3)');
     expect(deferred?.[2]).toContain('land-only retry at 2026-11-05T00:01:00.000Z');
-    expect(r.closeParkedPr).not.toHaveBeenCalled();
-    expect(r.octokit).not.toHaveBeenCalled(); // no park comment
+    expect(r.closed).toEqual([]);
+    expect(r.octokitGets()).toBe(0); // no park comment
   });
 
   it('a park decision at the cap falls through to the ci-failed park', async () => {
     const r = await lane(3);
     expect(r.released).toEqual([[5, 'parked']]);
     expect(r.events.some(([type]) => type === 'parked')).toBe(true);
-    expect(r.closeParkedPr).toHaveBeenCalledWith(5, 'factory/5-x', 'ci-failed');
+    expect(r.closed).toEqual([[5, 'factory/5-x', 'ci-failed']]);
   });
 
   it('without recordLandDeferred a moving-base give-up parks ci-failed as before', async () => {
     const r = await lane(0, { recordLandDeferred: undefined });
     expect(r.released).toEqual([[5, 'parked']]);
-    expect(r.closeParkedPr).toHaveBeenCalledWith(5, 'factory/5-x', 'ci-failed');
+    expect(r.closed).toEqual([[5, 'factory/5-x', 'ci-failed']]);
   });
 
   it('due land-deferred retries run before the next claim and inside each land', async () => {
