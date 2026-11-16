@@ -61,10 +61,13 @@ describe('cli commands (via main dispatch)', () => {
       };
       const labels = join(h.repoRoot, 'labels.csv');
       writeFileSync(labels, 'pr,class\n');
+      const sandboxes: string[] = [];
+      const base = coreFakes.ModelRouter as any;
+      coreFakes.ModelRouter = function (this: unknown, ...args: unknown[]) {
+        return { ...base.apply(this, args), setCodexSandbox: (m: string) => void sandboxes.push(m) };
+      } as any;
       await runMain('classifier', 'backtest', '--since', '2026-01-01', '--labels', labels);
-      expect(vi.mocked(coreFakes.ModelRouter).mock.results.at(-1)?.value.setCodexSandbox).toHaveBeenCalledWith(
-        'workspace-write',
-      );
+      expect(sandboxes).toEqual(['workspace-write']);
     });
 
     it('replays a merged PR through the wired deps and writes the JSONL file', async () => {

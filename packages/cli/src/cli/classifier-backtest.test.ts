@@ -48,14 +48,17 @@ function makeDeps(prs: any[], extra: Partial<ClassifierBacktestDeps> = {}) {
   const logs: string[] = [];
   const files = new Map<string, string>();
   const commands: string[] = [];
-  const run = vi.fn(async () => ({
-    model: 'm-1',
-    output: '{"class":"A","claims":[],"notInspected":[]}',
-    exitCode: 0,
-    attempts: [],
-  }));
+  const runs: unknown[][] = [];
   const router = new ModelRouter(MODELS, ROUTES, false, new StubModelExecutor({ scripts: {} }));
-  vi.spyOn(router, 'run').mockImplementation(run);
+  vi.spyOn(router, 'run').mockImplementation(async (...a: unknown[]) => {
+    runs.push(a);
+    return {
+      model: 'm-1',
+      output: '{"class":"A","claims":[],"notInspected":[]}',
+      exitCode: 0,
+      attempts: [],
+    };
+  });
   vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue({ cost: 0.4, cachedRateMissing: false });
   const octokit = {
     rest: {
@@ -112,7 +115,7 @@ function makeDeps(prs: any[], extra: Partial<ClassifierBacktestDeps> = {}) {
           .map((l) => JSON.parse(l))
       : [];
   };
-  return { deps, logs, files, commands, jsonl, run };
+  return { deps, logs, files, commands, jsonl, runs };
 }
 
 const opts = (o: Partial<ClassifierBacktestOptions> = {}): ClassifierBacktestOptions => ({
@@ -124,10 +127,14 @@ const PRS = [1, 2, 3, 4].map((n) => pr(n, `2026-08-0${n}T00:00:00.000Z`));
 
 describe('cmdClassifierBacktest', () => {
   it('reads local events with includeSegments (#3711)', async () => {
-    const readEvents = vi.fn((_path: string, _opts: { includeSegments: boolean }) => [] as FactoryEvent[]);
+    const reads: Array<[string, { includeSegments: boolean }]> = [];
+    const readEvents = (path: string, o: { includeSegments: boolean }) => {
+      reads.push([path, o]);
+      return [] as FactoryEvent[];
+    };
     const t = makeDeps(PRS, { readEvents });
     await cmdClassifierBacktest(opts(), t.deps);
-    expect(readEvents).toHaveBeenCalledWith('/repo/.factory/events.ndjson', { includeSegments: true });
+    expect(reads).toEqual([['/repo/.factory/events.ndjson', { includeSegments: true }]]);
   });
 
   it('prints the report table and writes one JSONL line per PR', async () => {
@@ -197,7 +204,8 @@ describe('cmdClassifierBacktest', () => {
     expect(err).toBeInstanceOf(ClassifierBacktestInputError);
     expect(err.message).toMatch(/^factory: /);
     expect(err.message).toMatch(message);
-    expect(t.run).not.toHaveBeenCalled();
+    expect(t.runs).toEqual([]);
+    expect(t.jsonl()).toEqual([]);
   });
 
   it('refuses a non-hex merge sha before running git', async () => {

@@ -1,29 +1,32 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { claudeKeychainChecks, doctorFailed } from './doctor.js';
 
 describe('claudeKeychainChecks', () => {
   it('returns no keychain row and never probes on linux', () => {
-    const probe = vi.fn(() => ({ status: 'skipped', detail: 'skipped — not macOS' }) as const);
+    const probe = () => {
+      throw new Error('probed');
+    };
     const rows = claudeKeychainChecks('linux', probe);
     expect(rows).toEqual([]);
     expect(rows.some((row) => row.name === 'claude keychain (macOS)')).toBe(false);
-    expect(probe).not.toHaveBeenCalled();
   });
 
   it('returns no keychain row on win32', () => {
-    const probe = vi.fn(() => ({ status: 'skipped', detail: 'skipped — not macOS' }) as const);
+    const probe = () => {
+      throw new Error('probed');
+    };
     const rows = claudeKeychainChecks('win32', probe);
     expect(rows).toEqual([]);
-    expect(probe).not.toHaveBeenCalled();
   });
 
   it('returns the claude keychain (macOS) row on darwin', () => {
-    const probe = vi.fn(() => ({ status: 'readable' }) as const);
+    const probe = () => ({ status: 'readable' }) as const;
     const rows = claudeKeychainChecks('darwin', probe);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ name: 'claude keychain (macOS)', ok: true });
-    expect(probe).toHaveBeenCalledTimes(1);
+    const unreadable = claudeKeychainChecks('darwin', () => ({ status: 'unreadable', inTmux: false }));
+    expect(unreadable[0]?.ok).toBe(false);
   });
 
   it('keeps the tmux hard-fail row on darwin', () => {

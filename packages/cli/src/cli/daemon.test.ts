@@ -810,28 +810,30 @@ describe('auto-update (#1939)', () => {
     const checks = [...(over.checks ?? [])];
     const applies = [...(over.applies ?? [{ code: 0, rolledBack: false, error: null }])];
     const applied: string[] = [];
+    const calls: string[] = [];
+    const stopCalls = () => calls.filter((c) => c === 'writeStops').length;
     const sleeps: number[] = [];
     const exits: number[] = [];
     const logs: string[] = [];
     let polls = 0;
-    let stopCalls = 0;
     let cycles = 0;
     const stateFile = join(dir, 'update-state.json');
     writeUpdateState(stateFile, initialUpdateState(config, null));
     const deps: AutoUpdateDeps = {
       stateFile,
-      check: vi.fn(async () => checks.shift() ?? ok('0.9.0')),
+      check: vi.fn(async () => (calls.push('check'), checks.shift() ?? ok('0.9.0'))),
       apply: vi.fn(async (v: string) => {
         applied.push(v);
         return applies.shift() ?? { code: 0, rolledBack: false, error: null };
       }),
       preflight: vi.fn(async () => ({ code: 0, rolledBack: false, error: null })),
       activeRuns: vi.fn(async () => {
+        calls.push('activeRuns');
         polls++;
         return polls <= (over.activeUntilPoll ?? 0) ? ['acme/app'] : [];
       }),
       writeStops: vi.fn(async () => {
-        stopCalls++;
+        calls.push('writeStops');
         mkdirSync(join(dir, 'repo'), { recursive: true });
         try {
           writeFileSync(stop, '', { flag: 'wx' });
@@ -856,7 +858,7 @@ describe('auto-update (#1939)', () => {
       },
       stopped: () => cycles > (over.cycles ?? 1),
     };
-    return { deps, applied, sleeps, exits, logs, stateFile, elapsed: () => t - start, stopCalls: () => stopCalls };
+    return { deps, applied, calls, sleeps, exits, logs, stateFile, elapsed: () => t - start, stopCalls };
   }
 
   describe('isUpdateCandidate', () => {
@@ -880,7 +882,7 @@ describe('auto-update (#1939)', () => {
       const f = fakeDeps(config, { checks: [ok('0.9.1')] });
       vi.mocked(f.deps.activeRuns).mockResolvedValue(['acme/app']);
       expect(await runAutoUpdateCycle(config, f.deps)).toBe('drain-timeout');
-      expect(f.deps.apply).not.toHaveBeenCalled();
+      expect(f.applied).toEqual([]);
       expect(existsSync(stop)).toBe(false);
       const state = readUpdateState(f.stateFile);
       expect(state?.lastResult).toMatchObject({ outcome: 'skipped', version: '0.9.1' });
@@ -893,7 +895,8 @@ describe('auto-update (#1939)', () => {
       const config = cfg('stable');
       const f = fakeDeps(config, { checks: [ok('0.9.1-next.0')] });
       expect(await runAutoUpdateCycle(config, f.deps)).toBe('no-update');
-      expect(f.deps.writeStops).not.toHaveBeenCalled();
+      expect(f.stopCalls()).toBe(0);
+      expect(existsSync(stop)).toBe(false);
       const state = readUpdateState(f.stateFile);
       expect(state?.available).toBeNull();
       expect(state?.lastCheckAt).not.toBeNull();
@@ -903,9 +906,8 @@ describe('auto-update (#1939)', () => {
       const config = cfg('manual');
       const f = fakeDeps(config);
       expect(await runAutoUpdateCycle(config, f.deps)).toBe('manual');
-      for (const dep of [f.deps.check, f.deps.activeRuns, f.deps.writeStops, f.deps.apply]) {
-        expect(dep).not.toHaveBeenCalled();
-      }
+      expect(f.calls).toEqual([]);
+      expect(f.applied).toEqual([]);
     });
 
     it('records a check error and starts no drain', async () => {
@@ -914,7 +916,7 @@ describe('auto-update (#1939)', () => {
       expect(await runAutoUpdateCycle(config, f.deps)).toBe('check-error');
       expect(f.logs.some((l) => l.includes('update check failed: registry down'))).toBe(true);
       expect(readUpdateState(f.stateFile)?.lastCheckAt).not.toBeNull();
-      expect(f.deps.writeStops).not.toHaveBeenCalled();
+      expect(f.stopCalls()).toBe(0);
     });
 
     it('turns a throwing check into a check error and creates a missing state file', async () => {
@@ -999,9 +1001,7 @@ describe('auto-update (#1939)', () => {
       const config = cfg('manual');
       const f = fakeDeps(config, { cycles: 3 });
       await runAutoUpdateLoop(config, f.deps);
-      expect(f.deps.check).not.toHaveBeenCalled();
-      expect(f.deps.activeRuns).not.toHaveBeenCalled();
-      expect(f.deps.writeStops).not.toHaveBeenCalled();
+      expect(f.calls).toEqual([]);
       expect(existsSync(stop)).toBe(false);
     });
 
@@ -1046,7 +1046,7 @@ describe('auto-update (#1939)', () => {
         }),
       );
       const logs: string[] = [];
-      const check = vi.fn(async () => ok('0.9.1'));
+      const check = async () => ok('9.9.9');
       const deps = createAutoUpdateDeps({
         registryFile,
         stateFile: join(dir, 'update-state.json'),
@@ -1070,7 +1070,7 @@ describe('auto-update (#1939)', () => {
     }
 
     it('writes and clears STOP exclusively and reports run-runtime activity', async () => {
-      const { deps, check } = setup({
+      const { deps } = setup({
         runs: [
           { repo: 'acme/app', issue: 7, status: 'running' },
           { repo: 'acme/app', issue: 8, status: 'succeeded' },
@@ -1084,8 +1084,7 @@ describe('auto-update (#1939)', () => {
       await deps.clearStops(first);
       await deps.clearStops(first);
       expect(existsSync(first[0] as string)).toBe(false);
-      expect(await deps.check()).toEqual(ok('0.9.1'));
-      expect(check).toHaveBeenCalledOnce();
+      expect(await deps.check()).toEqual(ok('9.9.9'));
       expect((await deps.apply('0.9.1')).code).not.toBe(0);
       await deps.sleep(1);
       expect(deps.now()).toBeGreaterThan(0);

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HARNESS_SETUP } from './doctor-harness.js';
-import { coreFakes, h, installDoctorHarness, logged, ops, paths, runMainWith } from './test-support/doctor-harness.js';
+import { coreFakes, h, installDoctorHarness, logged, paths, runMainWith } from './test-support/doctor-harness.js';
 
 installDoctorHarness();
 
@@ -422,7 +422,9 @@ describe('cli', () => {
     it('probes the sandbox runtime through the injected execSync seam, not node:child_process (#2014)', async () => {
       h.claudeAvailable = true;
       const base = h.execSyncImpl;
+      const cmds: string[] = [];
       h.execSyncImpl = (cmd: string) => {
+        cmds.push(cmd);
         if (cmd.includes('command -v sandbox-exec') || cmd.includes('command -v firejail')) {
           throw new Error('not on PATH');
         }
@@ -431,10 +433,7 @@ describe('cli', () => {
       const res = await runMain('doctor', '--probe-inference');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('skipped: no sandbox runtime (sandbox-exec/firejail) on this host');
-      expect(ops.execSync).toHaveBeenCalledWith(
-        expect.stringMatching(/^command -v (sandbox-exec|firejail) /),
-        expect.anything(),
-      );
+      expect(cmds.some((c) => /^command -v (sandbox-exec|firejail) /.test(c))).toBe(true);
     });
 
     it('skips the sandboxed claude probe when sandbox is disabled by config', async () => {

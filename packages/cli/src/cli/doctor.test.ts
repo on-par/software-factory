@@ -62,13 +62,13 @@ function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
 
 describe('gitAuthCheck', () => {
   it('outside a git repo, git auth is skipped with a reason and does not fail doctor', () => {
-    const tryExecSpy = vi.fn((_cmd: string): string | null => 'https://github.com/o/r.git');
+    const cmds: string[] = [];
+    const tryExecSpy = (cmd: string): string | null => (cmds.push(cmd), 'https://github.com/o/r.git');
     const check = gitAuthCheck(null, tryExecSpy);
     expect(check).toMatchObject({ name: 'git auth', ok: true, optional: true });
     expect(check.detail).toMatch(/^skipped: not inside a git repository/);
     expect(check.detail).toContain(NOT_IN_REPO_HINT);
-    expect(tryExecSpy.mock.calls.some(([cmd]) => cmd.includes('git remote'))).toBe(false);
-    expect(tryExecSpy.mock.calls.some(([cmd]) => cmd.includes('ls-remote'))).toBe(false);
+    expect(cmds.some((cmd) => /git remote|ls-remote/.test(cmd))).toBe(false);
 
     const base = probes();
     const checks = runDoctorChecks(
@@ -82,14 +82,14 @@ describe('gitAuthCheck', () => {
 
   it('in a repo with no origin remote, git auth is skipped with a reason and does not fail doctor', () => {
     for (const result of [null, '']) {
-      const spy = vi.fn((_cmd: string): string | null => result);
-      expect(gitAuthCheck('/repo', spy)).toEqual({
+      const cmds: string[] = [];
+      expect(gitAuthCheck('/repo', (cmd) => (cmds.push(cmd), result))).toEqual({
         name: 'git auth',
         ok: true,
         optional: true,
         detail: 'skipped: no origin remote configured',
       });
-      expect(spy.mock.calls.some(([cmd]) => cmd.includes('ls-remote'))).toBe(false);
+      expect(cmds.some((cmd) => cmd.includes('ls-remote'))).toBe(false);
     }
 
     const base = probes();
@@ -148,11 +148,13 @@ describe('gitAuthCheck', () => {
   });
 
   it('runs the probe with prompting disabled and a bounded timeout', () => {
-    const spy = vi.fn((cmd: string, _opts?: unknown): string | null =>
-      cmd.includes('get-url') ? 'https://github.com/o/r.git' : '',
+    const calls: Array<[string, unknown]> = [];
+    const spy = (c: string, o?: unknown) => (
+      calls.push([c, o]),
+      c.includes('get-url') ? 'https://github.com/o/r.git' : ''
     );
     gitAuthCheck('/repo', spy);
-    const call = spy.mock.calls.find(([cmd]) => cmd.includes('ls-remote'))!;
+    const call = calls.find(([cmd]) => cmd.includes('ls-remote'))!;
     const opts = call[1] as { env: Record<string, string>; timeoutMs: number };
     expect(call[0]).toBe(GIT_AUTH_PROBE_CMD);
     expect(call[0]).toContain('credential.interactive=never');
@@ -501,15 +503,16 @@ describe('formatDoctorChecks', () => {
 describe('outside a git repo (#2554)', () => {
   function outsideProbes() {
     const base = probes();
-    const tryExec = vi.fn((cmd: string): string | null => {
-      if (cmd.includes('git rev-parse') || cmd.includes('git config user.')) return null;
-      return base.tryExec(cmd);
-    });
-    return { tryExec, env: probes({ tryExec }) };
+    const cmds: string[] = [];
+    const tryExec = (cmd: string): string | null => (
+      cmds.push(cmd),
+      /git rev-parse|git config user\./.test(cmd) ? null : base.tryExec(cmd)
+    );
+    return { cmds, env: probes({ tryExec }) };
   }
 
   it('renders every repo check as skipped and does not fail when git identity is unset', () => {
-    const { tryExec, env } = outsideProbes();
+    const { cmds, env } = outsideProbes();
     const checks = runDoctorChecks(env);
     for (const name of ['git identity', 'git worktree clean', '.factory initialized', 'git auth']) {
       const row = checks.find((c) => c.name === name)!;
@@ -519,7 +522,7 @@ describe('outside a git repo (#2554)', () => {
     const identity = checks.find((c) => c.name === 'git identity')!;
     expect(identity).toMatchObject({ ok: false, optional: true, detail: NOT_IN_REPO_SKIP_DETAIL });
     expect(identity.fix).toBeUndefined();
-    expect(tryExec.mock.calls.some(([cmd]) => cmd.includes('git config user.'))).toBe(false);
+    expect(cmds.some((cmd) => cmd.includes('git config user.'))).toBe(false);
     expect(doctorFailed(checks)).toBe(false);
     const out = formatDoctorChecks(checks, { inRepo: false });
     expect(out).toContain(' 0 failed');
@@ -1076,30 +1079,28 @@ describe('harness sign-in (#2556)', () => {
     });
 
     it('the shared harness probe decides each row via commandAvailable', () => {
-      const commandAvailable = vi.fn(() => true);
-      harnessSignInChecks(probes({ commandAvailable }));
+      const rows = (a: (c: string) => boolean) => names(harnessSignInChecks(probes({ commandAvailable: a })));
       for (const cli of ['claude', 'codex', 'opencode']) {
-        expect(commandAvailable).toHaveBeenCalledWith(cli);
+        expect(rows(() => true)).toContain(`${cli} signed in`);
+        expect(rows((c) => c !== cli)).not.toContain(`${cli} signed in`);
       }
     });
   });
 
   it('makes no inference call for any of the three harnesses', () => {
     for (const evidence of [true, false]) {
-      const inference = vi.fn();
+      const inferred: string[] = [];
       const base = evidence ? probes() : noEvidence();
-      const claudeLoggedIn = vi.fn(() => evidence);
-      const opencodeLoggedIn = vi.fn(() => evidence);
       const checks = runDoctorChecks({
         ...base,
-        claudeLoggedIn,
-        opencodeLoggedIn,
+        claudeLoggedIn: () => evidence,
+        opencodeLoggedIn: () => evidence,
         tryExec: (cmd, opts) => {
-          if (/^(claude\s+(-p|--print)|codex\s+exec|opencode\s+run)\b/.test(cmd)) inference();
+          if (/^(claude\s+(-p|--print)|codex\s+exec|opencode\s+run)\b/.test(cmd)) inferred.push(cmd);
           return base.tryExec(cmd, opts);
         },
       });
-      expect(inference).not.toHaveBeenCalled();
+      expect(inferred).toEqual([]);
       for (const cli of ['claude', 'codex', 'opencode']) {
         expect(checks.some((c) => c.name === `${cli} signed in`)).toBe(true);
       }
@@ -1107,14 +1108,14 @@ describe('harness sign-in (#2556)', () => {
   });
 
   it('an unrefreshable stored Claude login fails the claude row with the /login fix (#2721)', () => {
-    const inference = vi.fn();
+    const inferred: string[] = [];
     const base = noEvidence();
     const checks = runDoctorChecks({
       ...base,
       claudeLoggedIn: () => false,
       claudeSessionState: () => 'unusable',
       tryExec: (cmd, opts) => {
-        if (/^(claude\s+(-p|--print)|codex\s+exec|opencode\s+run)\b/.test(cmd)) inference();
+        if (/^(claude\s+(-p|--print)|codex\s+exec|opencode\s+run)\b/.test(cmd)) inferred.push(cmd);
         return base.tryExec(cmd, opts);
       },
     });
@@ -1122,7 +1123,7 @@ describe('harness sign-in (#2556)', () => {
     expect(row).toMatchObject({ ok: false });
     expect(row!.detail).toContain('re-run claude login');
     expect(row!.fix).toContain('/login');
-    expect(inference).not.toHaveBeenCalled();
+    expect(inferred).toEqual([]);
   });
 
   it('an expired Claude access token with a refresh token stays signed in (#2721)', () => {

@@ -1,5 +1,5 @@
 import type { LinearPreflightResult, TrackerConfig } from '@on-par/factory-core/internal';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { linearTrackerChecks } from './doctor-linear.js';
 
@@ -13,24 +13,23 @@ const tracker: TrackerConfig = {
     states: { ready: 'Todo', inProgress: 'In Progress', parked: 'Todo' },
   },
 };
-const probeOf = (result: LinearPreflightResult) => vi.fn(async () => result);
+const probeOf = (result: LinearPreflightResult) => async () => result;
+const throwingProbe = async (): Promise<LinearPreflightResult> => {
+  throw new Error('probed');
+};
 
 describe('linearTrackerChecks (#3891)', () => {
   it('returns no rows and never probes for a github tracker', async () => {
-    const probe = probeOf({ kind: 'ok', readyIssues: 0, unmappedProjects: [] });
-    expect(await linearTrackerChecks({ kind: 'github' }, { LINEAR_API_KEY: 'k' }, probe)).toEqual([]);
-    expect(probe).not.toHaveBeenCalled();
+    expect(await linearTrackerChecks({ kind: 'github' }, { LINEAR_API_KEY: 'k' }, throwingProbe)).toEqual([]);
   });
 
   it('fails only the Linear tracker row with a fix-it when LINEAR_API_KEY is unset', async () => {
     for (const env of [{}, { LINEAR_API_KEY: '' }, { LINEAR_API_KEY: '   ' }]) {
-      const probe = probeOf({ kind: 'ok', readyIssues: 0, unmappedProjects: [] });
-      const rows = await linearTrackerChecks(tracker, env, probe);
+      const rows = await linearTrackerChecks(tracker, env, throwingProbe);
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ name: 'Linear tracker', ok: false, section: 'Repo' });
       expect(rows[0]?.detail).toContain('LINEAR_API_KEY');
       expect(rows[0]?.fix).toBeTruthy();
-      expect(probe).not.toHaveBeenCalled();
     }
   });
 

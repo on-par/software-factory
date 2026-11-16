@@ -12,6 +12,11 @@ installDoctorHarness();
 
 const runMain = (...args: string[]) => runMainWith(undefined, ...args);
 
+function recorder(result: () => unknown) {
+  const calls: unknown[][] = [];
+  return { calls, fn: async (...a: unknown[]) => (calls.push(a), result()) };
+}
+
 describe('cli', () => {
   describe('doctor', () => {
     beforeEach(() => {
@@ -169,21 +174,28 @@ describe('cli', () => {
         dryRun: false,
       };
 
-      const res = await runMain('doctor', '--reconcile');
+      const sweeps = recorder(() => h.gcReport);
+      const res = await runMainWith({ sweepWorktrees: sweeps.fn } as any, 'doctor', '--reconcile');
       expect(res.exited).toBe(false);
-      expect(ops.sweepWorktrees).toHaveBeenCalledWith(
-        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7 }),
-        expect.anything(),
-      );
+      expect(sweeps.calls).toEqual([
+        [expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7 }), expect.anything()],
+      ]);
       expect(logged()).toContain('reconcile: removed worktree /wt/a');
       expect(logged()).toContain('deleted branch ship-it/5-x');
     });
 
     it('doctor without --reconcile never sweeps worktrees', async () => {
       h.claudeAvailable = true;
-      const res = await runMain('doctor');
+      h.gcReport = {
+        removed: [{ path: '/wt/a', branch: 'x', ageDays: 1, reason: 'merged', scrubbedFiles: [], branchDeleted: true }],
+        kept: 0,
+        dryRun: false,
+      };
+      const sweeps = recorder(() => h.gcReport);
+      const res = await runMainWith({ sweepWorktrees: sweeps.fn } as any, 'doctor');
       expect(res.exited).toBe(false);
-      expect(ops.sweepWorktrees).not.toHaveBeenCalled();
+      expect(sweeps.calls).toEqual([]);
+      expect(logged()).not.toContain('reconcile: removed worktree');
     });
 
     it('--reconcile survives a failing worktree sweep', async () => {
@@ -207,9 +219,14 @@ describe('cli', () => {
 
     it('doctor without --reconcile never calls releaseStaleClaims', async () => {
       h.claudeAvailable = true;
-      const res = await runMain('doctor');
+      h.staleClaims = [
+        { issue: 42, label: 'factory:claim-expires:1700000000', expiresAt: 1_700_000_000, released: true },
+      ];
+      const releases = recorder(() => h.staleClaims);
+      const res = await runMainWith({ releaseStaleClaims: releases.fn } as any, 'doctor');
       expect(res.exited).toBe(false);
-      expect(ops.releaseStaleClaims).not.toHaveBeenCalled();
+      expect(releases.calls).toEqual([]);
+      expect(logged()).not.toContain('reconcile: released');
     });
 
     it('--reconcile survives a rejected releaseStaleClaims', async () => {
@@ -231,9 +248,11 @@ describe('cli', () => {
         if (cmd.includes('gh auth status')) throw new Error('not logged in');
         return '';
       };
-      await runMain('doctor', '--reconcile');
+      const releases = recorder(() => h.staleClaims);
+      await runMainWith({ releaseStaleClaims: releases.fn } as any, 'doctor', '--reconcile');
       expect(logged()).toContain('reconcile: skipping stale claims: no GitHub repo or token');
-      expect(ops.releaseStaleClaims).not.toHaveBeenCalled();
+      expect(releases.calls).toEqual([]);
+      expect(logged()).not.toContain('reconcile: released');
     });
 
     it('--reconcile reports the blocked-parks summary and logs poller events', async () => {
@@ -245,21 +264,29 @@ describe('cli', () => {
         { issue: 11, outcome: 'skipped', detail: 'no blockers' },
         { issue: 12, outcome: 'raced' },
       ];
-      const res = await runMain('doctor', '--reconcile');
+      const res = await runMainWith(
+        {
+          pollBlockedParks: async (opts: any) => {
+            opts.logEvent('issue_unparked', 7, '#7 auto-unparked');
+            opts.logEvent('warn', 7, 'park comment not updated');
+            opts.logEvent('order_collision_repaired', 7, '#7 moved from order 1 to 2');
+            opts.logEvent('order_collision_repaired', 7, '#7 stays shared, exhausted');
+            opts.onSkip('blocked-park poll skipped: this host is not the fleet leader');
+            return h.blockedParks;
+          },
+        } as any,
+        'doctor',
+        '--reconcile',
+      );
       expect(res.exited).toBe(false);
       expect(logged()).toContain('reconcile: blocked parks: 1 unparked, 1 held, 0 capped, 1 waiting');
       expect(logged()).toContain('#8 held — blocker #9 closed not_planned');
       expect(logged()).toContain('#12 raced');
-      const { logEvent } = ops.pollBlockedParks.mock.calls[0][0];
-      expect(() => {
-        logEvent('issue_unparked', 7, '#7 auto-unparked');
-        logEvent('warn', 7, 'park comment not updated');
-        logEvent('order_collision_repaired', 7, '#7 moved from order 1 to 2');
-        logEvent('order_collision_repaired', 7, '#7 stays shared, exhausted');
-      }).not.toThrow();
-      const { onSkip } = ops.pollBlockedParks.mock.calls[0][0];
-      onSkip('blocked-park poll skipped: this host is not the fleet leader');
       expect(logged()).toContain('reconcile: blocked-park poll skipped: this host is not the fleet leader');
+      expect(logged()).not.toContain('blocked park poll failed');
+      const events = readFileSync(paths().events, 'utf8');
+      expect(events).toContain('issue_unparked');
+      expect(events).toContain('order_collision_repaired');
     });
 
     it('--reconcile survives a rejected pollBlockedParks', async () => {
@@ -281,9 +308,11 @@ describe('cli', () => {
         if (cmd.includes('gh auth status')) throw new Error('not logged in');
         return '';
       };
-      await runMain('doctor', '--reconcile');
+      const polls = recorder(() => h.blockedParks);
+      await runMainWith({ pollBlockedParks: polls.fn } as any, 'doctor', '--reconcile');
       expect(logged()).toContain('reconcile: skipping blocked parks: no GitHub repo or token');
-      expect(ops.pollBlockedParks).not.toHaveBeenCalled();
+      expect(polls.calls).toEqual([]);
+      expect(logged()).not.toContain('reconcile: blocked parks:');
     });
 
     it('reports a green-and-ready PR with its owning issue', async () => {
@@ -320,10 +349,15 @@ describe('cli', () => {
     it('skips the orphan container/sbx VM scan entirely when docker/sbx are not on PATH', async () => {
       h.claudeAvailable = true;
 
-      const res = await runMain('doctor');
+      const containerLists = recorder(() => h.orphanContainers);
+      const vmLists = recorder(() => h.orphanVmNames);
+      const res = await runMainWith(
+        { listOrphanContainers: containerLists.fn, listMicroVms: vmLists.fn } as any,
+        'doctor',
+      );
       expect(res.exited).toBe(false);
-      expect(ops.listOrphanContainers).not.toHaveBeenCalled();
-      expect(ops.listMicroVms).not.toHaveBeenCalled();
+      expect(containerLists.calls).toEqual([]);
+      expect(vmLists.calls).toEqual([]);
       expect(logged()).toContain('no orphan sf-job-*/factory.managed containers');
       expect(logged()).toContain('no orphan factory-* sbx VMs');
     });
@@ -345,9 +379,10 @@ describe('cli', () => {
       h.orphanContainers = [{ id: 'abc123', name: 'sf-job-1' }];
       h.reapedContainers = [{ id: 'abc123', name: 'sf-job-1', removed: true, detail: 'docker rm -f -v sf-job-1 ok' }];
 
-      const res = await runMain('doctor', '--reconcile');
+      const reaps = recorder(() => h.reapedContainers);
+      const res = await runMainWith({ reapOrphanContainers: reaps.fn } as any, 'doctor', '--reconcile');
       expect(res).toEqual({ exited: true, code: 1 });
-      expect(ops.reapOrphanContainers).toHaveBeenCalledWith(h.orphanContainers);
+      expect(reaps.calls).toEqual([[h.orphanContainers]]);
       expect(logged()).toContain('reconcile: removed container sf-job-1');
     });
 
@@ -356,9 +391,11 @@ describe('cli', () => {
       h.dockerAvailable = true;
       h.orphanContainers = [{ id: 'abc123', name: 'sf-job-1' }];
 
-      const res = await runMain('doctor');
+      const reaps = recorder(() => h.reapedContainers);
+      const res = await runMainWith({ reapOrphanContainers: reaps.fn } as any, 'doctor');
       expect(res).toEqual({ exited: true, code: 1 });
-      expect(ops.reapOrphanContainers).not.toHaveBeenCalled();
+      expect(reaps.calls).toEqual([]);
+      expect(logged()).not.toContain('reconcile: removed');
     });
 
     it('fails doctor and reports a factory-* sbx VM with no active lane as an orphan', async () => {
@@ -406,9 +443,10 @@ describe('cli', () => {
       h.orphanVmNames = ['factory-abc123'];
       h.reapedVms = [{ name: 'factory-abc123', removed: true, detail: 'sbx rm --force factory-abc123 ok' }];
 
-      const res = await runMain('doctor', '--reconcile');
+      const reaps = recorder(() => h.reapedVms[0]);
+      const res = await runMainWith({ reapOrphanMicroVm: reaps.fn } as any, 'doctor', '--reconcile');
       expect(res).toEqual({ exited: true, code: 1 });
-      expect(ops.reapOrphanMicroVm).toHaveBeenCalledWith('factory-abc123');
+      expect(reaps.calls).toEqual([['factory-abc123']]);
       expect(logged()).toContain('reconcile: removed sbx VM factory-abc123 (sbx rm --force)');
     });
 
@@ -417,9 +455,11 @@ describe('cli', () => {
       h.sbxAvailable = true;
       h.orphanVmNames = ['factory-abc123'];
 
-      const res = await runMain('doctor');
+      const reaps = recorder(() => ({ name: 'factory-abc123', removed: true, detail: 'ok' }));
+      const res = await runMainWith({ reapOrphanMicroVm: reaps.fn } as any, 'doctor');
       expect(res).toEqual({ exited: true, code: 1 });
-      expect(ops.reapOrphanMicroVm).not.toHaveBeenCalled();
+      expect(reaps.calls).toEqual([]);
+      expect(logged()).not.toContain('reconcile: removed');
     });
   });
 });

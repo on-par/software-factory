@@ -65,16 +65,19 @@ describe('runDraftCommand', () => {
     const dir = await tempDirs.make('draft-cmd-');
     const file = join(dir, 'idea.txt');
     writeFileSync(file, 'do the thing');
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const lines: unknown[] = [];
+    vi.spyOn(console, 'log').mockImplementation((m) => void lines.push(m));
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const runModel = vi.fn(async () => ({
-      model: 'm',
-      output: BODY('\n## Verification\n\n- Run `npm test`.\n'),
-      cost: null,
-    }));
+    const prompts: string[] = [];
+    const runModel = async (_task: string, prompt: string) => {
+      prompts.push(prompt);
+      return { model: 'm', output: BODY('\n## Verification\n\n- Run `npm test`.\n'), cost: null };
+    };
     await runDraftCommand({ file }, async () => runModel);
-    expect(log).toHaveBeenCalledTimes(1);
-    expect(runModel).toHaveBeenCalledTimes(1);
+    expect(lines).toHaveLength(1);
+    expect(String(lines[0])).toContain('# Do the thing');
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('do the thing');
   });
 
   it('exits 1 for a draft that stays not ready', async () => {

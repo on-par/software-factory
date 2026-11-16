@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   createAutoUpdateDeps,
@@ -35,40 +35,51 @@ const config = {
 };
 const OK: AutoUpdateApplyResult = { code: 0, rolledBack: false, error: null };
 
-function fakeDeps(over: { preflight?: AutoUpdateApplyResult; apply?: AutoUpdateApplyResult } = {}) {
+function fakeDeps(
+  over: { preflight?: AutoUpdateApplyResult; apply?: AutoUpdateApplyResult; preflightThrows?: Error } = {},
+) {
   const stateFile = join(dir, 'update-state.json');
   writeUpdateState(stateFile, initialUpdateState(config, null));
   const logs: string[] = [];
+  const order: string[] = [];
   const deps: AutoUpdateDeps = {
     stateFile,
-    check: vi.fn(async () => ({ candidate: '0.9.1', updateAvailable: true, error: null })),
-    preflight: vi.fn(async () => over.preflight ?? OK),
-    apply: vi.fn(async () => over.apply ?? OK),
-    activeRuns: vi.fn(async () => []),
-    writeStops: vi.fn(async () => {
+    check: async () => ({ candidate: '0.9.1', updateAvailable: true, error: null }),
+    preflight: async (v: string) => {
+      order.push(`preflight:${v}`);
+      if (over.preflightThrows) throw over.preflightThrows;
+      return over.preflight ?? OK;
+    },
+    apply: async (v: string) => {
+      order.push(`apply:${v}`);
+      return over.apply ?? OK;
+    },
+    activeRuns: async () => {
+      order.push('activeRuns');
+      return [];
+    },
+    writeStops: async () => {
+      order.push('writeStops');
       mkdirSync(join(dir, 'repo'), { recursive: true });
       writeFileSync(stop, '');
       return [stop];
-    }),
-    clearStops: vi.fn(async (files: string[]) => {
+    },
+    clearStops: async (files: string[]) => {
       for (const f of files) rmSync(f, { force: true });
-    }),
+    },
     now: () => Date.parse('2026-10-13T20:14:00-05:00'),
     sleep: async () => {},
     log: (l) => logs.push(l),
     exit: () => {},
   };
-  return { deps, logs, stateFile };
+  return { deps, logs, stateFile, order };
 }
 
 describe('runAutoUpdateCycle preflight', () => {
   it('a failing preflight never writes STOP, never applies, and records skipped (the 8:14 PM bug)', async () => {
     const f = fakeDeps({ preflight: { code: 1, rolledBack: false, error: "error: unknown option '--to'" } });
     expect(await runAutoUpdateCycle(config, f.deps)).toBe('preflight-failed');
-    expect(f.deps.preflight).toHaveBeenCalledWith('0.9.1');
-    expect(f.deps.writeStops).not.toHaveBeenCalled();
-    expect(f.deps.activeRuns).not.toHaveBeenCalled();
-    expect(f.deps.apply).not.toHaveBeenCalled();
+    expect(f.order).toEqual(['preflight:0.9.1']);
     expect(existsSync(stop)).toBe(false);
     const state = readUpdateState(f.stateFile);
     expect(state?.draining).toBeNull();
@@ -78,18 +89,20 @@ describe('runAutoUpdateCycle preflight', () => {
   });
 
   it('a throwing preflight is a preflight failure, not a drain', async () => {
-    const f = fakeDeps();
-    vi.mocked(f.deps.preflight).mockRejectedValue(new Error('spawn ENOENT'));
+    const f = fakeDeps({ preflightThrows: new Error('spawn ENOENT') });
     expect(await runAutoUpdateCycle(config, f.deps)).toBe('preflight-failed');
-    expect(f.deps.writeStops).not.toHaveBeenCalled();
+    expect(f.order).not.toContain('writeStops');
+    expect(existsSync(stop)).toBe(false);
     expect(readUpdateState(f.stateFile)?.lastResult?.error).toContain('spawn ENOENT');
   });
 
   it('preflights before draining, and clears STOP after a failed apply so builds resume', async () => {
     const f = fakeDeps({ apply: { code: 1, rolledBack: true, error: 'doctor failed' } });
     expect(await runAutoUpdateCycle(config, f.deps)).toBe('failed');
-    const pre = vi.mocked(f.deps.preflight).mock.invocationCallOrder[0]!;
-    const drain = vi.mocked(f.deps.writeStops).mock.invocationCallOrder[0]!;
+    const pre = f.order.indexOf('preflight:0.9.1');
+    const drain = f.order.indexOf('writeStops');
+    expect(pre).toBeGreaterThanOrEqual(0);
+    expect(drain).toBeGreaterThanOrEqual(0);
     expect(pre).toBeLessThan(drain);
     expect(existsSync(stop)).toBe(false);
     expect(readUpdateState(f.stateFile)).toMatchObject({ draining: null, lastResult: { outcome: 'rolled-back' } });
@@ -98,7 +111,7 @@ describe('runAutoUpdateCycle preflight', () => {
   it('updates after a passing preflight', async () => {
     const f = fakeDeps();
     expect(await runAutoUpdateCycle(config, f.deps)).toBe('updated');
-    expect(f.deps.apply).toHaveBeenCalledWith('0.9.1');
+    expect(f.order).toContain('apply:0.9.1');
     expect(existsSync(stop)).toBe(false);
   });
 });
