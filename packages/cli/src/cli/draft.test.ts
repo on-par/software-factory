@@ -65,11 +65,14 @@ const WELL_FORMED = `${NO_VERIFICATION}\n${VERIFICATION}`;
 
 function stub(...outputs: Array<string | Error>) {
   const queue = [...outputs];
-  return vi.fn(async (_task: string, _prompt: string) => {
+  const prompts: Array<{ task: string; prompt: string }> = [];
+  const runModel = async (task: string, prompt: string) => {
+    prompts.push({ task, prompt });
     const next = queue.shift();
     if (next instanceof Error) throw next;
     return { model: 'm-1', output: next ?? '', cost: 0.01 };
-  });
+  };
+  return Object.assign(runModel, { prompts });
 }
 
 function harness(runModel: ReturnType<typeof stub>) {
@@ -104,10 +107,10 @@ describe('runIssueDraft', () => {
     expect(out[0]).toMatch(/^# Unpark a lane from my phone/);
     for (const h of HEADINGS) expect(out[0]).toContain(`## ${h}`);
     expect(result.exit).toBe(0);
-    expect(runModel).toHaveBeenCalledTimes(1);
-    expect(runModel.mock.calls[0]?.[0]).toBe('issue_draft');
-    expect(runModel.mock.calls[0]?.[1]).toContain('<untrusted-idea>');
-    expect(runModel.mock.calls[0]?.[1]).toContain('let me unpark a lane from my phone');
+    expect(runModel.prompts).toHaveLength(1);
+    expect(runModel.prompts[0]?.task).toBe('issue_draft');
+    expect(runModel.prompts[0]?.prompt).toContain('<untrusted-idea>');
+    expect(runModel.prompts[0]?.prompt).toContain('let me unpark a lane from my phone');
     expect(draftResultExit(result)).toBeNull();
   });
 
@@ -137,9 +140,9 @@ describe('runIssueDraft', () => {
     const runModel = stub(NO_VERIFICATION, NO_VERIFICATION);
     const { err, deps } = harness(runModel);
     const result = await runIssueDraft('idea', {}, deps);
-    expect(runModel).toHaveBeenCalledTimes(2);
-    expect(runModel.mock.calls[1]?.[1]).toContain('missing: Verification');
-    expect(runModel.mock.calls[1]?.[1]).toContain('<untrusted-previous-draft>');
+    expect(runModel.prompts).toHaveLength(2);
+    expect(runModel.prompts[1]?.prompt).toContain('missing: Verification');
+    expect(runModel.prompts[1]?.prompt).toContain('<untrusted-previous-draft>');
     expect(result.exit).toBe(1);
     expect(result.reasons).toContain('missing: Verification');
     expect(draftResultExit(result)?.code).toBe(1);
@@ -147,7 +150,7 @@ describe('runIssueDraft', () => {
 
     const second = stub(NO_VERIFICATION, WELL_FORMED);
     const r2 = await runIssueDraft('idea', {}, harness(second).deps);
-    expect(second).toHaveBeenCalledTimes(2);
+    expect(second.prompts).toHaveLength(2);
     expect(r2.exit).toBe(0);
   });
 
@@ -188,13 +191,13 @@ describe('runIssueDraft', () => {
     const parsed = JSON.parse(out[0]!) as { title: string; body: string };
     const report = buildIssueCheckReport(0, scoreIssueReadiness(parsed), gradeIssueCriteria(parsed.body));
     expect(report.exitCode).toBe(0);
-    expect(runModel).toHaveBeenCalledTimes(2);
+    expect(runModel.prompts).toHaveLength(2);
   });
 
   it('throws after two unparseable outputs', async () => {
     const runModel = stub('no title here', 'still none');
     await expect(runIssueDraft('idea', {}, harness(runModel).deps)).rejects.toBeInstanceOf(IssueDraftError);
-    expect(runModel).toHaveBeenCalledTimes(2);
+    expect(runModel.prompts).toHaveLength(2);
   });
 
   it('wraps a throwing model call', async () => {

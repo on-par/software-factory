@@ -51,19 +51,25 @@ function countingRuntime(remaining = 5000) {
       },
     },
   };
-  const appendKpiSnapshot = vi.fn(async () => ({}));
+  const reconstructs: string[] = [];
+  const snapshots: Array<{ partial: boolean }> = [];
+  const appendKpiSnapshot = vi.fn(async (_p: unknown, _r: unknown, _s: unknown, opts: { partial: boolean }) => {
+    snapshots.push(opts);
+    return {};
+  });
   const rt = {
     readCosts: () => [],
-    reconstructHumanEventsForKpis: vi.fn(async (events: any[], prefix: string) => ({
-      ...(await reconstructKpiEvents(events, (issues) =>
+    reconstructHumanEventsForKpis: async (events: any[], prefix: string) => ({
+      ...(reconstructs.push(prefix),
+      await reconstructKpiEvents(events, (issues) =>
         fetchHumanEventSourcesCached(client, 'o', 'r', issues, prefix, { cachePath: paths.kpiSweepCache }),
       )),
       owner: 'o',
       repoName: 'r',
-    })),
+    }),
     appendKpiSnapshot,
   };
-  return { rt, calls, appendKpiSnapshot };
+  return { rt, calls, reconstructs, snapshots };
 }
 
 const loggedOfType = (type: string) => readEvents(paths.events).filter((e) => e.type === type);
@@ -77,29 +83,29 @@ describe('runEndOfRunKpiSnapshot', () => {
       { type: 'parked', ts: DURING },
       { type: 'run-done', ts: DURING },
     );
-    const { rt, calls, appendKpiSnapshot } = countingRuntime();
+    const { rt, calls, reconstructs, snapshots } = countingRuntime();
     await runEndOfRunKpiSnapshot(paths, root, 'factory', RUN_START, rt as any);
     expect(calls).toEqual([]);
-    expect(rt.reconstructHumanEventsForKpis).not.toHaveBeenCalled();
-    expect(appendKpiSnapshot).not.toHaveBeenCalled();
+    expect(reconstructs).toEqual([]);
+    expect(snapshots).toEqual([]);
     expect(loggedOfType('kpi-sweep-skipped').map((e) => e.msg)).toEqual([KPI_SWEEP_NOOP_MESSAGE]);
   });
 
   it('a run that opened a PR sweeps and appends a snapshot', async () => {
     writeEvents({ type: 'pr_opened', ts: DURING });
-    const { rt, calls, appendKpiSnapshot } = countingRuntime();
+    const { rt, calls, snapshots } = countingRuntime();
     await runEndOfRunKpiSnapshot(paths, root, 'factory', RUN_START, rt as any);
     expect(calls).toEqual(['rateLimit', 'list']);
-    expect(appendKpiSnapshot).toHaveBeenCalledWith(paths, root, expect.anything(), { partial: false });
+    expect(snapshots).toEqual([{ partial: false }]);
     expect(loggedOfType('kpi-snapshot')).toHaveLength(1);
   });
 
   it('when core remaining is under 20%, makes 0 sweep calls, logs the reason and marks the snapshot partial', async () => {
     writeEvents({ type: 'merged', ts: DURING });
-    const { rt, calls, appendKpiSnapshot } = countingRuntime(100);
+    const { rt, calls, snapshots } = countingRuntime(100);
     await runEndOfRunKpiSnapshot(paths, root, 'factory', RUN_START, rt as any);
     expect(calls).toEqual(['rateLimit']); // GET /rate_limit does not count against the budget
-    expect(appendKpiSnapshot).toHaveBeenCalledWith(paths, root, expect.anything(), { partial: true });
+    expect(snapshots).toEqual([{ partial: true }]);
     const warns = loggedOfType('warn').map((e) => e.msg);
     expect(warns).toEqual([
       'kpi snapshot partial: GitHub human-event reconstruction failed: KPI sweep skipped: GitHub REST core budget low: 100/5000 remaining (< 20%)',

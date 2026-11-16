@@ -19,6 +19,9 @@ import {
 } from './github-stub.js';
 
 const exec = promisify(execCb);
+const noReal = (): Octokit => {
+  throw new Error('real factory called');
+};
 
 let tmp: string;
 beforeEach(() => {
@@ -26,6 +29,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   rmSync(tmp, { recursive: true, force: true });
 });
@@ -56,19 +60,16 @@ describe('resolveGitHubMode', () => {
 describe('selectOctokit', () => {
   it('calls the real factory when unset', () => {
     const client = {} as Octokit;
-    const real = vi.fn(() => client);
+    const real = () => client;
     expect(selectOctokit({}, real)).toBe(client);
-    expect(real).toHaveBeenCalledTimes(1);
   });
-  it('never calls the real factory in stub mode', () => {
-    const real = vi.fn();
-    selectOctokit({ FACTORY_GITHUB: 'stub', FACTORY_GITHUB_STUB_DIR: tmp }, real);
-    expect(real).not.toHaveBeenCalled();
+  it('never calls the real factory in stub mode', async () => {
+    writeFixture(tmp, { issues: { '1': { title: 'S', body: '', labels: [] } } });
+    const o = selectOctokit({ FACTORY_GITHUB: 'stub', FACTORY_GITHUB_STUB_DIR: tmp }, noReal);
+    expect((await o.rest.issues.get({ owner: 'o', repo: 'r', issue_number: 1 })).data.title).toBe('S');
   });
   it('requires FACTORY_GITHUB_STUB_DIR in stub mode', () => {
-    const real = vi.fn();
-    expect(() => selectOctokit({ FACTORY_GITHUB: 'stub' }, real)).toThrow(/FACTORY_GITHUB_STUB_DIR/);
-    expect(real).not.toHaveBeenCalled();
+    expect(() => selectOctokit({ FACTORY_GITHUB: 'stub' }, noReal)).toThrow(/FACTORY_GITHUB_STUB_DIR/);
   });
 });
 
@@ -168,12 +169,18 @@ describe('createStubOctokit', () => {
 describe('recordGitPushes', () => {
   it('records only git push commands and always delegates', async () => {
     const callsFile = join(tmp, GITHUB_STUB_CALLS_FILE);
-    const inner = vi.fn(async () => ({ stdout: 'ok' }));
+    const seen: string[] = [];
+    const inner = async (cmd: string) => {
+      seen.push(cmd);
+      return { stdout: `ran ${cmd}` };
+    };
     const run = recordGitPushes(inner, callsFile, 'br');
-    await run('git status');
+    await expect(run('git status')).resolves.toEqual({ stdout: 'ran git status' });
     expect(existsSync(callsFile)).toBe(false);
-    await expect(run('git push -u origin br', { cwd: '/w' })).resolves.toEqual({ stdout: 'ok' });
-    expect(inner).toHaveBeenCalledTimes(2);
+    await expect(run('git push -u origin br', { cwd: '/w' })).resolves.toEqual({
+      stdout: 'ran git push -u origin br',
+    });
+    expect(seen).toEqual(['git status', 'git push -u origin br']);
     expect(readCalls(tmp)).toMatchObject([
       { op: 'git.push', args: { branch: 'br', command: 'git push -u origin br', cwd: '/w' } },
     ]);
@@ -203,8 +210,16 @@ describe('offline ship', () => {
     writeFixture(dir, { issues: { '7': { title: 'Offline ship', body: 'b', labels: ['factory'] } } });
     vi.stubEnv('FACTORY_GITHUB', 'stub');
     vi.stubEnv('FACTORY_GITHUB_STUB_DIR', dir);
-    const real = vi.fn();
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const realCalls: string[] = [];
+    const real = (): Octokit => {
+      realCalls.push('real');
+      throw new Error('real factory called');
+    };
+    const fetches: unknown[] = [];
+    vi.stubGlobal('fetch', async (...a: unknown[]) => {
+      fetches.push(a);
+      throw new Error('offline');
+    });
     const octokit = selectOctokit(process.env, real);
 
     const work = await createDefaultWorkSourceRegistry({ octokit }).resolve(GITHUB_ISSUE_SOURCE, {
@@ -221,16 +236,16 @@ describe('offline ship', () => {
       log: () => {},
       run: recordGitPushes(exec, join(dir, GITHUB_STUB_CALLS_FILE), branch),
     });
-    return { work, result, real, fetchSpy, dir };
+    return { work, result, realCalls, fetches, dir };
   }
 
   it('ships an issue offline from fixture to PR create without constructing a real client', async () => {
-    const { work, result, real, fetchSpy, dir } = await shipOffline();
+    const { work, result, realCalls, fetches, dir } = await shipOffline();
     expect((work as { title: string }).title).toBe('Offline ship');
     expect(result.ok).toBe(true);
     expect(typeof result.prNumber).toBe('number');
-    expect(real).not.toHaveBeenCalled();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(realCalls).toEqual([]);
+    expect(fetches).toEqual([]);
     expect(readCalls(dir).some((c) => c.op === 'git.push' && c.args.branch === branch)).toBe(true);
   }, 30_000);
 

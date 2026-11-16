@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import './index.js';
 import { MAX_LAND_SYNC_ROUNDS } from './land-behind.js';
-import { CiFailedError, CiUnverifiedError, landOpenPullRequest } from './land-pr.js';
+import { CiFailedError, CiUnverifiedError, LandDeferredError, landOpenPullRequest } from './land-pr.js';
 
 type Opts = {
   mergeState?: string;
@@ -174,5 +174,28 @@ describe('landOpenPullRequest: head behind origin/main (#3654)', () => {
     expect(merges).not.toContain('head-kinds-485');
     expect(pushes(trace)).toHaveLength(1);
     expect(merges).toEqual(['merged-with-main-kinds-498']);
+  });
+});
+
+describe('landOpenPullRequest: moving base is deferred (#3957)', () => {
+  it('a base that keeps moving throws LandDeferredError with the base kept moving message', async () => {
+    const { merges, logs, land } = setup({ behindFor: () => true });
+    const err = await land().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LandDeferredError);
+    expect(err).toBeInstanceOf(CiUnverifiedError);
+    const msg = `PR #123 on ship-it/20-behind: base kept moving — synced ${MAX_LAND_SYNC_ROUNDS} times and origin/main moved again; refusing to merge an unverified head`;
+    expect((err as LandDeferredError).message).toBe(msg);
+    expect((err as LandDeferredError).branch).toBe('ship-it/20-behind');
+    expect((err as LandDeferredError).prNumber).toBe(123);
+    expect(logs).toContain(`land-deferred: ${msg}`);
+    expect(logs.some((l) => l.startsWith('ci-failed'))).toBe(false);
+    expect(merges).toEqual([]);
+  });
+
+  it('a CI failure after a sync still throws CiFailedError, not LandDeferredError', async () => {
+    const { land } = setup({ behindFor: (sha) => sha === 'stale-sha', failSha: 'synced-sha-1' });
+    const err = await land().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CiFailedError);
+    expect(err).not.toBeInstanceOf(LandDeferredError);
   });
 });
