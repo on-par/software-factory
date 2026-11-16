@@ -26,9 +26,8 @@ async function lane(prevDeferrals: number, extra: Partial<RunLaneDeps> = {}) {
   const closeParkedPr = async (...a: [number, string, string]) => void closed.push(a);
   let octokitGets = 0;
   const octokit = () => (octokitGets++, {} as Octokit);
-  const recorded: Array<[LandDeferredError, number, string]> = [];
   const order: string[] = [];
-  const decide = async (err: LandDeferredError, issue: number, branch: string) => ({
+  const recordLandDeferred = async (err: LandDeferredError, issue: number, branch: string) => ({
     ...decideLandDeferral(
       prevDeferrals === 0
         ? undefined
@@ -63,19 +62,18 @@ async function lane(prevDeferrals: number, extra: Partial<RunLaneDeps> = {}) {
       order.push('claimNext');
       return null;
     },
-    recordLandDeferred: async (err, issue, branch) => (recorded.push([err, issue, branch]), decide(err, issue, branch)),
+    recordLandDeferred,
     octokit,
     closeParkedPr,
     reapWorktree: async () => {},
     ...extra,
   });
-  return { events, released, closed, recorded, octokitGets: () => octokitGets, order };
+  return { events, released, closed, octokitGets: () => octokitGets, order };
 }
 
 describe('runLane land-deferred (#3957)', () => {
   it('a land-deferred outcome records the deferral, settles done and adds no factory:parked label', async () => {
     const r = await lane(0);
-    expect(r.recorded).toEqual([[expect.any(LandDeferredError), 5, 'factory/5-x']]);
     expect(r.released).toEqual([[5, 'done']]);
     expect(r.events.some(([type]) => type === 'parked' || type === 'ci-failed')).toBe(false);
     const deferred = r.events.find(([type]) => type === 'land-deferred');

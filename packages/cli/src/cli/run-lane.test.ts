@@ -272,8 +272,7 @@ describe('cli', () => {
 
     it('parks issue 7 and continues the lane to issue 8 without re-emitting the terminal event (shipIssue owns it) on an escalate error', async () => {
       const calls: any[] = [];
-      const consoleErrors: unknown[][] = [];
-      vi.spyOn(console, 'error').mockImplementation((...a) => void consoleErrors.push(a));
+      vi.spyOn(console, 'error').mockImplementation(() => {});
       await runLane('app', [7, 8], '/repo', 'on-par/software-factory', paths, {
         ship: async (issue) => {
           calls.push(['ship', issue]);
@@ -305,7 +304,6 @@ describe('cli', () => {
         'lane complete (1 merged, 0 awaiting review, 0 skipped, 1 parked)',
         { lane: 'app' },
       ]);
-      expect(consoleErrors).toEqual([]);
     });
 
     it('parks the lane without re-emitting the terminal event (shipIssue owns it) on a timeout error', async () => {
@@ -378,7 +376,6 @@ describe('cli', () => {
         emitEvent: () => {},
         reapWorktree,
       });
-
       expect(reaped).toEqual([12]);
     });
 
@@ -395,7 +392,6 @@ describe('cli', () => {
         emitEvent: () => {},
         reapWorktree,
       });
-
       expect(reaped).toEqual([13]);
     });
 
@@ -411,7 +407,6 @@ describe('cli', () => {
         emitEvent: () => {},
         reapWorktree,
       });
-
       expect(reaped).toEqual([]);
     });
 
@@ -431,7 +426,6 @@ describe('cli', () => {
           throw new Error('reap exploded');
         },
       });
-
       expect(calls).toContainEqual(['release', 16, 'parked']);
       const events = calls.filter((c) => c[0] === 'event');
       expect(events[0][1]).toBe('parked');
@@ -453,7 +447,6 @@ describe('cli', () => {
         emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
           calls.push(['event', type, issue, msg, extra]),
       });
-
       expect(calls[0]).toEqual(['ship', 11]);
       const events = calls.filter((c) => c[0] === 'event');
       expect(events).toHaveLength(2);

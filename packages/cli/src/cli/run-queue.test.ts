@@ -18,7 +18,6 @@ describe('createRunQueue draft adoption wiring (#4039)', () => {
   it('hands the preflight ops a draftAdoption whose CI probe reads the head SHA checks', async () => {
     const dir = tmp.makeSync('run-queue-');
     mkdirSync(join(dir, 'state'));
-    const refs: string[] = [];
     const octokit: any = {
       rest: {
         issues: {
@@ -35,10 +34,9 @@ describe('createRunQueue draft adoption wiring (#4039)', () => {
           createLabel: async () => ({}),
         },
         checks: {
-          listForRef: async ({ ref }: any) => (
-            refs.push(ref),
-            { data: { check_runs: [{ status: 'completed', conclusion: 'success' }] } }
-          ),
+          listForRef: async ({ ref }: any) => ({
+            data: { check_runs: [{ status: 'completed', conclusion: ref === 'abc123' ? 'success' : 'failure' }] },
+          }),
         },
       },
       paginate: async () => [
@@ -73,6 +71,5 @@ describe('createRunQueue draft adoption wiring (#4039)', () => {
     });
     await queue().claimNext('app');
     expect(probed).toBe('success');
-    expect(refs).toEqual(['abc123']);
   });
 });

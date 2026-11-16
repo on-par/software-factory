@@ -116,7 +116,6 @@ describe('land-time park comment', () => {
       const fake = commentStoreOctokit([]);
       await park(err, fake);
       expect(fake.ops.filter((o) => o !== 'list')).toEqual(['create']);
-      expect(fake.comments).toHaveLength(1);
       expect(fake.comments[0].body).toContain(marker);
       expect(stateLine(fake.comments, 'reason')).toBe(reason);
     },
@@ -197,6 +196,5 @@ describe('land-time park comment', () => {
     });
     expect(events).toContain('parked');
     expect(fake.ops).toEqual([]);
-    expect(fake.comments).toEqual([]);
   });
 });

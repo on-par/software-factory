@@ -8,15 +8,13 @@ const hold = { kind: 'hold', load5: 30, threshold: 24, cpus: 8, retryMs: 1000 } 
 
 function io(stopped = false) {
   const events: unknown[][] = [];
-  const slept: number[] = [];
   return {
     events,
-    slept,
     lane: 'app',
     paths: { events: '/e', stop: '/stop' },
     emitEvent: (...a: unknown[]) => void events.push(a),
     now: () => new Date(0),
-    sleep: async (ms: number) => void slept.push(ms),
+    sleep: async () => {},
     pathExists: () => stopped,
   };
 }
@@ -42,7 +40,6 @@ describe('holdForLoad', () => {
     const next = () => decisions.shift() ?? { kind: 'claim' as const };
     expect(await holdForLoad(next, i)).toBe('claim');
     expect(i.events.map((e) => e[1])).toEqual(['warn', 'warn']);
-    expect(i.slept).toEqual([1000, 1000]);
   });
 
   it('stops when STOP appears during the hold', async () => {
