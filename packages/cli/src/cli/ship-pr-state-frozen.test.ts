@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { defaultFactoryConfig } from '@on-par/factory-config';
 import type { Octokit } from '@octokit/rest';
 import { workKeyFromIssue, type EventKind } from '@on-par/factory-core';
-import { createTempDirs, loadReusablePlan } from '@on-par/factory-core/testing';
+import { createTempDirs, fakeOctokit, loadReusablePlan } from '@on-par/factory-core/testing';
 import {
   createPlanReuseStore,
   issueBodyHash,
@@ -25,28 +25,27 @@ const SHA = 'abc1234def';
 
 type Stored = { id: number; user: { id: number }; body: string };
 
-function fakeOctokit(): { octokit: Octokit; comments: Stored[] } {
+function commentStoreOctokit(): { octokit: Octokit; comments: Stored[] } {
   const comments: Stored[] = [];
   let next = 100;
   const pulls = [{ number: 9, head: { ref: BRANCH, sha: SHA, repo: { full_name: REPO } } }];
-  const rest = {
-    users: { getAuthenticated: async () => ({ data: { id: SELF } }) },
-    pulls: { list: async () => ({ data: pulls }), get: async () => ({ data: { head: { sha: SHA } } }) },
-    issues: {
-      listComments: async ({ page }: { page: number }) => ({ data: page === 1 ? comments : [] }),
-      createComment: async ({ body }: { body: string }) => {
-        const c = { id: next++, user: { id: SELF }, body };
-        comments.push(c);
-        return { data: c };
-      },
-      updateComment: async ({ comment_id, body }: { comment_id: number; body: string }) => {
-        const c = comments.find((x) => x.id === comment_id);
-        if (c) c.body = body;
-        return { data: c };
-      },
+  const { octokit } = fakeOctokit({
+    'users.getAuthenticated': async () => ({ data: { id: SELF } }),
+    'pulls.list': async () => ({ data: pulls }),
+    'pulls.get': async () => ({ data: { head: { sha: SHA } } }),
+    'issues.listComments': async ({ page }: { page: number }) => ({ data: page === 1 ? comments : [] }),
+    'issues.createComment': async ({ body }: { body: string }) => {
+      const c = { id: next++, user: { id: SELF }, body };
+      comments.push(c);
+      return { data: c };
     },
-  };
-  return { octokit: Object.assign({} as Octokit, { rest }), comments };
+    'issues.updateComment': async ({ comment_id, body }: { comment_id: number; body: string }) => {
+      const c = comments.find((x) => x.id === comment_id);
+      if (c) c.body = body;
+      return { data: c };
+    },
+  });
+  return { octokit: octokit as Octokit, comments };
 }
 
 function prState(): PrRunState {
@@ -136,7 +135,7 @@ describe('ship PR frozen plan', () => {
       const a = join(dir, 'A');
       mkdirSync(join(a, 'state', 'plans'), { recursive: true });
       writeFileSync(specIn(a), SPEC);
-      const fake = fakeOctokit();
+      const fake = commentStoreOctokit();
       const record = (
         await shipRunStateRecorder(
           false,
@@ -213,7 +212,7 @@ describe('ship PR frozen plan', () => {
       const a = join(dir, 'A2');
       mkdirSync(join(a, 'state', 'plans'), { recursive: true });
       writeFileSync(specIn(a), SPEC);
-      const skipped = fakeOctokit();
+      const skipped = commentStoreOctokit();
       const record = (
         await shipRunStateRecorder(true, shipOpts(skipped.octokit, a, { specPath: specIn(a), brief: BRIEF }))
       )(baseUpdate(a));
@@ -222,7 +221,7 @@ describe('ship PR frozen plan', () => {
     });
 
     it('removes the restored spec and logs when it has no build route', async () => {
-      const fake = fakeOctokit();
+      const fake = commentStoreOctokit();
       await savePrRunState({ octokit: fake.octokit, repo: REPO, prNumber: 9, state: prState() });
       await savePrFrozenSpec({
         octokit: fake.octokit,
@@ -253,7 +252,7 @@ describe('ship PR frozen plan', () => {
       await record({ status: 'shipping', prNumber: 9 });
       expect(events.some((e) => e.msg.includes('too large for one PR comment'))).toBe(true);
 
-      const failing = fakeOctokit();
+      const failing = commentStoreOctokit();
       await savePrRunState({ octokit: failing.octokit, repo: REPO, prNumber: 9, state: prState() });
       const listOnce = failing.octokit.rest.issues.listComments;
       let calls = 0;
@@ -287,7 +286,7 @@ describe('ship PR frozen plan', () => {
       }
       expect(events.some((e) => e.kind === 'pr_state_failed' && e.msg.includes('restore the frozen plan'))).toBe(true);
 
-      const down = fakeOctokit();
+      const down = commentStoreOctokit();
       Object.assign(down.octokit.rest.issues, {
         createComment: async ({ body }: { body: string }) => {
           if (body.includes('factory:frozen-spec')) throw new Error('create down');

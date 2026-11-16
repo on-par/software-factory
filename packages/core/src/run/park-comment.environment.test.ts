@@ -1,6 +1,7 @@
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
 
+import { fakeOctokit } from '../test-support/index.js';
 import { recordArgs } from '../test-support/recorders.js';
 import type { EnvironmentFailure } from '../phases/check.js';
 import { renderEnvironmentReleaseComment } from '../phases/environment-release.js';
@@ -10,20 +11,20 @@ import { environmentReleaseMarker, postEnvironmentReleaseComment } from './park-
 const K7 = workKeyFromIssue(7);
 const env: EnvironmentFailure = { baseSha: 'abc123', failingChecks: ['tests'], cause: 'environment', logPaths: [] };
 
-function fakeOctokit(createComment: (args: { body: string }) => Promise<{ data: { id: number } }>) {
+function environmentOctokit(createComment: (args: { body: string }) => Promise<{ data: { id: number } }>) {
   const create = recordArgs(createComment);
-  const octokit = Object.assign({} as Octokit, {
-    rest: {
-      users: { getAuthenticated: vi.fn(async () => ({ data: { id: 99 } })) },
-      issues: { listComments: vi.fn(async () => ({ data: [] })), createComment: create.fn, updateComment: vi.fn() },
-    },
-  });
+  const octokit = fakeOctokit({
+    'users.getAuthenticated': vi.fn(async () => ({ data: { id: 99 } })),
+    'issues.listComments': vi.fn(async () => ({ data: [] })),
+    'issues.createComment': create.fn,
+    'issues.updateComment': vi.fn(),
+  }).octokit as Octokit;
   return { octokit, create };
 }
 
 describe('postEnvironmentReleaseComment', () => {
   it('posts the rendered environment-failure comment with its marker', async () => {
-    const { octokit, create } = fakeOctokit(async () => ({ data: { id: 1 } }));
+    const { octokit, create } = environmentOctokit(async () => ({ data: { id: 1 } }));
     const warn = recordArgs((_m: string) => {});
     await postEnvironmentReleaseComment({ octokit, repo: 'o/r', issue: K7, env, warn: warn.fn });
     const marker = environmentReleaseMarker(K7);
@@ -35,7 +36,7 @@ describe('postEnvironmentReleaseComment', () => {
   });
 
   it('warns instead of throwing when GitHub rejects the comment', async () => {
-    const { octokit } = fakeOctokit(async () => {
+    const { octokit } = environmentOctokit(async () => {
       throw new Error('boom');
     });
     const warn = recordArgs((_m: string) => {});

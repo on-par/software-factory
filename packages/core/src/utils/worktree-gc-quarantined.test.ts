@@ -4,6 +4,7 @@ import { basename, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
+import { fakeOctokit } from '../test-support/index.js';
 import type { SweepDeps } from './worktree-gc.js';
 import { quarantineDestination, sweepWorktrees } from './worktree-gc.js';
 
@@ -37,13 +38,14 @@ describe('already-quarantined worktrees (#3966)', () => {
     return path;
   }
 
-  function fakeOctokit(
+  function sweepOctokit(
     result: () => { data: Array<Record<string, unknown>> },
     issueResult: () => { data: Record<string, unknown> } = () => ({ data: { state: 'open', labels: [] } }),
   ) {
-    const double: SweepOctokitDouble = {
-      rest: { pulls: { list: vi.fn(async () => result()) }, issues: { get: vi.fn(async () => issueResult()) } },
-    };
+    const double: SweepOctokitDouble = fakeOctokit({
+      'pulls.list': vi.fn(async () => result()),
+      'issues.get': vi.fn(async () => issueResult()),
+    }).octokit;
     return double as NonNullable<SweepDeps['octokit']>;
   }
 
@@ -100,7 +102,7 @@ describe('already-quarantined worktrees (#3966)', () => {
     const logs: Array<[string, string]> = [];
     const report = await sweepWorktrees(opts(root), {
       runCommand,
-      octokit: fakeOctokit(() => ({ data: [] }), notFound),
+      octokit: sweepOctokit(() => ({ data: [] }), notFound),
       log: (type, msg) => logs.push([type, msg]),
     });
     expect(report.removed).toEqual([]);
@@ -115,7 +117,7 @@ describe('already-quarantined worktrees (#3966)', () => {
     const wt = quarantined(root, name);
     for (let i = 0; i < 3; i++) {
       const { runCommand } = runner(root, wt, 'factory/72-ghost');
-      await sweepWorktrees(opts(root), { runCommand, octokit: fakeOctokit(() => ({ data: [] }), notFound) });
+      await sweepWorktrees(opts(root), { runCommand, octokit: sweepOctokit(() => ({ data: [] }), notFound) });
     }
     const qdir = join(root, '.factory', 'state', 'quarantine');
     expect(existsSync(join(qdir, name))).toBe(true);
@@ -126,7 +128,7 @@ describe('already-quarantined worktrees (#3966)', () => {
     const { repoRoot: root } = setup();
     const wt = quarantined(root, `${basename(root)}-factory-ship-it-73`);
     const { commands, runCommand } = runner(root, wt, 'factory/73-merged', true);
-    const octokit = fakeOctokit(() => ({
+    const octokit = sweepOctokit(() => ({
       data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
     }));
     const report = await sweepWorktrees(opts(root), { runCommand, octokit });
@@ -140,7 +142,7 @@ describe('already-quarantined worktrees (#3966)', () => {
     const { repoRoot: root } = setup();
     const wt = quarantined(root, `${basename(root)}-factory-ship-it-74`);
     const { commands, runCommand } = runner(root, wt, 'factory/74-open', true);
-    const octokit = fakeOctokit(() => ({ data: [{ number: 5, state: 'open' }] }));
+    const octokit = sweepOctokit(() => ({ data: [{ number: 5, state: 'open' }] }));
     const report = await sweepWorktrees(opts(root), { runCommand, octokit });
     expect(report.removed).toEqual([]);
     expect(report.kept).toBe(1);

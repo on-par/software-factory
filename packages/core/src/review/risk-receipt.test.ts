@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { DEFAULT_RISK_RULES, RiskRulesError, type RiskRuleSet } from '@on-par/factory-config';
 import { createTempDirs } from '../harness/temp-dir.js';
+import { fakeOctokit } from '../test-support/index.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { RiskEvaluation } from './risk.js';
@@ -68,12 +69,13 @@ describe('upsertRiskReceipt', () => {
   });
 });
 
-function fakeOctokit(body: string | null, filenames: string[]) {
+function receiptOctokit(body: string | null, filenames: string[]) {
   const listFiles = vi.fn(async () => ({ data: filenames.map((filename) => ({ filename })) }));
   const get = vi.fn(async () => ({ data: { body } }));
   const updates: { body: string; pull_number: number }[] = [];
   const update = async (args: { body: string; pull_number: number }) => ({ count: updates.push(args) });
-  const octokit = { rest: { pulls: { listFiles, get, update } } } as never;
+  const octokit = fakeOctokit({ 'pulls.listFiles': listFiles, 'pulls.get': get, 'pulls.update': update })
+    .octokit as never;
   return { octokit, listFiles, get, updates };
 }
 
@@ -81,7 +83,7 @@ describe('publishRiskReceipt', () => {
   it('regenerates a path-free receipt for a mixed diff', async () => {
     const paths = ['src/widget.test.ts', 'scripts/build.sh', 'src/widget.ts'];
     const legacy = `${RISK_RECEIPT_START}\n${paths.join(' ')}\n${RISK_RECEIPT_END}`;
-    const f = fakeOctokit(`intro\n${legacy}\noutro`, paths);
+    const f = receiptOctokit(`intro\n${legacy}\noutro`, paths);
     const result = await publishRiskReceipt({ octokit: f.octokit, owner: 'o', repo: 'r', prNumber: 5 });
     const body = f.updates[0].body;
     expect(body).toContain(renderRiskReceipt(result.evaluation));
@@ -91,7 +93,7 @@ describe('publishRiskReceipt', () => {
   });
 
   it('writes a receipt with the tier into the PR body', async () => {
-    const f = fakeOctokit('Closes #5', ['src/auth/login.ts']);
+    const f = receiptOctokit('Closes #5', ['src/auth/login.ts']);
     const res = await publishRiskReceipt({ octokit: f.octokit, owner: 'o', repo: 'r', prNumber: 5 });
     const [arg, ...rest] = f.updates;
     expect(rest).toEqual([]);
@@ -104,24 +106,24 @@ describe('publishRiskReceipt', () => {
   });
 
   it('does not write again when the body already holds this receipt', async () => {
-    const first = fakeOctokit('Closes #5', ['src/auth/login.ts']);
+    const first = receiptOctokit('Closes #5', ['src/auth/login.ts']);
     await publishRiskReceipt({ octokit: first.octokit, owner: 'o', repo: 'r', prNumber: 5 });
     const written = first.updates[0].body;
-    const second = fakeOctokit(written, ['src/auth/login.ts']);
+    const second = receiptOctokit(written, ['src/auth/login.ts']);
     const res = await publishRiskReceipt({ octokit: second.octokit, owner: 'o', repo: 'r', prNumber: 5 });
     expect(second.updates).toEqual([]);
     expect(res.updated).toBe(false);
   });
 
   it('forwards the rules option', async () => {
-    const f = fakeOctokit('x', ['src/auth/login.ts']);
+    const f = receiptOctokit('x', ['src/auth/login.ts']);
     const rules: RiskRuleSet = { rules: [{ id: 'all', tier: 'low', globs: ['**'] }] };
     const res = await publishRiskReceipt({ octokit: f.octokit, owner: 'o', repo: 'r', prNumber: 5, rules });
     expect(res.evaluation.tier).toBe('low');
   });
 
   it('propagates a listFiles rejection', async () => {
-    const f = fakeOctokit('x', []);
+    const f = receiptOctokit('x', []);
     f.listFiles.mockRejectedValueOnce(new Error('nope'));
     await expect(publishRiskReceipt({ octokit: f.octokit, owner: 'o', repo: 'r', prNumber: 5 })).rejects.toThrow(
       'nope',

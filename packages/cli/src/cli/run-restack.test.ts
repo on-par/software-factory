@@ -1,4 +1,5 @@
 // packages/cli/src/cli/run-restack.test.ts — the lane's restack hook reads the trusted slice plan (#3368)
+import { fakeOctokit } from '@on-par/factory-core/testing';
 import type { Octokit } from '@octokit/rest';
 import { parseDecompositionOutput, renderSlicePlanComment, type SlicePlan } from '@on-par/factory-core/internal';
 import { describe, expect, it, vi } from 'vitest';
@@ -31,20 +32,16 @@ function plan(issue: number): SlicePlan {
   return { issue, slices: [{ index: 1, title: only!.title, story: only!, state: 'pending' }] };
 }
 
-function fakeOctokit(bodies: string[]) {
+function commentStoreOctokit(bodies: string[]) {
   const updateComment = vi.fn(async () => ({ data: {} }));
-  const octokit: Octokit = {
-    rest: {
-      users: { getAuthenticated: async () => ({ data: { id: BOT } }) },
-      issues: {
-        listComments: async ({ page }: { page: number }) => ({
-          data: page === 1 ? bodies.map((body, i) => ({ id: 500 + i, user: { id: BOT }, body })) : [],
-        }),
-        updateComment,
-        createComment: vi.fn(async () => ({ data: { id: 1 } })),
-      },
-    },
-  } as never;
+  const octokit: Octokit = fakeOctokit({
+    'users.getAuthenticated': async () => ({ data: { id: BOT } }),
+    'issues.listComments': async ({ page }: { page: number }) => ({
+      data: page === 1 ? bodies.map((body, i) => ({ id: 500 + i, user: { id: BOT }, body })) : [],
+    }),
+    'issues.updateComment': updateComment,
+    'issues.createComment': vi.fn(async () => ({ data: { id: 1 } })),
+  }).octokit as never;
   return { octokit, updateComment };
 }
 
@@ -53,14 +50,14 @@ const base = { repo: 'o/r', repoRoot: '/repo', issue: 7, merged: { index: 1, prN
 describe('restackFromSlicePlan', () => {
   it('does nothing when the issue has no slice plan', async () => {
     const restack = vi.fn();
-    const out = await restackFromSlicePlan({ ...base, octokit: fakeOctokit([]).octokit, restack });
+    const out = await restackFromSlicePlan({ ...base, octokit: commentStoreOctokit([]).octokit, restack });
     expect(out).toEqual({ status: 'nothing', reason: 'no slice plan to restack' });
     expect(restack).not.toHaveBeenCalled();
   });
 
   it('parks when the slice plan comment is unreadable', async () => {
     const restack = vi.fn();
-    const { octokit } = fakeOctokit([renderSlicePlanComment(plan(8))]);
+    const { octokit } = commentStoreOctokit([renderSlicePlanComment(plan(8))]);
     const out = await restackFromSlicePlan({ ...base, octokit, restack });
     expect(out).toEqual({ status: 'park', reason: 'slice plan unavailable for restack', index: 1, files: [] });
     expect(restack).not.toHaveBeenCalled();
@@ -68,7 +65,7 @@ describe('restackFromSlicePlan', () => {
 
   it('restacks with the trusted plan and saves new head SHAs back to the slice plan comment', async () => {
     const trusted = plan(7);
-    const { octokit, updateComment } = fakeOctokit([renderSlicePlanComment(trusted)]);
+    const { octokit, updateComment } = commentStoreOctokit([renderSlicePlanComment(trusted)]);
     const restack = vi.fn(
       async (opts: Parameters<NonNullable<Parameters<typeof restackFromSlicePlan>[0]['restack']>>[0]) => {
         await opts.savePlan(opts.plan);

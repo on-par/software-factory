@@ -1,6 +1,7 @@
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it } from 'vitest';
 
+import { fakeOctokit } from '../test-support/index.js';
 import type { RunStatus } from '../types/index.js';
 import type { SelfIdentity } from '../utils/github-identity.js';
 import { workKeyFromIssue } from '../work/work-key.js';
@@ -211,39 +212,35 @@ describe('pr run state', () => {
 
 type Stored = { id: number; user: { id: number }; body: string };
 
-function fakeOctokit(opts: { selfId?: number | 'fail'; comments?: Stored[] } = {}): {
+function commentStoreOctokit(opts: { selfId?: number | 'fail'; comments?: Stored[] } = {}): {
   octokit: Octokit;
   comments: Stored[];
 } {
   const comments = opts.comments ?? [];
   let next = 100;
-  const rest = {
-    users: {
-      getAuthenticated: async () => {
-        if (opts.selfId === 'fail') throw new Error('no identity');
-        return { data: { id: opts.selfId ?? SELF } };
-      },
+  const { octokit } = fakeOctokit({
+    'users.getAuthenticated': async () => {
+      if (opts.selfId === 'fail') throw new Error('no identity');
+      return { data: { id: opts.selfId ?? SELF } };
     },
-    issues: {
-      listComments: async ({ page }: { page: number }) => ({ data: page === 1 ? comments : [] }),
-      createComment: async ({ body }: { body: string }) => {
-        const c = { id: next++, user: { id: opts.selfId === 'fail' ? SELF : (opts.selfId ?? SELF) }, body };
-        comments.push(c);
-        return { data: c };
-      },
-      updateComment: async ({ comment_id, body }: { comment_id: number; body: string }) => {
-        const c = comments.find((x) => x.id === comment_id);
-        if (c) c.body = body;
-        return { data: c };
-      },
+    'issues.listComments': async ({ page }: { page: number }) => ({ data: page === 1 ? comments : [] }),
+    'issues.createComment': async ({ body }: { body: string }) => {
+      const c = { id: next++, user: { id: opts.selfId === 'fail' ? SELF : (opts.selfId ?? SELF) }, body };
+      comments.push(c);
+      return { data: c };
     },
-  };
-  return { octokit: Object.assign({} as Octokit, { rest }), comments };
+    'issues.updateComment': async ({ comment_id, body }: { comment_id: number; body: string }) => {
+      const c = comments.find((x) => x.id === comment_id);
+      if (c) c.body = body;
+      return { data: c };
+    },
+  });
+  return { octokit: octokit as Octokit, comments };
 }
 
 describe('savePrRunState / loadPrRunState', () => {
   it("savePrRunState upserts the factory's own PR comment and loadPrRunState reads it back", async () => {
-    const { octokit, comments } = fakeOctokit({ comments: [{ id: 1, user: { id: 99 }, body: 'hi' }] });
+    const { octokit, comments } = commentStoreOctokit({ comments: [{ id: 1, user: { id: 99 }, body: 'hi' }] });
     const first = await savePrRunState({ octokit, repo: 'o/r', prNumber: 9, state: state() });
     expect(first.created).toBe(true);
     const second = await savePrRunState({
@@ -310,7 +307,7 @@ describe('savePrRunState / loadPrRunState', () => {
 
   it('loadPrRunState fails closed when the identity lookup throws', async () => {
     const body = encodePrRunState(state());
-    const { octokit } = fakeOctokit({ selfId: 'fail', comments: [{ id: 3, user: { id: SELF }, body }] });
+    const { octokit } = commentStoreOctokit({ selfId: 'fail', comments: [{ id: 3, user: { id: SELF }, body }] });
     const loaded = await loadPrRunState({ octokit, repo: 'o/r', prNumber: 9, key });
     expect(loaded).toEqual({ status: 'none', ignored: [{ commentId: 3, reason: 'identity-unavailable' }] });
   });

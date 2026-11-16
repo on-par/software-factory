@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { fakeOctokit } from '../test-support/index.js';
 import { type CiWatchProgress, type WatchChecksOptions, watchChecks } from './ci-watch.js';
 
 const done = (name: string, conclusion: string) => ({ name, status: 'completed', conclusion });
@@ -15,32 +16,30 @@ function createClock() {
   };
 }
 
-function fakeOctokit(
+function ciOctokit(
   clock: { now: () => number },
   runsAt: (ms: number) => any[],
   extra: { statusesAt?: (ms: number) => any[]; noRepos?: boolean; workflows?: boolean } = {},
 ): any {
   const notFound = () => Object.assign(new Error('Not Found'), { status: 404 });
-  return {
-    rest: {
-      checks: { listForRef: async () => ({ data: { check_runs: runsAt(clock.now()) } }) },
-      repos: extra.noRepos
-        ? {}
-        : {
-            getStatusChecksProtection: async () => ({ data: { contexts: ['verify'] } }),
-            getBranchRules: async () => {
-              throw notFound();
-            },
-            getCombinedStatusForRef: async () => {
-              const statuses = extra.statusesAt?.(clock.now()) ?? [];
-              return { data: { total_count: statuses.length, statuses, sha: 'abc' } };
-            },
-            getContent: async () => (extra.workflows ? { data: [{ type: 'file' }] } : Promise.reject(notFound())),
-            get: async () => ({ data: { default_branch: 'main' } }),
-            listCommits: async () => ({ data: [{ sha: 'c1' }] }),
+  return fakeOctokit({
+    'checks.listForRef': async () => ({ data: { check_runs: runsAt(clock.now()) } }),
+    ...(extra.noRepos
+      ? {}
+      : {
+          'repos.getStatusChecksProtection': async () => ({ data: { contexts: ['verify'] } }),
+          'repos.getBranchRules': async () => {
+            throw notFound();
           },
-    },
-  };
+          'repos.getCombinedStatusForRef': async () => {
+            const statuses = extra.statusesAt?.(clock.now()) ?? [];
+            return { data: { total_count: statuses.length, statuses, sha: 'abc' } };
+          },
+          'repos.getContent': async () => (extra.workflows ? { data: [{ type: 'file' }] } : Promise.reject(notFound())),
+          'repos.get': async () => ({ data: { default_branch: 'main' } }),
+          'repos.listCommits': async () => ({ data: [{ sha: 'c1' }] }),
+        }),
+  }).octokit;
 }
 
 function watch(octokit: any, clock: ReturnType<typeof createClock>, extra: Partial<WatchChecksOptions> = {}) {
@@ -61,7 +60,7 @@ describe('watchChecks required checks (#3206)', () => {
     const clock = createClock();
     const progress: CiWatchProgress[] = [];
     const outcome = await watch(
-      fakeOctokit(clock, () => [lint]),
+      ciOctokit(clock, () => [lint]),
       clock,
       { onProgress: (p: CiWatchProgress) => progress.push(p) },
     );
@@ -73,7 +72,7 @@ describe('watchChecks required checks (#3206)', () => {
   it('waits through zero runs and succeeds once the required check passes', async () => {
     const clock = createClock();
     const progress: CiWatchProgress[] = [];
-    const octokit = fakeOctokit(clock, (ms) => (ms < 180_000 ? [] : [done('verify', 'success')]));
+    const octokit = ciOctokit(clock, (ms) => (ms < 180_000 ? [] : [done('verify', 'success')]));
     const outcome = await watch(octokit, clock, { onProgress: (p: CiWatchProgress) => progress.push(p) });
 
     expect(outcome).toBe('success');
@@ -84,7 +83,7 @@ describe('watchChecks required checks (#3206)', () => {
   it('reports a pending required check as pending', async () => {
     const clock = createClock();
     const progress: CiWatchProgress[] = [];
-    const octokit = fakeOctokit(clock, () => [{ name: 'verify', status: 'in_progress', conclusion: null }]);
+    const octokit = ciOctokit(clock, () => [{ name: 'verify', status: 'in_progress', conclusion: null }]);
     await watch(octokit, clock, { onProgress: (p: CiWatchProgress) => progress.push(p) });
 
     expect(progress[0].waitingFor).toEqual([{ name: 'verify', state: 'pending' }]);
@@ -94,7 +93,7 @@ describe('watchChecks required checks (#3206)', () => {
     const clock = createClock();
     expect(
       await watch(
-        fakeOctokit(clock, () => [done('verify', 'failure')]),
+        ciOctokit(clock, () => [done('verify', 'failure')]),
         clock,
       ),
     ).toBe('failure');
@@ -104,7 +103,7 @@ describe('watchChecks required checks (#3206)', () => {
     const clock = createClock();
     expect(
       await watch(
-        fakeOctokit(clock, () => [lint, done('verify', 'skipped')]),
+        ciOctokit(clock, () => [lint, done('verify', 'skipped')]),
         clock,
       ),
     ).toBe('success');
@@ -112,7 +111,7 @@ describe('watchChecks required checks (#3206)', () => {
 
   it('waits for a required context satisfied by a commit status', async () => {
     const clock = createClock();
-    const octokit = fakeOctokit(clock, () => [lint], {
+    const octokit = ciOctokit(clock, () => [lint], {
       statusesAt: (ms) => [{ context: 'verify', state: ms < 100_000 ? 'pending' : 'success' }],
     });
     expect(await watch(octokit, clock)).toBe('success');
@@ -120,13 +119,13 @@ describe('watchChecks required checks (#3206)', () => {
 
   it('fails when a required commit status ends failure', async () => {
     const clock = createClock();
-    const octokit = fakeOctokit(clock, () => [lint], { statusesAt: () => [{ context: 'verify', state: 'error' }] });
+    const octokit = ciOctokit(clock, () => [lint], { statusesAt: () => [{ context: 'verify', state: 'error' }] });
     expect(await watch(octokit, clock)).toBe('failure');
   });
 
   it('keeps waiting when the combined status read throws', async () => {
     const clock = createClock();
-    const octokit = fakeOctokit(clock, () => [lint]);
+    const octokit = ciOctokit(clock, () => [lint]);
     octokit.rest.repos.getCombinedStatusForRef = async () => {
       throw new Error('boom');
     };
@@ -135,19 +134,19 @@ describe('watchChecks required checks (#3206)', () => {
 
   it('falls back to the all-runs settle rule when the required lookup throws', async () => {
     const clock = createClock();
-    const octokit = fakeOctokit(clock, () => [lint], { noRepos: true });
+    const octokit = ciOctokit(clock, () => [lint], { noRepos: true });
     expect(await watch(octokit, clock)).toBe('success');
   });
 
   it('probeNoCi without a grace never ends no-checks on a repo with workflow files', async () => {
     const clock = createClock();
-    const octokit = fakeOctokit(clock, () => [], { workflows: true });
+    const octokit = ciOctokit(clock, () => [], { workflows: true });
     expect(await watch(octokit, clock, { requiredChecks: undefined, probeNoCi: true })).toBe('timeout');
   });
 
   it('probeNoCi ends no-checks at once on a repo proven to have no CI', async () => {
     const clock = createClock();
-    const octokit = fakeOctokit(clock, () => []);
+    const octokit = ciOctokit(clock, () => []);
     expect(await watch(octokit, clock, { requiredChecks: undefined, probeNoCi: true })).toBe('no-checks');
   });
 });

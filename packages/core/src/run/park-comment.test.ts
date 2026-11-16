@@ -1,6 +1,7 @@
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
 
+import { fakeOctokit } from '../test-support/index.js';
 import { recordArgs } from '../test-support/recorders.js';
 import type { ParkReason } from './outcome.js';
 import { workKeyFromIssue } from '../work/work-key.js';
@@ -56,7 +57,7 @@ interface FakeComment {
   user: { id: number };
 }
 
-function fakeOctokit(initial: FakeComment[] = []) {
+function commentStoreOctokit(initial: FakeComment[] = []) {
   const store = [...initial];
   const requests: string[] = [];
   let nextId = 1000;
@@ -75,9 +76,12 @@ function fakeOctokit(initial: FakeComment[] = []) {
     if (c) c.body = body;
     return { data: c };
   });
-  const octokit = Object.assign({} as Octokit, {
-    rest: { users: { getAuthenticated }, issues: { listComments, createComment, updateComment } },
-  });
+  const octokit = fakeOctokit({
+    'users.getAuthenticated': getAuthenticated,
+    'issues.listComments': listComments,
+    'issues.createComment': createComment,
+    'issues.updateComment': updateComment,
+  }).octokit as Octokit;
   return { octokit, store, requests, getAuthenticated, listComments, createComment, updateComment };
 }
 
@@ -202,7 +206,7 @@ describe('readParkState', () => {
 
 describe('upsertParkComment', () => {
   it('edits the existing marked comment on a second park instead of posting twice', async () => {
-    const f = fakeOctokit();
+    const f = commentStoreOctokit();
     await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input({ reason: 'fail' }) });
     const second = await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input({ reason: 'config' }) });
     const marked = f.store.filter((c) => c.body?.includes('factory-issue-state'));
@@ -212,7 +216,7 @@ describe('upsertParkComment', () => {
   });
 
   it('ignores a marker comment by another user and creates its own', async () => {
-    const f = fakeOctokit([{ id: 1, body: issueStateMarker(K7), user: { id: 5 } }]);
+    const f = commentStoreOctokit([{ id: 1, body: issueStateMarker(K7), user: { id: 5 } }]);
     const result = await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input() });
     expect(result.created).toBe(true);
     expect(f.store).toHaveLength(2);
@@ -220,7 +224,7 @@ describe('upsertParkComment', () => {
 
   it('finds the lowest-id marker comment across pages', async () => {
     const filler: FakeComment[] = Array.from({ length: 100 }, (_, i) => ({ id: i + 10, body: 'x', user: { id: ME } }));
-    const f = fakeOctokit([
+    const f = commentStoreOctokit([
       ...filler,
       { id: 500, body: issueStateMarker(K7), user: { id: ME } },
       { id: 600, body: issueStateMarker(K7), user: { id: ME } },
@@ -231,7 +235,7 @@ describe('upsertParkComment', () => {
   });
 
   it('keeps the lowest id when a later page entry comes first in order', async () => {
-    const f = fakeOctokit([
+    const f = commentStoreOctokit([
       { id: 9, body: issueStateMarker(K7), user: { id: ME } },
       { id: 3, body: issueStateMarker(K7), user: { id: ME } },
     ]);
@@ -239,7 +243,7 @@ describe('upsertParkComment', () => {
   });
 
   it('treats a comment with a null body as unmarked', async () => {
-    const f = fakeOctokit([{ id: 1, body: null, user: { id: ME } }]);
+    const f = commentStoreOctokit([{ id: 1, body: null, user: { id: ME } }]);
     expect((await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input() })).created).toBe(true);
   });
 });
@@ -248,7 +252,7 @@ describe('publishParkComment', () => {
   const { parkSha: _omit, ...base } = input();
 
   it('puts the readHead SHA in the body', async () => {
-    const f = fakeOctokit();
+    const f = commentStoreOctokit();
     const readHead = vi.fn(async () => 'b'.repeat(40));
     const r = await publishParkComment({ octokit: f.octokit, repo: 'o/r', worktree: '/wt', input: base, readHead });
     expect(r).toMatchObject({ ok: true, created: true });
@@ -257,7 +261,7 @@ describe('publishParkComment', () => {
 
   it('still posts with park-sha - when readHead rejects or returns empty', async () => {
     for (const readHead of [vi.fn().mockRejectedValue(new Error('no git')), vi.fn().mockResolvedValue('')]) {
-      const f = fakeOctokit();
+      const f = commentStoreOctokit();
       const r = await publishParkComment({ octokit: f.octokit, repo: 'o/r', worktree: '/wt', input: base, readHead });
       expect(r.ok).toBe(true);
       expect(f.store[0].body).toContain('park-sha: -');
@@ -265,7 +269,7 @@ describe('publishParkComment', () => {
   });
 
   it('does not call readHead without a worktree', async () => {
-    const f = fakeOctokit();
+    const f = commentStoreOctokit();
     const readHead = recordArgs(async () => 'b'.repeat(40));
     await publishParkComment({ octokit: f.octokit, repo: 'o/r', input: base, readHead: readHead.fn });
     expect(readHead.calls).toEqual([]);
@@ -273,21 +277,21 @@ describe('publishParkComment', () => {
   });
 
   it('returns { ok: false } instead of throwing when GitHub fails', async () => {
-    const create = fakeOctokit();
+    const create = commentStoreOctokit();
     create.createComment.mockRejectedValue(new Error('create boom'));
     expect(await publishParkComment({ octokit: create.octokit, repo: 'o/r', input: base })).toEqual({
       ok: false,
       error: 'create boom',
     });
 
-    const update = fakeOctokit([{ id: 1, body: issueStateMarker(K7), user: { id: ME } }]);
+    const update = commentStoreOctokit([{ id: 1, body: issueStateMarker(K7), user: { id: ME } }]);
     update.updateComment.mockRejectedValue(new Error('update boom'));
     expect(await publishParkComment({ octokit: update.octokit, repo: 'o/r', input: base })).toMatchObject({
       ok: false,
       error: 'update boom',
     });
 
-    const auth = fakeOctokit();
+    const auth = commentStoreOctokit();
     auth.getAuthenticated.mockRejectedValue('plain string');
     expect(await publishParkComment({ octokit: auth.octokit, repo: 'o/r', input: base })).toEqual({
       ok: false,
@@ -326,7 +330,7 @@ describe('park comment counter and status', () => {
 
 describe('findOwnParkComment', () => {
   it('returns undefined when none match and ignores foreign authors and null bodies', async () => {
-    const f = fakeOctokit([
+    const f = commentStoreOctokit([
       { id: 1, body: issueStateMarker(K7), user: { id: 5 } },
       { id: 2, body: null, user: { id: ME } },
     ]);
@@ -335,7 +339,7 @@ describe('findOwnParkComment', () => {
 
   it('returns the lowest-id own marker comment across pages', async () => {
     const filler: FakeComment[] = Array.from({ length: 100 }, (_, i) => ({ id: i + 10, body: 'x', user: { id: ME } }));
-    const f = fakeOctokit([
+    const f = commentStoreOctokit([
       ...filler,
       { id: 600, body: issueStateMarker(K7), user: { id: ME } },
       { id: 500, body: issueStateMarker(K7), user: { id: ME } },
@@ -349,20 +353,20 @@ describe('findOwnParkComment', () => {
 
 describe('upsertParkComment auto-unparks counter', () => {
   it('carries the counter from the existing comment on a re-park', async () => {
-    const f = fakeOctokit([{ id: 1, body: renderParkComment(input({ autoUnparks: 2 })), user: { id: ME } }]);
+    const f = commentStoreOctokit([{ id: 1, body: renderParkComment(input({ autoUnparks: 2 })), user: { id: ME } }]);
     await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input({ reason: 'config' }) });
     expect(f.store[0].body).toContain('auto-unparks: 2');
     expect(f.store[0].body).toContain('reason: config');
   });
 
   it('lets an explicit autoUnparks win', async () => {
-    const f = fakeOctokit([{ id: 1, body: renderParkComment(input({ autoUnparks: 2 })), user: { id: ME } }]);
+    const f = commentStoreOctokit([{ id: 1, body: renderParkComment(input({ autoUnparks: 2 })), user: { id: ME } }]);
     await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input({ autoUnparks: 1 }) });
     expect(f.store[0].body).toContain('auto-unparks: 1');
   });
 
   it('starts at zero when the existing comment is unreadable', async () => {
-    const f = fakeOctokit([{ id: 1, body: issueStateMarker(K7), user: { id: ME } }]);
+    const f = commentStoreOctokit([{ id: 1, body: issueStateMarker(K7), user: { id: ME } }]);
     await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input() });
     expect(f.store[0].body).not.toContain('auto-unparks');
   });
@@ -377,7 +381,7 @@ describe('upsertMarkerComment', () => {
   });
 
   it('creates when no own marker comment exists, appending a missing marker', async () => {
-    const f = fakeOctokit([{ id: 1, body: `foreign ${marker}`, user: { id: 5 } }]);
+    const f = commentStoreOctokit([{ id: 1, body: `foreign ${marker}`, user: { id: 5 } }]);
     const result = await upsertMarkerComment({
       octokit: f.octokit,
       repo: 'o/r',
@@ -390,7 +394,7 @@ describe('upsertMarkerComment', () => {
   });
 
   it('updates the lowest-id own comment when one exists', async () => {
-    const f = fakeOctokit([
+    const f = commentStoreOctokit([
       { id: 600, body: marker, user: { id: ME } },
       { id: 500, body: marker, user: { id: ME } },
     ]);
@@ -408,7 +412,7 @@ describe('upsertMarkerComment', () => {
   });
 
   it('does not touch a park-state comment', async () => {
-    const f = fakeOctokit([{ id: 1, body: issueStateMarker(K7), user: { id: ME } }]);
+    const f = commentStoreOctokit([{ id: 1, body: issueStateMarker(K7), user: { id: ME } }]);
     const result = await upsertMarkerComment({
       octokit: f.octokit,
       repo: 'o/r',
@@ -421,7 +425,7 @@ describe('upsertMarkerComment', () => {
 });
 
 describe('park-time order (#3554)', () => {
-  const withLabels = (f: ReturnType<typeof fakeOctokit>, names: string[] | Error) => {
+  const withLabels = (f: ReturnType<typeof commentStoreOctokit>, names: string[] | Error) => {
     const listLabelsOnIssue = vi.fn(async () => {
       if (names instanceof Error) throw names;
       return { data: names.map((name) => ({ name })) };
@@ -445,7 +449,7 @@ describe('park-time order (#3554)', () => {
   });
 
   it('upsert keeps the previously recorded order when the input has none', async () => {
-    const f = fakeOctokit([{ id: 1, body: renderParkComment(input({ order: 5 })), user: { id: ME } }]);
+    const f = commentStoreOctokit([{ id: 1, body: renderParkComment(input({ order: 5 })), user: { id: ME } }]);
     await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input() });
     expect(f.store[0].body).toContain('order: 5');
     await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input({ order: 9 }) });
@@ -453,7 +457,7 @@ describe('park-time order (#3554)', () => {
   });
 
   it('publishParkComment records the single order label', async () => {
-    const f = fakeOctokit();
+    const f = commentStoreOctokit();
     withLabels(f, ['bug', 'factory:order:7']);
     await publishParkComment({ octokit: f.octokit, repo: 'o/r', input: base });
     expect(f.store[0].body).toContain('order: 7');
@@ -461,7 +465,7 @@ describe('park-time order (#3554)', () => {
 
   it('publishParkComment skips zero, several or malformed order labels', async () => {
     for (const names of [[], ['factory:order:1', 'factory:order:2'], ['factory:order:x']]) {
-      const f = fakeOctokit();
+      const f = commentStoreOctokit();
       withLabels(f, names);
       await publishParkComment({ octokit: f.octokit, repo: 'o/r', input: base });
       expect(f.store[0].body).not.toContain('order:');
@@ -469,18 +473,18 @@ describe('park-time order (#3554)', () => {
   });
 
   it('publishParkComment survives a throwing label read and honours readOrder', async () => {
-    const f = fakeOctokit();
+    const f = commentStoreOctokit();
     withLabels(f, new Error('boom'));
     expect(await publishParkComment({ octokit: f.octokit, repo: 'o/r', input: base })).toMatchObject({ ok: true });
     expect(f.store[0].body).not.toContain('order:');
-    const g = fakeOctokit();
+    const g = commentStoreOctokit();
     await publishParkComment({ octokit: g.octokit, repo: 'o/r', input: base, readOrder: async () => 4 });
     expect(g.store[0].body).toContain('order: 4');
   });
 
   it('readParkedOrder returns the recorded order, undefined without a comment', async () => {
-    const f = fakeOctokit([{ id: 1, body: renderParkComment(input({ order: 5 })), user: { id: ME } }]);
+    const f = commentStoreOctokit([{ id: 1, body: renderParkComment(input({ order: 5 })), user: { id: ME } }]);
     expect(await readParkedOrder({ octokit: f.octokit, repo: 'o/r', issue: K7 })).toBe(5);
-    expect(await readParkedOrder({ octokit: fakeOctokit().octokit, repo: 'o/r', issue: K7 })).toBeUndefined();
+    expect(await readParkedOrder({ octokit: commentStoreOctokit().octokit, repo: 'o/r', issue: K7 })).toBeUndefined();
   });
 });

@@ -2,9 +2,10 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { fakeOctokit } from '../test-support/index.js';
 import { claimedByLabel, createGithubQueue, createOctokitQueueClient, IN_PROGRESS_LABEL } from './github-queue.js';
 
-function fakeOctokit(opts: { issues: Array<{ number: number; labels: string[] }>; repoLabels?: string[] }) {
+function labelOctokit(opts: { issues: Array<{ number: number; labels: string[] }>; repoLabels?: string[] }) {
   const state = new Map(opts.issues.map((i) => [i.number, new Set(i.labels)]));
   const repoLabels = new Set(opts.repoLabels ?? opts.issues.flatMap((i) => i.labels));
   const deleteLabel = vi.fn(async ({ name }: { name: string }) => {
@@ -51,7 +52,17 @@ function fakeOctokit(opts: { issues: Array<{ number: number; labels: string[] }>
   };
   const paginate = async (fn: (input: unknown) => Promise<{ data: unknown[] }>, input: unknown) =>
     (await fn(input)).data;
-  return { octokit: { paginate, rest: { issues } } as any, issues, state, repoLabels, deleteLabel };
+  const { octokit } = fakeOctokit({
+    paginate,
+    'issues.listForRepo': issues.listForRepo,
+    'issues.listLabelsOnIssue': issues.listLabelsOnIssue,
+    'issues.addLabels': issues.addLabels,
+    'issues.removeLabel': issues.removeLabel,
+    'issues.createLabel': issues.createLabel,
+    'issues.listLabelsForRepo': issues.listLabelsForRepo,
+    'issues.deleteLabel': issues.deleteLabel,
+  });
+  return { octokit: octokit as any, issues, state, repoLabels, deleteLabel };
 }
 
 function heartbeatQueue(octokit: unknown) {
@@ -69,14 +80,14 @@ const claimed = (...extra: string[]) => [IN_PROGRESS_LABEL, claimedByLabel('aaa-
 
 describe('heartbeat repo-label cleanup (#1623)', () => {
   it('heartbeat deletes the replaced claim-expires repo label (#1623)', async () => {
-    const f = fakeOctokit({ issues: [{ number: 7, labels: claimed('factory:claim-expires:1000') }] });
+    const f = labelOctokit({ issues: [{ number: 7, labels: claimed('factory:claim-expires:1000') }] });
     await expect(heartbeatQueue(f.octokit).heartbeat(7)).resolves.toBe(true);
     expect(f.repoLabels.has('factory:claim-expires:1000')).toBe(false);
     expect(f.state.get(7)).toContain('factory:claim-expires:1300');
   });
 
   it('heartbeat ignores a 404 when the replaced claim-expires label is already gone (#1623)', async () => {
-    const f = fakeOctokit({ issues: [{ number: 7, labels: claimed('factory:claim-expires:1000') }] });
+    const f = labelOctokit({ issues: [{ number: 7, labels: claimed('factory:claim-expires:1000') }] });
     f.deleteLabel.mockRejectedValueOnce({ status: 404 });
     await expect(heartbeatQueue(f.octokit).heartbeat(7)).resolves.toBe(true);
     expect(f.state.get(7)).toContain('factory:claim-expires:1300');
@@ -84,7 +95,7 @@ describe('heartbeat repo-label cleanup (#1623)', () => {
   });
 
   it('heartbeat keeps a replaced label another open issue still carries', async () => {
-    const f = fakeOctokit({
+    const f = labelOctokit({
       issues: [
         { number: 7, labels: claimed('factory:claim-expires:1000') },
         { number: 8, labels: ['factory:claim-expires:1000'] },
@@ -95,7 +106,7 @@ describe('heartbeat repo-label cleanup (#1623)', () => {
   });
 
   it('heartbeat still succeeds when deleteLabel fails with 500', async () => {
-    const f = fakeOctokit({ issues: [{ number: 7, labels: claimed('factory:claim-expires:1000') }] });
+    const f = labelOctokit({ issues: [{ number: 7, labels: claimed('factory:claim-expires:1000') }] });
     f.deleteLabel.mockRejectedValueOnce({ status: 500 });
     await expect(heartbeatQueue(f.octokit).heartbeat(7)).resolves.toBe(true);
   });
@@ -104,13 +115,13 @@ describe('heartbeat repo-label cleanup (#1623)', () => {
 describe('createOctokitQueueClient repo-label sweep methods (#1623)', () => {
   it('listRepoLabels pages until a short page', async () => {
     const names = Array.from({ length: 250 }, (_, i) => `l${i}`);
-    const f = fakeOctokit({ issues: [], repoLabels: names });
+    const f = labelOctokit({ issues: [], repoLabels: names });
     const client = createOctokitQueueClient(f.octokit);
     await expect(client.listRepoLabels!({ owner: 'o', repo: 'r' })).resolves.toEqual(names);
   });
 
   it('listRepoLabels throws past the page cap instead of returning a partial list', async () => {
-    const f = fakeOctokit({ issues: [] });
+    const f = labelOctokit({ issues: [] });
     f.issues.listLabelsForRepo.mockImplementation(async () => ({
       data: Array.from({ length: 100 }, () => ({ name: 'x' })),
     }));
@@ -119,7 +130,7 @@ describe('createOctokitQueueClient repo-label sweep methods (#1623)', () => {
   });
 
   it('listAllOpenIssues pages, keeps PRs and normalises labels', async () => {
-    const f = fakeOctokit({ issues: [] });
+    const f = labelOctokit({ issues: [] });
     const page = (n: number) =>
       Array.from({ length: n }, (_, i) => ({
         number: i + 1,
@@ -134,7 +145,7 @@ describe('createOctokitQueueClient repo-label sweep methods (#1623)', () => {
   });
 
   it('listAllOpenIssues throws past the page cap', async () => {
-    const f = fakeOctokit({ issues: [] });
+    const f = labelOctokit({ issues: [] });
     f.issues.listForRepo.mockImplementation(async () => ({
       data: Array.from({ length: 100 }, (_, i) => ({ number: i, labels: [] })),
     }));
@@ -143,7 +154,7 @@ describe('createOctokitQueueClient repo-label sweep methods (#1623)', () => {
   });
 
   it('deleteRepoLabel swallows 404, rethrows 500, and evicts the label cache', async () => {
-    const f = fakeOctokit({ issues: [], repoLabels: ['gone'] });
+    const f = labelOctokit({ issues: [], repoLabels: ['gone'] });
     const client = createOctokitQueueClient(f.octokit);
     await client.ensureLabel({ owner: 'o', repo: 'r', name: 'gone', color: 'fff', description: '' });
     f.deleteLabel.mockRejectedValueOnce({ status: 404 });
