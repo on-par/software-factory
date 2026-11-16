@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { Octokit } from '@octokit/rest';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
@@ -14,11 +15,10 @@ import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import { recordArgs } from '../test-support/recorders.js';
 import type { WorkRequest } from '../work/index.js';
+import type { RunPolicy } from './policy.js';
 import { parkUnblockHint } from './park-comment.js';
 import type { Workspace } from './ports.js';
 import { workKeyFromIssue } from '../work/work-key.js';
-import type { RunPolicy } from './policy.js';
-import { MODELS, policy, ROUTES } from './ci-rework-test-helpers.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
 const planPhase = vi.fn<typeof realPlanPhase>();
@@ -57,6 +57,29 @@ const request: RunRequest = {
   failover: { enabled: false, cooldownMs: 60_000, fallbackModel: 'claude-sonnet-5' },
   efficiency: { maxReworkRounds: 1, fastPath: false },
   processGroupGraceMs: 50,
+};
+
+const ROUTES: RoutesConfig = { version: 1, routes: {} };
+const MODELS: ModelsConfig = {
+  version: 1,
+  models: {},
+  tiers: {},
+  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
+  routingRules: {},
+};
+
+const policy: RunPolicy = {
+  models: MODELS,
+  routes: ROUTES,
+  sandbox: {
+    enabled: false,
+    runtime: 'auto',
+    network: { allow: [] },
+    resources: { cpuMs: 0, memMb: 0 },
+    docker: { rolloutPercent: 0 },
+  },
+  budget: {},
+  effective: {} as RunPolicy['effective'],
 };
 
 const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-park-comment-'));
