@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempWorktrees } from '../test-support/temp-worktree.js';
 import {
   countPlaceholderLinks,
   detectLintConfig,
@@ -18,25 +19,11 @@ import {
   type WorktreeProbe,
 } from './probe.js';
 
-const tempDirs = new Set<string>();
+const { makeWorktree, cleanup } = createTempWorktrees('checker-probe-test-');
 
 afterEach(async () => {
-  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
+  await cleanup();
 });
-
-async function makeWorktree(files: Record<string, string> = {}): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'checker-probe-test-'));
-  tempDirs.add(dir);
-
-  for (const [path, contents] of Object.entries(files)) {
-    const fullPath = join(dir, path);
-    await mkdir(dirname(fullPath), { recursive: true });
-    await writeFile(fullPath, contents);
-  }
-
-  return dir;
-}
 
 describe('probeWorktree', () => {
   it('captures package.json scripts, an ordered HTML walk, and Playwright config facts', async () => {

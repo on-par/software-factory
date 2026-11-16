@@ -12,7 +12,7 @@ import type { SweepDeps } from './worktree-gc.js';
 describe('sweepWorktrees in-flight lanes, claims and zero-commit branches (#2964)', () => {
   let parentDir: string;
 
-  function makeWorktree(name: string): string {
+  function makeGcWorktree(name: string): string {
     const path = join(parentDir, name);
     mkdirSync(path, { recursive: true });
     writeFileSync(join(path, '.git'), 'gitdir: /somewhere');
@@ -56,7 +56,7 @@ describe('sweepWorktrees in-flight lanes, claims and zero-commit branches (#2964
 
   function rig(n: number, ahead: string) {
     const { repoRoot: root } = setup();
-    const wt = makeWorktree(`${basename(root)}-factory-ship-it-${n}`);
+    const wt = makeGcWorktree(`${basename(root)}-factory-ship-it-${n}`);
     const commands: string[] = [];
     const runCommand = async (cmd: string) => {
       commands.push(cmd);

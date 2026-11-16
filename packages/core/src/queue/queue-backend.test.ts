@@ -12,8 +12,8 @@ import {
   QUEUED_LABEL,
   queueOrderLabel,
   type QueueGitHubClient,
-  type QueueIssue,
 } from './github-queue.js';
+import { createFakeStore } from '../test-support/fake-queue-store.js';
 import { toWorkKey, workKeyFromIssue } from '../work/work-key.js';
 import {
   createGithubQueueBackend,
@@ -21,44 +21,10 @@ import {
   UnsupportedQueueBackendError,
   type QueueBackend,
 } from './queue-backend.js';
-import { fakeIssueComments } from './fake-issue-comments.js';
 
 const NOW_MS = 1_700_000_000_000;
 const NOW_SECONDS = Math.floor(NOW_MS / 1000);
 const now = () => NOW_MS;
-
-function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
-  const state = new Map<number, Set<string>>(issues.map((i) => [i.number, new Set(i.labels)]));
-
-  const client: QueueGitHubClient = {
-    async listOpenIssuesWithLabels({ labels }) {
-      const result: QueueIssue[] = [];
-      for (const [number, labelSet] of state) {
-        if (labels.every((l) => labelSet.has(l))) {
-          result.push({ number, labels: [...labelSet] });
-        }
-      }
-      return result;
-    },
-    async getIssueLabels({ issue_number }) {
-      return [...(state.get(issue_number) ?? new Set<string>())];
-    },
-    async addLabels({ issue_number, labels }) {
-      const set = state.get(issue_number) ?? new Set<string>();
-      for (const label of labels) set.add(label);
-      state.set(issue_number, set);
-    },
-    async removeLabel({ issue_number, name }) {
-      state.get(issue_number)?.delete(name);
-    },
-    ...fakeIssueComments(),
-    async ensureLabel() {
-      return false;
-    },
-  };
-
-  return { state, client };
-}
 
 describe('createGithubQueueBackend', () => {
   it('returns an object satisfying QueueBackend, with every member callable', () => {

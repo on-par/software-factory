@@ -3,45 +3,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { loadFactoryConfig, type FactoryConfig } from '../config/index.js';
-import { fakeIssueComments } from './fake-issue-comments.js';
 import { createClaimSettler, DEFAULT_CLAIM_SETTLE_MS, resolveQueueClaimSettleMs } from './claim-settle.js';
-import {
-  createGithubQueue,
-  laneLabel,
-  QUEUED_LABEL,
-  queueOrderLabel,
-  type QueueGitHubClient,
-  type QueueIssue,
-} from './github-queue.js';
-
-function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
-  const state = new Map<number, Set<string>>(issues.map((i) => [i.number, new Set(i.labels)]));
-  const client: QueueGitHubClient = {
-    async listOpenIssuesWithLabels({ labels }) {
-      const result: QueueIssue[] = [];
-      for (const [number, labelSet] of state) {
-        if (labels.every((l) => labelSet.has(l))) result.push({ number, labels: [...labelSet] });
-      }
-      return result;
-    },
-    async getIssueLabels({ issue_number }) {
-      return [...(state.get(issue_number) ?? new Set<string>())];
-    },
-    async addLabels({ issue_number, labels }) {
-      const set = state.get(issue_number) ?? new Set<string>();
-      for (const label of labels) set.add(label);
-      state.set(issue_number, set);
-    },
-    async removeLabel({ issue_number, name }) {
-      state.get(issue_number)?.delete(name);
-    },
-    ...fakeIssueComments(),
-    async ensureLabel() {
-      return false;
-    },
-  };
-  return { client };
-}
+import { createGithubQueue, laneLabel, QUEUED_LABEL, queueOrderLabel } from './github-queue.js';
+import { createFakeStore } from '../test-support/fake-queue-store.js';
 
 describe('claim settle delay (#3239)', () => {
   it('claimSettleMs defaults to 3000', () => {

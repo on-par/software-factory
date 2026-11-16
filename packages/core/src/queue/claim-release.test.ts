@@ -12,42 +12,8 @@ import {
   PARKED_LABEL,
   QUEUED_LABEL,
   queueOrderLabel,
-  type QueueGitHubClient,
-  type QueueIssue,
 } from './github-queue.js';
-import { fakeIssueComments } from './fake-issue-comments.js';
-
-function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
-  const state = new Map<number, Set<string>>(issues.map((i) => [i.number, new Set(i.labels)]));
-  const calls: string[] = [];
-  const client: QueueGitHubClient = {
-    async listOpenIssuesWithLabels({ labels }) {
-      const result: QueueIssue[] = [];
-      for (const [number, labelSet] of state) {
-        if (labels.every((l) => labelSet.has(l))) result.push({ number, labels: [...labelSet] });
-      }
-      return result;
-    },
-    async getIssueLabels({ issue_number }) {
-      return [...(state.get(issue_number) ?? new Set<string>())];
-    },
-    async addLabels({ issue_number, labels }) {
-      calls.push('addLabels');
-      const set = state.get(issue_number) ?? new Set<string>();
-      for (const label of labels) set.add(label);
-      state.set(issue_number, set);
-    },
-    async removeLabel({ issue_number, name }) {
-      calls.push('removeLabel');
-      state.get(issue_number)?.delete(name);
-    },
-    ...fakeIssueComments(),
-    async ensureLabel() {
-      return false;
-    },
-  };
-  return { state, calls, client };
-}
+import { createFakeStore } from '../test-support/fake-queue-store.js';
 
 describe('release', () => {
   it("release removes only the caller's claimed-by label", async () => {
@@ -86,14 +52,14 @@ describe('release', () => {
   });
 
   it('release writes nothing when only another claimant holds the issue', async () => {
-    const { client, calls } = createFakeStore([
+    const { client, writes } = createFakeStore([
       { number: 42, labels: [IN_PROGRESS_LABEL, claimedByLabel('host-b-2')] },
     ]);
     const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'host-a-1' });
 
     await queue.release(42);
 
-    expect(calls).toEqual([]);
+    expect(writes).toEqual([]);
   });
 
   it("release(issue, 'parked') by the sole claimant removes claim labels and adds factory:parked", async () => {

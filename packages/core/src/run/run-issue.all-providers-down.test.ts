@@ -1,5 +1,3 @@
-import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -15,6 +13,7 @@ import type { ShipResult, shipPhase as realShipPhase } from '../phases/ship.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
+import { makeRepo } from '../test-support/git-repo.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
@@ -72,22 +71,6 @@ const tempDirs = createTempDirs();
 const dir = tempDirs.makeSync('run-issue-all-providers-down-');
 afterAll(() => tempDirs.cleanup());
 let counter = 0;
-
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
-}
-
-function makeRepo(): string {
-  counter += 1;
-  const repo = join(dir, `repo-${counter}`);
-  execFileSync('git', ['init', '-q', repo]);
-  git(repo, 'config', 'user.email', 't@example.com');
-  git(repo, 'config', 'user.name', 'T');
-  writeFileSync(join(repo, 'a.txt'), 'a');
-  git(repo, 'add', '.');
-  git(repo, 'commit', '-q', '-m', 'start');
-  return repo;
-}
 
 const request: RunRequest = {
   issue: 1,
@@ -151,7 +134,7 @@ async function run(open: (breaker: ProviderBreaker) => Promise<void>, models: Mo
   const ports: RunPorts = {
     router: new ModelRouter(models, ROUTES),
     octokit: {} as Octokit,
-    workspace: { path: makeRepo(), dispose: async () => {} } as Workspace,
+    workspace: { path: makeRepo(tempDirs, 'run-issue-repo-', { 'a.txt': 'a' }), dispose: async () => {} } as Workspace,
     events: () => (type: string, msg: string) => {
       events.push([type, msg]);
     },

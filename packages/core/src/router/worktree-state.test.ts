@@ -14,6 +14,8 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
+import { makeRepo } from '../test-support/git-repo.js';
 import { defaultExecFn } from '../utils/exec.js';
 import type { GitExecFn, WorktreeSnapshot } from './worktree-state.js';
 import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
@@ -124,26 +126,16 @@ describe('captureWorktreeState', () => {
 
 describe('captureWorktreeState with a real git repository', () => {
   const cleanupPaths: string[] = [];
+  const dirs = createTempDirs();
 
   afterEach(async () => {
+    await dirs.cleanup();
     await Promise.all(cleanupPaths.map((path) => rm(path, { recursive: true, force: true })));
     cleanupPaths.length = 0;
   });
 
-  async function makeRepo(): Promise<string> {
-    const repoDir = await mkdtemp(join(tmpdir(), 'wt-state-repo-'));
-    cleanupPaths.push(repoDir);
-    await defaultExecFn('git init', { cwd: repoDir });
-    await defaultExecFn('git config user.email test@example.com', { cwd: repoDir });
-    await defaultExecFn('git config user.name test', { cwd: repoDir });
-    await writeFileFs(join(repoDir, 'tracked.txt'), 'original\n');
-    await defaultExecFn('git add -A', { cwd: repoDir });
-    await defaultExecFn('git commit -m init', { cwd: repoDir });
-    return repoDir;
-  }
-
   it.skipIf(!symlinksSupported)('captures a snapshot when the worktree is a symlink to the repo root', async () => {
-    const repoDir = await makeRepo();
+    const repoDir = makeRepo(dirs, 'wt-state-repo-', { 'tracked.txt': 'original\n' }, 'init');
     const linkPath = join(tmpdir(), `wt-state-link-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     await symlink(repoDir, linkPath);
     cleanupPaths.push(linkPath);
@@ -158,7 +150,7 @@ describe('captureWorktreeState with a real git repository', () => {
   });
 
   it('still disables the guard for a subdirectory', async () => {
-    const repoDir = await makeRepo();
+    const repoDir = makeRepo(dirs, 'wt-state-repo-', { 'tracked.txt': 'original\n' }, 'init');
     const subdir = join(repoDir, 'subdir');
     await mkdirFs(subdir);
     const logs: string[] = [];
@@ -172,7 +164,7 @@ describe('captureWorktreeState with a real git repository', () => {
   it.skipIf(!symlinksSupported)(
     'resetWorktreeState restores a tracked file dirtied after a snapshot captured via a symlink',
     async () => {
-      const repoDir = await makeRepo();
+      const repoDir = makeRepo(dirs, 'wt-state-repo-', { 'tracked.txt': 'original\n' }, 'init');
       const linkPath = join(tmpdir(), `wt-state-link-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
       await symlink(repoDir, linkPath);
       cleanupPaths.push(linkPath);
@@ -193,7 +185,7 @@ describe('captureWorktreeState with a real git repository', () => {
   );
 
   it('writes a private attempt trace inside the worktree that git never sees', async () => {
-    const repoDir = await makeRepo();
+    const repoDir = makeRepo(dirs, 'wt-state-repo-', { 'tracked.txt': 'original\n' }, 'init');
     const logs: string[] = [];
     const snapshot = await captureWorktreeState(defaultExecFn, repoDir, (msg) => logs.push(msg));
     expect(snapshot).not.toBeNull();
@@ -219,7 +211,7 @@ describe('captureWorktreeState with a real git repository', () => {
   });
 
   it.skipIf(!symlinksSupported)('refuses to write a trace through a symlinked trace directory', async () => {
-    const repoDir = await makeRepo();
+    const repoDir = makeRepo(dirs, 'wt-state-repo-', { 'tracked.txt': 'original\n' }, 'init');
     const outside = await mkdtemp(join(tmpdir(), 'wt-state-outside-'));
     cleanupPaths.push(outside);
     await mkdirFs(join(repoDir, '.factory'), { recursive: true });

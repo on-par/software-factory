@@ -1,28 +1,15 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempWorktrees } from '../test-support/temp-worktree.js';
 import { resolveLintCommands } from './index.js';
 
-const tempDirs = new Set<string>();
+const { makeWorktree, cleanup } = createTempWorktrees('lint-commands-test-');
 
 afterEach(async () => {
-  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
+  await cleanup();
 });
-
-async function makeWorktree(files: Record<string, string> = {}): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'lint-commands-test-'));
-  tempDirs.add(dir);
-  for (const [path, contents] of Object.entries(files)) {
-    const fullPath = join(dir, path);
-    await mkdir(dirname(fullPath), { recursive: true });
-    await writeFile(fullPath, contents);
-  }
-  return dir;
-}
 
 function makeContext(worktree: string) {
   return { worktree, specPath: join(worktree, 'no-such-spec.md'), constitutionBody: 'test constitution' };

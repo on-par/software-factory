@@ -273,7 +273,7 @@ describe('isSafeHttpHeaderName', () => {
   });
 });
 
-function makeRepo(kind: 'node' | 'empty' | 'pkg-dir' | 'dotnet' | 'node-dotnet' | 'sln-dir'): string {
+function makeEcosystemDir(kind: 'node' | 'empty' | 'pkg-dir' | 'dotnet' | 'node-dotnet' | 'sln-dir'): string {
   const dir = mkdtempSync(join(tmpdir(), 'egress-eco-'));
   cleanups.push(async () => rmSync(dir, { recursive: true, force: true }));
   if (kind === 'node') writeFileSync(join(dir, 'package.json'), '{}');
@@ -286,14 +286,14 @@ function makeRepo(kind: 'node' | 'empty' | 'pkg-dir' | 'dotnet' | 'node-dotnet' 
 
 describe('buildEgressAllowlist', () => {
   it('pre-allows the npm and yarn registries for a Node repo (package.json fixture)', () => {
-    const list = buildEgressAllowlist(['api.anthropic.com', 'github.com'], makeRepo('node'));
+    const list = buildEgressAllowlist(['api.anthropic.com', 'github.com'], makeEcosystemDir('node'));
     expect(list).toEqual(['api.anthropic.com', 'github.com', 'registry.npmjs.org', 'registry.yarnpkg.com']);
     expect(isAllowedHost('registry.npmjs.org', list)).toBe(true);
   });
 
   it('marks registry.yarnpkg.com as on allowlist through the proxy for a Node repo', async () => {
     const calls: Array<[string, boolean]> = [];
-    const list = buildEgressAllowlist(['github.com'], makeRepo('node'));
+    const list = buildEgressAllowlist(['github.com'], makeEcosystemDir('node'));
     const proxy = await proxyWith(list, calls);
     // onHost fires before the upstream connect, so don't wait on real DNS: hang up once it has fired.
     const sock = net.connect(proxy.port, '127.0.0.1');
@@ -307,7 +307,7 @@ describe('buildEgressAllowlist', () => {
 
   it('does not pre-allow registries for a repo without package.json', () => {
     const configured = ['api.anthropic.com', 'github.com'];
-    for (const dir of [makeRepo('empty'), join(tmpdir(), 'egress-eco-missing-dir'), '']) {
+    for (const dir of [makeEcosystemDir('empty'), join(tmpdir(), 'egress-eco-missing-dir'), '']) {
       const list = buildEgressAllowlist(configured, dir);
       expect(list).toEqual(configured);
       expect(isAllowedHost('registry.npmjs.org', list)).toBe(false);
@@ -315,13 +315,13 @@ describe('buildEgressAllowlist', () => {
   });
 
   it('keeps an empty (deny-all) allowlist empty for a Node repo', () => {
-    expect(buildEgressAllowlist([], makeRepo('node'))).toEqual([]);
-    expect(buildEgressAllowlist([], makeRepo('dotnet'))).toEqual([]);
+    expect(buildEgressAllowlist([], makeEcosystemDir('node'))).toEqual([]);
+    expect(buildEgressAllowlist([], makeEcosystemDir('dotnet'))).toEqual([]);
   });
 
   it('pre-allows api.nuget.org and *.nuget.org for a .NET repo (.sln fixture)', () => {
     const configured = ['api.anthropic.com', 'github.com'];
-    const list = buildEgressAllowlist(configured, makeRepo('dotnet'));
+    const list = buildEgressAllowlist(configured, makeEcosystemDir('dotnet'));
     expect(list).toEqual([...configured, 'api.nuget.org', '*.nuget.org']);
     expect(isAllowedHost('api.nuget.org', list)).toBe(true);
     expect(isAllowedHost('globalcdn.nuget.org', list)).toBe(true);
@@ -330,7 +330,7 @@ describe('buildEgressAllowlist', () => {
 
   it('marks globalcdn.nuget.org as on allowlist through the proxy for a .NET repo', async () => {
     const calls: Array<[string, boolean]> = [];
-    const list = buildEgressAllowlist(['github.com'], makeRepo('dotnet'));
+    const list = buildEgressAllowlist(['github.com'], makeEcosystemDir('dotnet'));
     const proxy = await proxyWith(list, calls);
     const sock = net.connect(proxy.port, '127.0.0.1');
     sock.on('error', () => {});
@@ -342,7 +342,7 @@ describe('buildEgressAllowlist', () => {
 
   it('does not pre-allow NuGet hosts for a Node-only repo', () => {
     const configured = ['api.anthropic.com', 'github.com'];
-    const list = buildEgressAllowlist(configured, makeRepo('node'));
+    const list = buildEgressAllowlist(configured, makeEcosystemDir('node'));
     expect(list).toEqual([...configured, 'registry.npmjs.org', 'registry.yarnpkg.com']);
     expect(isAllowedHost('api.nuget.org', list)).toBe(false);
     expect(isAllowedHost('globalcdn.nuget.org', list)).toBe(false);
@@ -350,7 +350,7 @@ describe('buildEgressAllowlist', () => {
   });
 
   it('adds both Node and NuGet hosts for a repo with package.json and a .sln', () => {
-    expect(buildEgressAllowlist(['github.com'], makeRepo('node-dotnet'))).toEqual([
+    expect(buildEgressAllowlist(['github.com'], makeEcosystemDir('node-dotnet'))).toEqual([
       'github.com',
       'registry.npmjs.org',
       'registry.yarnpkg.com',
@@ -360,11 +360,11 @@ describe('buildEgressAllowlist', () => {
   });
 
   it('does not duplicate a configured *.nuget.org', () => {
-    expect(buildEgressAllowlist(['*.NuGet.org'], makeRepo('dotnet'))).toEqual(['*.NuGet.org']);
+    expect(buildEgressAllowlist(['*.NuGet.org'], makeEcosystemDir('dotnet'))).toEqual(['*.NuGet.org']);
   });
 
   it('does not duplicate a registry already configured, in any casing', () => {
-    expect(buildEgressAllowlist(['Registry.NPMJS.org'], makeRepo('node'))).toEqual([
+    expect(buildEgressAllowlist(['Registry.NPMJS.org'], makeEcosystemDir('node'))).toEqual([
       'Registry.NPMJS.org',
       'registry.yarnpkg.com',
     ]);
@@ -373,13 +373,13 @@ describe('buildEgressAllowlist', () => {
 
 describe('detectEcosystems', () => {
   it('detects node from a root package.json file', () => {
-    expect(detectEcosystems(makeRepo('node'))).toEqual(['node']);
+    expect(detectEcosystems(makeEcosystemDir('node'))).toEqual(['node']);
   });
 
   it('detects nothing for an empty dir, a missing dir, or a package.json directory', () => {
-    expect(detectEcosystems(makeRepo('empty'))).toEqual([]);
+    expect(detectEcosystems(makeEcosystemDir('empty'))).toEqual([]);
     expect(detectEcosystems(join(tmpdir(), 'egress-eco-missing-dir'))).toEqual([]);
-    expect(detectEcosystems(makeRepo('pkg-dir'))).toEqual([]);
+    expect(detectEcosystems(makeEcosystemDir('pkg-dir'))).toEqual([]);
   });
 });
 
@@ -387,18 +387,18 @@ describe('detectEcosystems (.NET)', () => {
   it.each(['App.sln', 'App.slnx', 'App.csproj', 'App.fsproj', 'App.vbproj', 'APP.SLN', 'global.json'])(
     'detects dotnet from a root %s file',
     (name) => {
-      const dir = makeRepo('empty');
+      const dir = makeEcosystemDir('empty');
       writeFileSync(join(dir, name), '');
       expect(detectEcosystems(dir)).toEqual(['dotnet']);
     },
   );
 
   it('detects node and dotnet for a mixed repo', () => {
-    expect(detectEcosystems(makeRepo('node-dotnet'))).toEqual(['node', 'dotnet']);
+    expect(detectEcosystems(makeEcosystemDir('node-dotnet'))).toEqual(['node', 'dotnet']);
   });
 
   it('does not detect dotnet for a .sln directory', () => {
-    expect(detectEcosystems(makeRepo('sln-dir'))).toEqual([]);
+    expect(detectEcosystems(makeEcosystemDir('sln-dir'))).toEqual([]);
   });
 });
 

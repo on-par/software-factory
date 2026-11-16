@@ -1,6 +1,5 @@
 import { execFile as execFileCb } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -10,6 +9,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { StubModelExecutor } from '../router/stub.js';
+import { createTempWorktrees } from '../test-support/temp-worktree.js';
 import { sandboxRecordingRouter } from '../test-support/recorders.js';
 import {
   BASE_REF_CANDIDATES,
@@ -67,20 +67,13 @@ function makeRouter(output: string): { router: ModelRouter; stub: StubModelExecu
   return { router: new ModelRouter(models, routes, false, stub), stub };
 }
 
-const tempDirs = new Set<string>();
+const { makeWorktree, cleanup } = createTempWorktrees('design-smells-test-');
 
 afterEach(async () => {
-  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
+  await cleanup();
 });
 
 const execFile = promisify(execFileCb);
-
-async function makeWorktree(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'design-smells-test-'));
-  tempDirs.add(dir);
-  return dir;
-}
 
 async function makeRemoteLessGitRepo(): Promise<{ worktree: string; baseSha: string }> {
   const worktree = await makeWorktree();

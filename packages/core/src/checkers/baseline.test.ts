@@ -32,7 +32,7 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
   return (await execFile('git', args, { cwd })).stdout.trim();
 }
 
-async function makeRepo(): Promise<{ repo: string; shaA: string; shaB: string }> {
+async function makeTwoCommitRepo(): Promise<{ repo: string; shaA: string; shaB: string }> {
   const repo = await mkdtemp(join(tmpdir(), 'baseline-repo-'));
   tempDirs.add(repo);
   await git(repo, 'init', '--initial-branch=main');
@@ -175,7 +175,7 @@ describe('compareBaseline', () => {
 
 describe('runBaselineCheckers', () => {
   it('runs in an isolated detached worktree at the base SHA, never changes the lane worktree, and cleans up', async () => {
-    const { repo, shaA, shaB } = await makeRepo();
+    const { repo, shaA, shaB } = await makeTwoCommitRepo();
     const seen: any = {};
     let parent = '';
     const { env, opts } = makeOpts(repo, shaA, {
@@ -208,7 +208,7 @@ describe('runBaselineCheckers', () => {
   });
 
   it('cleans up and reports an error when the runner throws', async () => {
-    const { repo, shaA } = await makeRepo();
+    const { repo, shaA } = await makeTwoCommitRepo();
     let parent = '';
     const { opts } = makeOpts(repo, shaA, {
       deps: {
@@ -225,7 +225,7 @@ describe('runBaselineCheckers', () => {
   });
 
   it('reports an error for an unresolvable SHA without running checkers', async () => {
-    const { repo } = await makeRepo();
+    const { repo } = await makeTwoCommitRepo();
     let parent = '';
     let ran = false;
     const { opts } = makeOpts(repo, 'deadbeef'.repeat(5), {
@@ -244,7 +244,7 @@ describe('runBaselineCheckers', () => {
   });
 
   it('creates nothing when no failing checker is runnable', async () => {
-    const { repo, shaA } = await makeRepo();
+    const { repo, shaA } = await makeTwoCommitRepo();
     let touched = false;
     const { opts } = makeOpts(repo, shaA, {
       failing: [out('design_smells', 'FAIL')],
@@ -374,7 +374,7 @@ describe('runBaselineCheckers', () => {
     }
 
     it('runs on a miss and stores the base result', async () => {
-      const { repo, shaA } = await makeRepo();
+      const { repo, shaA } = await makeTwoCommitRepo();
       const file = await cacheFilePath();
       const { filters, deps } = recorder();
       const { env, opts } = makeOpts(repo, shaA, { deps, cache: new BaselineCache(file) });
@@ -386,7 +386,7 @@ describe('runBaselineCheckers', () => {
     });
 
     it('reuses a cached result without creating a worktree', async () => {
-      const { repo, shaA } = await makeRepo();
+      const { repo, shaA } = await makeTwoCommitRepo();
       const file = await cacheFilePath();
       const { env, opts } = makeOpts(repo, shaA);
       await new BaselineCache(file).set(shaA, hashBaselineEnv(env), hashBaselineCheckerConfig(null), [
@@ -412,7 +412,7 @@ describe('runBaselineCheckers', () => {
     });
 
     it('writes no cache entry for an unknown checker (#2563)', async () => {
-      const { repo, shaA } = await makeRepo();
+      const { repo, shaA } = await makeTwoCommitRepo();
       const file = await cacheFilePath();
       const { opts } = makeOpts(repo, shaA, {
         constitution: constitutionWith(['typecheck']),
@@ -427,7 +427,7 @@ describe('runBaselineCheckers', () => {
     });
 
     it('re-runs the base when the constitution checker list changes (#2563)', async () => {
-      const { repo, shaA } = await makeRepo();
+      const { repo, shaA } = await makeTwoCommitRepo();
       const file = await cacheFilePath();
       const constitutionA = constitutionWith(['tests']);
       const constitutionB = constitutionWith(['tests', 'lint']);
@@ -458,7 +458,7 @@ describe('runBaselineCheckers', () => {
     });
 
     it('misses when the applied laneEnv changes', async () => {
-      const { repo, shaA } = await makeRepo();
+      const { repo, shaA } = await makeTwoCommitRepo();
       const file = await cacheFilePath();
       const envA = { FACTORY_HEADLESS: '1' };
       await new BaselineCache(file).set(shaA, hashBaselineEnv(envA), hashBaselineCheckerConfig(null), [
@@ -473,7 +473,7 @@ describe('runBaselineCheckers', () => {
     });
 
     it('ignores volatile env keys', async () => {
-      const { repo, shaA } = await makeRepo();
+      const { repo, shaA } = await makeTwoCommitRepo();
       const file = await cacheFilePath();
       await new BaselineCache(file).set(
         shaA,
@@ -488,7 +488,7 @@ describe('runBaselineCheckers', () => {
     });
 
     it('runs only the cache misses', async () => {
-      const { repo, shaA } = await makeRepo();
+      const { repo, shaA } = await makeTwoCommitRepo();
       const file = await cacheFilePath();
       const { env, opts } = makeOpts(repo, shaA);
       await new BaselineCache(file).set(shaA, hashBaselineEnv(env), hashBaselineCheckerConfig(null), [
@@ -509,7 +509,7 @@ describe('runBaselineCheckers', () => {
     });
 
     it('does not cache when the base run throws', async () => {
-      const { repo, shaA } = await makeRepo();
+      const { repo, shaA } = await makeTwoCommitRepo();
       const file = await cacheFilePath();
       const { opts } = makeOpts(repo, shaA, {
         cache: new BaselineCache(file),
@@ -525,7 +525,7 @@ describe('runBaselineCheckers', () => {
     });
 
     it('does not cache when the worktree cannot be created', async () => {
-      const { repo } = await makeRepo();
+      const { repo } = await makeTwoCommitRepo();
       const file = await cacheFilePath();
       const { opts } = makeOpts(repo, 'deadbeef'.repeat(5), { cache: new BaselineCache(file) });
       const report = await runBaselineCheckers(opts);
@@ -534,7 +534,7 @@ describe('runBaselineCheckers', () => {
     });
 
     it('treats cache read and write errors as misses', async () => {
-      const { repo, shaA } = await makeRepo();
+      const { repo, shaA } = await makeTwoCommitRepo();
       const { filters, deps } = recorder();
       class BrokenCache extends BaselineCache {
         override async get(): Promise<never> {

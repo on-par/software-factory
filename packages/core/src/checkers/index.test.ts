@@ -14,6 +14,7 @@ import { StubModelExecutor } from '../router/stub.js';
 import { recordingLog, sandboxRecordingRouter, type LoggedEvent } from '../test-support/recorders.js';
 import type { Constitution } from '../types/index.js';
 import type { CommandResult } from '../utils/command-runner.js';
+import { createTempWorktrees } from '../test-support/temp-worktree.js';
 import {
   accessibilityChecker,
   type CheckerContext,
@@ -66,26 +67,16 @@ const routes: RoutesConfig = {
   },
 };
 
+const { makeWorktree, cleanup } = createTempWorktrees('checker-test-');
+
 const tempDirs = new Set<string>();
 
 afterEach(async () => {
+  await cleanup();
   await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
   vi.unstubAllEnvs();
 });
-
-async function makeWorktree(files: Record<string, string> = {}): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'checker-test-'));
-  tempDirs.add(dir);
-
-  for (const [path, contents] of Object.entries(files)) {
-    const fullPath = join(dir, path);
-    await mkdir(dirname(fullPath), { recursive: true });
-    await writeFile(fullPath, contents);
-  }
-
-  return dir;
-}
 
 function makeContext(worktree: string): CheckerContext {
   return {

@@ -20,7 +20,7 @@ async function put(dir: string, files: Record<string, string>): Promise<void> {
   }
 }
 
-async function makeRepo(base: Record<string, string>, change: Record<string, string>): Promise<string> {
+async function makeBaseAndChangeRepo(base: Record<string, string>, change: Record<string, string>): Promise<string> {
   const dir = await dirs.make('lint-new-findings-');
   git(dir, 'init', '-q', '-b', 'main');
   await put(dir, base);
@@ -61,7 +61,7 @@ const ctxFor = (worktree: string, lint: string, run: CheckerContext['runCommand'
 
 describe('lintChecker fails only on new findings the change adds', () => {
   it('FAILs on a violation in a changed file and names file, line and rule', async () => {
-    const dir = await makeRepo({ 'ok.py': 'x = 1\n' }, { 'bad.py': 'import os\n' });
+    const dir = await makeBaseAndChangeRepo({ 'ok.py': 'x = 1\n' }, { 'bad.py': 'import os\n' });
     const { run, calls } = realGitFakeToolRunner((argv) => result(argv, 1, 'bad.py:2:1: F401 unused import\n'));
     const out = await lintChecker(ctxFor(dir, 'ruff check .', run));
     expect(out.result).toBe('FAIL');
@@ -70,7 +70,7 @@ describe('lintChecker fails only on new findings the change adds', () => {
   });
 
   it('PASSes with a pre-existing warning when only unchanged files violate', async () => {
-    const dir = await makeRepo({ 'src/old.rs': 'x\n' }, { 'src/new.rs': 'y\n' });
+    const dir = await makeBaseAndChangeRepo({ 'src/old.rs': 'x\n' }, { 'src/new.rs': 'y\n' });
     const { run } = realGitFakeToolRunner((argv) =>
       result(argv, 1, 'src/old.rs:5:1: needless return (clippy::needless_return)\n'),
     );
@@ -81,7 +81,7 @@ describe('lintChecker fails only on new findings the change adds', () => {
   });
 
   it('runs the declared dotnet format command unchanged plus --include of the changed files, from the worktree that holds .editorconfig', async () => {
-    const dir = await makeRepo(
+    const dir = await makeBaseAndChangeRepo(
       { '.editorconfig': 'root = true\n', 'A.sln': '', 'Program.cs': 'a\n' },
       { 'Program.cs': 'b\n' },
     );
@@ -94,7 +94,7 @@ describe('lintChecker fails only on new findings the change adds', () => {
   });
 
   it('skips every code linter with a reason on a docs-only change', async () => {
-    const dir = await makeRepo(
+    const dir = await makeBaseAndChangeRepo(
       { 'package.json': '{"scripts":{"lint":"x"}}', 'tsconfig.json': '{}', 'a.ts': 'a\n' },
       { 'docs/x.md': '# hi\n' },
     );
@@ -107,7 +107,7 @@ describe('lintChecker fails only on new findings the change adds', () => {
   });
 
   it('never runs a write-mode command and leaves the worktree unmodified', async () => {
-    const dir = await makeRepo({ 'a.ts': 'a\n' }, { 'b.ts': 'b\n' });
+    const dir = await makeBaseAndChangeRepo({ 'a.ts': 'a\n' }, { 'b.ts': 'b\n' });
     const before = git(dir, 'status', '--porcelain');
     const { run, calls } = realGitFakeToolRunner((argv) => result(argv, 1));
     const out = await lintChecker(ctxFor(dir, 'eslint . --fix', run));
@@ -119,14 +119,14 @@ describe('lintChecker fails only on new findings the change adds', () => {
   });
 
   it('returns SKIP when no lint commands resolve', async () => {
-    const dir = await makeRepo({ 'a.txt': 'a\n' }, { 'b.txt': 'b\n' });
+    const dir = await makeBaseAndChangeRepo({ 'a.txt': 'a\n' }, { 'b.txt': 'b\n' });
     const out = await lintChecker({ ...ctxFor(dir, '', realGitFakeToolRunner((a) => result(a, 0)).run), checks: null });
     expect(out.result).toBe('SKIP');
     expect(out.details).toContain('no linting configured');
   });
 
   it('FAILs without a base run when the whole-repo command times out', async () => {
-    const dir = await makeRepo({ 'a.go': 'a\n' }, { 'b.go': 'b\n' });
+    const dir = await makeBaseAndChangeRepo({ 'a.go': 'a\n' }, { 'b.go': 'b\n' });
     const { run, calls } = realGitFakeToolRunner((argv) => ({ ...result(argv, -1), timedOut: true, killed: true }));
     const out = await lintChecker(ctxFor(dir, 'go vet ./...', run));
     expect(out.result).toBe('FAIL');
@@ -134,7 +134,7 @@ describe('lintChecker fails only on new findings the change adds', () => {
   });
 
   it('treats a whole-repo failure on an empty diff as pre-existing without a base run', async () => {
-    const dir = await makeRepo({ 'a.go': 'a\n' }, {});
+    const dir = await makeBaseAndChangeRepo({ 'a.go': 'a\n' }, {});
     const { run, calls } = realGitFakeToolRunner((argv) => result(argv, 1, 'a.go:1:1: bad (govet)\n'));
     const out = await lintChecker(ctxFor(dir, 'stylelint .', run));
     expect(out.result).toBe('PASS');
@@ -145,7 +145,7 @@ describe('lintChecker fails only on new findings the change adds', () => {
 
 describe('lintChecker merge-base fallback', () => {
   it('FAILs when the merge base passes and HEAD fails; warns when both fail', async () => {
-    const dir = await makeRepo({ 'a.go': 'a\n' }, { 'b.go': 'b\n' });
+    const dir = await makeBaseAndChangeRepo({ 'a.go': 'a\n' }, { 'b.go': 'b\n' });
     const vetOutput = 'b.go:3:1: bad thing (govet)\n';
 
     const headOnly = realGitFakeToolRunner((argv, cwd) => (cwd === dir ? result(argv, 1, vetOutput) : result(argv, 0)));
