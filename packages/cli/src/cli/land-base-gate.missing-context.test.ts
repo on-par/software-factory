@@ -4,7 +4,11 @@ import './index.js';
 import { landBaseGate } from './land-base-gate.js';
 import { landOpenPullRequest } from './land-pr.js';
 
-const merge = vi.fn(async () => ({ data: { merged: true } }));
+const merges: unknown[] = [];
+const merge = async (...a: unknown[]) => {
+  merges.push(a);
+  return { data: { merged: true } };
+};
 const octokit = {
   graphql: async () => ({ repository: { pullRequest: { mergeStateStatus: 'CLEAN' } } }),
   rest: {
@@ -25,17 +29,19 @@ const octokit = {
 } as never;
 
 const dirs = createTempDirs();
+const events: Array<[string, string]> = [];
+const log = (kind: string, msg: string) => void events.push([kind, msg]);
 afterEach(async () => {
   await dirs.cleanup();
-  merge.mockClear();
+  merges.length = 0;
+  events.length = 0;
 });
 
 const clock = () => {
   let now = 0;
   return { now: () => now, sleep: async (ms: number) => void (now += ms), slept: () => now };
 };
-const build = (log = vi.fn(), c = clock()) => ({
-  log,
+const build = (c = clock()) => ({
   c,
   gate: landBaseGate({
     octokit,
@@ -60,10 +66,10 @@ describe('land base gate with a required check that never runs on the base', () 
     expect(c.slept()).toBeLessThan(30 * 60_000);
   });
   it('logs one warn event naming the missing context across check() and check(false)', async () => {
-    const { gate, log } = build();
+    const { gate } = build();
     await gate.check();
     await gate.check(false);
-    const warns = log.mock.calls.filter(([kind]) => kind === 'warn');
+    const warns = events.filter(([kind]) => kind === 'warn');
     expect(warns).toHaveLength(1);
     expect(warns[0]?.[1]).toContain('test');
   });
@@ -87,6 +93,6 @@ describe('land base gate with a required check that never runs on the base', () 
       behindProbe: async () => false,
       baseGate: gate,
     });
-    expect(merge).toHaveBeenCalledTimes(1);
+    expect(merges).toHaveLength(1);
   });
 });

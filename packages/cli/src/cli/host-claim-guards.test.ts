@@ -1,7 +1,7 @@
 // packages/cli/src/cli/host-claim-guards.test.ts — host load and disk guards for lane claims (#3048, #2284)
 
 import { loadFactoryConfig } from '@on-par/factory-core';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { hostClaimGuards } from './host-claim-guards.js';
 
@@ -19,10 +19,14 @@ describe('hostClaimGuards', () => {
   });
 
   it('adds a diskReclaim that reclaims under pressure when a reclaimer is given (#3970)', async () => {
-    const reclaim = vi.fn(async () => 'skipped' as const);
+    const asked: boolean[] = [];
+    const reclaim = async (force: boolean) => {
+      asked.push(force);
+      return 'skipped' as const;
+    };
     const guards = hostClaimGuards(loadFactoryConfig(), where, false, reclaim);
     await guards.diskReclaim?.();
-    expect(reclaim).toHaveBeenCalledWith(true);
+    expect(asked).toEqual([true]);
     expect(hostClaimGuards(loadFactoryConfig(), where, true, reclaim)).toEqual({});
   });
 });

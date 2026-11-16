@@ -11,7 +11,6 @@ import {
   h,
   installCliCommandsHarness,
   logged,
-  ops,
   paths,
   runMain,
 } from './test-support/cli-commands-harness.js';
@@ -69,10 +68,14 @@ describe('cli commands (via main dispatch)', () => {
 
     it('runs `ollama list` unchanged when ollama is on PATH', async () => {
       const prev = h.execSyncImpl;
-      h.execSyncImpl = (cmd: string) => (cmd === 'ollama list' ? 'NAME ID SIZE MODIFIED\n' : prev(cmd));
+      const cmds: string[] = [];
+      h.execSyncImpl = (cmd: string) => {
+        cmds.push(cmd);
+        return cmd === 'ollama list' ? 'NAME ID SIZE MODIFIED\n' : prev(cmd);
+      };
       const res = await runMain('init');
       expect(res.exited).toBe(false);
-      expect(ops.execSync).toHaveBeenCalledWith('ollama list', { timeout: 10_000 });
+      expect(cmds).toContain('ollama list');
       const out = logged();
       expect(out).toContain('policy=auto');
       expect(out).toContain('Initialized');

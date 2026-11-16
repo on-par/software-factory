@@ -273,15 +273,17 @@ describe('cmdJob', () => {
     vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'y');
     const argv = [...process.argv];
     process.argv[1] = entry;
-    const out = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
-    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const outLines: string[] = [];
+    const errLines: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((c) => (outLines.push(String(c)), true));
+    vi.spyOn(process.stderr, 'write').mockImplementation((c) => (errLines.push(String(c)), true));
     try {
       await expect(cmdJob({ repo: 'on-par/foreman', issue: '12' })).resolves.toBeUndefined();
     } finally {
       process.argv = argv;
     }
-    const line = out.mock.calls.map((c) => String(c[0])).find((l) => l.startsWith('{')) ?? '';
+    const line = outLines.find((l) => l.startsWith('{')) ?? '';
     expect(JSON.parse(line)).toMatchObject({ merged: true, exitCode: 0 });
-    expect(err).toHaveBeenCalled();
+    expect(errLines.join('')).toContain('factory job: config source:');
   });
 });

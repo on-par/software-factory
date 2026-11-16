@@ -105,7 +105,7 @@ describe('cli commands (via main dispatch)', () => {
       const out = join(h.repoRoot, 'report.md');
       await runMain('garden', '--report', '--out', out);
       expect(readFileSync(out, 'utf8')).toContain('# Garden report');
-      expect(logSpy).not.toHaveBeenCalled();
+      expect(logged()).toBe('');
       expect(errored()).toContain(`wrote report to ${out}`);
     });
 
@@ -114,7 +114,7 @@ describe('cli commands (via main dispatch)', () => {
       const out = join(h.repoRoot, 'report.json');
       await runMain('garden', '--report', '--json', '--out', out);
       expect(JSON.parse(readFileSync(out, 'utf8')).clusters.length).toBeGreaterThan(0);
-      expect(logSpy).not.toHaveBeenCalled();
+      expect(logged()).toBe('');
     });
 
     it('rejects an invalid --since or --max-clusters', async () => {
@@ -141,24 +141,51 @@ describe('cli commands (via main dispatch)', () => {
       const emptyDoc = { since: '14d', maxClusters: 10, clusters: [] };
 
       const guardSideEffects = (opts: { searchAllowed: boolean }) => {
-        const octokitFactory = vi.fn(() => h.octokit);
-        ops.octokit = octokitFactory;
-        const fetchFn = vi.fn(async () => {
+        const fetches: unknown[] = [];
+        vi.stubGlobal('fetch', async (...args: unknown[]) => {
+          fetches.push(args);
           throw new Error('network');
         });
-        vi.stubGlobal('fetch', fetchFn);
+        let octokitsCreated = 0;
+        ops.octokit = () => {
+          octokitsCreated += 1;
+          return h.octokit;
+        };
+        const cmds: string[] = [];
+        const prevExec = h.execImpl;
+        h.execImpl = (cmd: string) => {
+          cmds.push(cmd);
+          return prevExec(cmd);
+        };
+        const prevSync = h.execSyncImpl;
+        h.execSyncImpl = (cmd: string) => {
+          cmds.push(cmd);
+          return prevSync(cmd);
+        };
+        const searches: unknown[] = [];
+        const search = h.octokit.rest.search.issuesAndPullRequests;
+        h.octokit.rest.search.issuesAndPullRequests = vi.fn(async (...a: unknown[]) => {
+          searches.push(a);
+          return search(...a);
+        });
+        const issueCalls: string[] = [];
+        for (const [name, fn] of Object.entries<(...a: unknown[]) => unknown>(h.octokit.rest.issues)) {
+          h.octokit.rest.issues[name] = vi.fn(async (...a: unknown[]) => {
+            issueCalls.push(name);
+            return fn(...a);
+          });
+        }
         return () => {
-          expect(fetchFn).not.toHaveBeenCalled();
-          const cmds = [...ops.exec.mock.calls, ...ops.execSync.mock.calls].map((c) => String(c[0]));
+          expect(fetches).toEqual([]);
           const ghCmds = cmds.filter((c) => /(^|\s)gh\s/.test(c));
           if (opts.searchAllowed) {
-            expect(h.octokit.rest.search.issuesAndPullRequests).toHaveBeenCalled();
+            expect(searches.length).toBeGreaterThan(0);
             for (const c of ghCmds) expect(c).toMatch(/gh (repo view|auth token)/);
           } else {
-            expect(octokitFactory).not.toHaveBeenCalled();
+            expect(octokitsCreated).toBe(0);
             expect(ghCmds).toEqual([]);
           }
-          for (const fn of Object.values(h.octokit.rest.issues)) expect(fn).not.toHaveBeenCalled();
+          expect(issueCalls).toEqual([]);
         };
       };
 
@@ -211,7 +238,7 @@ describe('cli commands (via main dispatch)', () => {
         const res = await runMain('garden', '--report', '--out', out);
         expect(res.exited).toBe(false);
         expect(readFileSync(out, 'utf8')).toBe('no clusters\n');
-        expect(logSpy).not.toHaveBeenCalled();
+        expect(logged()).toBe('');
         expect(errored()).toContain('wrote report to');
       });
 

@@ -5,12 +5,24 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { loadFactoryConfig } from '@on-par/factory-core';
+import { loadFactoryConfig, type EventKind } from '@on-par/factory-core';
 import { createDiskGuard, createRunSlotGate, resolveHostMaxBuilds } from '@on-par/factory-core/internal';
 
 import { hostBuildSlotPort, shipHostBuildSlot } from './host-slot.js';
 
 let dir: string;
+
+const recorder = () => {
+  const events: Array<[string, string]> = [];
+  const sleeps: number[] = [];
+  return {
+    events,
+    sleeps,
+    log: (kind: EventKind, message: string) => void events.push([kind, message]),
+    sleep: async (ms: number) => void sleeps.push(ms),
+    saw: (kind: string, text: string) => events.some(([k, m]) => k === kind && m.includes(text)),
+  };
+};
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'factory-host-slot-port-'));
@@ -43,19 +55,19 @@ describe('hostBuildSlotPort (#3043)', () => {
         JSON.stringify({ pid: deadPid, repo: 'o/dead', issue: 12, phase: 'build', token, acquiredAt: '' }),
       );
     }
-    const log = vi.fn();
+    const { events, log } = recorder();
     const port = hostBuildSlotPort(loadFactoryConfig(), 'o/r', 7, log);
     await expect(port('build', async () => 'ok')).resolves.toBe('ok');
-    expect(log).toHaveBeenCalledWith(
+    expect(events).toContainEqual([
       'environment_lease',
       expect.stringContaining(`reclaimed host build slot 0 from o/dead#12 (pid ${deadPid}`),
-    );
+    ]);
   });
 });
 
 describe('hostBuildSlotPort with a run gate (#3049)', () => {
   it('serialises lanes on the run cap and logs the run wait line', async () => {
-    const log = vi.fn();
+    const { events, log } = recorder();
     const port = hostBuildSlotPort(loadFactoryConfig(), 'o/r', 7, log, createRunSlotGate(1));
     let active = 0;
     let maxActive = 0;
@@ -67,7 +79,7 @@ describe('hostBuildSlotPort with a run gate (#3049)', () => {
     };
     await Promise.all([port('build', fn), port('check', fn)]);
     expect(maxActive).toBe(1);
-    expect(log).toHaveBeenCalledWith('environment_lease', 'waiting for run build slot (1/1 in use)');
+    expect(events).toContainEqual(['environment_lease', 'waiting for run build slot (1/1 in use)']);
   });
 });
 
@@ -77,22 +89,28 @@ describe('hostBuildSlotPort with a disk guard (#2284)', () => {
   it('uses the default timer while waiting for disk recovery', async () => {
     vi.useFakeTimers();
     try {
-      const check = vi
-        .fn()
-        .mockReturnValueOnce({ ...hold, retryMs: 25 })
-        .mockReturnValue({ kind: 'claim' });
-      const log = vi.fn();
-      const fn = vi.fn(async () => 'built');
+      const decisions = [{ ...hold, retryMs: 25 }];
+      let checks = 0;
+      const check = () => {
+        checks += 1;
+        return decisions.shift() ?? { kind: 'claim' as const };
+      };
+      const { events, log } = recorder();
+      let ran = false;
+      const fn = async () => {
+        ran = true;
+        return 'built';
+      };
       const config = loadFactoryConfig();
       const guard = createDiskGuard(config, { repoRoot: dir, ghRepo: 'o/r', stateRoot: dir });
       const port = hostBuildSlotPort(config, 'o/r', 7, log, undefined, { guard: { ...guard, check } });
       const result = port('build', fn);
       await vi.advanceTimersByTimeAsync(24);
-      expect(fn).not.toHaveBeenCalled();
+      expect(ran).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
       await expect(result).resolves.toBe('built');
-      expect(check).toHaveBeenCalledTimes(2);
-      expect(log).toHaveBeenCalledWith('disk_low', expect.stringContaining('#7 build waiting:'));
+      expect(checks).toBe(2);
+      expect(events).toContainEqual(['disk_low', expect.stringContaining('#7 build waiting:')]);
     } finally {
       vi.useRealTimers();
     }
@@ -102,18 +120,18 @@ describe('hostBuildSlotPort with a disk guard (#2284)', () => {
     const decisions = [hold, hold, { kind: 'claim' as const }];
     const guard: any = { check: () => decisions.shift() };
     const order: string[] = [];
-    const log = vi.fn((kind: string) => order.push(`log:${kind}`));
-    const sleep = vi.fn(async () => {
-      order.push('sleep');
-    });
-    const port = hostBuildSlotPort(loadFactoryConfig(), 'o/r', 7, log as any, undefined, { guard, sleep });
+    const rec = recorder();
+    const { events, sleeps } = rec;
+    const log = (kind: EventKind, message: string) => (order.push(`log:${kind}`), rec.log(kind, message));
+    const sleep = async (ms: number) => (order.push('sleep'), rec.sleep(ms));
+    const port = hostBuildSlotPort(loadFactoryConfig(), 'o/r', 7, log, undefined, { guard, sleep });
     await port('check', async () => {
       order.push('fn');
       expect((await readdir(dir)).filter((f) => f.startsWith('slot-'))).toEqual(['slot-0.json']);
     });
     expect(order).toEqual(['log:disk_low', 'sleep', 'log:warn', 'sleep', 'fn']);
-    expect(sleep).toHaveBeenCalledWith(300_000);
-    expect(log).toHaveBeenCalledWith('disk_low', expect.stringContaining('#7 check waiting:'));
+    expect(sleeps).toEqual([300_000, 300_000]);
+    expect(events).toContainEqual(['disk_low', expect.stringContaining('#7 check waiting:')]);
   });
 
   it('reclaims retained trees on a disk hold and proceeds without changing maxBuilds', async () => {
@@ -121,33 +139,35 @@ describe('hostBuildSlotPort with a disk guard (#2284)', () => {
     const maxBefore = resolveHostMaxBuilds(config);
     let reclaimed = false;
     const guard: any = { check: () => (reclaimed ? { kind: 'claim' } : hold) };
-    const reclaim = vi.fn(async () => {
+    let reclaims = 0;
+    const reclaim = async () => {
+      reclaims += 1;
       reclaimed = true;
-    });
-    const sleep = vi.fn(async () => {});
-    const log = vi.fn();
-    const fn = vi.fn(async () => 'built');
+    };
+    const { events, sleeps, sleep, log } = recorder();
+    const fn = async () => 'built';
     const port = hostBuildSlotPort(config, 'o/r', 7, log, undefined, { guard, reclaim, sleep });
     await expect(port('build', fn)).resolves.toBe('built');
-    expect(reclaim).toHaveBeenCalledTimes(1);
-    expect(sleep).not.toHaveBeenCalled();
-    expect(log).not.toHaveBeenCalledWith('disk_low', expect.anything());
+    expect(reclaims).toBe(1);
+    expect(sleeps).toEqual([]);
+    expect(events.filter(([k]) => k === 'disk_low')).toEqual([]);
     expect(resolveHostMaxBuilds(config)).toBe(maxBefore);
   });
 
   it('falls back to waiting when reclaim does not free space', async () => {
     const decisions = [hold, hold, hold, { kind: 'claim' as const }, { kind: 'claim' as const }];
     const guard: any = { check: () => decisions.shift() };
-    const reclaim = vi.fn(async () => {
+    let reclaims = 0;
+    const reclaim = async () => {
+      reclaims += 1;
       throw new Error('busy');
-    });
-    const sleep = vi.fn(async () => {});
-    const log = vi.fn();
+    };
+    const { events, sleeps, sleep, log } = recorder();
     const port = hostBuildSlotPort(loadFactoryConfig(), 'o/r', 7, log, undefined, { guard, reclaim, sleep });
     await port('check', async () => 'ok');
-    expect(reclaim).toHaveBeenCalledTimes(2);
-    expect(sleep).toHaveBeenCalledTimes(1);
-    expect(log).toHaveBeenCalledWith('disk_low', expect.stringContaining('#7 check waiting:'));
+    expect(reclaims).toBe(2);
+    expect(sleeps).toHaveLength(1);
+    expect(events).toContainEqual(['disk_low', expect.stringContaining('#7 check waiting:')]);
   });
 
   it('treats a throwing guard as claim and takes no slot while held', async () => {
@@ -165,7 +185,7 @@ describe('shipHostBuildSlot reclaim wiring (#3970)', () => {
   it('reclaims retained worktrees before waiting on a low disk, and only with lock paths', async () => {
     vi.stubEnv('FACTORY_MIN_FREE_GB', '1000000000');
     const config = loadFactoryConfig();
-    const log = vi.fn();
+    const { log, saw } = recorder();
     const where = {
       repoRoot: dir,
       ghRepo: 'o/r',
@@ -173,12 +193,12 @@ describe('shipHostBuildSlot reclaim wiring (#3970)', () => {
     };
     void shipHostBuildSlot(config, 7, log, where)('build', async () => 'built');
     // The tmp dir is not a git repo, so the reclaim logs a warn and skips; the wait still starts.
-    await vi.waitFor(() => expect(log).toHaveBeenCalledWith('disk_low', expect.stringContaining('#7 build waiting:')));
-    expect(log).toHaveBeenCalledWith('warn', expect.stringContaining('retention reclaim failed'));
+    await vi.waitFor(() => expect(saw('disk_low', '#7 build waiting:')).toBe(true));
+    expect(saw('warn', 'retention reclaim failed')).toBe(true);
 
-    const bare = vi.fn();
+    const { events: bareEvents, log: bare, saw: bareSaw } = recorder();
     void shipHostBuildSlot(config, 8, bare, { ...where, paths: { root: dir } })('build', async () => 'built');
-    await vi.waitFor(() => expect(bare).toHaveBeenCalledWith('disk_low', expect.stringContaining('#8 build waiting:')));
-    expect(bare).not.toHaveBeenCalledWith('warn', expect.anything());
+    await vi.waitFor(() => expect(bareSaw('disk_low', '#8 build waiting:')).toBe(true));
+    expect(bareEvents.filter(([k]) => k === 'warn')).toEqual([]);
   });
 });
