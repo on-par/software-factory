@@ -149,7 +149,6 @@
   "packages/cli/src/cli/merge-scope.ts": 3,
   "packages/cli/src/cli/migrate.test.ts": 1,
   "packages/cli/src/cli/model-override-messages.ts": 5,
-  "packages/cli/src/cli/models-command.test.ts": 2,
   "packages/cli/src/cli/no-em-dash.test.ts": 2,
   "packages/cli/src/cli/notify.test.ts": 1,
   "packages/cli/src/cli/notify.ts": 9,
