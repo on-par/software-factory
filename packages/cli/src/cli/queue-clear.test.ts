@@ -75,6 +75,10 @@ describe('formatQueueClearResult', () => {
   });
 });
 
+const tracked =
+  <T>(log: string[], name: string, fn: () => Promise<T>) =>
+  async () => (log.push(name), fn());
+
 describe('runQueueClear', () => {
   const previewClear = async () => preview;
   const clear = async () => result;
@@ -98,24 +102,16 @@ describe('runQueueClear', () => {
   });
 
   it('--yes clears via clear() and exits 0', async () => {
-    let clears = 0;
-    let previews = 0;
+    const calls: string[] = [];
     const res = await runQueueClear({
-      previewClear: async () => {
-        previews += 1;
-        return previewClear();
-      },
-      clear: async () => {
-        clears += 1;
-        return clear();
-      },
+      previewClear: tracked(calls, 'preview', previewClear),
+      clear: tracked(calls, 'clear', clear),
       yes: true,
     });
     expect(res.exitCode).toBe(0);
     expect(res.message).toBeUndefined();
     expect(res.report).toContain(formatQueueClearResult(result));
-    expect(clears).toBe(1);
-    expect(previews).toBe(0);
+    expect(calls).toEqual(['clear']);
   });
 
   it('--yes exits 1 after printing every line when an issue failed', async () => {
@@ -131,18 +127,10 @@ describe('runQueueClear', () => {
   });
 
   it('--dry-run with --yes previews and never calls clear()', async () => {
-    let clears = 0;
-    const res = await runQueueClear({
-      previewClear,
-      clear: async () => {
-        clears += 1;
-        return clear();
-      },
-      dryRun: true,
-      yes: true,
-    });
+    const calls: string[] = [];
+    const res = await runQueueClear({ previewClear, clear: tracked(calls, 'clear', clear), dryRun: true, yes: true });
     expect(res.report).toContain('dry run');
-    expect(clears).toBe(0);
+    expect(calls).toEqual([]);
   });
 
   it.each([{}, { dryRun: true }, { yes: true }])('reports an empty queue with exit 0 (%j)', async (flags) => {

@@ -14,11 +14,7 @@ import { registerSetupCommands } from './program-setup.js';
 
 const countCommands = (cmd: Command): number => cmd.commands.reduce((n, c) => n + 1 + countCommands(c), 0);
 
-const recordArgs =
-  (into: unknown[][]) =>
-  async (...args: unknown[]) => {
-    into.push(args);
-  };
+const recorder = (calls: unknown[][] = []) => ({ calls, fn: async (...args: unknown[]) => void calls.push(args) });
 
 describe('buildProgram', () => {
   it('buildProgram registers 67 commands', () => {
@@ -70,8 +66,7 @@ describe('buildProgram', () => {
   });
 
   it('draft passes --text and --json to cmdDraft (#3171)', async () => {
-    const cmdDraftCalls: unknown[][] = [];
-    const cmdDraft = recordArgs(cmdDraftCalls);
+    const { calls: cmdDraftCalls, fn: cmdDraft } = recorder();
     await buildProgram({ ...PROGRAM_HANDLERS, cmdDraft }, {}).parseAsync([
       'node',
       'factory',
@@ -84,12 +79,9 @@ describe('buildProgram', () => {
   });
 
   it('run-issue, run-brief and ship register --base-branch and pass it to their handlers (#3764)', async () => {
-    const cmdShipCalls: unknown[][] = [];
-    const cmdShip = recordArgs(cmdShipCalls);
-    const cmdRunIssueCalls: unknown[][] = [];
-    const cmdRunIssue = recordArgs(cmdRunIssueCalls);
-    const cmdRunBriefCalls: unknown[][] = [];
-    const cmdRunBrief = recordArgs(cmdRunBriefCalls);
+    const { calls: cmdShipCalls, fn: cmdShip } = recorder();
+    const { calls: cmdRunIssueCalls, fn: cmdRunIssue } = recorder();
+    const { calls: cmdRunBriefCalls, fn: cmdRunBrief } = recorder();
     const handlers = { ...PROGRAM_HANDLERS, cmdShip, cmdRunIssue, cmdRunBrief };
     for (const name of ['ship', 'run-issue', 'run-brief']) {
       const cmd = buildProgram(handlers, {}).commands.find((c) => c.name() === name);
@@ -105,10 +97,8 @@ describe('buildProgram', () => {
   });
 
   it('run-issue and run-brief register --merge, --merge-timeout and --admin (#3905)', async () => {
-    const cmdRunIssueCalls: unknown[][] = [];
-    const cmdRunIssue = recordArgs(cmdRunIssueCalls);
-    const cmdRunBriefCalls: unknown[][] = [];
-    const cmdRunBrief = recordArgs(cmdRunBriefCalls);
+    const { calls: cmdRunIssueCalls, fn: cmdRunIssue } = recorder();
+    const { calls: cmdRunBriefCalls, fn: cmdRunBrief } = recorder();
     const handlers = { ...PROGRAM_HANDLERS, cmdRunIssue, cmdRunBrief };
     for (const name of ['run-issue', 'run-brief']) {
       const cmd = buildProgram(handlers, {}).commands.find((c) => c.name() === name);
@@ -124,12 +114,9 @@ describe('buildProgram', () => {
   });
 
   it('ship, run-issue and run-brief register --json and --export (#3907)', async () => {
-    const cmdShipCalls: unknown[][] = [];
-    const cmdShip = recordArgs(cmdShipCalls);
-    const cmdRunIssueCalls: unknown[][] = [];
-    const cmdRunIssue = recordArgs(cmdRunIssueCalls);
-    const cmdRunBriefCalls: unknown[][] = [];
-    const cmdRunBrief = recordArgs(cmdRunBriefCalls);
+    const { calls: cmdShipCalls, fn: cmdShip } = recorder();
+    const { calls: cmdRunIssueCalls, fn: cmdRunIssue } = recorder();
+    const { calls: cmdRunBriefCalls, fn: cmdRunBrief } = recorder();
     const handlers = { ...PROGRAM_HANDLERS, cmdShip, cmdRunIssue, cmdRunBrief };
     for (const name of ['ship', 'run-issue', 'run-brief']) {
       const cmd = buildProgram(handlers, {}).commands.find((c) => c.name() === name);
@@ -147,8 +134,7 @@ describe('buildProgram', () => {
   });
 
   it('unpark registers --keep-order and passes keepOrder to cmdUnpark (#3554)', async () => {
-    const cmdUnparkCalls: unknown[][] = [];
-    const cmdUnpark = recordArgs(cmdUnparkCalls);
+    const { calls: cmdUnparkCalls, fn: cmdUnpark } = recorder();
     const handlers = { ...PROGRAM_HANDLERS, cmdUnpark };
     const unpark = buildProgram(handlers, {}).commands.find((c) => c.name() === 'unpark');
     expect(unpark?.options.some((o) => o.long === '--keep-order')).toBe(true);

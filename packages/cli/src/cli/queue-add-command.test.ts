@@ -6,29 +6,17 @@ import { errored, h, installCliCommandsHarness, logged, paths, runMain } from '.
 
 installCliCommandsHarness();
 
-const recordInto = (into: unknown[], result?: unknown) => async (arg: unknown) => {
-  into.push(arg);
-  return result;
-};
-
 describe('cli commands (via main dispatch)', () => {
   describe('queue add', () => {
-    let created: any[];
-    let added: any[];
-    let listed: any[];
-
     beforeEach(() => {
-      created = [];
-      added = [];
-      listed = [];
       h.execImpl = (cmd: string) => {
         if (cmd.includes('rev-parse')) return h.repoRoot;
         if (cmd.includes('gh repo view')) return h.ghRepo;
         return '';
       };
-      h.octokit.rest.issues.createLabel = recordInto(created, {});
-      h.octokit.rest.issues.addLabels = recordInto(added, {});
-      h.octokit.rest.issues.listForRepo = recordInto(listed, { data: [] });
+      h.octokit.rest.issues.createLabel = h.record();
+      h.octokit.rest.issues.addLabels = h.record();
+      h.octokit.rest.issues.listForRepo = h.record({ data: [] });
       h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: [] }));
     });
 
@@ -36,9 +24,9 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('queue', 'add', lane, '1');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('lane');
-      expect(created).toEqual([]);
-      expect(added).toEqual([]);
-      expect(listed).toEqual([]);
+      expect(h.octokit.rest.issues.createLabel.calls).toEqual([]);
+      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
+      expect(h.octokit.rest.issues.listForRepo.calls).toEqual([]);
     });
 
     it('prints the applied lane slug in the success line', async () => {
@@ -52,7 +40,7 @@ describe('cli commands (via main dispatch)', () => {
       expect(res.exited).toBe(false);
       expect(logged()).toContain('#10 queued');
       expect(logged()).toContain('#11 queued');
-      expect(added).toEqual(
+      expect(h.octokit.rest.issues.addLabels.calls).toEqual(
         [10, 11].map((issue_number, i) => ({
           owner: 'on-par',
           repo: 'software-factory',
@@ -65,7 +53,7 @@ describe('cli commands (via main dispatch)', () => {
     it('creates missing factory labels idempotently before applying them', async () => {
       await runMain('queue', 'add', 'daw', '10');
       for (const name of ['factory:queued', 'factory:lane:daw', 'factory:order:1'])
-        expect(created).toContainEqual(expect.objectContaining({ name }));
+        expect(h.octokit.rest.issues.createLabel.calls).toContainEqual(expect.objectContaining({ name }));
     });
 
     it('exits nonzero and reports a per-issue failure without dropping the successful issue', async () => {
@@ -85,8 +73,8 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('queue', 'add', 'daw', 'notanumber');
 
       expect(res).toEqual({ exited: true, code: 2 });
-      expect(created).toEqual([]);
-      expect(added).toEqual([]);
+      expect(h.octokit.rest.issues.createLabel.calls).toEqual([]);
+      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
     });
 
     it('--json prints exactly one JSON object with orders and created labels', async () => {
@@ -114,7 +102,7 @@ describe('cli commands (via main dispatch)', () => {
 
       const json = JSON.parse(logged());
       expect(json.issues[0]).toEqual({ number: 1, outcome: 'already-queued', order: 5, labelsAdded: [] });
-      expect(added.map((a) => a.issue_number)).toEqual([2]);
+      expect(h.octokit.rest.issues.addLabels.calls.map((a: any) => a.issue_number)).toEqual([2]);
     });
 
     it('--json reports no created labels when they already exist (422)', async () => {

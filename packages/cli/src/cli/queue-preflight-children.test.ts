@@ -68,10 +68,7 @@ describe('queue prerequisite sub-issue evidence (#3703)', () => {
       { repository: { issue: { state: 'OPEN' } } },
     ];
     const variables: any[] = [];
-    const graphql = async (_query: string, input: unknown) => {
-      variables.push(input);
-      return responses.shift();
-    };
+    const graphql = async (_query: string, input: unknown) => (variables.push(input), responses.shift());
     const ops = createQueuePreflightOps({ graphql } as never, 'o', 'r');
     await expect(ops.getPrerequisiteState(2)).rejects.toThrow('prerequisite #2 state changed during pagination');
     expect(variables.map((v) => v.after)).toEqual([null, 'next']);
@@ -176,9 +173,7 @@ describe('queue prerequisite sub-issue evidence (#3703)', () => {
     }
     const { ops } = childOps('COMPLETED', undefined);
     const deferred: Array<[number, string]> = [];
-    const onDeferred = (issue: number, reason: string) => {
-      deferred.push([issue, reason]);
-    };
+    const onDeferred = (issue: number, reason: string) => void deferred.push([issue, reason]);
     await expect(
       preflightQueuedIssue(
         { number: 9, labels: [] },

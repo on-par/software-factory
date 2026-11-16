@@ -36,10 +36,7 @@ describe('ci-pending drafts (#3968)', () => {
 
   it('adopts a draft PR whose trusted run state is ci-pending without a CI watch', async () => {
     const watched: string[] = [];
-    const watch = async (sha: string) => {
-      watched.push(sha);
-      return 'success' as const;
-    };
+    const watch = async (sha: string) => (watched.push(sha), 'success' as const);
     await expect(
       run({
         getLandState: async () => ({ isDraft: true, mergeStateStatus: 'BLOCKED' }),
@@ -68,10 +65,7 @@ describe('ci-pending drafts (#3968)', () => {
     );
     await expect(run({ getLandState })).resolves.toEqual(parked);
     const checked: unknown[] = [];
-    const ciPendingDraft = async () => {
-      checked.push(true);
-      return true;
-    };
+    const ciPendingDraft = async () => checked.push(true) > 0;
     await expect(run({ getLandState: async () => ({ isDraft: undefined }), ciPendingDraft })).resolves.toEqual(parked);
     expect(checked).toEqual([]);
   });

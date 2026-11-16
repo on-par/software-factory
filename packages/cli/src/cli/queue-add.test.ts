@@ -10,10 +10,7 @@ function opsOctokit() {
   const addedArgs: any[] = [];
   const issues = {
     createLabel: vi.fn(async () => ({})),
-    addLabels: async (arg: any) => {
-      addedArgs.push(arg);
-      return {};
-    },
+    addLabels: async (arg: any) => (addedArgs.push(arg), {}),
     removeLabel: vi.fn(async () => ({})),
     listForRepo: vi.fn(async () => ({
       data: [

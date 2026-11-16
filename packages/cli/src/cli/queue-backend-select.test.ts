@@ -23,11 +23,7 @@ const githubOptions = (): GithubQueueBackendOptions => ({
 
 function select(tracker: unknown, env: Record<string, string | undefined>, ghRepo = 'o/r') {
   const builds: GithubQueueBackendOptions[] = [];
-  const github = () => {
-    const options = githubOptions();
-    builds.push(options);
-    return options;
-  };
+  const github = () => (builds.push(githubOptions()), builds[builds.length - 1]!);
   const run = () =>
     selectQueueBackend({
       factoryConfig: tracker === undefined ? {} : { tracker: tracker as never },

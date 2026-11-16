@@ -7,31 +7,17 @@ import { errored, h, installCliCommandsHarness, logged, paths, runMain } from '.
 
 installCliCommandsHarness();
 
-const logCall =
-  (bucket: unknown[], answer: unknown = {}) =>
-  async (req: unknown) => {
-    bucket.push(req);
-    return answer;
-  };
-
 describe('cli commands (via main dispatch)', () => {
   describe('queue migrate', () => {
-    let created: any[];
-    let added: any[];
-    let gets: any[];
-
     beforeEach(() => {
-      created = [];
-      added = [];
-      gets = [];
       h.execImpl = (cmd: string) => {
         if (cmd.includes('rev-parse')) return h.repoRoot;
         if (cmd.includes('gh repo view')) return h.ghRepo;
         return '';
       };
-      h.octokit.rest.issues.createLabel = logCall(created, {});
-      h.octokit.rest.issues.addLabels = logCall(added, {});
-      h.octokit.rest.issues.get = logCall(gets, { data: { title: 'Fix the bug' } });
+      h.octokit.rest.issues.createLabel = h.record();
+      h.octokit.rest.issues.addLabels = h.record();
+      h.octokit.rest.issues.get = h.record({ data: { title: 'Fix the bug' } });
     });
 
     it('migrates valid local queue entries in per-lane order without rewriting the source queue', async () => {
@@ -43,12 +29,12 @@ describe('cli commands (via main dispatch)', () => {
       expect(res.exited).toBe(false);
       expect(readFileSync(paths().queue, 'utf-8')).toBe(source);
       expect(logged()).toContain('queue migrated — 3 issue(s)');
-      expect(added.map((a) => [a.issue_number, a.labels])).toEqual([
+      expect(h.octokit.rest.issues.addLabels.calls.map((a: any) => [a.issue_number, a.labels])).toEqual([
         [1055, ['factory:queued', 'factory:lane:daw', 'factory:order:1']],
         [200, ['factory:queued', 'factory:lane:docs', 'factory:order:1']],
         [993, ['factory:queued', 'factory:lane:daw', 'factory:order:2']],
       ]);
-      expect(created.length).toBeGreaterThan(0);
+      expect(h.octokit.rest.issues.createLabel.calls.length).toBeGreaterThan(0);
     });
 
     it('rejects a missing local queue before creating or applying labels', async () => {
@@ -56,8 +42,8 @@ describe('cli commands (via main dispatch)', () => {
 
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('queue not found');
-      expect(created).toEqual([]);
-      expect(added).toEqual([]);
+      expect(h.octokit.rest.issues.createLabel.calls).toEqual([]);
+      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
     });
 
     it('rejects an invalid local queue before creating or applying labels', async () => {
@@ -67,8 +53,8 @@ describe('cli commands (via main dispatch)', () => {
 
       expect(res).toEqual({ exited: true, code: 1 });
       expect(errored()).toContain('queue is invalid');
-      expect(created).toEqual([]);
-      expect(added).toEqual([]);
+      expect(h.octokit.rest.issues.createLabel.calls).toEqual([]);
+      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
     });
 
     it('rejects a queue with a duplicate issue number before any GitHub call', async () => {
@@ -78,8 +64,8 @@ describe('cli commands (via main dispatch)', () => {
 
       expect(res).toEqual({ exited: true, code: 1 });
       expect(errored()).toContain('duplicate issue #1055');
-      expect(gets).toEqual([]);
-      expect(added).toEqual([]);
+      expect(h.octokit.rest.issues.get.calls).toEqual([]);
+      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
     });
 
     it('rejects an empty queue with no issue entries', async () => {
@@ -89,7 +75,7 @@ describe('cli commands (via main dispatch)', () => {
 
       expect(res).toEqual({ exited: true, code: 1 });
       expect(errored()).toContain('no issue entries');
-      expect(added).toEqual([]);
+      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
     });
 
     it('aborts the whole migration when an entry is a pull request, not an issue', async () => {
@@ -100,7 +86,7 @@ describe('cli commands (via main dispatch)', () => {
 
       expect(res).toEqual({ exited: true, code: 1 });
       expect(errored()).toContain('is a pull request');
-      expect(added).toEqual([]);
+      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
     });
 
     it('previews the migration plan without mutating GitHub in --dry-run', async () => {
@@ -112,8 +98,8 @@ describe('cli commands (via main dispatch)', () => {
       expect(res.exited).toBe(false);
       expect(logged()).toContain('dry run');
       expect(logged()).toContain('#1055 → lane daw, position 1');
-      expect(added).toEqual([]);
-      expect(created).toEqual([]);
+      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
+      expect(h.octokit.rest.issues.createLabel.calls).toEqual([]);
       expect(readFileSync(paths().queue, 'utf-8')).toBe(source);
     });
 
@@ -125,7 +111,7 @@ describe('cli commands (via main dispatch)', () => {
 
       expect(res).toEqual({ exited: true, code: 1 });
       expect(errored()).toContain('closed');
-      expect(added).toEqual([]);
+      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
     });
 
     it('aborts the whole migration when an entry is inaccessible', async () => {
@@ -138,7 +124,7 @@ describe('cli commands (via main dispatch)', () => {
 
       expect(res).toEqual({ exited: true, code: 1 });
       expect(errored()).toContain('inaccessible');
-      expect(added).toEqual([]);
+      expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
     });
 
     it('surfaces a GitHub failure during apply as a CliExitError', async () => {
