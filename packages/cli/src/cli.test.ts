@@ -250,16 +250,13 @@ describe('cli', () => {
 
     it('does nothing when the proxy feature is disabled', async () => {
       const events: any[] = [];
-      const proxyCalls: unknown[] = [];
-      const createProxy = (opts: unknown) => proxyCalls.push(opts) && (undefined as any);
-      const result = await startLaneProxy(
-        paths,
-        { ...settings, enabled: false },
-        { createProxy, emitEvent: (...args: any[]) => events.push(args) },
-      );
+      const createProxy = (): never => {
+        throw new Error('createProxy must not run when disabled');
+      };
+      const emitEvent = (...args: any[]) => events.push(args);
+      const result = await startLaneProxy(paths, { ...settings, enabled: false }, { createProxy, emitEvent });
 
       expect(result.proxy).toBeUndefined();
-      expect(proxyCalls).toEqual([]);
       expect(events).toHaveLength(0);
     });
 
