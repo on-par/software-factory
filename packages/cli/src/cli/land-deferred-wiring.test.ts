@@ -3,7 +3,7 @@
 import { getFactoryPaths, type FactoryConfig } from '@on-par/factory-core';
 import { landDeferredFile, readLandDeferred } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { landDeferredLaneDeps } from './land-deferred-wiring.js';
 import { LandDeferredError } from './land-pr.js';
@@ -34,8 +34,9 @@ describe('landDeferredLaneDeps (#3957)', () => {
 
   it('a retry with nothing due takes the slot once and calls nothing', async () => {
     const { deps } = wiring(3);
-    const emit = vi.fn();
-    await deps.retryLandDeferred?.({ park: vi.fn(), emit });
-    expect(emit).not.toHaveBeenCalled();
+    const emitted: unknown[] = [];
+    const emit = (...a: unknown[]) => void emitted.push(a);
+    await deps.retryLandDeferred?.({ park: async () => {}, emit });
+    expect(emitted).toEqual([]);
   });
 });

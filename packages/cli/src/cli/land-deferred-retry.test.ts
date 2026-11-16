@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { readLandDeferred, upsertLandDeferred, type LandDeferredRecord } from '@on-par/factory-core/internal';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import './index.js';
 import { waitForMerge } from './land.js';
@@ -68,7 +68,11 @@ describe('retryDueLandDeferred (#3957)', () => {
   it('a due retry lands with syncMain and holdsLandingSlot and clears the record without shipping', async () => {
     const dir = dirs.makeSync('land-deferred-wfm-');
     const paths: any = { config: join(dir, 'config.yaml'), events: join(dir, 'e.ndjson'), stop: join(dir, 'STOP') };
-    const land = vi.fn(async () => ({ branch: 'factory/5-x', prNumber: 50 }));
+    const lands: unknown[][] = [];
+    const land = async (...a: unknown[]) => {
+      lands.push(a);
+      return { branch: 'factory/5-x', prNumber: 50 };
+    };
     const real = (r: LandDeferredRecord) =>
       waitForMerge(r.issue, r.branch, '/repo', 'o/r', paths, {
         landBranch: r.branch,
@@ -98,21 +102,22 @@ describe('retryDueLandDeferred (#3957)', () => {
       });
     const { file, deps, events } = await setup([rec(5)], real);
     await retryDueLandDeferred(deps);
-    expect(land).toHaveBeenCalledTimes(1);
-    expect(land.mock.calls[0]).toEqual([
-      5,
-      '/repo',
-      'o/r',
-      paths,
-      expect.anything(),
-      expect.anything(),
-      undefined,
-      expect.objectContaining({
-        branch: 'factory/5-x',
-        syncMain: true,
-        holdsLandingSlot: true,
-        enforceRisk: true,
-      }),
+    expect(lands).toEqual([
+      [
+        5,
+        '/repo',
+        'o/r',
+        paths,
+        expect.anything(),
+        expect.anything(),
+        undefined,
+        expect.objectContaining({
+          branch: 'factory/5-x',
+          syncMain: true,
+          holdsLandingSlot: true,
+          enforceRisk: true,
+        }),
+      ],
     ]);
     expect(await readLandDeferred(file)).toEqual([]);
     expect(events).toEqual([
@@ -136,10 +141,11 @@ describe('retryDueLandDeferred (#3957)', () => {
   });
 
   it('a record not yet due is left alone', async () => {
-    const land = vi.fn(async () => {});
-    const { deps, file } = await setup([rec(3, { nextRetryAt: NOW + MIN })], land);
+    const land = async () => Promise.reject(new Error('land must not run'));
+    const { deps, file, events, parks } = await setup([rec(3, { nextRetryAt: NOW + MIN })], land);
     await retryDueLandDeferred(deps);
-    expect(land).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+    expect(parks).toEqual([]);
     expect(await readLandDeferred(file)).toHaveLength(1);
   });
 

@@ -16,8 +16,12 @@ describe('land leaves a decomposed parent alone (#3834)', () => {
   let repoRoot = '';
   let octokit: any;
   let logSpy: ReturnType<typeof vi.spyOn>;
+  let out: string[];
+  let parentTouches: string[];
 
   beforeEach(() => {
+    out = [];
+    parentTouches = [];
     repoRoot = tmp.makeSync('factory-cli-');
     mkdirSync(join(repoRoot, '.git', 'info'), { recursive: true });
     mkdirSync(join(repoRoot, '.factory', 'state', 'plans'), { recursive: true });
@@ -26,16 +30,18 @@ describe('land leaves a decomposed parent alone (#3834)', () => {
     octokit = {
       rest: {
         issues: {
-          get: vi.fn(async ({ issue_number }: any) => ({
-            data:
-              issue_number === 40
-                ? { title: 'Parent', body: '## Acceptance criteria\n- [ ] one\n- [ ] two\n' }
-                : { title: 'Fix the bug', body: childBody },
-          })),
+          get: vi.fn(async ({ issue_number }: any) => {
+            if (issue_number !== 40) return { data: { title: 'Fix the bug', body: childBody } };
+            parentTouches.push('get');
+            return { data: { title: 'Parent', body: '## Acceptance criteria\n- [ ] one\n- [ ] two\n' } };
+          }),
           listForRepo: vi.fn(async () => ({ data: [] })),
           listLabelsOnIssue: vi.fn(async () => ({ data: [] })),
           listComments: vi.fn(async () => ({ data: [] })),
-          createComment: vi.fn(async () => ({ data: { id: 1 } })),
+          createComment: vi.fn(async ({ issue_number }: any) => {
+            if (issue_number === 40) parentTouches.push('comment');
+            return { data: { id: 1 } };
+          }),
         },
         users: { getAuthenticated: vi.fn(async () => ({ data: { id: 7 } })) },
         pulls: {
@@ -55,16 +61,17 @@ describe('land leaves a decomposed parent alone (#3834)', () => {
         checks: { listForRef: vi.fn(async () => ({ data: { check_runs: [] } })) },
         search: { issuesAndPullRequests: vi.fn(async () => ({ data: { items: [] } })) },
       },
-      request: vi.fn(async () => ({
-        data: [{ number: 5, body: childBody, state: 'closed', state_reason: 'completed' }],
-      })),
+      request: vi.fn(async () => {
+        parentTouches.push('request');
+        return { data: [{ number: 5, body: childBody, state: 'closed', state_reason: 'completed' }] };
+      }),
       graphql: vi.fn(async (query: string) =>
         query.trimStart().startsWith('query')
           ? { repository: { pullRequest: { id: 'PR_ID', isDraft: false, mergeStateStatus: 'CLEAN' } } }
           : {},
       ),
     };
-    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    logSpy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => void out.push(a.join(' ')));
   });
 
   afterEach(async () => {
@@ -108,11 +115,8 @@ describe('land leaves a decomposed parent alone (#3834)', () => {
 
   it('lands a child with a Covers parent criteria line without reading or writing the parent', async () => {
     await runLand();
-    expect(logSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n')).toContain('Landed PR #77');
+    expect(out.join('\n')).toContain('Landed PR #77');
     expect(process.exitCode).toBeUndefined();
-    const parentCall = (call: unknown[]): boolean => (call[0] as { issue_number?: number }).issue_number === 40;
-    expect(octokit.rest.issues.createComment.mock.calls.filter(parentCall)).toEqual([]);
-    expect(octokit.rest.issues.get.mock.calls.filter(parentCall)).toEqual([]);
-    expect(octokit.request).not.toHaveBeenCalled();
+    expect(parentTouches).toEqual([]);
   });
 });

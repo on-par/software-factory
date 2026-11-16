@@ -1,5 +1,5 @@
 import { createFakeGitHub } from '@on-par/factory-core/testing';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import './index.js';
 import { isLandLeftOpen, landOpenPullRequest } from './land-pr.js';
@@ -22,7 +22,7 @@ function setup(body: string, statusesBySha: Record<string, unknown[]>) {
     ['POST /graphql', () => ({ data: { repository: { pullRequest: { mergeStateStatus: 'CLEAN' } } } })],
   ]);
   const merges = () => github.requests.filter((r) => r.method === 'PUT' && r.path === '/repos/o/r/pulls/2/merge');
-  const log = vi.fn();
+  const logs: Array<[string, string]> = [];
   const land = () =>
     landOpenPullRequest({
       octokit: github.octokit,
@@ -34,24 +34,24 @@ function setup(body: string, statusesBySha: Record<string, unknown[]>) {
       branch: 'b',
       worktree: '/w',
       prNumber: 2,
-      log,
+      log: (kind: string, msg: string) => void logs.push([kind, msg]),
       skipCI: true,
       adminMerge: false,
       sleep: async () => {},
-      run: vi.fn(),
+      run: async () => ({ stdout: '' }),
       behindProbe: async () => false,
     });
-  return { land, merges, log };
+  return { land, merges, logs };
 }
 
 describe('landOpenPullRequest: UI visual proof (#2232)', () => {
   it('leaves the PR open when visual proof is for an older head', async () => {
-    const { land, merges, log } = setup(MARKED, { oldhead: [status(77)] });
+    const { land, merges, logs } = setup(MARKED, { oldhead: [status(77)] });
     const err = await land().catch((e: unknown) => e);
     expect(isLandLeftOpen(err)).toBe(true);
     expect(err).toMatchObject({ name: 'VisualProofMissingError', prNumber: 2 });
     expect(merges()).toEqual([]);
-    expect(log).toHaveBeenCalledWith('land', expect.stringContaining('re-run SHIP (factory resume --from ship)'));
+    expect(logs).toContainEqual(['land', expect.stringContaining('re-run SHIP (factory resume --from ship)')]);
   });
 
   it('leaves the PR open when the status was not created by the factory', async () => {
