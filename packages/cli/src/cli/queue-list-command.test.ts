@@ -4,6 +4,11 @@ import { errored, h, installCliCommandsHarness, logged, runMain } from './test-s
 
 installCliCommandsHarness();
 
+const sink =
+  (store: unknown[], reply: unknown = {}) =>
+  (call: unknown) =>
+    Promise.resolve(store.push(call) && reply);
+
 describe('cli commands (via main dispatch)', () => {
   describe('queue list', () => {
     const issue = (number: number, labels: string[], title?: string) => ({
@@ -12,15 +17,24 @@ describe('cli commands (via main dispatch)', () => {
       labels,
     });
 
+    let added: any[];
+    let removed: any[];
+    let created: any[];
+    let listed: any[];
+
     beforeEach(() => {
+      added = [];
+      removed = [];
+      created = [];
+      listed = [];
       h.execImpl = (cmd: string) => {
         if (cmd.includes('rev-parse')) return h.repoRoot;
         if (cmd.includes('gh repo view')) return h.ghRepo;
         return '';
       };
-      h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
-      h.octokit.rest.issues.removeLabel = vi.fn(async () => ({}));
-      h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
+      h.octokit.rest.issues.addLabels = sink(added, {});
+      h.octokit.rest.issues.removeLabel = sink(removed, {});
+      h.octokit.rest.issues.createLabel = sink(created, {});
     });
 
     const twoLanes = (): void => {
@@ -53,9 +67,9 @@ describe('cli commands (via main dispatch)', () => {
         ],
         orderConflicts: [],
       });
-      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
-      expect(h.octokit.rest.issues.removeLabel).not.toHaveBeenCalled();
-      expect(h.octokit.rest.issues.createLabel).not.toHaveBeenCalled();
+      expect(added).toEqual([]);
+      expect(removed).toEqual([]);
+      expect(created).toEqual([]);
     });
 
     it('--lane returns only that lane', async () => {
@@ -122,14 +136,14 @@ describe('cli commands (via main dispatch)', () => {
     });
 
     it('exits 2 without --json and makes no GitHub call', async () => {
-      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listForRepo = sink(listed, { data: [] });
 
       const res = await runMain('queue', 'list');
 
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('requires --json');
       expect(logged()).toBe('');
-      expect(h.octokit.rest.issues.listForRepo).not.toHaveBeenCalled();
+      expect(listed).toEqual([]);
     });
   });
 });

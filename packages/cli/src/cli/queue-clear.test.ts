@@ -1,7 +1,7 @@
 // packages/cli/src/cli/queue-clear.test.ts — `factory queue clear` preview and exit codes (#1693).
 
 import type { QueueClearPreview, QueueClearResult } from '@on-par/factory-core/internal';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { formatQueueClearPreview, formatQueueClearResult, runQueueClear } from './queue-clear.js';
 
@@ -98,14 +98,24 @@ describe('runQueueClear', () => {
   });
 
   it('--yes clears via clear() and exits 0', async () => {
-    const clearSpy = vi.fn(clear);
-    const previewSpy = vi.fn(previewClear);
-    const res = await runQueueClear({ previewClear: previewSpy, clear: clearSpy, yes: true });
+    let clears = 0;
+    let previews = 0;
+    const res = await runQueueClear({
+      previewClear: async () => {
+        previews += 1;
+        return previewClear();
+      },
+      clear: async () => {
+        clears += 1;
+        return clear();
+      },
+      yes: true,
+    });
     expect(res.exitCode).toBe(0);
     expect(res.message).toBeUndefined();
     expect(res.report).toContain(formatQueueClearResult(result));
-    expect(clearSpy).toHaveBeenCalledOnce();
-    expect(previewSpy).not.toHaveBeenCalled();
+    expect(clears).toBe(1);
+    expect(previews).toBe(0);
   });
 
   it('--yes exits 1 after printing every line when an issue failed', async () => {
@@ -121,10 +131,18 @@ describe('runQueueClear', () => {
   });
 
   it('--dry-run with --yes previews and never calls clear()', async () => {
-    const clearSpy = vi.fn(clear);
-    const res = await runQueueClear({ previewClear, clear: clearSpy, dryRun: true, yes: true });
+    let clears = 0;
+    const res = await runQueueClear({
+      previewClear,
+      clear: async () => {
+        clears += 1;
+        return clear();
+      },
+      dryRun: true,
+      yes: true,
+    });
     expect(res.report).toContain('dry run');
-    expect(clearSpy).not.toHaveBeenCalled();
+    expect(clears).toBe(0);
   });
 
   it.each([{}, { dryRun: true }, { yes: true }])('reports an empty queue with exit 0 (%j)', async (flags) => {

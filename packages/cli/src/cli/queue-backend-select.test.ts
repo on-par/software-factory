@@ -1,6 +1,6 @@
 // packages/cli/src/cli/queue-backend-select.test.ts — queue backend selection from tracker.kind (#3918)
 import type { GithubQueueBackendOptions } from '@on-par/factory-core/internal';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { CliExitError } from './errors.js';
 import { selectQueueBackend } from './queue-backend-select.js';
@@ -22,7 +22,12 @@ const githubOptions = (): GithubQueueBackendOptions => ({
 });
 
 function select(tracker: unknown, env: Record<string, string | undefined>, ghRepo = 'o/r') {
-  const github = vi.fn(githubOptions);
+  const builds: GithubQueueBackendOptions[] = [];
+  const github = () => {
+    const options = githubOptions();
+    builds.push(options);
+    return options;
+  };
   const run = () =>
     selectQueueBackend({
       factoryConfig: tracker === undefined ? {} : { tracker: tracker as never },
@@ -31,14 +36,14 @@ function select(tracker: unknown, env: Record<string, string | undefined>, ghRep
       github,
       warn: () => undefined,
     });
-  return { github, run };
+  return { builds, run };
 }
 
 describe('selectQueueBackend', () => {
   it('selects the GitHub backend when the config has no tracker key', () => {
-    const { github, run } = select(undefined, {});
+    const { builds, run } = select(undefined, {});
     expect(run().kind).toBe('github');
-    expect(github).toHaveBeenCalledTimes(1);
+    expect(builds).toHaveLength(1);
   });
 
   it('selects the GitHub backend when tracker.kind is github', () => {
@@ -47,11 +52,11 @@ describe('selectQueueBackend', () => {
   });
 
   it('selects the Linear backend without building GitHub options', async () => {
-    const { github, run } = select(linearTracker, { LINEAR_API_KEY: 'lin_key' });
+    const { builds, run } = select(linearTracker, { LINEAR_API_KEY: 'lin_key' });
     const selected = run();
     expect(selected.kind).toBe('linear');
     expect(await selected.backend.pollBlockedParks()).toEqual([]);
-    expect(github).not.toHaveBeenCalled();
+    expect(builds).toEqual([]);
   });
 
   it('throws a CliExitError naming LINEAR_API_KEY when the key is missing', () => {

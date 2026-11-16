@@ -2,7 +2,7 @@
 
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { HELP_GROUPS, OTHER_GROUP } from './help-groups.js';
 import { PROGRAM_HANDLERS } from './index.js';
 import { buildProgram } from './program.js';
@@ -13,6 +13,12 @@ import { registerRunWorkCommands } from './program-run-work.js';
 import { registerSetupCommands } from './program-setup.js';
 
 const countCommands = (cmd: Command): number => cmd.commands.reduce((n, c) => n + 1 + countCommands(c), 0);
+
+const recordArgs =
+  (into: unknown[][]) =>
+  async (...args: unknown[]) => {
+    into.push(args);
+  };
 
 describe('buildProgram', () => {
   it('buildProgram registers 67 commands', () => {
@@ -64,7 +70,8 @@ describe('buildProgram', () => {
   });
 
   it('draft passes --text and --json to cmdDraft (#3171)', async () => {
-    const cmdDraft = vi.fn(async () => {});
+    const cmdDraftCalls: unknown[][] = [];
+    const cmdDraft = recordArgs(cmdDraftCalls);
     await buildProgram({ ...PROGRAM_HANDLERS, cmdDraft }, {}).parseAsync([
       'node',
       'factory',
@@ -73,13 +80,16 @@ describe('buildProgram', () => {
       'x',
       '--json',
     ]);
-    expect(cmdDraft).toHaveBeenCalledWith({ text: 'x', json: true }, expect.anything());
+    expect(cmdDraftCalls[0]?.[0]).toEqual({ text: 'x', json: true });
   });
 
   it('run-issue, run-brief and ship register --base-branch and pass it to their handlers (#3764)', async () => {
-    const cmdShip = vi.fn(async () => undefined);
-    const cmdRunIssue = vi.fn(async () => {});
-    const cmdRunBrief = vi.fn(async () => {});
+    const cmdShipCalls: unknown[][] = [];
+    const cmdShip = recordArgs(cmdShipCalls);
+    const cmdRunIssueCalls: unknown[][] = [];
+    const cmdRunIssue = recordArgs(cmdRunIssueCalls);
+    const cmdRunBriefCalls: unknown[][] = [];
+    const cmdRunBrief = recordArgs(cmdRunBriefCalls);
     const handlers = { ...PROGRAM_HANDLERS, cmdShip, cmdRunIssue, cmdRunBrief };
     for (const name of ['ship', 'run-issue', 'run-brief']) {
       const cmd = buildProgram(handlers, {}).commands.find((c) => c.name() === name);
@@ -89,14 +99,16 @@ describe('buildProgram', () => {
     await parse(['ship', '5', '--base-branch', 'feat/x']);
     await parse(['run-issue', '5', '--base-branch', 'feat/x']);
     await parse(['run-brief', 'a.md', '--base-branch', 'feat/x']);
-    expect(cmdShip).toHaveBeenCalledWith(5, expect.objectContaining({ baseBranch: 'feat/x' }));
-    expect(cmdRunIssue).toHaveBeenCalledWith(5, expect.objectContaining({ baseBranch: 'feat/x' }));
-    expect(cmdRunBrief).toHaveBeenCalledWith(['a.md'], expect.objectContaining({ baseBranch: 'feat/x' }));
+    expect(cmdShipCalls[0]).toMatchObject([5, { baseBranch: 'feat/x' }]);
+    expect(cmdRunIssueCalls[0]).toMatchObject([5, { baseBranch: 'feat/x' }]);
+    expect(cmdRunBriefCalls[0]).toMatchObject([['a.md'], { baseBranch: 'feat/x' }]);
   });
 
   it('run-issue and run-brief register --merge, --merge-timeout and --admin (#3905)', async () => {
-    const cmdRunIssue = vi.fn(async () => {});
-    const cmdRunBrief = vi.fn(async () => {});
+    const cmdRunIssueCalls: unknown[][] = [];
+    const cmdRunIssue = recordArgs(cmdRunIssueCalls);
+    const cmdRunBriefCalls: unknown[][] = [];
+    const cmdRunBrief = recordArgs(cmdRunBriefCalls);
     const handlers = { ...PROGRAM_HANDLERS, cmdRunIssue, cmdRunBrief };
     for (const name of ['run-issue', 'run-brief']) {
       const cmd = buildProgram(handlers, {}).commands.find((c) => c.name() === name);
@@ -107,17 +119,17 @@ describe('buildProgram', () => {
     const parse = (args: string[]) => buildProgram(handlers, {}).parseAsync(['node', 'factory', ...args]);
     await parse(['run-issue', '5', '--merge', '--merge-timeout', '30m', '--admin']);
     await parse(['run-brief', 'a.md', '--merge']);
-    expect(cmdRunIssue).toHaveBeenCalledWith(
-      5,
-      expect.objectContaining({ merge: true, mergeTimeout: '30m', admin: true }),
-    );
-    expect(cmdRunBrief).toHaveBeenCalledWith(['a.md'], expect.objectContaining({ merge: true }));
+    expect(cmdRunIssueCalls[0]).toMatchObject([5, { merge: true, mergeTimeout: '30m', admin: true }]);
+    expect(cmdRunBriefCalls[0]).toMatchObject([['a.md'], { merge: true }]);
   });
 
   it('ship, run-issue and run-brief register --json and --export (#3907)', async () => {
-    const cmdShip = vi.fn(async () => {});
-    const cmdRunIssue = vi.fn(async () => {});
-    const cmdRunBrief = vi.fn(async () => {});
+    const cmdShipCalls: unknown[][] = [];
+    const cmdShip = recordArgs(cmdShipCalls);
+    const cmdRunIssueCalls: unknown[][] = [];
+    const cmdRunIssue = recordArgs(cmdRunIssueCalls);
+    const cmdRunBriefCalls: unknown[][] = [];
+    const cmdRunBrief = recordArgs(cmdRunBriefCalls);
     const handlers = { ...PROGRAM_HANDLERS, cmdShip, cmdRunIssue, cmdRunBrief };
     for (const name of ['ship', 'run-issue', 'run-brief']) {
       const cmd = buildProgram(handlers, {}).commands.find((c) => c.name() === name);
@@ -129,18 +141,19 @@ describe('buildProgram', () => {
     await parse(['ship', '5', '--json', '--export', '/out']);
     await parse(['run-issue', '5', '--json']);
     await parse(['run-brief', 'a.md', '--export', '/out']);
-    expect(cmdShip).toHaveBeenCalledWith(5, expect.objectContaining({ json: true, export: '/out' }));
-    expect(cmdRunIssue).toHaveBeenCalledWith(5, expect.objectContaining({ json: true }));
-    expect(cmdRunBrief).toHaveBeenCalledWith(['a.md'], expect.objectContaining({ export: '/out' }));
+    expect(cmdShipCalls[0]).toMatchObject([5, { json: true, export: '/out' }]);
+    expect(cmdRunIssueCalls[0]).toMatchObject([5, { json: true }]);
+    expect(cmdRunBriefCalls[0]).toMatchObject([['a.md'], { export: '/out' }]);
   });
 
   it('unpark registers --keep-order and passes keepOrder to cmdUnpark (#3554)', async () => {
-    const cmdUnpark = vi.fn(async () => {});
+    const cmdUnparkCalls: unknown[][] = [];
+    const cmdUnpark = recordArgs(cmdUnparkCalls);
     const handlers = { ...PROGRAM_HANDLERS, cmdUnpark };
     const unpark = buildProgram(handlers, {}).commands.find((c) => c.name() === 'unpark');
     expect(unpark?.options.some((o) => o.long === '--keep-order')).toBe(true);
     await buildProgram(handlers, {}).parseAsync(['node', 'factory', 'unpark', '12', '--keep-order']);
-    expect(cmdUnpark).toHaveBeenCalledWith('12', expect.objectContaining({ keepOrder: true }));
+    expect(cmdUnparkCalls[0]).toMatchObject(['12', { keepOrder: true }]);
   });
 
   it('does not register the hosted command', () => {

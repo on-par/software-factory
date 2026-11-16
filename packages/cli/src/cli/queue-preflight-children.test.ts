@@ -1,5 +1,5 @@
 import type { StackPullReviews } from '@on-par/factory-core/internal';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createQueuePreflightOps, preflightQueuedIssue } from './index.js';
 
 describe('queue prerequisite sub-issue evidence (#3703)', () => {
@@ -56,26 +56,33 @@ describe('queue prerequisite sub-issue evidence (#3703)', () => {
   });
 
   it('rejects a prerequisite that changes state between pages', async () => {
-    const graphql = vi
-      .fn()
-      .mockResolvedValueOnce({
+    const responses = [
+      {
         repository: {
           issue: {
             state: 'CLOSED',
             closedByPullRequestsReferences: { nodes: [], pageInfo: { hasNextPage: true, endCursor: 'next' } },
           },
         },
-      })
-      .mockResolvedValueOnce({ repository: { issue: { state: 'OPEN' } } });
+      },
+      { repository: { issue: { state: 'OPEN' } } },
+    ];
+    const variables: any[] = [];
+    const graphql = async (_query: string, input: unknown) => {
+      variables.push(input);
+      return responses.shift();
+    };
     const ops = createQueuePreflightOps({ graphql } as never, 'o', 'r');
     await expect(ops.getPrerequisiteState(2)).rejects.toThrow('prerequisite #2 state changed during pagination');
-    expect(graphql).toHaveBeenCalledTimes(2);
+    expect(variables.map((v) => v.after)).toEqual([null, 'next']);
   });
 
   it('parks a linked PR when watching its CI fails', async () => {
-    const watch = vi.fn(async () => {
+    const watched: string[] = [];
+    const watch = async (sha: string): Promise<never> => {
+      watched.push(sha);
       throw new Error('CI unavailable');
-    });
+    };
     await expect(
       preflightQueuedIssue(
         { number: 7, labels: [] },
@@ -91,12 +98,14 @@ describe('queue prerequisite sub-issue evidence (#3703)', () => {
         },
       ),
     ).resolves.toEqual({ kind: 'park', reason: 'CI watch for PR #71 failed: CI unavailable' });
-    expect(watch).toHaveBeenCalledWith('abc');
+    expect(watched).toEqual(['abc']);
   });
 
   const childOps = (reason: string | undefined, children: unknown, parentPrs: unknown[] = []) => {
-    const graphql = vi.fn(async (query: string, _input: unknown) =>
-      query.includes('QueuePrerequisiteChildren')
+    const queries: string[] = [];
+    const graphql = async (query: string, _input: unknown) => {
+      queries.push(query);
+      return query.includes('QueuePrerequisiteChildren')
         ? { repository: { issue: { subIssues: children } } }
         : {
             repository: {
@@ -106,10 +115,10 @@ describe('queue prerequisite sub-issue evidence (#3703)', () => {
                 closedByPullRequestsReferences: { nodes: parentPrs, pageInfo: { hasNextPage: false, endCursor: null } },
               },
             },
-          },
-    );
+          };
+    };
     const octokit: any = { rest: { issues: { get: async () => ({ data: { number: 5, body: '' } }) } }, graphql };
-    return { ops: createQueuePreflightOps(octokit, 'o', 'r'), graphql };
+    return { ops: createQueuePreflightOps(octokit, 'o', 'r'), queries };
   };
   const child = (state: string, merged: boolean[]) => ({
     number: 1,
@@ -119,13 +128,13 @@ describe('queue prerequisite sub-issue evidence (#3703)', () => {
   const page = (nodes: unknown[], hasNextPage = false) => ({ nodes, pageInfo: { hasNextPage } });
 
   it('reports mergedViaChildren for a completed parent whose sub-issues all have merged closing PRs', async () => {
-    const { ops, graphql } = childOps('COMPLETED', page([child('CLOSED', [false, true]), child('CLOSED', [true])]));
+    const { ops, queries } = childOps('COMPLETED', page([child('CLOSED', [false, true]), child('CLOSED', [true])]));
     await expect(ops.getPrerequisiteState(5)).resolves.toEqual({
       state: 'closed',
       mergedClosingPr: false,
       mergedViaChildren: true,
     });
-    expect(graphql).toHaveBeenCalledTimes(2);
+    expect(queries).toHaveLength(2);
   });
 
   it('keeps closed-unmerged evidence for not_planned, childless, and partially merged children', async () => {
@@ -139,10 +148,10 @@ describe('queue prerequisite sub-issue evidence (#3703)', () => {
       ['COMPLETED', page([child('CLOSED', [true])], true)],
     ];
     for (const [reason, children] of cases) {
-      const { ops, graphql } = childOps(reason, children);
+      const { ops, queries } = childOps(reason, children);
       const evidence = await ops.getPrerequisiteState(5);
       expect(evidence.mergedViaChildren).not.toBe(true);
-      if (reason !== 'COMPLETED') expect(graphql).toHaveBeenCalledTimes(1);
+      if (reason !== 'COMPLETED') expect(queries).toHaveLength(1);
       await expect(
         preflightQueuedIssue(
           { number: 9, labels: [] },
@@ -166,7 +175,10 @@ describe('queue prerequisite sub-issue evidence (#3703)', () => {
       await expect(ops.getPrerequisiteState(5)).rejects.toThrow('sub-issue evidence was malformed');
     }
     const { ops } = childOps('COMPLETED', undefined);
-    const onDeferred = vi.fn();
+    const deferred: Array<[number, string]> = [];
+    const onDeferred = (issue: number, reason: string) => {
+      deferred.push([issue, reason]);
+    };
     await expect(
       preflightQueuedIssue(
         { number: 9, labels: [] },
@@ -178,6 +190,6 @@ describe('queue prerequisite sub-issue evidence (#3703)', () => {
         },
       ),
     ).resolves.toEqual({ kind: 'defer' });
-    expect(onDeferred).toHaveBeenCalledWith(9, expect.stringContaining('prerequisite evidence lookup failed'));
+    expect(deferred).toContainEqual([9, expect.stringContaining('prerequisite evidence lookup failed')]);
   });
 });
