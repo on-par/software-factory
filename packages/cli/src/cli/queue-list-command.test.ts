@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { errored, h, installCliCommandsHarness, logged, runMain } from './test-support/cli-commands-harness.js';
+import { record } from './test-support/call-recorder.js';
 
 installCliCommandsHarness();
 
@@ -18,9 +19,9 @@ describe('cli commands (via main dispatch)', () => {
         if (cmd.includes('gh repo view')) return h.ghRepo;
         return '';
       };
-      h.octokit.rest.issues.addLabels = h.record();
-      h.octokit.rest.issues.removeLabel = h.record();
-      h.octokit.rest.issues.createLabel = h.record();
+      h.octokit.rest.issues.addLabels = record();
+      h.octokit.rest.issues.removeLabel = record();
+      h.octokit.rest.issues.createLabel = record();
     });
 
     const twoLanes = (): void => {
@@ -122,7 +123,7 @@ describe('cli commands (via main dispatch)', () => {
     });
 
     it('exits 2 without --json and makes no GitHub call', async () => {
-      h.octokit.rest.issues.listForRepo = h.record({ data: [] });
+      h.octokit.rest.issues.listForRepo = record({ data: [] });
 
       const res = await runMain('queue', 'list');
 

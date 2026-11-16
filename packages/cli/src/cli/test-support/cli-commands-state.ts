@@ -9,6 +9,7 @@ import type { CliDeps } from '../index.js';
 
 import { checkInPlaceCheckout, setupInPlaceCheckout } from './in-place-doubles.js';
 
+// ---------------------------------------------------------------------------
 // Shared mutable state the fakes read from. Set per test by installCliCommandsHarness().
 // ---------------------------------------------------------------------------
 export const h = {
@@ -35,7 +36,6 @@ export const h = {
   reapedVms: [] as Array<{ name: string; removed: boolean; detail: string }>,
   // GitHub client injected through CliDeps.octokit
   octokit: {} as any,
-  record: (r: unknown = {}, c: any[] = []) => Object.assign(async (a: unknown) => (c.push(a), r), { calls: c }),
   // configurable core behaviour
   constitutionResolve: (
     _worktree: string,

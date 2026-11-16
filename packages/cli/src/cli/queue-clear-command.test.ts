@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { errored, h, installCliCommandsHarness, logged, runMain } from './test-support/cli-commands-harness.js';
+import { type IssueCallArgs, record } from './test-support/call-recorder.js';
 
 installCliCommandsHarness();
 
@@ -12,8 +13,8 @@ describe('cli commands (via main dispatch)', () => {
         if (cmd.includes('gh repo view')) return h.ghRepo;
         return '';
       };
-      h.octokit.rest.issues.removeLabel = h.record();
-      h.octokit.rest.issues.addLabels = h.record();
+      h.octokit.rest.issues.removeLabel = record();
+      h.octokit.rest.issues.addLabels = record();
       const labelsFor = (n: number): string[] =>
         n === 10
           ? ['factory:queued', 'factory:lane:daw', 'factory:order:1']
@@ -61,12 +62,14 @@ describe('cli commands (via main dispatch)', () => {
       expect(logged()).toContain('#11 [lane daw] skipped — claimed');
       expect(logged()).toContain('#12 [lane daw] cleared');
       expect(logged()).toContain('3 queued issue(s): 2 cleared, 1 skipped');
-      const removed = h.octokit.rest.issues.removeLabel.calls.map((arg: any) => [arg.issue_number, arg.name]);
+      const removed = h.octokit.rest.issues.removeLabel.calls.map((arg: IssueCallArgs) => [arg.issue_number, arg.name]);
       expect(removed).toContainEqual([10, 'factory:queued']);
       expect(removed).toContainEqual([10, 'factory:order:1']);
       expect(removed).toContainEqual([12, 'factory:queued']);
-      expect(removed.some(([n]: any) => n === 11)).toBe(false);
-      expect(removed.some(([, name]: any) => String(name).startsWith('factory:lane:'))).toBe(false);
+      expect(removed.some(([n]: [number, string | undefined]) => n === 11)).toBe(false);
+      expect(removed.some(([, name]: [number, string | undefined]) => String(name).startsWith('factory:lane:'))).toBe(
+        false,
+      );
       expect(h.octokit.rest.issues.addLabels.calls).toEqual([]);
     });
 
@@ -129,11 +132,16 @@ describe('cli commands (via main dispatch)', () => {
         const res = await runMain('queue', 'clear', '--lane', 'ops', '--yes');
 
         expect(res).toEqual({ exited: false, code: undefined });
-        const removed = h.octokit.rest.issues.removeLabel.calls.map((arg: any) => [arg.issue_number, arg.name]);
+        const removed = h.octokit.rest.issues.removeLabel.calls.map((arg: IssueCallArgs) => [
+          arg.issue_number,
+          arg.name,
+        ]);
         expect(removed).toContainEqual([10, 'factory:queued']);
         expect(removed).toContainEqual([12, 'factory:queued']);
-        expect(removed.some(([n]: any) => n === 11)).toBe(false);
-        expect(removed.some(([, name]: any) => String(name).startsWith('factory:lane:'))).toBe(false);
+        expect(removed.some(([n]: [number, string | undefined]) => n === 11)).toBe(false);
+        expect(removed.some(([, name]: [number, string | undefined]) => String(name).startsWith('factory:lane:'))).toBe(
+          false,
+        );
       });
 
       it('reports an empty lane and exits 0 without writing', async () => {

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { errored, h, installCliCommandsHarness, logged, paths, runMain } from './test-support/cli-commands-harness.js';
+import { type IssueCallArgs, record } from './test-support/call-recorder.js';
 
 installCliCommandsHarness();
 
@@ -15,9 +16,9 @@ describe('cli commands (via main dispatch)', () => {
         if (cmd.includes('gh repo view')) return h.ghRepo;
         return '';
       };
-      h.octokit.rest.issues.createLabel = h.record();
-      h.octokit.rest.issues.addLabels = h.record();
-      h.octokit.rest.issues.get = h.record({ data: { title: 'Fix the bug' } });
+      h.octokit.rest.issues.createLabel = record();
+      h.octokit.rest.issues.addLabels = record();
+      h.octokit.rest.issues.get = record({ data: { title: 'Fix the bug' } });
     });
 
     it('migrates valid local queue entries in per-lane order without rewriting the source queue', async () => {
@@ -29,7 +30,7 @@ describe('cli commands (via main dispatch)', () => {
       expect(res.exited).toBe(false);
       expect(readFileSync(paths().queue, 'utf-8')).toBe(source);
       expect(logged()).toContain('queue migrated — 3 issue(s)');
-      expect(h.octokit.rest.issues.addLabels.calls.map((a: any) => [a.issue_number, a.labels])).toEqual([
+      expect(h.octokit.rest.issues.addLabels.calls.map((a: IssueCallArgs) => [a.issue_number, a.labels])).toEqual([
         [1055, ['factory:queued', 'factory:lane:daw', 'factory:order:1']],
         [200, ['factory:queued', 'factory:lane:docs', 'factory:order:1']],
         [993, ['factory:queued', 'factory:lane:daw', 'factory:order:2']],

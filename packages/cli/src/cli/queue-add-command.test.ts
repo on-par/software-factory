@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { errored, h, installCliCommandsHarness, logged, paths, runMain } from './test-support/cli-commands-harness.js';
+import { type IssueCallArgs, record } from './test-support/call-recorder.js';
 
 installCliCommandsHarness();
 
@@ -14,9 +15,9 @@ describe('cli commands (via main dispatch)', () => {
         if (cmd.includes('gh repo view')) return h.ghRepo;
         return '';
       };
-      h.octokit.rest.issues.createLabel = h.record();
-      h.octokit.rest.issues.addLabels = h.record();
-      h.octokit.rest.issues.listForRepo = h.record({ data: [] });
+      h.octokit.rest.issues.createLabel = record();
+      h.octokit.rest.issues.addLabels = record();
+      h.octokit.rest.issues.listForRepo = record({ data: [] });
       h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: [] }));
     });
 
@@ -102,7 +103,7 @@ describe('cli commands (via main dispatch)', () => {
 
       const json = JSON.parse(logged());
       expect(json.issues[0]).toEqual({ number: 1, outcome: 'already-queued', order: 5, labelsAdded: [] });
-      expect(h.octokit.rest.issues.addLabels.calls.map((a: any) => a.issue_number)).toEqual([2]);
+      expect(h.octokit.rest.issues.addLabels.calls.map((a: IssueCallArgs) => a.issue_number)).toEqual([2]);
     });
 
     it('--json reports no created labels when they already exist (422)', async () => {
