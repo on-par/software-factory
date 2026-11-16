@@ -12,12 +12,14 @@ import { reapExpiredClaims, sweepLaneClaims } from './queue-startup.js';
 
 let dir: string;
 let paths: ReturnType<typeof getFactoryPaths>;
+const releases: unknown[] = [];
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'factory-queue-startup-'));
   paths = { events: join(dir, 'events.jsonl'), laneFiles: join(dir, 'lane-files') } as ReturnType<
     typeof getFactoryPaths
   >;
+  releases.length = 0;
 });
 
 afterEach(async () => {
@@ -58,17 +60,19 @@ describe('sweepLaneClaims', () => {
 describe('reapExpiredClaims', () => {
   const octokit = {} as Octokit;
   const base = { issue: 3339, label: 'factory:claim-expires:1700000000', expiresAt: 1_700_000_000 };
+  const recording =
+    <T>(out: T[]) =>
+    async (i: unknown) => (releases.push(i), out);
 
   it('makes no call without an octokit', async () => {
-    const release = vi.fn();
-    await reapExpiredClaims(paths, 'o/r', () => undefined, release);
-    expect(release).not.toHaveBeenCalled();
+    await reapExpiredClaims(paths, 'o/r', () => undefined, recording([]));
+    expect(releases).toEqual([]);
   });
 
   it('logs claim_expired_released for a released claim', async () => {
-    const release = vi.fn(async () => [{ ...base, released: true, outcome: 'released' as const }]);
+    const release = recording([{ ...base, released: true, outcome: 'released' as const }]);
     await reapExpiredClaims(paths, 'o/r', () => octokit, release);
-    expect(release).toHaveBeenCalledWith(expect.objectContaining({ owner: 'o', repo: 'r' }));
+    expect(releases[0]).toMatchObject({ owner: 'o', repo: 'r' });
     const events = await readFile(paths.events, 'utf8');
     expect(events).toContain('"type":"claim_expired_released"');
     expect(events).toContain('#3339 claim lease expired');
@@ -87,12 +91,12 @@ describe('reapExpiredClaims', () => {
 
   it('reapExpiredClaims logs reap_refused_clock_skew when the reap is refused for clock skew', async () => {
     const refused = { released: false, outcome: 'refused-clock-skew' as const, skewMs: 300_000 };
-    const release = vi.fn(async () => [
+    const release = recording([
       { ...base, ...refused },
       { ...base, issue: 4, ...refused },
     ]);
     await reapExpiredClaims(paths, 'o/r', () => octokit, release);
-    expect(release).toHaveBeenCalledWith(expect.objectContaining({ maxClockSkewMs: 60_000 }));
+    expect(releases[0]).toMatchObject({ maxClockSkewMs: 60_000 });
     const events = await readFile(paths.events, 'utf8');
     expect(events.match(/"type":"reap_refused_clock_skew"/g)).toHaveLength(1);
     expect(events).toContain('#3339, #4');

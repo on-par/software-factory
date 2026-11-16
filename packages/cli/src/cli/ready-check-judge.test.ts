@@ -35,14 +35,16 @@ const verdictJson = (verdict: string, questions: unknown[] = [], assumptions: un
 /** Fake runner: answers readiness_judge with `judgeOutputs` in order (last repeats), decompose with SPLIT_JSON. */
 function judgeRunner(judgeOutputs: string[], calls: Array<[string, string]> = [], cost: number | null = 0.02) {
   let n = 0;
-  return vi.fn(async (task: string, prompt: string) => {
+  return async (task: string, prompt: string) => {
     calls.push([task, prompt]);
     if (task === 'decompose') return { model: 'fake-model', output: SPLIT_JSON, cost };
     const output = judgeOutputs[Math.min(n, judgeOutputs.length - 1)]!;
     n += 1;
     return { model: 'fake-model', output, cost };
-  });
+  };
 }
+
+const unexpectedModel = async (): Promise<never> => Promise.reject(new Error('unexpected model call'));
 
 const tmp = createTempDirs();
 afterEach(() => tmp.cleanup());
@@ -85,31 +87,32 @@ describe('runIssueCheck readiness judge', () => {
 
   it('serves the second check from the cache and --rejudge calls the runner', async () => {
     const { d } = deps(PLAIN);
-    const runModel = judgeRunner([READY]);
+    const calls: Array<[string, string]> = [];
+    const runModel = judgeRunner([READY], calls);
     const full = { ...d, runModel, readinessCacheDir: cacheDir() };
     const first = await runIssueCheck(7, {}, full);
-    expect(runModel).toHaveBeenCalledTimes(1);
+    expect(calls.length).toBe(1);
     expect(first.judge?.cached).toBe(false);
     const second = await runIssueCheck(7, {}, full);
-    expect(runModel).toHaveBeenCalledTimes(1);
+    expect(calls.length).toBe(1);
     expect(second.judge).toMatchObject({ cached: true, cost: 0 });
     await runIssueCheck(7, { rejudge: true }, full);
-    expect(runModel).toHaveBeenCalledTimes(2);
+    expect(calls.length).toBe(2);
   });
 
   it('--no-judge calls no model, verdict null, exits 1 on missing headings', async () => {
     const { d } = deps(PLAIN);
-    const runModel = vi.fn();
+    const runModel = unexpectedModel;
     const r = await runIssueCheck(7, { judge: false }, { ...d, runModel });
-    expect(runModel).not.toHaveBeenCalled();
     expect(r).toMatchObject({ verdict: null, summary: null, judge: null, questions: [], assumptions: [], exitCode: 1 });
   });
 
   it('throws ReadinessJudgeError naming invalid-json after two bad replies', async () => {
     const { d } = deps(PLAIN);
-    const runModel = judgeRunner(['not json']);
+    const calls: Array<[string, string]> = [];
+    const runModel = judgeRunner(['not json'], calls);
     await expect(runIssueCheck(7, {}, { ...d, runModel })).rejects.toThrow(/invalid-json/);
-    expect(runModel).toHaveBeenCalledTimes(2);
+    expect(calls.length).toBe(2);
   });
 
   it('throws ReadinessJudgeError for a schema violation, a failing model, and a missing runner', async () => {
@@ -117,18 +120,17 @@ describe('runIssueCheck readiness judge', () => {
     await expect(runIssueCheck(7, {}, { ...d, runModel: judgeRunner(['{"verdict":"maybe"}']) })).rejects.toThrow(
       /schema-violation/,
     );
-    const failing = vi.fn(async () => {
+    const failing = async (): Promise<never> => {
       throw new Error('boom');
-    });
+    };
     await expect(runIssueCheck(7, {}, { ...d, runModel: failing })).rejects.toThrow(/model-error.*boom/);
     await expect(runIssueCheck(7, {}, d)).rejects.toBeInstanceOf(ReadinessJudgeError);
   });
 
   it('epic is skipped with verdict null and heading exit code', async () => {
     const { lines, d } = deps('### Goal\n\nBig.\n', 'Epic: big');
-    const runModel = vi.fn();
+    const runModel = unexpectedModel;
     const r = await runIssueCheck(7, {}, { ...d, runModel });
-    expect(runModel).not.toHaveBeenCalled();
     expect(r).toMatchObject({ verdict: null, judge: null, judgeSkipped: 'epic' });
     expect(lines).toContain('judge - skipped (epic)');
   });
@@ -145,7 +147,7 @@ describe('runIssueCheck readiness judge', () => {
 
   it('passes labels so an epic label skips the judge', async () => {
     const lines: string[] = [];
-    const runModel = vi.fn();
+    const runModel = unexpectedModel;
     const r = await runIssueCheck(
       7,
       {},
@@ -239,9 +241,7 @@ describe('runIssueCheck --deep', () => {
     await runIssueCheck(7, { json: true, deep: true, judge: false }, { ...a.d, runModel: judgeRunner([READY]) });
     expect(JSON.parse(a.lines[0]).deep.model).toBe('fake-model');
     const b = deps(body(7));
-    const runModel = judgeRunner([READY]);
-    await runIssueCheck(7, { json: true, judge: false }, { ...b.d, runModel });
+    await runIssueCheck(7, { json: true, judge: false }, { ...b.d, runModel: unexpectedModel });
     expect(JSON.parse(b.lines[0])).not.toHaveProperty('deep');
-    expect(runModel).not.toHaveBeenCalled();
   });
 });

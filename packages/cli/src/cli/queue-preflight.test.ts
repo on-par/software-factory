@@ -3,6 +3,8 @@ import type { SlicePlan, StackPullReviews } from '@on-par/factory-core/internal'
 import { describe, expect, it, vi } from 'vitest';
 import { createQueuePreflightOps, preflightQueuedIssue } from './index.js';
 
+const unexpected = async (): Promise<never> => Promise.reject(new Error('unexpected lookup'));
+
 describe('queue PR preflight', () => {
   const baseDeps = {
     expectedHeadRepoFullName: 'on-par/software-factory',
@@ -163,11 +165,13 @@ describe('queue PR preflight', () => {
   });
 
   it('uses the open-state fast path and rejects malformed prerequisite evidence', async () => {
-    const graphql = vi.fn(async (_query: string, _input: unknown) => ({ repository: { issue: { state: 'OPEN' } } }));
+    const vars: any[] = [];
+    const open = { repository: { issue: { state: 'OPEN' } } };
+    const graphql = async (_query: string, input: unknown) => (vars.push(input), open);
     const octokit: any = { rest: { issues: { get: async () => ({ data: { number: 2, body: 'text' } }) } }, graphql };
     const ops = createQueuePreflightOps(octokit, 'o', 'r');
     await expect(ops.getPrerequisiteState(2)).resolves.toEqual({ state: 'open', mergedClosingPr: false });
-    expect(graphql).toHaveBeenCalledTimes(1);
+    expect(vars.map((v) => v.after)).toEqual([null]);
     octokit.graphql = async () => ({
       repository: {
         issue: {
@@ -189,9 +193,7 @@ describe('queue PR preflight', () => {
   });
 
   it('defers open prerequisites before slice or pull request evidence and reports all unresolved references', async () => {
-    const findSlicePlan = vi.fn();
-    const findOpenPR = vi.fn();
-    const onDeferred = vi.fn();
+    const deferred: unknown[][] = [];
     const result = await preflightQueuedIssue(
       { number: 3258, labels: [] },
       {
@@ -201,18 +203,16 @@ describe('queue PR preflight', () => {
           state: 'open' as const,
           mergedClosingPr: false,
         }),
-        findSlicePlan,
-        findOpenPR,
-        onDeferred,
+        findSlicePlan: unexpected,
+        findOpenPR: unexpected,
+        onDeferred: (...a) => void deferred.push(a),
       },
     );
     expect(result).toEqual({ kind: 'defer' });
-    expect(onDeferred).toHaveBeenCalledWith(3258, 'waiting for prerequisites: #3256, #3257', 'open-prerequisites');
-    expect(findSlicePlan).not.toHaveBeenCalled();
-    expect(findOpenPR).not.toHaveBeenCalled();
+    expect(deferred).toEqual([[3258, 'waiting for prerequisites: #3256, #3257', 'open-prerequisites']]);
   });
   it('parks a verified closed prerequisite before slice or PR preflight', async () => {
-    const onDeferred = vi.fn();
+    const deferred: unknown[][] = [];
     const result = await preflightQueuedIssue(
       { number: 9, labels: [] },
       {
@@ -222,15 +222,15 @@ describe('queue PR preflight', () => {
           state: 'closed' as const,
           mergedClosingPr: number === 4,
         }),
-        onDeferred,
+        onDeferred: (...a) => void deferred.push(a),
       },
     );
     expect(result).toEqual({ kind: 'park', reason: 'prerequisite #5 closed unmerged' });
-    expect(onDeferred).not.toHaveBeenCalled();
+    expect(deferred).toEqual([]);
   });
 
   it('defers evidence errors ahead of closed-unmerged results and includes known unresolved references', async () => {
-    const onDeferred = vi.fn();
+    const deferred: unknown[][] = [];
     const result = await preflightQueuedIssue(
       { number: 9, labels: [] },
       {
@@ -241,17 +241,15 @@ describe('queue PR preflight', () => {
           if (number === 5) return { state: 'open' as const, mergedClosingPr: false };
           throw new Error('rate limited');
         },
-        onDeferred,
+        onDeferred: (...a) => void deferred.push(a),
       },
     );
     expect(result).toEqual({ kind: 'defer' });
-    expect(onDeferred).toHaveBeenCalledWith(9, expect.stringContaining('#6: rate limited'));
-    expect(onDeferred.mock.calls[0][1]).toContain('#4');
-    expect(onDeferred.mock.calls[0][1]).toContain('#5');
+    expect(deferred).toEqual([[9, 'prerequisite evidence lookup failed: #6: rate limited; unresolved: #5, #4']]);
   });
 
   it('defers body lookup failures and leaves dependency phrases outside the declaration syntax alone', async () => {
-    const onDeferred = vi.fn();
+    const deferred: unknown[][] = [];
     await expect(
       preflightQueuedIssue(
         { number: 9, labels: [] },
@@ -260,23 +258,20 @@ describe('queue PR preflight', () => {
           readIssueBody: async () => {
             throw new Error('body denied');
           },
-          onDeferred,
+          onDeferred: (...a) => void deferred.push(a),
         },
       ),
     ).resolves.toEqual({ kind: 'defer' });
-    expect(onDeferred).toHaveBeenCalledWith(9, 'issue body lookup failed: body denied');
-    const getPrerequisiteState = vi.fn();
+    expect(deferred).toEqual([[9, 'issue body lookup failed: body denied']]);
     await expect(
       preflightQueuedIssue(
         { number: 9, labels: [] },
         {
           ...baseDeps,
           readIssueBody: async () => 'Related: #4\nblocked by #5',
-          getPrerequisiteState,
         },
       ),
     ).resolves.toEqual({ kind: 'build' });
-    expect(getPrerequisiteState).not.toHaveBeenCalled();
   });
 
   it('adopts only a green, non-draft PR and preserves its actual head branch', async () => {
@@ -339,28 +334,24 @@ describe('queue PR preflight', () => {
   });
 
   it('defers while the current slice PR is open without any Closes-PR work', async () => {
-    const findOpenPR = vi.fn(async () => undefined);
-    const getLandState = vi.fn();
-    const watch = vi.fn();
-    const saveSlicePlan = vi.fn(async () => {});
     const result = await preflightQueuedIssue(
       { number: 7, labels: [] },
       {
         ...baseDeps,
-        findOpenPR,
-        getLandState,
-        watch,
-        saveSlicePlan,
+        findOpenPR: unexpected,
+        getLandState: unexpected,
+        watch: unexpected,
+        saveSlicePlan: unexpected,
         findSlicePlan: async () => foundPlan(prOpenPlan()),
         getPullState: async () => 'open',
       },
     );
     expect(result).toEqual({ kind: 'defer' });
-    for (const fn of [findOpenPR, getLandState, watch, saveSlicePlan]) expect(fn).not.toHaveBeenCalled();
   });
 
   it('marks the slice merged and builds once its PR merged', async () => {
-    const saveSlicePlan = vi.fn(async (_issue: number, _plan: SlicePlan) => {});
+    const saved: Array<[number, SlicePlan]> = [];
+    const saveSlicePlan = async (issue: number, plan: SlicePlan) => void saved.push([issue, plan]);
     const result = await preflightQueuedIssue(
       { number: 7, labels: [] },
       {
@@ -371,10 +362,8 @@ describe('queue PR preflight', () => {
       },
     );
     expect(result).toEqual({ kind: 'build' });
-    expect(saveSlicePlan).toHaveBeenCalledTimes(1);
-    const [issue, plan] = saveSlicePlan.mock.calls[0];
-    expect(issue).toBe(7);
-    expect(plan.slices.map((sl) => [sl.state, sl.prNumber])).toEqual([
+    expect(saved.map(([issue]) => issue)).toEqual([7]);
+    expect(saved[0][1].slices.map((sl) => [sl.state, sl.prNumber])).toEqual([
       ['merged', 81],
       ['pending', undefined],
       ['pending', undefined],
@@ -382,12 +371,11 @@ describe('queue PR preflight', () => {
   });
 
   it('parks naming the PR when the slice PR was closed without merging', async () => {
-    const saveSlicePlan = vi.fn(async () => {});
     const result = await preflightQueuedIssue(
       { number: 7, labels: [] },
       {
         ...baseDeps,
-        saveSlicePlan,
+        saveSlicePlan: unexpected,
         findSlicePlan: async () => foundPlan(prOpenPlan()),
         getPullState: async () => 'closed',
       },
@@ -395,16 +383,14 @@ describe('queue PR preflight', () => {
     expect(result.kind).toBe('park');
     expect(result.kind === 'park' && result.reason).toContain('PR #81');
     expect(result.kind === 'park' && result.reason).toContain('closed without merging');
-    expect(saveSlicePlan).not.toHaveBeenCalled();
   });
 
   it('keeps the Closes-PR decision when there is no slice plan', async () => {
-    const getPullState = vi.fn();
     const result = await preflightQueuedIssue(
       { number: 7, labels: [] },
       {
         ...baseDeps,
-        getPullState,
+        getPullState: unexpected,
         findOpenPR: async () => ({
           number: 71,
           branch: 'contributor/real-head',
@@ -414,20 +400,17 @@ describe('queue PR preflight', () => {
       },
     );
     expect(result).toEqual({ kind: 'adopt', branch: 'contributor/real-head' });
-    expect(getPullState).not.toHaveBeenCalled();
   });
 
   it('falls through for pending and all-merged slice plans', async () => {
-    const getPullState = vi.fn();
     const allMerged = [1, 2, 3].reduce((p, n) => withSliceState(p, n, 'merged'), slicePlan());
     for (const plan of [slicePlan(), allMerged]) {
       const result = await preflightQueuedIssue(
         { number: 7, labels: [] },
-        { ...baseDeps, getPullState, findSlicePlan: async () => foundPlan(plan) },
+        { ...baseDeps, getPullState: unexpected, findSlicePlan: async () => foundPlan(plan) },
       );
       expect(result).toEqual({ kind: 'build' });
     }
-    expect(getPullState).not.toHaveBeenCalled();
   });
 
   it('parks when slice evidence cannot be read or recorded', async () => {
@@ -460,7 +443,7 @@ describe('queue PR preflight', () => {
 
   it('maps slice PR state and reads and rewrites the slice plan comment', async () => {
     const plan = prOpenPlan();
-    const updateComment = vi.fn(async () => ({ data: {} }));
+    const updates: any[] = [];
     const pulls: Record<number, any> = {
       1: { state: 'closed', merged: true },
       2: { state: 'closed', merged: false, merged_at: null },
@@ -474,7 +457,7 @@ describe('queue PR preflight', () => {
           listComments: async () => ({
             data: [{ id: 555, user: { id: 42 }, body: renderSlicePlanComment(plan) }],
           }),
-          updateComment,
+          updateComment: async (o: unknown) => (updates.push(o), { data: {} }),
           createComment: vi.fn(),
         },
       },
@@ -485,16 +468,14 @@ describe('queue PR preflight', () => {
     await expect(ops.getPullState(3)).resolves.toBe('open');
     await expect(ops.findSlicePlan(7)).resolves.toMatchObject({ status: 'found', commentId: 555, plan });
     await ops.saveSlicePlan(7, withSliceState(plan, 1, 'merged', 81));
-    expect(updateComment).toHaveBeenCalledWith(expect.objectContaining({ comment_id: 555 }));
+    expect(updates.map((u) => u.comment_id)).toEqual([555]);
   });
 
   it('defers an already factory-owned candidate', async () => {
-    const findSlicePlan = vi.fn();
     await expect(
-      preflightQueuedIssue({ number: 7, labels: ['factory:in-progress'] }, { ...baseDeps, findSlicePlan }),
+      preflightQueuedIssue({ number: 7, labels: ['factory:in-progress'] }, { ...baseDeps, findSlicePlan: unexpected }),
     ).resolves.toEqual({
       kind: 'defer',
     });
-    expect(findSlicePlan).not.toHaveBeenCalled();
   });
 });
