@@ -58,11 +58,10 @@ describe('factory risk', () => {
 
   it('rejects an invalid or unknown PR with a non-zero exit and a clear message', async () => {
     for (const raw of ['abc', '0', '-3', '99999999999999999999']) {
-      const listFiles = vi.fn(async () => []);
+      const listFiles = async () => Promise.reject(new Error('unexpected file listing'));
       const err = await failure(runRiskCommand(raw, {}, makeDeps({ listFiles })));
       expect(err.code).toBe(2);
       expect(err.message).toContain('invalid PR argument');
-      expect(listFiles).not.toHaveBeenCalled();
     }
     const notFound = makeDeps({
       listFiles: async () => {
@@ -187,8 +186,8 @@ describe('cmdRisk runtime wiring', () => {
 
   it('exits 2 on a bad <pr> before any repo lookup, and rethrows unexpected errors', async () => {
     const { rt } = runtime('/nonexistent');
+    rt.getRepoRoot = async () => Promise.reject(new Error('unexpected repo lookup'));
     await expect(cmdRisk('abc', {}, rt)).rejects.toMatchObject({ name: 'CliExitError', code: 2 });
-    expect(rt.getRepoRoot).not.toHaveBeenCalled();
 
     const boom = new Error('no repo');
     rt.getRepoRoot = async () => {
@@ -198,12 +197,13 @@ describe('cmdRisk runtime wiring', () => {
   });
 
   it('is wired into the CLI entry point', async () => {
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errors: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((...a) => void errors.push(a.join(' ')));
     process.exitCode = undefined;
     try {
       await main(['node', 'factory', 'risk', 'abc']);
       expect(process.exitCode).toBe(2);
-      expect(errSpy.mock.calls.flat().join('\n')).toContain("factory risk: invalid PR argument 'abc'");
+      expect(errors.join('\n')).toContain("factory risk: invalid PR argument 'abc'");
     } finally {
       process.exitCode = undefined;
     }

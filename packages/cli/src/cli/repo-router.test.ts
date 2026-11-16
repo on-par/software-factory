@@ -20,8 +20,17 @@ const dirs = createTempDirs();
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  sandboxes.length = 0;
   await dirs.cleanup();
 });
+
+const sandboxes: unknown[] = [];
+class RecordingRouter extends ModelRouter {
+  override setCodexSandbox(...a: Parameters<ModelRouter['setCodexSandbox']>) {
+    sandboxes.push(a[0]);
+    super.setCodexSandbox(...a);
+  }
+}
 
 describe('newRepoRouter', () => {
   it('builds the router from the given loaders, applying the repo sandbox and local-auth sink', () => {
@@ -29,29 +38,39 @@ describe('newRepoRouter', () => {
     const routes = loadRoutesConfig();
     const factory = loadFactoryConfig();
     const loaders: RepoRouterLoaders = {
-      loadRepoConfig: vi.fn(() => null),
-      loadModelsConfig: vi.fn(() => models),
-      loadRoutesConfig: vi.fn(() => routes),
-      loadFactoryConfigForRepo: vi.fn(() => ({
-        ...factory,
-        sandbox: { ...factory.sandbox, codexFullAccessTasks: ['build_codex'] },
-      })),
+      loadRepoConfig: (root) => (repoRoots.push(root), null),
+      loadModelsConfig: () => models,
+      loadRoutesConfig: () => routes,
+      loadFactoryConfigForRepo: (path) => (
+        configPaths.push(path),
+        { ...factory, sandbox: { ...factory.sandbox, codexFullAccessTasks: ['build_codex'] } }
+      ),
     };
+    const repoRoots: string[] = [];
+    const configPaths: string[] = [];
+    const fullAccess: unknown[] = [];
+    const sinks: unknown[] = [];
     const constructed: ConstructorParameters<typeof ModelRouter>[] = [];
     class SpyRouter extends ModelRouter {
       constructor(...args: ConstructorParameters<typeof ModelRouter>) {
         super(...args);
         constructed.push(args);
       }
+      override setCodexFullAccessTasks(...a: Parameters<ModelRouter['setCodexFullAccessTasks']>) {
+        fullAccess.push(a[0]);
+        super.setCodexFullAccessTasks(...a);
+      }
+      override setLocalAuthSink(...a: Parameters<ModelRouter['setLocalAuthSink']>) {
+        sinks.push(a[0]);
+        super.setLocalAuthSink(...a);
+      }
     }
-    const setCodexFullAccessTasks = vi.spyOn(SpyRouter.prototype, 'setCodexFullAccessTasks');
-    const setLocalAuthSink = vi.spyOn(SpyRouter.prototype, 'setLocalAuthSink');
 
     const router = newRepoRouter('/repo', loaders, SpyRouter);
 
     expect(router).toBeInstanceOf(SpyRouter);
-    expect(loaders.loadRepoConfig).toHaveBeenCalledWith('/repo');
-    expect(loaders.loadFactoryConfigForRepo).toHaveBeenCalledWith(getFactoryPaths('/repo').config);
+    expect(repoRoots).toEqual(['/repo']);
+    expect(configPaths).toEqual([getFactoryPaths('/repo').config]);
     expect(constructed).toHaveLength(1);
     const [modelsArg, routesArg, verbose, executor, allowExperimental, localOnly] = constructed[0]!;
     expect(modelsArg).toBe(models);
@@ -60,24 +79,23 @@ describe('newRepoRouter', () => {
     expect(executor).toBeUndefined();
     expect(typeof allowExperimental).toBe('boolean');
     expect(typeof localOnly).toBe('boolean');
-    expect(setCodexFullAccessTasks).toHaveBeenCalledWith(['build_codex']);
-    expect(setLocalAuthSink).toHaveBeenCalledWith(recordLocalAuthFailure);
+    expect(fullAccess).toEqual([['build_codex']]);
+    expect(sinks).toEqual([recordLocalAuthFailure]);
   });
 
   it('passes sandbox.codexSandbox to setCodexSandbox (#3830)', () => {
     const factory = loadFactoryConfig();
     const loaders: RepoRouterLoaders = {
-      loadRepoConfig: vi.fn(() => null),
-      loadModelsConfig: vi.fn(() => loadModelsConfig()),
-      loadRoutesConfig: vi.fn(() => loadRoutesConfig()),
-      loadFactoryConfigForRepo: vi.fn(() => ({
+      loadRepoConfig: () => null,
+      loadModelsConfig,
+      loadRoutesConfig,
+      loadFactoryConfigForRepo: () => ({
         ...factory,
         sandbox: { ...factory.sandbox, codexSandbox: 'workspace-write' as const },
-      })),
+      }),
     };
-    const setCodexSandbox = vi.spyOn(ModelRouter.prototype, 'setCodexSandbox');
-    newRepoRouter('/repo', loaders, ModelRouter);
-    expect(setCodexSandbox).toHaveBeenCalledWith('workspace-write');
+    newRepoRouter('/repo', loaders, RecordingRouter);
+    expect(sandboxes).toEqual(['workspace-write']);
   });
 
   it('an unknown sandbox.codexSandbox in config reaches setCodexSandbox as undefined (#3830)', () => {
@@ -87,13 +105,12 @@ describe('newRepoRouter', () => {
     writeFileSync(configPath, 'sandbox:\n  codexSandbox: read-only\n');
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const loaders: RepoRouterLoaders = {
-      loadRepoConfig: vi.fn(() => null),
-      loadModelsConfig: vi.fn(() => loadModelsConfig()),
-      loadRoutesConfig: vi.fn(() => loadRoutesConfig()),
+      loadRepoConfig: () => null,
+      loadModelsConfig,
+      loadRoutesConfig,
       loadFactoryConfigForRepo,
     };
-    const setCodexSandbox = vi.spyOn(ModelRouter.prototype, 'setCodexSandbox');
-    newRepoRouter(root, loaders, ModelRouter);
-    expect(setCodexSandbox).toHaveBeenCalledWith(undefined);
+    newRepoRouter(root, loaders, RecordingRouter);
+    expect(sandboxes).toEqual([undefined]);
   });
 });

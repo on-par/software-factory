@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { LaneFileGuard, ReworkHistory, workKeyFromIssue } from '@on-par/factory-core';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { formatResetLine, parseResetIssues, type ResetDeps, runReset } from './reset.js';
 
@@ -35,7 +35,7 @@ function seedState() {
 }
 
 function makeDeps(state: string, over: Partial<ResetDeps> = {}) {
-  const releaseLease = vi.fn(async () => {});
+  const released: string[] = [];
   const deps: ResetDeps = {
     repoRoot: repo,
     cwd: repo,
@@ -53,10 +53,10 @@ function makeDeps(state: string, over: Partial<ResetDeps> = {}) {
       sh('git worktree prune');
     },
     readLeases: () => [{ worktreeId: wt192, branch: 'factory/192-some-title', port: 3100, pid: 1, acquiredAt: 'now' }],
-    releaseLease,
+    releaseLease: async (id) => void released.push(id),
     ...over,
   };
-  return { deps, releaseLease };
+  return { deps, released };
 }
 
 async function seedHistory(state: string) {
@@ -86,7 +86,7 @@ describe('runReset', () => {
   it('removes every piece of local state for the issue and nothing else', async () => {
     const state = seedState();
     await seedHistory(state);
-    const { deps, releaseLease } = makeDeps(state);
+    const { deps, released } = makeDeps(state);
 
     await runReset([192], deps);
 
@@ -96,7 +96,7 @@ describe('runReset', () => {
     expect(readdirSafe(join(state, 'plans'))).toEqual([]);
     expect(existsSync(join(state, 'runs', 'issue-192.phase.json'))).toBe(false);
     expect(existsSync(join(state, 'logs', 'issue-192'))).toBe(false);
-    expect(releaseLease).toHaveBeenCalledWith(wt192);
+    expect(released).toEqual([wt192]);
     const history = new ReworkHistory(join(state, 'rework-history.json'));
     expect(await history.priorSignature(192)).toBeUndefined();
     expect(await history.priorSignature(7)).toBe('sig-7');
@@ -131,14 +131,14 @@ describe('runReset', () => {
 
   it('keeps the worktree and branch when cwd is inside the worktree', async () => {
     const state = seedState();
-    const { deps, releaseLease } = makeDeps(state, { cwd: join(wt192, 'sub') });
+    const { deps, released } = makeDeps(state, { cwd: join(wt192, 'sub') });
 
     const [line] = await runReset([192], deps);
 
     expect(line).toContain(`kept worktree ${wt192} (current checkout)`);
     expect(line).toContain('branch factory/192-some-title (checked out in');
     expect(existsSync(wt192)).toBe(true);
-    expect(releaseLease).not.toHaveBeenCalled();
+    expect(released).toEqual([]);
   });
 
   it('reports a failing removal as kept and carries on', async () => {
@@ -276,10 +276,10 @@ describe('runReset --dry-run', () => {
     const state = seedState();
     await seedHistory(state);
     const cmds: string[] = [];
-    const removeWorktree = vi.fn(async () => {});
-    const { deps, releaseLease } = makeDeps(state, {
+    const removed: string[] = [];
+    const { deps, released } = makeDeps(state, {
       dryRun: true,
-      removeWorktree,
+      removeWorktree: async (p) => void removed.push(p),
       git: async (cmd) => {
         cmds.push(cmd);
         return sh(cmd);
@@ -306,8 +306,8 @@ describe('runReset --dry-run', () => {
       expect(line).toContain(part);
     }
     expect(snapshot(state)).toEqual(before);
-    expect(removeWorktree).not.toHaveBeenCalled();
-    expect(releaseLease).not.toHaveBeenCalled();
+    expect(removed).toEqual([]);
+    expect(released).toEqual([]);
     expect(cmds.some((c) => c.includes('branch -D'))).toBe(false);
   });
 
@@ -358,13 +358,13 @@ describe('runReset safety (#1789)', () => {
   it('keeps a dirty worktree and its branch, still removes other state', async () => {
     const state = seedState();
     writeFileSync(join(wt192, 'a.txt'), 'changed');
-    const { deps, releaseLease } = makeDeps(state);
+    const { deps, released } = makeDeps(state);
     const [line] = await runReset([192], deps);
     expect(existsSync(wt192)).toBe(true);
     expect(sh('git branch --list factory/192-some-title')).not.toBe('');
     expect(existsSync(join(state, 'plans', 'issue-192.md'))).toBe(false);
     expect(existsSync(join(state, 'logs', 'issue-192'))).toBe(false);
-    expect(releaseLease).not.toHaveBeenCalled();
+    expect(released).toEqual([]);
     expect(line).toContain(`kept worktree ${wt192} (uncommitted changes; pass --force to remove)`);
   });
 

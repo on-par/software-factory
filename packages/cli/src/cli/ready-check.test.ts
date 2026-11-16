@@ -1,5 +1,5 @@
 import { scoreIssueReadiness } from '@on-par/factory-core';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createDeepModelRunner, buildIssueCheckReport, formatIssueCheckLines, runIssueCheck } from './ready-check.js';
 import { body, deps } from './test-support/ready-check-fixtures.js';
 
@@ -48,11 +48,10 @@ describe('runIssueCheck INVEST', () => {
   });
 
   it('leaves invest null for non factory-task issues and does no lookups', async () => {
-    const getIssueState = vi.fn(async () => 'open' as const);
+    const getIssueState = async (): Promise<'open'> => Promise.reject(new Error('unexpected state lookup'));
     const { d } = deps('### Why\n\nbecause. depends on #4\n\n### Children\n\n- #1\n\n### Done when\n\nall', '[Epic] x');
     const r = await runIssueCheck(7, { judge: false }, { ...d, getIssueState });
     expect(r.invest).toBeNull();
-    expect(getIssueState).not.toHaveBeenCalled();
   });
 
   it('buildIssueCheckReport defaults invest to null', () => {
@@ -121,10 +120,12 @@ describe('runIssueCheck', () => {
   });
 
   it('reports an epic as runs-as-is and only reads once', async () => {
-    const { getIssue, d } = deps('### Goal\n\nBig.\n', 'Epic: big');
+    const { d: base } = deps('### Goal\n\nBig.\n', 'Epic: big');
+    let reads = 0;
+    const d = { ...base, getIssue: async () => (reads++, { title: 'Epic: big', body: '### Goal\n\nBig.\n' }) };
     const r = await runIssueCheck(7, { judge: false }, d);
     expect(r.size.verdict).toBe('runs-as-is');
-    expect(getIssue).toHaveBeenCalledTimes(1);
+    expect(reads).toBe(1);
     expect(Object.keys(d).sort()).toEqual(['getIssue', 'log']);
   });
 });
@@ -225,18 +226,16 @@ ${verification}
 describe('createDeepModelRunner', () => {
   it('returns the model, output, and the cost captured by the sink', async () => {
     let sink: (e: { cost: number | null }) => void = () => {};
+    const runs: unknown[][] = [];
     const router = {
       setCostSink: (s: typeof sink) => {
         sink = s;
       },
-      run: vi.fn(async () => {
-        sink({ cost: 0.5 });
-        return { model: 'm9', output: 'out' };
-      }),
+      run: async (...a: unknown[]) => (runs.push(a), sink({ cost: 0.5 }), { model: 'm9', output: 'out' }),
     };
     const run = createDeepModelRunner(router, '/repo');
     expect(await run('readiness_judge', 'p')).toEqual({ model: 'm9', output: 'out', cost: 0.5 });
-    expect(router.run).toHaveBeenCalledWith('readiness_judge', 'p', { worktree: '/repo', timeoutSeconds: 600 });
+    expect(runs).toEqual([['readiness_judge', 'p', { worktree: '/repo', timeoutSeconds: 600 }]]);
   });
 
   it('reports a null cost when the sink never fires', async () => {

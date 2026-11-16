@@ -21,7 +21,7 @@ afterEach(async () => {
 type Pull = { state: string; head: { ref: string; repo: { full_name: string } | null } };
 const open: Pull = { state: 'open', head: { ref: 'factory/42-fix-it', repo: { full_name: 'o/r' } } };
 
-async function setup(pull: Pull = open, config: Partial<FactoryConfig> = {}) {
+async function setup(pull: Pull = open, config: Partial<FactoryConfig> = {}, over: Partial<RespondDeps> = {}) {
   const repoRoot = await tmp.make('respond-');
   const out: string[] = [];
   const octokit = Object.assign({} as Octokit, {
@@ -30,44 +30,45 @@ async function setup(pull: Pull = open, config: Partial<FactoryConfig> = {}) {
       issues: { listLabelsOnIssue: vi.fn(async () => ({ data: [{ name: 'factory:lane:bugfix' }] })) },
     },
   });
-  const shipIssue = vi.fn<RespondDeps['shipIssue']>(async () => 'shipped');
-  const parkAtCap = vi.fn<RespondDeps['parkAtCap']>(async () => {});
-  const publishParkComment = vi.fn<RespondDeps['publishParkComment']>(async () => ({ ok: true }) as never);
+  const ships: Array<Parameters<RespondDeps['shipIssue']>> = [];
+  const parks: Array<Parameters<RespondDeps['parkAtCap']>[0]> = [];
+  const published: unknown[] = [];
   const deps: RespondDeps = {
     getRepoRoot: async () => repoRoot,
     getGitHubRepo: async () => 'o/r',
     getOctokit: () => octokit,
     loadConfig: () => config as FactoryConfig,
-    shipIssue,
-    parkAtCap,
-    publishParkComment,
+    shipIssue: async (...a) => (ships.push(a), 'shipped'),
+    parkAtCap: async (a) => void parks.push(a),
+    publishParkComment: async (a) => (published.push(a), { ok: true } as never),
     now: () => new Date('2026-01-02T00:00:00.000Z'),
     out: (l) => out.push(l),
+    ...over,
   };
-  return { deps, out, shipIssue, parkAtCap, publishParkComment, repoRoot };
+  return { deps, out, ships, parks, published, repoRoot };
 }
 
 describe('runFeedbackRound', () => {
   it('returns the round result and prints nothing itself', async () => {
-    const { deps, shipIssue, out } = await setup();
+    const { deps, ships, out } = await setup();
     await expect(runFeedbackRound(7, deps)).resolves.toEqual({ pr: 7, issue: 42, result: 'shipped' });
-    expect(shipIssue).toHaveBeenCalledTimes(1);
+    expect(ships).toHaveLength(1);
     expect(out).toEqual([]);
   });
 
   it('throws for a closed PR', async () => {
-    const { deps, shipIssue } = await setup({ ...open, state: 'closed' });
+    const { deps, ships } = await setup({ ...open, state: 'closed' });
     await expect(runFeedbackRound(7, deps)).rejects.toBeInstanceOf(CliExitError);
-    expect(shipIssue).not.toHaveBeenCalled();
+    expect(ships).toEqual([]);
   });
 });
 
 describe('cmdRespond', () => {
   it("respond starts a feedback round for the PR's issue", async () => {
-    const { deps, shipIssue, out } = await setup();
+    const { deps, ships, out } = await setup();
     await cmdRespond('#7', {}, deps);
-    expect(shipIssue).toHaveBeenCalledTimes(1);
-    const [issue, opts, ctx] = shipIssue.mock.calls[0] ?? [];
+    expect(ships).toHaveLength(1);
+    const [issue, opts, ctx] = ships[0] ?? [];
     expect(issue).toBe(42);
     expect(opts).toMatchObject({ branchPrefix: 'factory', autoRework: true, interactive: false });
     expect(ctx).toMatchObject({ ghRepo: 'o/r', feedbackRound: { prNumber: 7 } });
@@ -75,9 +76,9 @@ describe('cmdRespond', () => {
   });
 
   it('records the round against the cap before shipping and prints JSON on request', async () => {
-    const { deps, shipIssue, out, repoRoot } = await setup();
+    const repoRoot = await tmp.make('respond-');
     const reviewRework = getFactoryPaths(repoRoot).reviewRework;
-    shipIssue.mockImplementation(async () => {
+    const shipIssue = async () => {
       expect(createFileReviewReworkStore(reviewRework).list()).toMatchObject([
         {
           reviewId: 70001,
@@ -88,8 +89,9 @@ describe('cmdRespond', () => {
           startedAt: '2026-01-02T00:00:00.000Z',
         },
       ]);
-      return 'ok';
-    });
+      return 'ok' as never;
+    };
+    const { deps, out } = await setup(open, {}, { shipIssue, getRepoRoot: async () => repoRoot });
     await cmdRespond('7', { json: true }, deps);
     expect(JSON.parse(out[0] ?? '{}')).toEqual({ pr: 7, issue: 42, result: 'ok' });
   });
@@ -100,9 +102,9 @@ describe('cmdRespond', () => {
     ['from a fork', { ...open, head: { ref: 'factory/42-x', repo: { full_name: 'evil/r' } } }],
     ['from a deleted fork', { ...open, head: { ref: 'factory/42-x', repo: null } }],
   ])('rejects a PR that is %s without running', async (_name, pull) => {
-    const { deps, shipIssue } = await setup(pull);
+    const { deps, ships } = await setup(pull);
     await expect(cmdRespond('7', {}, deps)).rejects.toMatchObject({ code: 1 });
-    expect(shipIssue).not.toHaveBeenCalled();
+    expect(ships).toEqual([]);
   });
 
   it('rejects a non-numeric PR argument', async () => {
@@ -111,7 +113,7 @@ describe('cmdRespond', () => {
   });
 
   it('parks at the review-rework cap without running', async () => {
-    const { deps, shipIssue, parkAtCap } = await setup(open, { queue: { max_review_rework_runs: 1 } } as never);
+    const { deps, ships, parks } = await setup(open, { queue: { max_review_rework_runs: 1 } } as never);
     const paths = getFactoryPaths(await deps.getRepoRoot());
     createFileReviewReworkStore(paths.reviewRework).record({
       reviewId: 1,
@@ -123,41 +125,34 @@ describe('cmdRespond', () => {
       startedAt: '2026-01-01T00:00:00.000Z',
     });
     await expect(cmdRespond('7', {}, deps)).rejects.toMatchObject({ code: 1 });
-    expect(shipIssue).not.toHaveBeenCalled();
-    expect(parkAtCap).toHaveBeenCalledWith(
-      expect.objectContaining({
-        source: 'feedback',
-        cap: 1,
-        count: 1,
-        pr: 7,
-        lane: 'bugfix',
-        branch: 'factory/42-fix-it',
-      }),
-    );
+    expect(ships).toEqual([]);
+    expect(parks).toMatchObject([
+      { source: 'feedback', cap: 1, count: 1, pr: 7, lane: 'bugfix', branch: 'factory/42-fix-it' },
+    ]);
   });
 
   it('publishes the park comment through the PR octokit and repo at the cap', async () => {
-    const { deps, parkAtCap, publishParkComment } = await setup(open, {
-      queue: { max_review_rework_runs: 0 },
-    } as never);
     const input = { issue: 42 } as never;
-    parkAtCap.mockImplementation(async (args) => {
+    const parkAtCap = async (args: Parameters<RespondDeps['parkAtCap']>[0]) => {
       await args.publishComment?.(input);
-    });
+    };
+    const { deps, published } = await setup(open, { queue: { max_review_rework_runs: 0 } } as never, { parkAtCap });
     await expect(cmdRespond('7', {}, deps)).rejects.toMatchObject({ code: 1 });
-    expect(publishParkComment).toHaveBeenCalledWith({ octokit: deps.getOctokit(), repo: 'o/r', input });
+    expect(published).toEqual([{ octokit: deps.getOctokit(), repo: 'o/r', input }]);
   });
 
   it('wires the default deps from the ship runtime', async () => {
     const { deps } = await setup({ ...open, state: 'closed' });
     const shell = { kind: 'fake-shell' };
-    const loadFactoryConfigForRepo = vi.fn(() => ({}) as FactoryConfig);
+    const shells: unknown[] = [];
+    const loads: unknown[] = [];
+    const loadFactoryConfigForRepo = () => (loads.push(1), {} as FactoryConfig);
     const runtime: RespondRuntime<typeof shell> = {
-      resolveShellOps: vi.fn(() => shell),
-      getRepoRoot: vi.fn(() => deps.getRepoRoot()),
-      getGitHubRepo: vi.fn(async () => 'o/r'),
-      getOctokit: vi.fn(() => deps.getOctokit()),
-      resolveConfigLoaders: vi.fn(() => ({ loadFactoryConfigForRepo })),
+      resolveShellOps: () => shell,
+      getRepoRoot: () => deps.getRepoRoot(),
+      getGitHubRepo: async () => 'o/r',
+      getOctokit: (s) => (shells.push(s), deps.getOctokit()),
+      resolveConfigLoaders: () => ({ loadFactoryConfigForRepo }),
     };
     const wired = respondDepsFrom(runtime);
     expect(wired.now()).toBeInstanceOf(Date);
@@ -165,7 +160,7 @@ describe('cmdRespond', () => {
       code: 1,
       message: expect.stringContaining('is closed'),
     });
-    expect(runtime.getOctokit).toHaveBeenCalledWith(shell);
-    expect(loadFactoryConfigForRepo).toHaveBeenCalledOnce();
+    expect(shells).toEqual([shell]);
+    expect(loads).toHaveLength(1);
   });
 });

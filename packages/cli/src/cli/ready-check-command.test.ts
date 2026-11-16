@@ -78,9 +78,9 @@ bash scripts/verify.sh
     });
 
     it('exits 2 on an invalid issue argument', async () => {
+      h.octokit.rest.issues.get = async () => Promise.reject(new Error('unexpected issue read'));
       const res = await runMain('ready', 'abc');
       expect(res).toEqual({ exited: true, code: 2 });
-      expect(h.octokit.rest.issues.get).not.toHaveBeenCalled();
     });
   });
 });
