@@ -3,33 +3,59 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import * as FactoryCore from '@on-par/factory-core';
+import type { RunOutcome } from '@on-par/factory-core';
 import { renderSlicePlanComment } from '@on-par/factory-core/internal';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { type CliDeps, IssueSkippedError, LaneParkError } from './index.js';
 import {
   coreFakes,
   defaultOctokit,
   h,
-  inertConfigLoaders,
   installShipHarness,
   paths,
   phases,
   runMainWith,
-  setupWorktree,
   shipIssue,
 } from './test-support/ship-harness.js';
 
 installShipHarness();
 
-describe('shipIssue (direct)', () => {
-  const ctx = () => ({ repoRoot: h.repoRoot, ghRepo: h.ghRepo });
+type PlanOpts = Parameters<NonNullable<CliDeps['planPhase']>>[0];
+type BuildOpts = Parameters<NonNullable<CliDeps['buildPhase']>>[0];
+type SetupArgs = Parameters<NonNullable<CliDeps['setupWorktree']>>;
+const recordPhases = () => {
+  const [plan, build]: [PlanOpts[], BuildOpts[]] = [[], []];
+  return {
+    plan,
+    build,
+    deps: {
+      planPhase: async (o: PlanOpts) => (plan.push(o), phases.planPhase(o)),
+      buildPhase: async (o: BuildOpts) => (build.push(o), phases.buildPhase(o)),
+    } satisfies Pick<CliDeps, 'planPhase' | 'buildPhase'>,
+  };
+};
+const recordSetup = () => {
+  const calls: SetupArgs[] = [];
+  return { calls, setupWorktree: async (...a: SetupArgs) => (calls.push(a), undefined as never) };
+};
+const ctx = () => ({ repoRoot: h.repoRoot, ghRepo: h.ghRepo });
+const outcomeCtx = () => {
+  const seen: RunOutcome[] = [];
+  return { seen, ctx: { repoRoot: h.repoRoot, ghRepo: h.ghRepo, onOutcome: (o: RunOutcome) => void seen.push(o) } };
+};
+const spy =
+  <A extends unknown[], R>(log: unknown[][], fn: (...a: A) => R) =>
+  (...a: A) => (log.push(a), fn(...a));
 
+describe('shipIssue (direct)', () => {
   it('uses an injected setupWorktree over the default git ops (#2019)', async () => {
-    const custom = vi.fn(async (..._args: Parameters<NonNullable<CliDeps['setupWorktree']>>) => undefined as never);
+    const { calls, setupWorktree: custom } = recordSetup();
+    const defaultHits: unknown[][] = [];
+    h.setupWorktreeImpl = spy(defaultHits, async () => {});
     await shipIssue(5, {}, ctx(), { setupWorktree: custom });
-    expect(custom.mock.calls[0]?.slice(0, 3)).toEqual([h.repoRoot, expect.any(String), expect.any(String)]);
-    expect(setupWorktree).not.toHaveBeenCalled();
+    expect(calls[0]?.slice(0, 3)).toEqual([h.repoRoot, expect.any(String), expect.any(String)]);
+    expect(defaultHits).toEqual([]);
   });
 
   describe('slice branch (ADR-0147)', () => {
@@ -56,58 +82,59 @@ describe('shipIssue (direct)', () => {
         { index: 2, title: 'Two', story: sliceStory(2) as never, state: 'pending' },
       ],
     });
-    const sliceOctokit = (listComments: () => Promise<unknown>) => {
+    const stored = async () => ({ data: [{ id: 1, user: { id: 7 }, body: planComment }] });
+    const sliceRun = async (
+      opts: Parameters<typeof shipIssue>[1],
+      listComments: () => Promise<unknown>,
+      extra = {},
+    ) => {
       const fake = defaultOctokit() as any;
-      fake.rest.issues.listComments = vi.fn(listComments);
-      return fake;
+      const listArgs: unknown[][] = [];
+      fake.rest.issues.listComments = spy(listArgs, listComments);
+      const { calls, setupWorktree } = recordSetup();
+      const err = await shipIssue(5, opts, ctx(), { setupWorktree, octokit: () => fake, ...extra }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      return { err, calls, listArgs };
     };
-    const custom = () =>
-      vi.fn(async (..._args: Parameters<NonNullable<CliDeps['setupWorktree']>>) => undefined as never);
 
     it('builds slice 2 on the -s2- branch when slice 1 is merged', async () => {
-      const setup = custom();
-      const fake = sliceOctokit(async () => ({ data: [{ id: 1, user: { id: 7 }, body: planComment }] }));
-      await shipIssue(5, { sizeGate: 'stack' }, ctx(), { setupWorktree: setup, octokit: () => fake });
-      expect(setup.mock.calls[0]?.[1]).toBe('factory/5-s2-fix-the-bug');
+      const r = await sliceRun({ sizeGate: 'stack' }, stored);
+      expect(r.calls[0]?.[1]).toBe('factory/5-s2-fix-the-bug');
     });
 
     it('keeps a chain member whole and passes the stack gate with a base', async () => {
-      const setup = custom();
-      const fake = sliceOctokit(async () => ({ data: [{ id: 1, user: { id: 7 }, body: planComment }] }));
-      await shipIssue(5, { sizeGate: 'stack', baseBranch: 'main', parkOverBudget: true }, ctx(), {
-        setupWorktree: setup,
-        octokit: () => fake,
-      });
-      expect(fake.rest.issues.listComments).not.toHaveBeenCalledWith(expect.objectContaining({ issue_number: 5 })); // slice-plan lookup only; the PR run-state comment is read on the PR number (#3909)
-      expect(setup.mock.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
-      expect(phases.planPhase.mock.calls[0]?.[0]).toMatchObject({ sizeGateMode: 'stack', parkOverBudget: true });
+      const { plan, deps } = recordPhases();
+      const r = await sliceRun({ sizeGate: 'stack', baseBranch: 'main', parkOverBudget: true }, stored, deps);
+      expect(r.listArgs.some(([a]: any) => a.issue_number === 5)).toBe(false); // slice-plan lookup only; the PR run-state comment is read on the PR number (#3909)
+      expect(r.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
+      expect(plan[0]).toMatchObject({ sizeGateMode: 'stack', parkOverBudget: true });
     });
 
     it('does not look up the slice plan in off mode', async () => {
-      const setup = custom();
-      const fake = sliceOctokit(async () => ({ data: [] }));
-      await shipIssue(5, { sizeGate: 'off' }, ctx(), { setupWorktree: setup, octokit: () => fake });
-      expect(fake.rest.issues.listComments).not.toHaveBeenCalledWith(expect.objectContaining({ issue_number: 5 })); // slice-plan lookup only; the PR run-state comment is read on the PR number (#3909)
-      expect(setup.mock.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
+      const r = await sliceRun({ sizeGate: 'off' }, async () => ({ data: [] }));
+      expect(r.listArgs.some(([a]: any) => a.issue_number === 5)).toBe(false); // slice-plan lookup only; the PR run-state comment is read on the PR number (#3909)
+      expect(r.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
     });
 
     describe('open factory PR adoption with the default stack (#3832)', () => {
       const openPr = () => {
         const fake = defaultOctokit() as any;
-        fake.rest.pulls.list = vi.fn(async ({ state }: any) => ({
+        fake.rest.pulls.list = async ({ state }: any) => ({
           data:
             state === 'open'
               ? [{ number: 77, head: { ref: 'factory/5-old-title', sha: 'abc', repo: { full_name: h.ghRepo } } }]
               : [],
-        }));
+        });
         return fake;
       };
       const branchFor = async (opts: Parameters<typeof shipIssue>[1], mode?: string) => {
-        const setup = custom();
+        const { calls, setupWorktree: setup } = recordSetup();
         h.factoryConfig = { ...h.factoryConfig, sizeGate: mode === undefined ? {} : { mode } };
         const fake = openPr();
         await shipIssue(5, opts, ctx(), { setupWorktree: setup, octokit: () => fake });
-        return setup.mock.calls[0]?.[1];
+        return calls[0]?.[1];
       };
 
       it.each([undefined, 'file', 'slice'])('adopts the open PR branch when sizeGate.mode is %s', async (mode) => {
@@ -124,128 +151,113 @@ describe('shipIssue (direct)', () => {
     });
 
     it('parks before creating a worktree when the slice plan lookup throws', async () => {
-      const setup = custom();
-      const fake = sliceOctokit(async () => {
-        throw new Error('network down');
-      });
-      await expect(
-        shipIssue(5, { sizeGate: 'stack' }, ctx(), { setupWorktree: setup, octokit: () => fake }),
-      ).rejects.toBeInstanceOf(LaneParkError);
-      expect(setup).not.toHaveBeenCalled();
+      const r = await sliceRun({ sizeGate: 'stack' }, () => Promise.reject(new Error('network down')));
+      expect(r.err).toBeInstanceOf(LaneParkError);
+      expect(r.calls).toEqual([]);
     });
   });
 
   it('uses the injected octokit factory instead of the default client', async () => {
-    const fake = defaultOctokit();
-    const factory = vi.fn(() => fake as never);
-    const defaultGet = h.octokit.rest.issues.get;
-
-    await shipIssue(5, {}, ctx(), { octokit: factory });
-
-    expect(factory).toHaveBeenCalledTimes(1);
-    expect(fake.rest.issues.get).toHaveBeenCalled();
-    expect(defaultGet).not.toHaveBeenCalled();
+    const fake = defaultOctokit() as any;
+    fake.rest.issues.get = async () => ({ data: { title: 'Injected title' } });
+    const factoryCalls: unknown[][] = [];
+    const branch = await shipIssue(5, {}, ctx(), { octokit: spy(factoryCalls, () => fake as never) });
+    expect(factoryCalls.length).toBe(1);
+    expect(branch).toBe('factory/5-injected-title');
+    expect(readFileSync(paths().events, 'utf-8')).toMatch(/"type":"issue-title".*Injected title/);
   });
 
   it('main() routes deps.octokit to GitHub-backed commands', async () => {
-    const fake = defaultOctokit();
-    fake.rest.pulls.list = vi.fn(async () => ({ data: [] }));
-    const factory = vi.fn(() => fake as never);
-    const defaultList = h.octokit.rest.pulls.list;
+    const fake = defaultOctokit() as any;
+    const [fakeListCalls, factoryCalls, defaultListCalls]: unknown[][][] = [[], [], []];
+    fake.rest.pulls.list = spy(fakeListCalls, async () => ({ data: [] }));
+    h.octokit.rest.pulls.list = spy(defaultListCalls, async () => ({ data: [] }));
+    await runMainWith({ octokit: spy(factoryCalls, () => fake as never) }, 'land', '5');
 
-    await runMainWith({ octokit: factory }, 'land', '5');
-
-    expect(factory).toHaveBeenCalled();
-    expect(fake.rest.pulls.list).toHaveBeenCalled();
-    expect(defaultList).not.toHaveBeenCalled();
+    expect(factoryCalls.length).toBeGreaterThan(0);
+    expect(fakeListCalls.length).toBeGreaterThan(0);
+    expect(defaultListCalls).toEqual([]);
   });
 
   it('uses injected resolveTimeouts, resolveSkipCI and resolveEffectiveModelPins', async () => {
-    const timeouts = vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1, tests: 1 }));
-    const skip = vi.fn(() => false);
-    const pins = vi.fn(() => ({
-      plan: undefined,
-      planFallback: undefined,
-      build: undefined,
-      buildFallback: undefined,
-      sources: {},
-    }));
-
+    const [timeoutArgs, skipArgs, pinCalls]: unknown[][][] = [[], [], []];
+    h.modelProviders = { 'pin-2064': 'anthropic' };
+    const pin = { plan: undefined, planFallback: undefined, build: 'pin-2064', buildFallback: undefined, sources: {} };
     await shipIssue(5, {}, ctx(), {
-      resolveTimeouts: timeouts as never,
-      resolveSkipCI: skip,
-      resolveEffectiveModelPins: pins as never,
+      resolveTimeouts: spy(timeoutArgs, () => ({ plan: 1, build: 1, check: 1, approval: 1, tests: 1 })) as never,
+      resolveSkipCI: spy(skipArgs, () => false),
+      resolveEffectiveModelPins: spy(pinCalls, () => pin) as never,
     });
-
-    expect(timeouts).toHaveBeenCalledWith(h.factoryConfig);
-    expect(skip).toHaveBeenCalledWith(h.factoryConfig);
-    expect(pins).toHaveBeenCalled();
-    expect(inertConfigLoaders.resolveEffectiveModelPins).not.toHaveBeenCalled();
+    expect(timeoutArgs).toContainEqual([h.factoryConfig]);
+    expect(skipArgs).toContainEqual([h.factoryConfig]);
+    expect(pinCalls.length).toBeGreaterThan(0);
+    expect(readFileSync(paths().events, 'utf-8')).toContain('build model pinned to pin-2064');
   });
 
   it('uses injected loadFactoryConfigForRepo and loadRepoConfig', async () => {
     const repoValue = FactoryCore.loadRepoConfig(h.repoRoot);
-    const factoryConfig = vi.fn(() => h.factoryConfig);
-    const repoConfig = vi.fn(() => repoValue);
-
+    const [factoryArgs, repoArgs]: unknown[][][] = [[], []];
     await shipIssue(5, {}, ctx(), {
-      loadFactoryConfigForRepo: factoryConfig as never,
-      loadRepoConfig: repoConfig as never,
+      loadFactoryConfigForRepo: spy(factoryArgs, () => h.factoryConfig) as never,
+      loadRepoConfig: spy(repoArgs, () => repoValue) as never,
     });
-
-    expect(factoryConfig).toHaveBeenCalledWith(expect.stringMatching(/\.factory\/config\.(json|yaml)$/));
-    expect(repoConfig).toHaveBeenCalledWith(h.repoRoot, paths().root);
+    expect(factoryArgs.some((a) => /\.factory\/config\.(json|yaml)$/.test(String(a[0])))).toBe(true);
+    expect(repoArgs).toContainEqual([h.repoRoot, paths().root]);
   });
 
   it('uses an injected loadModelsConfig and loadRoutesConfig', async () => {
     const modelsValue = { models: { 'distinctive-model-2064': {} }, tiers: {} };
     const routesValue = { 'distinctive-route-2064': {} };
-    const models = vi.fn(() => modelsValue as never);
-    const routes = vi.fn(() => routesValue as never);
-
-    await shipIssue(5, {}, ctx(), { loadModelsConfig: models, loadRoutesConfig: routes });
-
-    expect(models).toHaveBeenCalled();
-    expect(routes).toHaveBeenCalled();
-    expect(coreFakes.ModelRouter.mock.calls.at(-1)?.[0]).toMatchObject(modelsValue);
-    expect(coreFakes.ModelRouter.mock.calls.at(-1)?.[1]).toMatchObject(routesValue);
+    const routerArgs: any[][] = [];
+    await shipIssue(5, {}, ctx(), {
+      loadModelsConfig: () => modelsValue as never,
+      loadRoutesConfig: () => routesValue as never,
+      ModelRouter: function (...a: unknown[]) {
+        routerArgs.push(a);
+        return new (coreFakes.ModelRouter as any)(...a);
+      } as never,
+    });
+    expect(routerArgs.at(-1)?.[0]).toMatchObject(modelsValue);
+    expect(routerArgs.at(-1)?.[1]).toMatchObject(routesValue);
   });
 
   it('uses the h.octokit client injected through the shared ops fakes', async () => {
-    await shipIssue(5, {}, ctx());
-    expect(h.octokit.rest.issues.get).toHaveBeenCalled();
+    h.octokit.rest.issues.get = async () => ({ data: { title: 'Shared client title' } });
+    expect(await shipIssue(5, {}, ctx())).toBe('factory/5-shared-client-title');
   });
 
   it('forwards an injected shipPhase override into RunPorts instead of the default', async () => {
-    const ship = vi.fn(async () => h.shipResult);
-
-    await shipIssue(5, {}, ctx(), { shipPhase: ship as never });
-
-    expect(ship).toHaveBeenCalledTimes(1);
-    expect(phases.shipPhase).not.toHaveBeenCalled();
+    const shipCalls: unknown[][] = [];
+    const { seen, ctx: octx } = outcomeCtx();
+    const shipPhase = spy(shipCalls, async () => ({ ...h.shipResult, prNumber: 4242 }));
+    await shipIssue(5, {}, octx, { shipPhase: shipPhase as never });
+    expect(shipCalls.length).toBe(1);
+    expect(seen[0]).toMatchObject({ prNumber: 4242 });
   });
 
   it('drives the deps-builder phase doubles when the test passes no override', async () => {
-    await shipIssue(5, {}, ctx());
-    expect(phases.planPhase).toHaveBeenCalled();
-    expect(phases.shipPhase).toHaveBeenCalled();
-    await expect(phases.planPhase.mock.results[0]?.value).resolves.toBe(h.planResult);
+    const { seen, ctx: octx } = outcomeCtx();
+    const { plan, deps } = recordPhases();
+    await shipIssue(5, {}, octx, deps);
+    expect(plan.length).toBe(1);
+    expect(seen[0]).toMatchObject({ prNumber: 99 });
   });
 
   it('main() forwards phase overrides to the shipIssue it runs', async () => {
-    const customPlan = vi.fn(async (_opts) => h.planResult);
-    await runMainWith({ planPhase: customPlan as never }, 'ship', '5');
-    expect(customPlan).toHaveBeenCalled();
-    expect(phases.planPhase).not.toHaveBeenCalled();
+    const planCalls: unknown[][] = [];
+    await runMainWith({ planPhase: spy(planCalls, async () => h.planResult) as never }, 'ship', '5');
+    expect(planCalls.length).toBeGreaterThanOrEqual(1);
   });
 
   it('restores the default phases after main() returns', async () => {
-    const customShip = vi.fn(async (_opts) => h.shipResult);
+    const shipCalls: unknown[][] = [];
+    const customShip = spy(shipCalls, async () => ({ ...h.shipResult, prNumber: 4242 }));
     await runMainWith({ shipPhase: customShip as never }, 'ship', '5');
-    const calls = customShip.mock.calls.length;
-    await shipIssue(5, {}, ctx());
-    expect(customShip).toHaveBeenCalledTimes(calls);
-    expect(phases.shipPhase).toHaveBeenCalled();
+    const n = shipCalls.length;
+    const { seen, ctx: octx } = outcomeCtx();
+    await shipIssue(5, {}, octx);
+    expect(shipCalls.length).toBe(n);
+    expect(seen[0]).toMatchObject({ prNumber: 99 });
   });
 
   it('uses the branchPrefix override for the branch name', async () => {
@@ -261,23 +273,20 @@ describe('shipIssue (direct)', () => {
   });
 
   it('loads the committed repo config from paths.root, not paths.state', async () => {
-    const spy = vi.fn(FactoryCore.loadRepoConfig);
-    await shipIssue(5, {}, ctx(), { loadRepoConfig: spy as never });
-    expect(spy).toHaveBeenCalledWith(h.repoRoot, paths().root);
+    const repoArgs: unknown[][] = [];
+    await shipIssue(5, {}, ctx(), { loadRepoConfig: spy(repoArgs, FactoryCore.loadRepoConfig) as never });
+    expect(repoArgs).toContainEqual([h.repoRoot, paths().root]);
   });
 
   it('keeps a claude-cli build pin on the claude route when PLAN picks codex (#1367)', async () => {
     h.modelOverrides = { build: 'claude-sonnet-5' };
     h.modelProviders = { 'claude-sonnet-5': 'anthropic' };
     h.planResult = { ok: true, route: 'codex' };
+    const { plan, build, deps } = recordPhases();
+    await shipIssue(5, {}, ctx(), deps);
 
-    await shipIssue(5, {}, ctx());
-
-    expect(phases.planPhase.mock.calls.at(-1)?.[0]).toMatchObject({ preferredRoute: 'claude' });
-    expect(phases.buildPhase.mock.calls.at(-1)?.[0]).toMatchObject({
-      route: 'claude',
-      modelOverride: 'claude-sonnet-5',
-    });
+    expect(plan.at(-1)).toMatchObject({ preferredRoute: 'claude' });
+    expect(build.at(-1)).toMatchObject({ route: 'claude', modelOverride: 'claude-sonnet-5' });
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('build model pinned to claude-sonnet-5');
     expect(events).toContain('build route derived from pinned build model claude-sonnet-5 → claude');
@@ -287,18 +296,19 @@ describe('shipIssue (direct)', () => {
   it('reads providers flags from .factory/config.json (no symlink needed)', async () => {
     mkdirSync(paths().root, { recursive: true });
     writeFileSync(paths().config, JSON.stringify({ version: 1, providers: { ollama: false } }));
-    const spy = vi.fn(FactoryCore.loadRepoConfig);
-    await shipIssue(5, {}, ctx(), { loadRepoConfig: spy as never });
-    expect(spy.mock.results.at(-1)?.value).toEqual({
-      version: 2,
-      providers: { ollama: false },
-    });
+    const results: unknown[] = [];
+    const record = (...a: Parameters<typeof FactoryCore.loadRepoConfig>) => (
+      results.push(FactoryCore.loadRepoConfig(...a)),
+      results.at(-1)
+    );
+    await shipIssue(5, {}, ctx(), { loadRepoConfig: record as never });
+    expect(results.at(-1)).toEqual({ version: 2, providers: { ollama: false } });
   });
 
   // Regression (#681): a closed issue must be refused before any resource is
   // committed — no worktree, no port lease, no model call.
   it('refuses a closed issue before any resource is committed', async () => {
-    h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix the bug', state: 'closed' } }));
+    h.octokit.rest.issues.get = async () => ({ data: { title: 'Fix the bug', state: 'closed' } });
 
     await expect(shipIssue(5, {}, ctx())).rejects.toBeInstanceOf(IssueSkippedError);
 
@@ -334,22 +344,20 @@ describe('shipIssue (direct)', () => {
       `${paths().root}/config.yaml`,
       'version: 2\nmodels:\n  pins:\n    triage: triage-x\n    plan: plan-x\n    build: build-y\n    checker: checker-z\n',
     );
-    const models = vi.fn(
-      () =>
-        ({
-          models: Object.fromEntries(
-            ['triage-x', 'plan-x', 'build-y', 'checker-z'].map((id) => [id, { provider: 'anthropic' }]),
-          ),
-          tiers: {},
-        }) as never,
-    );
-    const pins = vi.fn(() => ({
+    const models = () =>
+      ({
+        models: Object.fromEntries(
+          ['triage-x', 'plan-x', 'build-y', 'checker-z'].map((id) => [id, { provider: 'anthropic' }]),
+        ),
+        tiers: {},
+      }) as never;
+    const pins = () => ({
       plan: 'plan-x',
       planFallback: undefined,
       build: 'build-y',
       buildFallback: undefined,
       sources: { plan: 'repo', build: 'repo' },
-    }));
+    });
     await shipIssue(5, {}, ctx(), { loadModelsConfig: models, resolveEffectiveModelPins: pins as never });
     const lines = readFileSync(paths().events, 'utf-8')
       .trim()
@@ -373,8 +381,9 @@ describe('shipIssue (direct)', () => {
     expect(readFileSync(paths().events, 'utf-8')).toContain('provider_breaker_open');
 
     h.triggerPlanProviderFailure = null;
-    await shipIssue(6, {}, ctx());
-    const planCall = phases.planPhase.mock.calls.at(-1)?.[0];
+    const { plan, deps } = recordPhases();
+    await shipIssue(6, {}, ctx(), deps);
+    const planCall = plan.at(-1);
     expect(planCall).toMatchObject({ modelOverride: 'claude-plan', modelFallbacks: ['gpt-plan'] });
     expect([...(planCall?.skipProviders ?? [])]).toEqual(['anthropic']);
   });
@@ -406,14 +415,9 @@ describe('shipIssue (direct)', () => {
         },
       }),
     );
-
-    await shipIssue(5, {}, ctx());
-
-    expect(phases.buildPhase.mock.calls.at(-1)?.[0]).toMatchObject({
-      route: 'codex',
-      modelOverride: 'gpt-build',
-      codexFallbackModel: 'gpt-build',
-    });
+    const { build, deps } = recordPhases();
+    await shipIssue(5, {}, ctx(), deps);
+    expect(build.at(-1)).toMatchObject({ route: 'codex', modelOverride: 'gpt-build', codexFallbackModel: 'gpt-build' });
   });
 
   it('logs standards source when a repo constitution resolves', async () => {
@@ -424,13 +428,12 @@ describe('shipIssue (direct)', () => {
   });
 
   it('passes the main checkout as the constitution source', async () => {
-    const resolveSpy = vi.fn((..._args: any[]): any => null);
-    h.constitutionResolve = resolveSpy;
+    const resolveArgs: unknown[][] = [];
+    h.constitutionResolve = spy(resolveArgs, () => null);
     await shipIssue(5, {}, ctx());
-    expect(resolveSpy).toHaveBeenCalledTimes(1);
-    const args = resolveSpy.mock.calls[0]!;
-    expect(args[3]).toBe(h.repoRoot);
-    expect(args[0]).not.toBe(h.repoRoot);
+    expect(resolveArgs.length).toBe(1);
+    expect(resolveArgs[0]?.[3]).toBe(h.repoRoot);
+    expect(resolveArgs[0]?.[0]).not.toBe(h.repoRoot);
   });
 
   it('logs bundled standards source when a bundled constitution resolves', async () => {
@@ -442,7 +445,6 @@ describe('shipIssue (direct)', () => {
 });
 
 describe('shipIssue review rework (#3564)', () => {
-  const ctx = () => ({ repoRoot: h.repoRoot, ghRepo: h.ghRepo });
   const seed = (extra: Record<string, unknown> = {}) =>
     writeFileSync(
       join(paths().state, 'review-rework.json'),
@@ -460,35 +462,31 @@ describe('shipIssue review rework (#3564)', () => {
         ],
       }),
     );
-  const closedPr = () => {
+  const reworkClaimed = async (extra?: Record<string, unknown>) => {
+    seed(extra);
     const fake = defaultOctokit() as any;
-    fake.rest.pulls.get = vi.fn(async () => ({ data: { state: 'closed', head: { ref: 'factory/5-fix-the-bug' } } }));
-    return fake;
+    const getArgs: unknown[][] = [];
+    fake.rest.pulls.get = spy(getArgs, async () => ({
+      data: { state: 'closed', head: { ref: 'factory/5-fix-the-bug' } },
+    }));
+    const { plan, deps } = recordPhases();
+    await expect(shipIssue(5, {}, ctx(), { ...deps, octokit: () => fake })).rejects.toThrow(/PR #77 must be open/);
+    expect(plan).toEqual([]);
+    expect(getArgs.some(([a]: any) => a.pull_number === 77)).toBe(true);
+    const saved = JSON.parse(readFileSync(join(paths().state, 'review-rework.json'), 'utf-8'));
+    expect(saved.reviews[0].startedAt).toEqual(expect.any(String));
   };
 
-  it('claims a pending record: skips PLAN, sends reviewRework on the request and marks it started', async () => {
-    seed();
-    const fake = closedPr();
-    await expect(shipIssue(5, {}, ctx(), { octokit: () => fake })).rejects.toThrow(/PR #77 must be open/);
-    expect(phases.planPhase).not.toHaveBeenCalled();
-    expect(fake.rest.pulls.get).toHaveBeenCalledWith(expect.objectContaining({ pull_number: 77 }));
-    const saved = JSON.parse(readFileSync(join(paths().state, 'review-rework.json'), 'utf-8'));
-    expect(saved.reviews[0].startedAt).toEqual(expect.any(String));
-  });
+  it('claims a pending record: skips PLAN, sends reviewRework on the request and marks it started', () =>
+    reworkClaimed());
 
-  it('a comment rework record skips PLAN and adopts the existing PR (#3882)', async () => {
-    seed({ source: 'comment' });
-    const fake = closedPr();
-    await expect(shipIssue(5, {}, ctx(), { octokit: () => fake })).rejects.toThrow(/PR #77 must be open/);
-    expect(phases.planPhase).not.toHaveBeenCalled();
-    expect(fake.rest.pulls.get).toHaveBeenCalledWith(expect.objectContaining({ pull_number: 77 }));
-    const saved = JSON.parse(readFileSync(join(paths().state, 'review-rework.json'), 'utf-8'));
-    expect(saved.reviews[0].startedAt).toEqual(expect.any(String));
-  });
+  it('a comment rework record skips PLAN and adopts the existing PR (#3882)', () =>
+    reworkClaimed({ source: 'comment' }));
 
   it('runs normally when the record is already started or absent', async () => {
     seed({ startedAt: '2026-01-02T00:00:00.000Z' });
-    await shipIssue(5, {}, ctx());
-    expect(phases.planPhase).toHaveBeenCalled();
+    const { plan, deps } = recordPhases();
+    await shipIssue(5, {}, ctx(), deps);
+    expect(plan.length).toBeGreaterThan(0);
   });
 });

@@ -55,7 +55,6 @@
   "packages/cli/src/cli/ship-sandbox.test.ts": 10,
   "packages/cli/src/cli/ship-steps.test.ts": 7,
   "packages/cli/src/cli/ship.base-branch.test.ts": 5,
-  "packages/cli/src/cli/ship.test.ts": 50,
   "packages/cli/src/cli/shutdown.test.ts": 15,
   "packages/cli/src/cli/stack-queue-merge.test.ts": 17,
   "packages/cli/src/cli/stack-run.test.ts": 6,
