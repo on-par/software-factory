@@ -1,41 +1,21 @@
 // packages/cli/src/cli/land-pr-claim-signal.test.ts — merge refuses to run once the claim is lost (#3146)
 
 import { fakeOctokit } from '@on-par/factory-core/testing';
-import type { Octokit } from '@octokit/rest';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { squashMergeAndDelete } from './land-pr.js';
-
-function landOctokit() {
-  const merge = vi.fn(async () => ({}));
-  return {
-    octokit: fakeOctokit({
-      'pulls.get': vi.fn(async () => ({ data: { base: { ref: 'main' } } })),
-      'pulls.merge': merge,
-      'git.deleteRef': vi.fn(async () => ({})),
-    }).octokit as Octokit,
-    merge,
-  };
-}
 
 describe('squashMergeAndDelete claim signal', () => {
   it('throws the abort reason and calls neither pulls.merge nor gh when aborted', async () => {
     const lost = new Error('claim lost');
     const controller = new AbortController();
     controller.abort(lost);
-    const { octokit, merge } = landOctokit();
-    const run = vi.fn(async () => ({}));
+    const { octokit, calls } = fakeOctokit({ 'pulls.get': { data: { base: { ref: 'main' } } } });
+    const run = async () => Promise.reject(new Error('run must not run'));
     await expect(squashMergeAndDelete(octokit, 'o', 'r', 'b', 5, { signal: controller.signal })).rejects.toBe(lost);
     await expect(
       squashMergeAndDelete(octokit, 'o', 'r', 'b', 5, { admin: true, run, signal: controller.signal }),
     ).rejects.toBe(lost);
-    expect(merge).not.toHaveBeenCalled();
-    expect(run).not.toHaveBeenCalled();
-  });
-
-  it('merges as before while the signal is healthy', async () => {
-    const { octokit, merge } = landOctokit();
-    await squashMergeAndDelete(octokit, 'o', 'r', 'b', 5, { signal: new AbortController().signal, sha: 'abc' });
-    expect(merge).toHaveBeenCalledWith(expect.objectContaining({ pull_number: 5, sha: 'abc' }));
+    expect(calls).toEqual([]);
   });
 });

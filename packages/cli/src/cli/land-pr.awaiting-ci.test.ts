@@ -11,13 +11,16 @@ import {
 } from './land-pr.js';
 
 function setup(signal: { runs?: unknown[] | Error; statuses?: number }, repoName = 'software-factory') {
-  const log = vi.fn();
+  const logs: Array<[string, string]> = [];
   const octokit: any = {
     graphql: async () => ({
       repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'MERGEABLE' } },
     }),
     rest: {
-      pulls: { get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }), merge: vi.fn() },
+      pulls: {
+        get: async () => ({ data: { head: { sha: 'abc123' }, base: { ref: 'main' } } }),
+        merge: async () => Promise.reject(new Error('merge must not run')),
+      },
       checks: {
         listForRef: async () => {
           if (signal.runs instanceof Error) throw signal.runs;
@@ -47,28 +50,24 @@ function setup(signal: { runs?: unknown[] | Error; statuses?: number }, repoName
       branch: 'factory/20-x',
       worktree: '/repo-factory-20',
       prNumber: 7,
-      log,
+      log: (kind: string, msg: string) => void logs.push([kind, msg]),
       adminMerge: false,
       watch: watch as any,
     });
-  return { log, octokit, land };
+  return { logs, land };
 }
 
 describe('landOpenPullRequest: CI deadline with nothing registered (#3208)', () => {
   it('throws AwaitingCiError, not a CI failure, when no check run or status exists on the head', async () => {
-    const { log, octokit, land } = setup({});
+    const { logs, land } = setup({});
     const err = await land().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AwaitingCiError);
     expect(err).not.toBeInstanceOf(CiFailedError);
     expect(err).toMatchObject({ prNumber: 7, headSha: 'abc123' });
     expect(isLandLeftOpen(err)).toBe(true);
     expect(isCiNotGreen(err)).toBe(true);
-    expect(octokit.rest.pulls.merge).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith(
-      'awaiting-ci',
-      expect.stringContaining('no CI run or status registered on abc123'),
-    );
-    expect(log).not.toHaveBeenCalledWith('ci-failed', expect.anything());
+    expect(logs).toContainEqual(['awaiting-ci', expect.stringContaining('no CI run or status registered on abc123')]);
+    expect(logs.some(([k]) => k === 'ci-failed')).toBe(false);
   });
 
   it('still throws CiUnverifiedError when check runs exist, or when only a status exists', async () => {
@@ -88,7 +87,7 @@ describe('landOpenPullRequest: CI deadline with nothing registered (#3208)', () 
     await first.land().catch(() => {});
     await second.land().catch(() => {});
     const warning = 'no branch protection on on-par/warn-once-repo@main; using all checks on head';
-    expect(first.log).toHaveBeenCalledWith('warn', warning);
-    expect(second.log).not.toHaveBeenCalledWith('warn', warning);
+    expect(first.logs).toContainEqual(['warn', warning]);
+    expect(second.logs).not.toContainEqual(['warn', warning]);
   });
 });

@@ -15,7 +15,7 @@ import {
   type LandRebuildOps,
 } from './land-rebuild.js';
 import { runLane, type RunLaneDeps } from './run-lane.js';
-import { h, installShipHarness, paths, phases, setupWorktree, shipIssue } from './test-support/ship-harness.js';
+import { h, installShipHarness, paths, phases, shipIssue } from './test-support/ship-harness.js';
 
 installShipHarness();
 
@@ -85,9 +85,21 @@ async function runAdoptedConflict(
 ) {
   const { conflicts = () => true, branch = OLD } = opts;
   const github = fakeGitHub();
+  const released: Array<[number, string]> = [];
+  const setups: Array<[string, string | undefined]> = [];
+  const runs = { plan: 0, build: 0 };
+  h.setupWorktreeImpl = async (_root, b, _wt, start) => void setups.push([b, start]);
+  phases.planPhase.mockImplementation(async () => {
+    runs.plan += 1;
+    return h.planResult;
+  });
+  phases.buildPhase.mockImplementation(async () => {
+    runs.build += 1;
+    return h.buildResult;
+  });
   const lands: Array<{ branch: string; deps: Record<string, unknown>; buildsBefore: number }> = [];
   const waitMerge: RunLaneDeps['waitMerge'] = async (issue, b, _root, _gh, _paths, deps = {}) => {
-    lands.push({ branch: b, deps, buildsBefore: phases.buildPhase.mock.calls.length });
+    lands.push({ branch: b, deps, buildsBefore: runs.build });
     if (!conflicts(b)) return;
     await landOpenPullRequest({
       octokit: landOctokit,
@@ -106,7 +118,7 @@ async function runAdoptedConflict(
       rebuildOnConflict: deps.rebuildOnConflict,
     });
   };
-  const releaseIssue = vi.fn(async () => {});
+  const releaseIssue = async (issue: number, outcome: string) => void released.push([issue, outcome]);
   const claimNext = vi
     .fn()
     .mockResolvedValueOnce({ issue: ISSUE, decision: { kind: 'adopt', branch, syncMain: true } })
@@ -122,7 +134,7 @@ async function runAdoptedConflict(
     .trim()
     .split('\n')
     .map((line) => JSON.parse(line) as { type: string; msg: string; park?: { reason: string } });
-  return { ...github, lands, releaseIssue, events };
+  return { ...github, lands, released, setups, runs, events };
 }
 
 function freezeSpec(route = 'claude'): void {
@@ -135,7 +147,7 @@ describe('land rebuild on a merge-main conflict (#3325)', () => {
     const r = await runAdoptedConflict({ conflicts: (b) => b === OLD });
 
     expect(r.created).toEqual([{ number: 124, head: NEW, body: expect.stringContaining(`Closes #${ISSUE}`) }]);
-    expect(setupWorktree.mock.calls.map((c) => [c[1], c[3]])).toEqual([[NEW, undefined]]); // fresh off origin/main
+    expect(r.setups).toEqual([[NEW, undefined]]); // fresh off origin/main
     expect(r.comments).toEqual([{ issue_number: 123, body: expect.stringContaining('replaced this PR with #124') }]);
     expect(r.comments[0].body).toContain(HELP_GROUPS);
     expect(r.closed).toEqual([123]);
@@ -146,7 +158,7 @@ describe('land rebuild on a merge-main conflict (#3325)', () => {
     expect(r.events.find((e) => e.type === 'pr_refresh' && e.msg.includes('action=rebuild'))?.msg).toBe(
       'PR #123 refreshed: mergeStateStatus=DIRTY action=rebuild newPr=#124',
     );
-    expect(r.releaseIssue).toHaveBeenCalledWith(ISSUE, 'done');
+    expect(r.released).toEqual([[ISSUE, 'done']]);
     expect(r.events.some((e) => e.type === 'conflict' || e.type === 'parked')).toBe(false);
   });
 
@@ -156,8 +168,7 @@ describe('land rebuild on a merge-main conflict (#3325)', () => {
 
     expect(r.lands[0].deps.rebuildOnConflict).toBe(true);
     expect(r.lands[0].buildsBefore).toBe(0);
-    expect(phases.buildPhase).toHaveBeenCalledTimes(1);
-    expect(phases.planPhase).not.toHaveBeenCalled();
+    expect(r.runs).toEqual({ plan: 0, build: 1 });
     expect(r.events.some((e) => e.type === 'plan_reused')).toBe(true);
   });
 
@@ -170,7 +181,7 @@ describe('land rebuild on a merge-main conflict (#3325)', () => {
     expect(conflict?.msg).toContain('rebuild of PR #123 failed at build');
     expect(conflict?.msg).toContain(HELP_GROUPS);
     expect(r.events.find((e) => e.type === 'parked')?.park?.reason).toBe('conflict');
-    expect(r.releaseIssue).toHaveBeenCalledWith(ISSUE, 'parked');
+    expect(r.released).toEqual([[ISSUE, 'parked']]);
     expect(r.created).toEqual([]);
     expect(r.closed).toEqual([]);
   });
@@ -179,9 +190,8 @@ describe('land rebuild on a merge-main conflict (#3325)', () => {
     const r = await runAdoptedConflict();
 
     expect(r.events.find((e) => e.type === 'conflict')?.msg).toContain('failed at setup');
-    expect(phases.planPhase).not.toHaveBeenCalled();
-    expect(phases.buildPhase).not.toHaveBeenCalled();
-    expect(r.releaseIssue).toHaveBeenCalledWith(ISSUE, 'parked');
+    expect(r.runs).toEqual({ plan: 0, build: 0 });
+    expect(r.released).toEqual([[ISSUE, 'parked']]);
   });
 
   it('a rebuilt PR that conflicts again parks conflict and opens no third PR', async () => {
@@ -202,7 +212,7 @@ describe('land rebuild on a merge-main conflict (#3325)', () => {
     const r = await runAdoptedConflict({ branch: NEW });
 
     expect(r.lands.map((l) => l.deps.rebuildOnConflict)).toEqual([false]);
-    expect(phases.buildPhase).not.toHaveBeenCalled();
+    expect(r.runs.build).toBe(0);
     expect(r.created).toEqual([]);
     expect(r.events.find((e) => e.type === 'parked')?.park?.reason).toBe('conflict');
   });
@@ -216,7 +226,7 @@ describe('land rebuild on a merge-main conflict (#3325)', () => {
       'could not close PR #123 after opening #124: github 502',
     );
     expect(r.lands.map((l) => l.branch)).toEqual([OLD, NEW]);
-    expect(r.releaseIssue).toHaveBeenCalledWith(ISSUE, 'done');
+    expect(r.released).toEqual([[ISSUE, 'done']]);
   });
 });
 
@@ -314,10 +324,9 @@ describe('landWithOneRebuild', () => {
   });
 
   it('rethrows a land error that is not a rebuild hand-off without shipping', async () => {
-    const ship = vi.fn(async () => 'never');
+    const ship = async () => Promise.reject(new Error('ship must not run'));
     const parked = new LandConflictError('parked');
     const { o } = ops(ship, async () => Promise.reject(parked));
     await expect(landWithOneRebuild(ISSUE, OLD, true, o)).rejects.toBe(parked);
-    expect(ship).not.toHaveBeenCalled();
   });
 });
