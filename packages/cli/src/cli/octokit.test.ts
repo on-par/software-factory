@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createFactoryOctokit,
+  type GitHubApiDeprecation,
   formatDeprecation,
   isBadCredentialsError,
   isOctokitDeprecationWarning,
@@ -66,25 +67,30 @@ function fakeFetch(headers: Record<string, string>, status = 201): typeof fetch 
   return (async () => new Response(JSON.stringify({ number: 1 }), { status, headers })) as typeof fetch;
 }
 
+function sink(out: string[]) {
+  return (...a: unknown[]) => void out.push(a.map(String).join(' '));
+}
+
 describe('createFactoryOctokit deprecations (#2218)', () => {
   afterEach(() => vi.restoreAllMocks());
 
   function setup() {
-    const log = vi.fn();
-    const stderr = vi.fn();
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const octokit = createFactoryOctokit('t', { log, stderr, throttle: false });
+    const logged: GitHubApiDeprecation[] = [];
+    const [lines, warned, errored]: string[][] = [[], [], []];
+    vi.spyOn(console, 'warn').mockImplementation(sink(warned));
+    vi.spyOn(console, 'error').mockImplementation(sink(errored));
+    const log = (d: GitHubApiDeprecation) => void logged.push(d);
+    const octokit = createFactoryOctokit('t', { log, stderr: (l) => void lines.push(l), throttle: false });
     const create = (headers: Record<string, string>, status = 201) =>
       octokit.rest.issues.create({ owner: 'o', repo: 'r', title: 't', request: { fetch: fakeFetch(headers, status) } });
-    return { octokit, log, stderr, warn, error, create };
+    return { octokit, logged, lines, warned, errored, create };
   }
 
   it('turns a deprecation into a structured callback', async () => {
-    const { log, create } = setup();
+    const { logged, create } = setup();
     await create(DEPRECATED_HEADERS);
-    expect(log).toHaveBeenCalledTimes(1);
-    const d = log.mock.calls[0][0];
+    expect(logged).toHaveLength(1);
+    const d = logged[0];
     expect(d).toEqual({
       method: 'POST',
       route: '/repos/{owner}/{repo}/issues',
@@ -97,10 +103,10 @@ describe('createFactoryOctokit deprecations (#2218)', () => {
   });
 
   it('collapses repeats per METHOD route', async () => {
-    const { octokit, log, stderr, create } = setup();
+    const { octokit, logged, lines, create } = setup();
     for (let i = 0; i < 6; i++) await create(DEPRECATED_HEADERS);
-    expect(log).toHaveBeenCalledTimes(1);
-    expect(stderr).toHaveBeenCalledTimes(1);
+    expect(logged).toHaveLength(1);
+    expect(lines).toHaveLength(1);
     await octokit.rest.issues.update({
       owner: 'o',
       repo: 'r',
@@ -108,17 +114,15 @@ describe('createFactoryOctokit deprecations (#2218)', () => {
       title: 't',
       request: { fetch: fakeFetch(DEPRECATED_HEADERS, 200) },
     });
-    expect(log).toHaveBeenCalledTimes(2);
-    expect(stderr).toHaveBeenCalledTimes(2);
-    expect(log.mock.calls[1][0].route).toBe('/repos/{owner}/{repo}/issues/{issue_number}');
+    expect(logged).toHaveLength(2);
+    expect(lines).toHaveLength(2);
+    expect(logged[1].route).toBe('/repos/{owner}/{repo}/issues/{issue_number}');
   });
 
   it('never emits the raw Octokit line', async () => {
-    const { warn, error, create } = setup();
+    const { warned, errored, create } = setup();
     await create(DEPRECATED_HEADERS);
-    for (const spy of [warn, error]) {
-      for (const call of spy.mock.calls) expect(String(call[0]).startsWith('[@octokit/request]')).toBe(false);
-    }
+    for (const text of [...warned, ...errored]) expect(text.startsWith('[@octokit/request]')).toBe(false);
   });
 
   it('recognises only the Octokit deprecation message', () => {
@@ -131,10 +135,10 @@ describe('createFactoryOctokit deprecations (#2218)', () => {
   });
 
   it('stays quiet for normal calls', async () => {
-    const { log, stderr, create } = setup();
+    const { logged, lines, create } = setup();
     await create({ 'content-type': 'application/json' });
-    expect(log).not.toHaveBeenCalled();
-    expect(stderr).not.toHaveBeenCalled();
+    expect(logged).toEqual([]);
+    expect(lines).toEqual([]);
   });
 
   it('readDeprecation handles missing and odd headers', () => {
@@ -148,15 +152,15 @@ describe('createFactoryOctokit deprecations (#2218)', () => {
   });
 
   it('detects deprecations on error responses and rethrows the original error', async () => {
-    const { log, create } = setup();
+    const { logged, create } = setup();
     await expect(create(DEPRECATED_HEADERS, 404)).rejects.toMatchObject({ status: 404 });
-    expect(log).toHaveBeenCalledTimes(1);
+    expect(logged).toHaveLength(1);
   });
 
   it('forwards non-deprecation warnings to console.warn', () => {
-    const { octokit, warn } = setup();
+    const { octokit, warned } = setup();
     octokit.log.warn('x');
-    expect(warn).toHaveBeenCalledWith('x');
+    expect(warned).toEqual(['x']);
   });
 });
 
@@ -164,7 +168,8 @@ describe('createFactoryOctokit request log (#1004)', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('keeps a failed GET off stderr and still rejects with the GitHub error', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const error: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation(sink(error));
     const octokit = createFactoryOctokit('t', { throttle: false });
     const notFound = (async () =>
       new Response(JSON.stringify({ message: 'Not Found' }), {
@@ -180,13 +185,14 @@ describe('createFactoryOctokit request log (#1004)', () => {
         request: { fetch: notFound },
       }),
     ).rejects.toMatchObject({ status: 404, message: expect.stringContaining('Not Found') });
-    expect(error).not.toHaveBeenCalled();
+    expect(error).toEqual([]);
   });
 
   it('forwards other errors to console.error', () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const error: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation(sink(error));
     createFactoryOctokit('t').log.error('boom');
-    expect(error).toHaveBeenCalledWith('boom');
+    expect(error).toEqual(['boom']);
   });
 
   it('recognises only the request-log line', () => {
@@ -203,8 +209,8 @@ describe('createFactoryOctokit credential refresh (#4027)', () => {
   afterEach(() => vi.restoreAllMocks());
 
   function setup(resolve: (() => string | undefined) | undefined, status: (auth: string) => number) {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const printed: string[] = [];
+    for (const m of ['error', 'warn'] as const) vi.spyOn(console, m).mockImplementation(sink(printed));
     const seen: string[] = [];
     const fetch = async (_url: unknown, init?: { headers?: Record<string, string> }) => {
       const auth = String(init?.headers?.authorization ?? '');
@@ -213,13 +219,14 @@ describe('createFactoryOctokit credential refresh (#4027)', () => {
       const body = code === 200 ? {} : { message: code === 401 ? 'Bad credentials' : 'Forbidden' };
       return new Response(JSON.stringify(body), { status: code, headers: { 'content-type': 'application/json' } });
     };
-    const resolveToken = vi.fn(resolve ?? (() => undefined));
+    let reads = 0;
+    const resolveToken = () => (reads++, resolve?.());
     const octokit = createFactoryOctokit('stale', {
       throttle: false,
       resolveToken: resolve ? resolveToken : undefined,
     });
     const get = () => octokit.rest.issues.get({ owner: 'o', repo: 'r', issue_number: 1, request: { fetch } });
-    return { seen, resolveToken, get, errorSpy, warnSpy };
+    return { seen, reads: () => reads, get, printed };
   }
   const byToken = (auth: string) => (auth === 'token fresh' ? 200 : 401);
 
@@ -227,7 +234,7 @@ describe('createFactoryOctokit credential refresh (#4027)', () => {
     const t = setup(() => 'fresh', byToken);
     await expect(t.get()).resolves.toBeDefined();
     expect(t.seen).toEqual(['token stale', 'token fresh']);
-    expect(t.resolveToken).toHaveBeenCalledTimes(1);
+    expect(t.reads()).toBe(1);
   });
 
   it('uses the refreshed token on later requests without re-reading', async () => {
@@ -235,7 +242,7 @@ describe('createFactoryOctokit credential refresh (#4027)', () => {
     await t.get();
     await t.get();
     expect(t.seen[2]).toBe('token fresh');
-    expect(t.resolveToken).toHaveBeenCalledTimes(1);
+    expect(t.reads()).toBe(1);
   });
 
   it('rethrows the original 401 when the re-read yields no token', async () => {
@@ -265,7 +272,7 @@ describe('createFactoryOctokit credential refresh (#4027)', () => {
     );
     await expect(t.get()).rejects.toMatchObject({ status: 401 });
     expect(t.seen).toEqual(['token stale', 'token fresh']);
-    expect(t.resolveToken).toHaveBeenCalledTimes(1);
+    expect(t.reads()).toBe(1);
   });
 
   it('does not re-read on non-401 errors', async () => {
@@ -274,7 +281,7 @@ describe('createFactoryOctokit credential refresh (#4027)', () => {
       () => 403,
     );
     await expect(t.get()).rejects.toMatchObject({ status: 403 });
-    expect(t.resolveToken).not.toHaveBeenCalled();
+    expect(t.reads()).toBe(0);
   });
 
   it('does not retry when no resolveToken is configured', async () => {
@@ -292,8 +299,7 @@ describe('createFactoryOctokit credential refresh (#4027)', () => {
       () => new Error('unexpected success'),
       (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
     );
-    const printed = [...t.errorSpy.mock.calls, ...t.warnSpy.mock.calls].flat().map(String);
-    for (const text of [...printed, String(err), err.message]) {
+    for (const text of [...t.printed, String(err), err.message]) {
       expect(text).not.toContain('stale');
       expect(text).not.toContain('fresh');
     }

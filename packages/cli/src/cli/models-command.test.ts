@@ -10,12 +10,10 @@ import {
   daemonDeps,
   errored,
   h,
-  inertConfigLoaders,
   installCliCommandsHarness,
   logged,
   logSpy,
   paths,
-  phases,
   recordingRunTui,
   runMain,
   runMainRaw,
@@ -28,42 +26,49 @@ installCliCommandsHarness();
 
 describe('cli commands (via main dispatch)', () => {
   describe('models', () => {
+    const ctx = () => ({ repoRoot: h.repoRoot, ghRepo: h.ghRepo });
+    const base = () => ({ daemon: daemonDeps(), runTui: recordingRunTui });
+    const recordPhases = () => {
+      const [plans, ships]: any[][] = [[], []];
+      const planPhase = (async (o: any) => (plans.push(o), h.planResult)) as never;
+      return { plans, ships, planPhase, shipPhase: (async (o: any) => (ships.push(o), h.shipResult)) as never };
+    };
+    const seeing = (seen: any[]) =>
+      function (cfg: any) {
+        seen.push(cfg);
+        return { ...new (coreFakes.ModelRegistry as any)(), list: () => Object.keys(cfg.models) };
+      } as never;
+
     it('uses an injected loadModelsConfig instead of the factory-core loader', async () => {
       const config = { models: { 'distinctive-model-2063': {} }, tiers: {} };
-      const stub = vi.fn(() => config as never);
-
-      await runMainWith({ daemon: daemonDeps(), runTui: recordingRunTui, loadModelsConfig: stub }, 'models');
-
-      expect(stub).toHaveBeenCalled();
-      expect(coreFakes.ModelRegistry.mock.calls.at(-1)?.[0]).toMatchObject({
-        models: { 'distinctive-model-2063': {} },
-      });
+      const seen: any[] = [];
+      await runMainWith({ ...base(), loadModelsConfig: () => config as never, ModelRegistry: seeing(seen) }, 'models');
+      expect(seen.at(-1)).toMatchObject({ models: { 'distinctive-model-2063': {} } });
+      expect(logged()).toContain('distinctive-model-2063');
     });
 
     it('uses the factory-core loadModelsConfig when none is injected', async () => {
-      await runMainRaw({ daemon: daemonDeps(), runTui: recordingRunTui }, 'models');
-      const arg = coreFakes.ModelRegistry.mock.calls.at(-1)?.[0] as { models: object };
-      expect(Object.keys(arg.models).length).toBeGreaterThan(0);
+      const seen: any[] = [];
+      await runMainRaw({ ...base(), ModelRegistry: seeing(seen) }, 'models');
+      expect(Object.keys(seen.at(-1).models).length).toBeGreaterThan(0);
     });
 
     it('restores the default loaders after main() returns', async () => {
-      const stub = vi.fn((repoRoot: string, stateRoot?: string) => FactoryCore.loadRepoConfig(repoRoot, stateRoot));
-      await runMainWith({ daemon: daemonDeps(), runTui: recordingRunTui, loadRepoConfig: stub as never }, 'models');
-      const stubCalls = stub.mock.calls.length;
-
-      await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo });
-
-      expect(stub.mock.calls.length).toBe(stubCalls);
+      let loads = 0;
+      const stub = (r: string, s?: string) => (loads++, FactoryCore.loadRepoConfig(r, s));
+      await runMainWith({ ...base(), loadRepoConfig: stub as never }, 'models');
+      const before = loads;
+      await shipIssue(5, {}, ctx());
+      expect(loads).toBe(before);
     });
 
     it('restores the default phases after main() returns', async () => {
-      const stub = vi.fn(async () => h.planResult) as never;
-      await runMainWith({ daemon: daemonDeps(), runTui: recordingRunTui, planPhase: stub }, 'models');
-
-      await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo });
-
-      expect(stub).not.toHaveBeenCalled();
-      expect(phases.planPhase).toHaveBeenCalled();
+      const injected = recordPhases();
+      await runMainWith({ ...base(), planPhase: injected.planPhase }, 'models');
+      const defaults = recordPhases();
+      await shipIssue(5, {}, ctx(), { planPhase: defaults.planPhase });
+      expect(injected.plans).toEqual([]);
+      expect(defaults.plans).toHaveLength(1);
     });
 
     it('serves the run from the offline GitHub stub when FACTORY_GITHUB=stub (#2652)', async () => {
@@ -75,24 +80,23 @@ describe('cli commands (via main dispatch)', () => {
         );
         vi.stubEnv('FACTORY_GITHUB', 'stub');
         vi.stubEnv('FACTORY_GITHUB_STUB_DIR', stubDir);
-        const fetchSpy = vi.spyOn(globalThis, 'fetch');
-
-        await shipIssue(5, { sizeGate: 'off' }, { repoRoot: h.repoRoot, ghRepo: h.ghRepo }, { octokit: undefined });
-
-        const plan = phases.planPhase.mock.calls.at(-1)?.[0] as any;
-        expect(plan.branch).toBe('factory/5-stubbed-title'); // slug of the fixture title
-        const captured = phases.shipPhase.mock.calls.at(-1)?.[0] as any;
+        const fetched: unknown[] = [];
+        vi.spyOn(globalThis, 'fetch').mockImplementation((...a) => (fetched.push(a), Promise.reject(new Error('x'))));
+        const r = recordPhases();
+        await shipIssue(5, { sizeGate: 'off' }, ctx(), { octokit: undefined, ...r });
+        expect(r.plans.at(-1).branch).toBe('factory/5-stubbed-title');
+        const captured = r.ships.at(-1);
         await captured.octokit.rest.pulls.create({ head: captured.branch, title: 't', base: 'main' });
-        // The wrapper delegates to the real runner; only a harmless non-push command is run here.
         await expect(captured.run('echo stub')).resolves.toMatchObject({ stdout: 'stub\n' });
         const ops = readFileSync(join(stubDir, 'calls.jsonl'), 'utf-8')
           .trim()
           .split('\n')
           .map((l) => JSON.parse(l).op);
         expect(ops).toContain('pulls.create');
-        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(fetched).toEqual([]);
       } finally {
         vi.unstubAllEnvs();
+        vi.restoreAllMocks();
         rmSync(stubDir, { recursive: true, force: true });
       }
     });
@@ -100,26 +104,19 @@ describe('cli commands (via main dispatch)', () => {
     it('a .factory/config template token parks the run before planPhase with file:line', async () => {
       mkdirSync(dirname(paths().config), { recursive: true });
       writeFileSync(paths().config, '{\n  "version": 2,\n  "models": { "pins": { "build": "<owner-name>" } }\n}\n');
-
-      const err = await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo }).catch((e: unknown) => e);
-
+      const r = recordPhases();
+      const err = await shipIssue(5, {}, ctx(), { planPhase: r.planPhase }).catch((e: unknown) => e);
       expect((err as Error).message).toContain(
         `${relative(h.repoRoot, paths().config)}:3: unfilled template token '<owner-name>'`,
       );
-      expect(phases.planPhase).not.toHaveBeenCalled();
+      expect(r.plans).toEqual([]);
     });
 
     it('routes constitution --product through an injected getConstitutionsDir', async () => {
-      writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha');
-      const stub = vi.fn(() => h.constitutionsDir);
-      await runMainWith(
-        { daemon: daemonDeps(), runTui: recordingRunTui, getConstitutionsDir: stub },
-        'constitution',
-        '--product',
-        'alpha',
-      );
-      expect(stub).toHaveBeenCalled();
-      expect(inertConfigLoaders.getConstitutionsDir).not.toHaveBeenCalled();
+      const injectedDir = tmp.makeSync('factory-inj-const-');
+      writeFileSync(join(injectedDir, 'alpha.md'), '# injected-alpha\n');
+      await runMainWith({ ...base(), getConstitutionsDir: () => injectedDir }, 'constitution', '--product', 'alpha');
+      expect(readFileSync(paths().constitution, 'utf-8')).toBe('# injected-alpha\n');
     });
 
     it('lists models, costs, and tiers', async () => {
