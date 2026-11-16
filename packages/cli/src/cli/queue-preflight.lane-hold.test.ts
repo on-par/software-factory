@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { StackPullReviews } from '@on-par/factory-core/internal';
 import { preflightQueuedIssue } from './index.js';
 
@@ -24,19 +24,20 @@ describe('queue preflight lane-file hold (#3576)', () => {
   };
 
   it('defers an issue whose lane-file hold is still live (#3576)', async () => {
-    const readIssueBody = vi.fn();
-    const findOpenPR = vi.fn();
-    const onDeferred = vi.fn();
-    const laneFileHold = vi.fn(async () => ({ holder: 3232, file: 'src/a.ts' }));
+    const looked: string[] = [];
+    const deferred: unknown[][] = [];
+    const onDeferred = (...a: unknown[]) => void deferred.push(a);
+    const readIssueBody = async () => (looked.push('readIssueBody'), '');
+    const findOpenPR = async () => (looked.push('findOpenPR'), undefined);
+    const laneFileHold = async () => ({ holder: 3232, file: 'src/a.ts' });
     await expect(
       preflightQueuedIssue(
         { number: 7, labels: ['factory:queued'] },
         { ...baseDeps, readIssueBody, findOpenPR, onDeferred, laneFileHold },
       ),
     ).resolves.toEqual({ kind: 'defer' });
-    expect(onDeferred).toHaveBeenCalledWith(7, expect.stringMatching(/#3232.*src\/a\.ts/));
-    expect(readIssueBody).not.toHaveBeenCalled();
-    expect(findOpenPR).not.toHaveBeenCalled();
+    expect(deferred).toEqual([[7, expect.stringMatching(/#3232.*src\/a\.ts/)]]);
+    expect(looked).toEqual([]);
   });
 
   it.each([
@@ -48,8 +49,11 @@ describe('queue preflight lane-file hold (#3576)', () => {
       },
     ],
   ])('falls through to the normal decision with %s (#3576)', async (_name, laneFileHold) => {
-    const readIssueBody = vi.fn(async () => 'no prerequisites');
-    await preflightQueuedIssue({ number: 7, labels: ['factory:queued'] }, { ...baseDeps, readIssueBody, laneFileHold });
-    expect(readIssueBody).toHaveBeenCalledWith(7);
+    const read: number[] = [];
+    const readIssueBody = async (n: number) => (read.push(n), 'no prerequisites');
+    await expect(
+      preflightQueuedIssue({ number: 7, labels: ['factory:queued'] }, { ...baseDeps, readIssueBody, laneFileHold }),
+    ).resolves.toEqual({ kind: 'build' });
+    expect(read).toEqual([7]);
   });
 });

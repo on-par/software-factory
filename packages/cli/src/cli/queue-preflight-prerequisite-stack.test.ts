@@ -1,7 +1,7 @@
 // packages/cli/src/cli/queue-preflight-prerequisite-stack.test.ts — stack on an open prerequisite factory PR (#3916).
 
 import { renderPrerequisiteStackMarker } from '@on-par/factory-core/internal';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { preflightQueuedIssue } from './index.js';
 import { makeQueuePreflightOps, type QueuePreflightOps } from './queue-preflight.js';
@@ -32,8 +32,9 @@ function harness(
   } = {},
 ) {
   const pulls = over.pulls ?? {};
-  const getLandState = vi.fn(async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }));
-  const onDeferred = vi.fn();
+  const rec = { landReads: 0, deferred: [] as unknown[][] };
+  const getLandState = async () => (rec.landReads++, { isDraft: false, mergeStateStatus: 'CLEAN' });
+  const onDeferred = (...args: unknown[]) => void rec.deferred.push(args);
   const deps: QueuePreflightOps = {
     expectedHeadRepoFullName: REPO,
     findSlicePlan: async () => ({ status: 'not-found' as const }),
@@ -43,7 +44,7 @@ function harness(
         if (n === 5) return prereqPr;
         return undefined;
       }),
-    getLandState: getLandState as never,
+    getLandState,
     watch: async () => 'success' as const,
     saveSlicePlan: async () => {},
     autoMergeStack: false,
@@ -67,8 +68,11 @@ function harness(
     branchContains: async () => over.contains ?? false,
     onDeferred,
   };
-  return { deps, onDeferred, getLandState };
+  return { deps, rec };
 }
+
+const expectWaitingOnPrerequisite = (deferred: unknown[][]) =>
+  expect(deferred).toEqual([[6, 'waiting for prerequisites: #5', 'open-prerequisites']]);
 
 const stackedOwn = (over: Partial<PullInfo> = {}): Record<number, PullInfo> => ({
   60: {
@@ -85,13 +89,13 @@ describe('queue preflight: stacking on an open prerequisite PR (#3916)', () => {
   it('stacks on an open factory prerequisite PR instead of deferring', async () => {
     const h = harness();
     await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({ kind: 'build', stackOn: prereq });
-    expect(h.onDeferred).not.toHaveBeenCalled();
+    expect(h.rec.deferred).toEqual([]);
   });
 
   it('defers when the open prerequisite has no open factory PR', async () => {
     const h = harness({ findOpenPR: async () => undefined });
     await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({ kind: 'defer' });
-    expect(h.onDeferred).toHaveBeenCalledWith(6, 'waiting for prerequisites: #5', 'open-prerequisites');
+    expectWaitingOnPrerequisite(h.rec.deferred);
   });
 
   it('defers when the prerequisite PR is a human branch', async () => {
@@ -116,14 +120,14 @@ describe('queue preflight: stacking on an open prerequisite PR (#3916)', () => {
   it('defers as before when queue.stackOnOpenPrerequisite is false', async () => {
     const h = harness({ stackOn: false });
     await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({ kind: 'defer' });
-    expect(h.onDeferred).toHaveBeenCalledWith(6, 'waiting for prerequisites: #5', 'open-prerequisites');
+    expectWaitingOnPrerequisite(h.rec.deferred);
   });
 
   it('never adopts a stacked PR for landing while its base is a prerequisite branch', async () => {
     const h = harness({ findOpenPR: async (n) => withOwn(n), pulls: stackedOwn() });
     await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({ kind: 'defer' });
-    expect(h.onDeferred).toHaveBeenCalledWith(6, 'stacked on prerequisite PR #50; waiting for it to merge');
-    expect(h.getLandState).not.toHaveBeenCalled();
+    expect(h.rec.deferred).toEqual([[6, 'stacked on prerequisite PR #50; waiting for it to merge']]);
+    expect(h.rec.landReads).toBe(0);
   });
 
   it('parks held naming the prerequisite PR when it closed unmerged', async () => {
@@ -157,7 +161,7 @@ describe('queue preflight: stacking on an open prerequisite PR (#3916)', () => {
       kind: 'restack-prerequisite',
       onto: { kind: 'main', mergedHead: SHA_B2 },
     });
-    expect(h.getLandState).not.toHaveBeenCalled();
+    expect(h.rec.landReads).toBe(0);
   });
 
   it('adopts a PR with a main base as before', async () => {
@@ -174,7 +178,7 @@ describe('queue preflight: stacking on an open prerequisite PR (#3916)', () => {
   });
 
   it('wires the switch and the PR body through makeQueuePreflightOps', async () => {
-    const get = vi.fn(async () => ({ data: { head: { ref: 'h', sha: 's' }, base: { ref: 'main' }, body: null } }));
+    const get = async () => ({ data: { head: { ref: 'h', sha: 's' }, base: { ref: 'main' }, body: null } });
     const ops = makeQueuePreflightOps({ rest: { pulls: { get } } } as never, 'o', 'r', {
       watch: async () => 'success',
       stackOnOpenPrerequisite: true,

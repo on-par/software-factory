@@ -1,5 +1,5 @@
 import type { StackPullReviews } from '@on-par/factory-core/internal';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { preflightQueuedIssue } from './index.js';
 
 describe('queue preflight Depends on prerequisites', () => {
@@ -24,9 +24,11 @@ describe('queue preflight Depends on prerequisites', () => {
   };
 
   it('defers a queued issue whose Depends on prerequisite is still open (#3915)', async () => {
-    const findSlicePlan = vi.fn();
-    const findOpenPR = vi.fn();
-    const onDeferred = vi.fn();
+    const looked: string[] = [];
+    const deferred: unknown[][] = [];
+    const onDeferred = (...a: unknown[]) => void deferred.push(a);
+    const findSlicePlan = async () => (looked.push('findSlicePlan'), { status: 'not-found' as const });
+    const findOpenPR = async () => (looked.push('findOpenPR'), undefined);
     const result = await preflightQueuedIssue(
       { number: 3893, labels: [] },
       {
@@ -39,8 +41,7 @@ describe('queue preflight Depends on prerequisites', () => {
       },
     );
     expect(result).toEqual({ kind: 'defer' });
-    expect(onDeferred).toHaveBeenCalledWith(3893, 'waiting for prerequisites: #3892', 'open-prerequisites');
-    expect(findSlicePlan).not.toHaveBeenCalled();
-    expect(findOpenPR).not.toHaveBeenCalled();
+    expect(deferred).toEqual([[3893, 'waiting for prerequisites: #3892', 'open-prerequisites']]);
+    expect(looked).toEqual([]);
   });
 });
