@@ -13,12 +13,12 @@ describe('cli commands (via main dispatch)', () => {
         paths().events,
         [JSON.stringify({ ts: '', type: 'plan', issue: '1', msg: 'Starting plan phase' })].join('\n'),
       );
-      const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      const out: string[] = [];
+      const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => (out.push(String(chunk)), true));
       try {
         const res = await runMain('logs');
         expect(res.exited).toBe(false);
-        const written = writeSpy.mock.calls.map((c) => String(c[0])).join('');
-        expect(written).toContain('[factory] plan #1: Starting plan phase');
+        expect(out.join('')).toContain('[factory] plan #1: Starting plan phase');
       } finally {
         writeSpy.mockRestore();
       }
@@ -32,14 +32,14 @@ describe('cli commands (via main dispatch)', () => {
           JSON.stringify({ ts: '', type: 'plan', issue: '301', msg: 'b' }),
         ].join('\n'),
       );
-      const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      const chunks: string[] = [];
+      const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => (chunks.push(String(chunk)), true));
       try {
         await runMain('logs', '--issue', '296');
-        const written = writeSpy.mock.calls.map((c) => String(c[0])).join('');
-        expect(written).toContain('#296');
-        expect(written).not.toContain('#301');
+        expect(chunks.join('')).toContain('#296');
+        expect(chunks.join('')).not.toContain('#301');
       } finally {
-        writeSpy.mockRestore();
+        spy.mockRestore();
       }
     });
   });

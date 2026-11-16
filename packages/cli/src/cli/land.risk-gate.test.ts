@@ -26,6 +26,9 @@ const tmp = createTempDirs();
 let repoRoot = '';
 let octokit: any;
 let logSpy: any;
+let calls: Array<[string, any]> = [];
+const rec = (key: string, res: unknown) => async (args: any) => (calls.push([key, args]), res);
+const of = (key: string) => calls.filter(([k]) => k === key).map(([, a]) => a);
 
 function paths(): any {
   const state = join(repoRoot, '.factory', 'state');
@@ -45,12 +48,12 @@ function makeOctokit(files: string[], labels: string[] = []) {
   return {
     rest: {
       issues: {
-        get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })),
+        get: rec('issues.get', { data: { title: 'Fix the bug' } }),
         listForRepo: vi.fn(async () => ({ data: [] })),
-        listLabelsOnIssue: vi.fn(async () => ({ data: labels.map((name) => ({ name })) })),
+        listLabelsOnIssue: rec('issues.listLabelsOnIssue', { data: labels.map((name) => ({ name })) }),
         listComments: vi.fn(async () => ({ data: [] })),
-        addLabels: vi.fn(async () => ({ data: [] })),
-        createComment: vi.fn(async () => ({ data: {} })),
+        addLabels: rec('issues.addLabels', { data: [] }),
+        createComment: rec('issues.createComment', { data: {} }),
       },
       users: { getAuthenticated: vi.fn(async () => ({ data: { id: 7 } })) },
       pulls: {
@@ -76,7 +79,7 @@ function makeOctokit(files: string[], labels: string[] = []) {
         })),
         listFiles: vi.fn(async () => ({ data: files.map((filename) => ({ filename })) })),
         update: vi.fn(async () => ({})),
-        merge: vi.fn(async () => ({})),
+        merge: rec('pulls.merge', {}),
       },
       git: { deleteRef: vi.fn(async () => ({})) },
       repos: {
@@ -96,7 +99,7 @@ function makeOctokit(files: string[], labels: string[] = []) {
   };
 }
 
-const cleanupWorktree = vi.fn(async () => {});
+const cleanupWorktree = rec('cleanup', undefined);
 let trustTier: string | undefined;
 
 beforeEach(() => {
@@ -104,6 +107,7 @@ beforeEach(() => {
   mkdirSync(join(repoRoot, '.git', 'info'), { recursive: true });
   mkdirSync(paths().plans, { recursive: true });
   trustTier = undefined;
+  calls = [];
   // The factory's own env (FACTORY_MERGE_ADMIN=1, ...) would change how land merges; isolate the suite from it (#3428).
   for (const k of ['FACTORY_LOCAL_ONLY', 'FACTORY_MERGE', 'FACTORY_MERGE_ADMIN', 'FACTORY_SKIP_CI'])
     vi.stubEnv(k, undefined);
@@ -159,10 +163,9 @@ describe('landIssue risk gate (#3381)', () => {
       issueless: true,
     });
     expect(res).toEqual({ branch: 'ship-it/5-fix-the-bug', prNumber: 77 });
-    expect(octokit.rest.issues.get).not.toHaveBeenCalled();
-    expect(octokit.rest.issues.listLabelsOnIssue).toHaveBeenCalledTimes(1);
-    expect(octokit.rest.issues.listLabelsOnIssue).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 77 }));
-    expect(octokit.rest.pulls.merge).toHaveBeenCalled();
+    expect(of('issues.get')).toEqual([]);
+    expect(of('issues.listLabelsOnIssue')).toEqual([expect.objectContaining({ issue_number: 77 })]);
+    expect(of('pulls.merge')).toEqual([expect.objectContaining({ pull_number: 77 })]);
   });
 
   it('issueless without a branch fails with exit 1 (#3905)', async () => {
@@ -175,8 +178,8 @@ describe('landIssue risk gate (#3381)', () => {
   it('merges a low-risk PR on the default trust tier, with no risk labels', async () => {
     octokit = makeOctokit(['docs/readme.md']);
     await expect(land(true)).resolves.toMatchObject({ prNumber: 77 });
-    expect(octokit.rest.pulls.merge).toHaveBeenCalled();
-    expect(octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    expect(of('pulls.merge')).toEqual([expect.objectContaining({ pull_number: 77 })]);
+    expect(of('issues.addLabels')).toEqual([]);
   });
 
   it('holds a high-risk PR: labels it, notifies on the issue, cleans up and never merges', async () => {
@@ -186,18 +189,18 @@ describe('landIssue risk gate (#3381)', () => {
     expect(err).toBeInstanceOf(AwaitingReviewError);
     expect((err as AwaitingReviewError).prNumber).toBe(77);
     expect((err as AwaitingReviewError).gate).toBe('risk');
-    expect(octokit.rest.pulls.merge).not.toHaveBeenCalled();
-    expect(octokit.rest.issues.addLabels).toHaveBeenCalledWith(
+    expect(of('pulls.merge')).toEqual([]);
+    expect(of('issues.addLabels')).toContainEqual(
       expect.objectContaining({ issue_number: 77, labels: ['risk:high', 'needs-human'] }),
     );
-    expect(octokit.rest.issues.createComment).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 5 }));
-    expect(cleanupWorktree).toHaveBeenCalled();
+    expect(of('issues.createComment')).toContainEqual(expect.objectContaining({ issue_number: 5 }));
+    expect(of('cleanup')).not.toEqual([]);
   });
 
   it('holds a med-risk PR unless the repo is T2, and honours needs-human on the issue', async () => {
     octokit = makeOctokit(['packages/core/src/foo.ts']);
     await expect(land(true)).rejects.toBeInstanceOf(AwaitingReviewError);
-    expect(octokit.rest.issues.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ['risk:med'] }));
+    expect(of('issues.addLabels')).toContainEqual(expect.objectContaining({ labels: ['risk:med'] }));
 
     octokit = makeOctokit(['packages/core/src/foo.ts']);
     trustTier = 'T2';
@@ -205,7 +208,7 @@ describe('landIssue risk gate (#3381)', () => {
 
     octokit = makeOctokit(['packages/core/src/foo.ts'], ['needs-human']);
     await expect(land(true)).rejects.toBeInstanceOf(AwaitingReviewError);
-    expect(octokit.rest.pulls.merge).not.toHaveBeenCalled();
+    expect(of('pulls.merge')).toHaveLength(1);
   });
 
   it('an unacknowledged demotion holds a med-risk PR at configured T2', async () => {
@@ -215,7 +218,7 @@ describe('landIssue risk gate (#3381)', () => {
     mkdirSync(join(paths().tierDemotions, '..'), { recursive: true });
     writeFileSync(paths().tierDemotions, `${JSON.stringify(open)}\n`);
     await expect(land(true)).rejects.toBeInstanceOf(AwaitingReviewError);
-    expect(octokit.rest.pulls.merge).not.toHaveBeenCalled();
+    expect(of('pulls.merge')).toEqual([]);
   });
 
   it('uses the repo risk policy, so the gate agrees with the risk receipt', async () => {
@@ -226,14 +229,14 @@ describe('landIssue risk gate (#3381)', () => {
     );
     octokit = makeOctokit(['docs/readme.md']);
     await expect(land(true)).rejects.toBeInstanceOf(AwaitingReviewError);
-    expect(octokit.rest.issues.createComment.mock.calls[0][0].body).toContain('docs-high');
+    expect(of('issues.createComment')[0].body).toContain('docs-high');
   });
 
   it('a human land (no enforceRisk) merges a high-risk PR untouched', async () => {
     octokit = makeOctokit(['db/migrations/001.sql']);
     await expect(land(false)).resolves.toMatchObject({ prNumber: 77 });
-    expect(octokit.rest.issues.addLabels).not.toHaveBeenCalled();
-    expect(octokit.rest.issues.createComment).not.toHaveBeenCalled();
+    expect(of('issues.addLabels')).toEqual([]);
+    expect(of('issues.createComment')).toEqual([]);
   });
 });
 
