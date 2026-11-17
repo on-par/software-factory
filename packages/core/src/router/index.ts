@@ -9,6 +9,7 @@ import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
 import { DEFAULT_CODEX_CONTEXT_CEILING } from '../harness/codex-context-ceiling.js';
 import { CommandHarness } from '../harness/command.js';
+import type { AgentEvent } from '../harness/agent-events.js';
 import type { CodingHarness, HarnessFailureReason, HarnessLiveUsage, HarnessUsage } from '../harness/index.js';
 import { taskRequiresAgenticHarness } from '../harness/index.js';
 import type { ProviderFailure, ProviderFailureKind } from '../harness/provider-failure.js';
@@ -142,6 +143,7 @@ export interface ModelExecutorContext {
   onUsage?: (usage: HarnessUsage) => void;
   /** Cumulative usage while the session runs (#3320); forwarded to HarnessRequest.onUsage. */
   onLiveUsage?: (cumulative: HarnessLiveUsage) => void;
+  onAgentEvent?: (event: AgentEvent) => void;
 }
 
 /** Execute one model; failure and empty output must surface as typed errors. */
@@ -251,6 +253,7 @@ export class CliModelExecutor implements ModelExecutor {
       | 'onPgid'
       | 'onUsage'
       | 'onLiveUsage'
+      | 'onAgentEvent'
     >,
   ): Promise<string> {
     const { output, usage } = await harness.run({
@@ -269,6 +272,7 @@ export class CliModelExecutor implements ModelExecutor {
       env: ctx.env,
       onPgid: ctx.onPgid,
       onUsage: ctx.onLiveUsage,
+      onEvent: ctx.onAgentEvent,
     });
     if (usage) ctx.onUsage?.(usage);
     return output;
@@ -296,6 +300,7 @@ export class ModelRouter {
   /** Models already warned about resolving through a retired harness id; once per run (#3445). */
   private readonly retiredHarnessNoticed = new Set<string>();
   private localAuthSink?: (agent: LocalAuthAgent) => void;
+  private agentEventSink?: (event: AgentEvent) => void;
   private codexFullAccessTasks: readonly string[] = [];
   private codexSandbox?: CodexSandboxMode;
   private contextCeilings: Readonly<Record<string, number>> = { 'codex-cli': DEFAULT_CODEX_CONTEXT_CEILING };
@@ -388,6 +393,9 @@ export class ModelRouter {
    *  flag it until the next login (#2733). Receives only the agent name. */
   setLocalAuthSink(sink: (agent: LocalAuthAgent) => void): void {
     this.localAuthSink = sink;
+  }
+  setAgentEventSink(sink: (event: AgentEvent) => void): void {
+    this.agentEventSink = sink;
   }
   /** Register a check telling whether a provider is held for rejected credentials; held providers are skipped. */
   setProviderHold(check: ((provider: string) => Promise<boolean>) | undefined): void {
@@ -666,6 +674,7 @@ export class ModelRouter {
               usage = u;
             },
             onLiveUsage: budget?.onLiveUsage,
+            onAgentEvent: this.agentEventSink,
           });
           budget?.throwIfStopped();
         } catch (err) {

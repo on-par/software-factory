@@ -67,6 +67,7 @@ import { decideBuildRoute, type EffectiveModelPins } from '../config/repo.js';
 import type { RunStewardPorts } from '../steward/run.js';
 import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
+import type { AgentEvent } from '../harness/agent-events.js';
 import type { ModelRouter } from '../router/index.js';
 import type { ProviderBreaker } from '../router/breaker.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
@@ -180,6 +181,7 @@ export interface RunPorts extends CiReworkPorts, LinearRunPorts {
   octokit: Octokit;
   workspace: Workspace;
   events: (phase?: string) => LogFn;
+  onAgentEvent?: (event: AgentEvent) => void;
   acquireEnvironment?: () => Promise<Environment>;
   resolveBaseUrl?: (appPort: number | undefined) => { baseUrl?: string; note: string };
   getIssueSpend?: () => number;
@@ -238,6 +240,10 @@ async function runIssueOnce(
   let request = initialRequest;
   const workKey = workKeyFromIssue(request.issue);
   if (request.codexWorkspacePaths) ports.router.setCodexWorkspacePaths?.(request.codexWorkspacePaths);
+  ports.router.setAgentEventSink?.((event) => {
+    ports.events(event.phase)('agent-event', JSON.stringify(event));
+    ports.onAgentEvent?.(event);
+  });
   const planPhase = ports.planPhase ?? planPhaseDefault;
   const slot = ports.hostBuildSlot ?? ((_phase, fn) => fn());
   const buildPhase: typeof buildPhaseDefault = (o) => slot('build', () => (ports.buildPhase ?? buildPhaseDefault)(o));

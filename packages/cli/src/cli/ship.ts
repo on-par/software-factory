@@ -399,9 +399,9 @@ async function shipIssueFrom(
     trustedApprovers: factoryConfig.intake?.trustedApprovers,
     ...reworkClaim,
   };
-
   const ports: RunPorts = {
     router,
+    onAgentEvent: (event) => console.log(`[factory] agent-event ${JSON.stringify(event)}`),
     octokit,
     workspace,
     events: mkLog,

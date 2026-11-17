@@ -50,3 +50,28 @@ each CHECK phase logs one summary:
 - `command_output_export` (info): `N sent, 0 dropped, 0 failed`; nothing was lost.
 - `command_output_export_degraded` (warn): records were dropped or failed, or the opt-in was requested with invalid
   `OTEL_*` config. The run is unaffected.
+
+## Agent activity events
+
+While a long agent step runs, the Claude Code and Codex harnesses turn each line of the agent's JSON stdout into a short
+`AgentEvent` as it arrives, instead of waiting for the process to exit. The final result is parsed as before.
+
+Each event goes three places:
+
+- The event log gets an `agent-event` row with the `phase` set (`plan`, `build`, `check` or `ship`). The `msg` is the event JSON.
+- Stdout gets one line with a stable prefix. In `--json` mode it goes to stderr, so the final JSON stays the last stdout line:
+
+  ```
+  [factory] agent-event {"phase":"build","kind":"tool_call","name":"Bash","summary":"npm test","at":"2026-01-01T00:00:00.000Z"}
+  ```
+
+- Embedding hosts can pass `RunPorts.onAgentEvent` to `runIssue`. A throwing subscriber is ignored.
+
+Fields:
+
+- `phase`: the run phase the agent step belongs to.
+- `kind`: `tool_call`, `tool_result`, `skill`, `mcp`, `text` or `result`.
+- `name`: the tool, skill name or `server.tool`, when there is one.
+- `summary`: one line about the event, never the full tool input or output. Summaries are redacted and capped at 200
+  characters; a longer one ends with `…[truncated N chars]`.
+- `at`: the ISO timestamp when the line arrived.

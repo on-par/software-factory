@@ -113,14 +113,6 @@ export function describeTestFailure(r: CommandResult, maxChars: number, combined
   return tail || describeCommandFailureTail(r, maxChars);
 }
 
-const DEFAULT_SUMMARY_MAX_CHARS = 4000;
-
-export interface SummarizeCommandRunOptions {
-  maxChars?: number;
-  logPath?: string;
-  durationMs?: number;
-}
-
 export interface CommandRunCounts {
   format: 'vitest' | 'jest' | 'pytest' | 'tsc' | 'eslint';
   line: string;
@@ -133,10 +125,6 @@ export interface CommandRunCounts {
 }
 
 const COUNT_PART = /\b(\d+) (failed|passed|skipped|errors?)\b/g;
-const BLOCK_CHAR_CAP = 1000;
-const TSC_ERROR_LINE = /error TS\d+:/;
-const ESLINT_ERROR_LINE = /^\s+\d+:\d+\s+error\s/;
-const ESLINT_FILE_LINE = /^(?:\/|[A-Za-z]:[\\/])/;
 
 function countParts(text: string): { line: string; counts: Partial<CommandRunCounts> } | null {
   const parts: string[] = [];
@@ -198,91 +186,4 @@ export function parseCommandCounts(output: string): CommandRunCounts | null {
     };
   }
   return null;
-}
-
-function collectFailureBlocks(clean: string): string[] {
-  const lines = clean.split(/\r?\n/);
-  const vitestMode = lines.some((l) => !NPM_SCRIPT_ECHO.test(l) && VITEST_FAIL_LINE.pattern.test(l));
-  const markers = vitestMode ? [VITEST_FAIL_LINE] : FAILED_TEST_MARKERS;
-  const markerLines = (line: string): number | null =>
-    NPM_SCRIPT_ECHO.test(line) ? null : (markers.find((m) => m.pattern.test(line))?.lines ?? null);
-  const isStart = (line: string): boolean =>
-    markerLines(line) !== null || (!vitestMode && (TSC_ERROR_LINE.test(line) || ESLINT_ERROR_LINE.test(line)));
-
-  const blocks: string[] = [];
-  const seen = new Set<string>();
-  let eslintFile = '';
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (!vitestMode && ESLINT_FILE_LINE.test(line) && !TSC_ERROR_LINE.test(line)) eslintFile = line.trim();
-    if (!isStart(line)) continue;
-    let head = line;
-    let keep = markerLines(line);
-    if (keep === null && !vitestMode && ESLINT_ERROR_LINE.test(line)) {
-      head = eslintFile ? `${eslintFile}:${line.trim()}` : line.trim();
-      keep = 1;
-    } else if (keep === null) {
-      keep = 5;
-    }
-    if (seen.has(head)) continue;
-    seen.add(head);
-    const body = [head];
-    for (let j = i + 1; j < lines.length && body.length < keep; j++) {
-      const next = lines[j]!;
-      if (isStart(next)) break;
-      if (markerLines(line) === null && !/^\s/.test(next)) break;
-      body.push(next);
-    }
-    const text = body.join('\n').trimEnd();
-    blocks.push(text.length > BLOCK_CHAR_CAP ? `${text.slice(0, BLOCK_CHAR_CAP)}…` : text);
-  }
-  return blocks;
-}
-
-function renderHeader(result: CommandResult, options: SummarizeCommandRunOptions, maxChars: number): string {
-  const suffix =
-    ` — exit ${result.exitCode}` +
-    (options.durationMs !== undefined ? ` in ${(options.durationMs / 1000).toFixed(1)}s` : '') +
-    (result.timedOut ? ' (timed out)' : '');
-  const quarter = Math.floor(maxChars / 4);
-  let command = result.command.join(' ');
-  if (command.length + 2 + suffix.length > quarter) {
-    command = `${command.slice(0, Math.max(1, quarter - suffix.length - 3))}…`;
-  }
-  return `$ ${command}${suffix}`;
-}
-
-export function summarizeCommandRun(result: CommandResult, options: SummarizeCommandRunOptions = {}): string {
-  const maxChars = options.maxChars ?? DEFAULT_SUMMARY_MAX_CHARS;
-  const clean = stripAnsi(`${result.stdout}\n${result.stderr}`);
-  const counts = parseCommandCounts(clean);
-  const fixed = [renderHeader(result, options, maxChars), ...(counts ? [counts.line] : [])];
-  const tailLine = options.logPath ? `full log: ${options.logPath}` : null;
-
-  let blocks = collectFailureBlocks(clean);
-  if (blocks.length === 0 && !result.ok) {
-    const tail = outputTail(clean, 1500);
-    if (tail) blocks = [tail];
-  }
-
-  const omission = (n: number): string => `… ${n} more failure${n === 1 ? '' : 's'} in the log`;
-  const fixedLen = fixed.join('\n').length + (tailLine ? tailLine.length + 1 : 0);
-  const kept: string[] = [];
-  let used = fixedLen;
-  for (const block of blocks) {
-    const omitted = blocks.length - kept.length - 1;
-    const total = used + block.length + 1 + (omitted > 0 ? omission(omitted).length + 1 : 0);
-    if (total > maxChars) break;
-    kept.push(block);
-    used += block.length + 1;
-  }
-  const omitted = blocks.length - kept.length;
-
-  const out = [...fixed, ...kept, ...(omitted > 0 ? [omission(omitted)] : []), ...(tailLine ? [tailLine] : [])].join(
-    '\n',
-  );
-  if (out.length <= maxChars) return out;
-  if (!tailLine || tailLine.length + 2 >= maxChars) return out.slice(0, maxChars);
-  const room = maxChars - tailLine.length - 1;
-  return `${fixed.join('\n').slice(0, room)}\n${tailLine}`;
 }

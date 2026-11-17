@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { recordArgs } from '../test-support/recorders.js';
 
-import { DEFAULT_CI_NO_CHECKS_GRACE_MS, detectNoCiConfigured, watchChecks } from './ci-watch.js';
+import { detectNoCiConfigured, watchChecks } from './ci-watch.js';
 
 function createClock() {
   let clock = 0;
@@ -53,7 +53,7 @@ describe('watchChecks up-front no-CI probe (#2488)', () => {
     const outcome = await watchChecks({
       ...base,
       octokit: t.octokit,
-      noChecksGraceMs: DEFAULT_CI_NO_CHECKS_GRACE_MS,
+      noChecksGraceMs: 90_000,
       onNoChecks: (i) => void infos.push(i),
       sleep: t.sleep,
       now: t.now,
@@ -76,7 +76,7 @@ describe('watchChecks up-front no-CI probe (#2488)', () => {
     const { outcome, infos } = await watchWithInfos(t);
 
     expect(outcome).toBe('no-checks');
-    expect(t.now()).toBeGreaterThanOrEqual(DEFAULT_CI_NO_CHECKS_GRACE_MS);
+    expect(t.now()).toBeGreaterThanOrEqual(90_000);
     expect(infos).toContainEqual(expect.objectContaining({ reason: 'grace-elapsed' }));
   });
 

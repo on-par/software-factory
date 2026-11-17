@@ -6,6 +6,7 @@ import { wrapCommandInSandbox } from '../sandbox/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
+import { agentEventStdout, claudeActivity } from './agent-events.js';
 import { classifyClaudeFailure } from './claude-error.js';
 import type { CodingHarness, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { HarnessError } from './index.js';
@@ -175,6 +176,7 @@ export class ClaudeCliHarness implements CodingHarness {
             maxBuffer: 10 * 1024 * 1024,
             env: hasOverlay ? { ...env, ...endpointEnv, ...effortEnv } : env,
             onPgid,
+            onStdout: agentEventStdout(request, claudeActivity),
           })
         ).stdout;
       } catch (err: any) {

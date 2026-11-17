@@ -8,21 +8,3 @@ export function normalizeAdrTitle(title: string): string {
     .replace(/^(?:a|an|the)(?:\s+|$)/, '')
     .trim();
 }
-
-function normalizedTokenSet(title: string): Set<string> {
-  const normalized = normalizeAdrTitle(title);
-  return normalized === '' ? new Set() : new Set(normalized.split(/\s+/));
-}
-
-export function adrTitleSimilarity(a: string, b: string): number {
-  const aTokens = normalizedTokenSet(a);
-  const bTokens = normalizedTokenSet(b);
-
-  if (aTokens.size === 0 || bTokens.size === 0) {
-    return 0;
-  }
-
-  const intersection = [...aTokens].filter((token) => bTokens.has(token)).length;
-  const union = new Set([...aTokens, ...bTokens]).size;
-  return intersection / union;
-}

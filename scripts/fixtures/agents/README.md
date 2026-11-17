@@ -9,6 +9,7 @@ These are fake `codex`, `opencode`, `pi` and `command-agent` CLIs used by the sm
 - `sentinel/claude`: recording `claude` stand-in that always fails. See Claude sentinel below.
 - `lib/claude-sentinel.sh`: `claude_sentinel_check <log>`, the assertion for the sentinel.
 - `recordings/<agent>/<mode>.stdout`: replayed to stdout. An optional `<mode>.stderr` is replayed to stderr.
+- `recordings/<agent>/stream-events.stdout`: a multi-event stream used by the agent-event normalizer tests. It is not a shim mode.
 - `recordings/codex/success.last-message`: copied to the `-o <file>` path in success mode.
 - `agents.test.ts`: checks every shim and mode, that `classifyFailure` classifies the recorded rate-limit and usage-cap output, and that this README covers every recorded agent.
 

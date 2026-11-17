@@ -1,11 +1,6 @@
-import { Command } from 'commander';
 import { branchFor } from '@on-par/factory-core/internal';
 import { describe, expect, it } from 'vitest';
-import {
-  BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION,
-  addBranchPrefixOption,
-  resolveBranchPrefixOption,
-} from './branch-prefix.js';
+import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION, resolveBranchPrefixOption } from './branch-prefix.js';
 import { workKeyFromIssue } from '@on-par/factory-core';
 
 describe('resolveBranchPrefixOption', () => {
@@ -37,20 +32,6 @@ describe('resolveBranchPrefixOption', () => {
   it('lets the flag beat run.branchPrefix', () => {
     expect(resolveBranchPrefixOption('sf', { run: { branchPrefix: 'acme' } })).toBe('sf');
     expect(resolveBranchPrefixOption('!!!', { run: { branchPrefix: 'acme' } })).toBeNull();
-  });
-});
-
-describe('addBranchPrefixOption', () => {
-  it('parses --branch-prefix', () => {
-    const cmd = addBranchPrefixOption(new Command('x'));
-    cmd.parse(['--branch-prefix', 'sf'], { from: 'user' });
-    expect(cmd.opts().branchPrefix).toBe('sf');
-  });
-
-  it('leaves the option undefined when omitted', () => {
-    const cmd = addBranchPrefixOption(new Command('x'));
-    cmd.parse([], { from: 'user' });
-    expect(cmd.opts().branchPrefix).toBeUndefined();
   });
 });
 
