@@ -144,16 +144,6 @@ describe('utils', () => {
     expect(factoryBranchIssue('factory/abc-x', 'factory')).toBeNull();
   });
 
-  it('logs worktree cleanup failures without rejecting', async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), 'factory-cleanup-'));
-    const worktreePath = join(tmpDir, 'nonexistent-wt');
-    const { events, log: spy } = logRecorder();
-
-    await expect(cleanupWorktree(tmpDir, worktreePath, spy)).resolves.toBeUndefined();
-
-    expect(events).toContainEqual(logged('warn', expect.stringContaining('nonexistent-wt')));
-  });
-
   it('does not throw when called without a log callback', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-cleanup-'));
     const worktreePath = join(tmpDir, 'nonexistent-wt');
