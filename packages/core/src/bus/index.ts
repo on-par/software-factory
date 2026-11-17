@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import type { LaneLifecycleEvent, LaneLifecyclePhase, LaneLifecycleStatus } from '@on-par/contracts';
 
 import type { EventKind } from '../events/kinds.js';
-import { startResourceMeter, type ResourceProbe } from '../utils/resource-usage.js';
+import { startResourceMeter, type ResourceProbe, type ResourceUsageSample } from '../utils/resource-usage.js';
 
 export type { LaneLifecycleEvent, LaneLifecyclePhase, LaneLifecycleStatus };
 
@@ -57,7 +57,7 @@ export interface LifecycleContext {
   laneId?: string;
   issueId: string | number;
   worktreePath: string;
-  log?: (type: EventKind, msg: string, extra?: { durationMs?: number; cpuMs?: number; peakRssBytes?: number }) => void;
+  log?: (type: EventKind, msg: string, extra?: { durationMs?: number } & Partial<ResourceUsageSample>) => void;
   resources?: ResourceProbe;
 }
 

@@ -30,6 +30,7 @@ import { execGit } from './git-exec.js';
 import { moveLaneBranchAside } from './lane-branch-aside.js';
 import { assertLaneReplaceable, laneReapKept, type LaneReapKeptOutcome } from './lane-removal.js';
 import { createMicroVm, removeMicroVm, type WorktreeSandbox } from './microvm.js';
+import type { ResourceUsageSample } from './resource-usage.js';
 import { ensureWorktreeParentExcluded } from './worktree-location.js';
 
 export type { WorktreeSandbox } from './microvm.js';
@@ -41,7 +42,7 @@ export function logEvent(
   type: EventKind,
   issue: string | number,
   msg: string,
-  extra?: {
+  extra?: Partial<ResourceUsageSample> & {
     failoverReason?: FailoverReason;
     lane?: string;
     phase?: string;
@@ -63,15 +64,13 @@ export function logEvent(
     model?: string;
     tokens?: { input: number; output: number };
     durationMs?: number;
-    cpuMs?: number;
-    peakRssBytes?: number;
     attribution?: RunAttribution;
     paths?: string[];
     mode?: 'mechanical';
   } & Pick<
-    LogExtra,
-    'providerAuthRejected' | 'providerBreakerClose' | 'providerRestored' | 'providerRefused' | 'claimLost'
-  >,
+      LogExtra,
+      'providerAuthRejected' | 'providerBreakerClose' | 'providerRestored' | 'providerRefused' | 'claimLost'
+    >,
 ): void {
   const logger = createLogger(eventsFile, { issue, lane: extra?.lane, phase: extra?.phase });
   const level = extra?.level ?? levelForType(type);
@@ -100,8 +99,7 @@ export function logEvent(
   if (extra?.model) meta.model = extra.model;
   if (extra?.tokens) meta.tokens = extra.tokens;
   if (extra?.durationMs !== undefined) meta.durationMs = extra.durationMs;
-  if (extra?.cpuMs !== undefined) meta.cpuMs = extra.cpuMs;
-  if (extra?.peakRssBytes !== undefined) meta.peakRssBytes = extra.peakRssBytes;
+  if (extra?.peakRssBytes) Object.assign(meta, { cpuMs: extra.cpuMs, peakRssBytes: extra.peakRssBytes });
   if (extra?.paths) meta.paths = extra.paths;
   if (extra?.mode) meta.mode = extra.mode;
   logger[level](type, msg, Object.keys(meta).length > 0 ? meta : undefined);

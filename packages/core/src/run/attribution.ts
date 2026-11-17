@@ -27,8 +27,6 @@ export type RunLogFn = (
   msg: string,
   extra?: {
     durationMs?: number;
-    cpuMs?: number;
-    peakRssBytes?: number;
     failoverReason?: FailoverReason;
     model?: string;
     tokens?: { input: number; output: number };

@@ -47,7 +47,7 @@ import {
   workerOutputChecker,
   WORKER_OUTPUT_CHECKER,
 } from './design-smells.js';
-import { startResourceMeter } from '../utils/resource-usage.js';
+import { startResourceMeter, type ResourceUsageSample } from '../utils/resource-usage.js';
 import { countPlaceholderLinks, fileExists, findHtmlFiles, probeWorktree, type WorktreeProbe } from './probe.js';
 
 export type { WorktreeProbe } from './probe.js';
@@ -81,7 +81,7 @@ export interface CheckerContext {
   env?: Record<string, string>;
   onPgid?: (pgid: number) => void;
   processGroupTracker?: Pick<ProcessGroupTracker, 'killAll'>;
-  log?: (type: EventKind, msg: string, extra?: { durationMs?: number; cpuMs?: number; peakRssBytes?: number }) => void;
+  log?: (type: EventKind, msg: string, extra?: { durationMs?: number } & Partial<ResourceUsageSample>) => void;
   onActivity?: () => void | Promise<void>;
   outputLogDir?: string;
   testsTimeoutSeconds?: number;

@@ -32,6 +32,7 @@ import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
 import type { RequiredChecksVerdict } from '../utils/required-checks.js';
+import type { ResourceUsageSample } from '../utils/resource-usage.js';
 import { baselineCacheOptions, describeBaseline } from './check-baseline.js';
 import { LENS_REVIEW_CHECKER, lensShowstopperRefs, remainingShowstoppers } from './check-showstoppers.js';
 import { failureSignature } from './check-signature.js';
@@ -52,13 +53,7 @@ import type {
 type LogFn = (
   type: EventKind,
   msg: string,
-  extra?: {
-    failoverReason?: FailoverReason;
-    rework?: ReworkInfo;
-    durationMs?: number;
-    cpuMs?: number;
-    peakRssBytes?: number;
-  },
+  extra?: { failoverReason?: FailoverReason; rework?: ReworkInfo; durationMs?: number } & Partial<ResourceUsageSample>,
 ) => void;
 
 export interface EnvironmentFailure {

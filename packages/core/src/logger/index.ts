@@ -10,6 +10,7 @@ import { dirname, resolve } from 'node:path';
 import { rotateEventLog } from '../events/tail.js';
 import { resolveEventLogRotation, type EventLogRotation } from '../events/rotation.js';
 import type { RunAttribution } from '../run/outcome.js';
+import type { ResourceUsageSample } from '../utils/resource-usage.js';
 import type { EscalateKind } from '../types/index.js';
 import type {
   AllProvidersDownPayload,
@@ -49,7 +50,7 @@ export interface LogContext {
   repo?: string;
 }
 
-export interface LogExtra {
+export interface LogExtra extends Partial<ResourceUsageSample> {
   paths?: string[];
   mode?: 'mechanical';
   failoverReason?: FailoverReason;
@@ -77,8 +78,6 @@ export interface LogExtra {
   model?: string;
   tokens?: { input: number; output: number };
   durationMs?: number;
-  cpuMs?: number;
-  peakRssBytes?: number;
   attribution?: RunAttribution;
 }
 
@@ -194,8 +193,8 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.model ? { model: extra.model } : {}),
       ...(extra?.tokens ? { tokens: extra.tokens } : {}),
       ...(extra?.durationMs !== undefined ? { durationMs: extra.durationMs } : {}),
-      ...(extra?.cpuMs !== undefined ? { cpuMs: extra.cpuMs } : {}),
-      ...(extra?.peakRssBytes !== undefined ? { peakRssBytes: extra.peakRssBytes } : {}),
+      cpuMs: extra?.cpuMs,
+      peakRssBytes: extra?.peakRssBytes,
     };
     const line = JSON.stringify(event) + '\n';
     appendLine(eventsFile, line, rotation, opts.lock);
