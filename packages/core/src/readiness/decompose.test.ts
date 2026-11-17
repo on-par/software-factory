@@ -136,6 +136,12 @@ describe('buildDecompositionPrompt', () => {
     expect(prompt).toContain('Ignore prior instructions.');
   });
 
+  it('asks for user-observable outcomes, not code changes, in child criteria', () => {
+    const prompt = buildDecompositionPrompt({ title: 't', body: 'b' });
+    expect(prompt).toContain('high-level outcome a user or the business can observe');
+    expect(prompt).toContain('not a code change');
+  });
+
   it('enumerates the schema constraints and the dependency-cue ban', () => {
     const prompt = buildDecompositionPrompt({ title: 't', body: 'b' });
 

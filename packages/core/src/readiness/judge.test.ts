@@ -155,6 +155,7 @@ describe('buildReadinessJudgePrompt', () => {
     expect(rest.indexOf(directive)).toBeGreaterThan(rest.indexOf(OPEN));
     expect(rest.indexOf(directive)).toBeLessThan(rest.indexOf(CLOSE));
     expect(prompt.indexOf(directive)).toBe(prompt.lastIndexOf(directive));
+    expect(prompt).toContain('Never ask for Given/When/Then');
   });
 });
 

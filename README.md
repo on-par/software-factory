@@ -181,7 +181,7 @@ factory usage                       Report 5-hour subscription usage
 
 `factory check` exits 0 when the verdict is ready or ready-with-assumptions, 1 when it is not-ready, 2 on a judge error, and 3 when it would split. `--no-judge` restores the free heading check (1 = missing fields).
 
-`factory draft` exits 0 when the draft is factory-ready, 1 when it is not, 2 on a model or input error, and 3 when it would split.
+`factory draft` exits 0 when the draft is factory-ready, 1 when it is not, 2 on a model or input error, and 3 when it would split. `factory draft` writes high-level outcome criteria and uses Given/When/Then only when asked.
 
 ### Size gate: stack by default
 
