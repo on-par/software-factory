@@ -50,3 +50,25 @@ each CHECK phase logs one summary:
 - `command_output_export` (info): `N sent, 0 dropped, 0 failed`; nothing was lost.
 - `command_output_export_degraded` (warn): records were dropped or failed, or the opt-in was requested with invalid
   `OTEL_*` config. The run is unaffected.
+
+## Phase resource usage fields
+
+`phase_completed` (plan, build, check and ship) and `checker_completed` carry three measurements:
+
+- `durationMs`: wall-clock time of the phase or checker.
+- `cpuMs`: user plus system CPU time of the factory process during the phase, in ms.
+- `peakRssBytes`: the highest sampled RSS of the factory process during the phase, sampled at start, every 1 s and at end.
+
+Limits:
+
+- Child processes (agent CLIs, test runners) are not counted.
+- Parallel lanes in one process share the counters.
+- The fields are omitted when measurement fails; measuring is fail-open and never changes the run.
+- There is no OTel span pipeline yet, so the fields live only on the event line.
+
+```sh
+jq -c 'select(.type=="phase_completed") | {phase, durationMs, cpuMs, peakRssBytes}' .factory/events.ndjson
+```
+
+A `cpuMs/durationMs` ratio near 0 means the phase was waiting (for example on the model). A ratio near 1 means it was
+CPU-bound in the factory process.

@@ -1,6 +1,8 @@
 import { LaneLifecycleEventSchema } from '@on-par/contracts';
 import { describe, expect, it } from 'vitest';
 
+import type { ResourceProbe } from '../utils/resource-usage.js';
+
 import { createLifecycleBus, lifecycleBus, withLifecycle } from './index.js';
 
 describe('createLifecycleBus', () => {
@@ -168,7 +170,7 @@ describe('withLifecycle', () => {
 
     expect(logged).toEqual([
       ['phase_started', 'plan started'],
-      ['phase_completed', 'plan complete (42)', { durationMs: expect.any(Number) }],
+      ['phase_completed', 'plan complete (42)', expect.objectContaining({ durationMs: expect.any(Number) })],
     ]);
     expect((logged[1][2] as { durationMs: number }).durationMs).toBeGreaterThanOrEqual(0);
   });
@@ -190,8 +192,80 @@ describe('withLifecycle', () => {
 
     expect(logged).toEqual([
       ['phase_started', 'plan started'],
-      ['phase_completed', expect.stringContaining('router exhausted'), { durationMs: expect.any(Number) }],
+      [
+        'phase_completed',
+        expect.stringContaining('router exhausted'),
+        expect.objectContaining({ durationMs: expect.any(Number) }),
+      ],
     ]);
+  });
+
+  const MIB = 1024 * 1024;
+  const fixtureResources = (): ResourceProbe => {
+    const cpu = [
+      { user: 1_000_000, system: 200_000 },
+      { user: 3_500_000, system: 700_000 },
+    ];
+    let c = 0;
+    const rss = [150 * MIB, 310 * MIB];
+    let r = 0;
+    return {
+      cpuUsage: () => cpu[Math.min(c++, 1)] as { user: number; system: number },
+      rss: () => rss[Math.min(r++, 1)] as number,
+    };
+  };
+
+  it('phase_completed carries cpuMs and peakRssBytes from the resource probe', async () => {
+    const logged: unknown[][] = [];
+    const log = (...args: unknown[]) => void logged.push(args);
+
+    await withLifecycle(
+      { ...baseCtx, bus: createLifecycleBus(), log, resources: fixtureResources() },
+      async () => ({ ok: true }),
+      (r) => r.ok,
+    );
+
+    expect(logged[1][2]).toEqual({ durationMs: expect.any(Number), cpuMs: 3000, peakRssBytes: 310 * MIB });
+  });
+
+  it('phase_completed carries cpuMs and peakRssBytes when run() rejects', async () => {
+    const logged: unknown[][] = [];
+    const log = (...args: unknown[]) => void logged.push(args);
+
+    await expect(
+      withLifecycle(
+        { ...baseCtx, bus: createLifecycleBus(), log, resources: fixtureResources() },
+        async () => {
+          throw new Error('boom');
+        },
+        () => true,
+      ),
+    ).rejects.toThrow('boom');
+
+    expect(logged[1][2]).toEqual({ durationMs: expect.any(Number), cpuMs: 3000, peakRssBytes: 310 * MIB });
+  });
+
+  it('a throwing resource probe omits the fields and the phase result is returned unchanged', async () => {
+    const logged: unknown[][] = [];
+    const log = (...args: unknown[]) => void logged.push(args);
+    const resources: ResourceProbe = {
+      cpuUsage: () => {
+        throw new Error('no cpu');
+      },
+      rss: () => {
+        throw new Error('no rss');
+      },
+    };
+
+    await expect(
+      withLifecycle(
+        { ...baseCtx, bus: createLifecycleBus(), log, resources },
+        async () => ({ ok: true }),
+        (r) => r.ok,
+      ),
+    ).resolves.toEqual({ ok: true });
+
+    expect(logged[1][2]).toEqual({ durationMs: expect.any(Number) });
   });
 
   it('emits onto the process-wide lifecycleBus when no bus is given', async () => {

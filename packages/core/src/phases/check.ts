@@ -52,7 +52,13 @@ import type {
 type LogFn = (
   type: EventKind,
   msg: string,
-  extra?: { failoverReason?: FailoverReason; rework?: ReworkInfo; durationMs?: number },
+  extra?: {
+    failoverReason?: FailoverReason;
+    rework?: ReworkInfo;
+    durationMs?: number;
+    cpuMs?: number;
+    peakRssBytes?: number;
+  },
 ) => void;
 
 export interface EnvironmentFailure {

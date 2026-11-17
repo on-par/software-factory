@@ -403,6 +403,8 @@ export interface CostEntry {
   /** Average cost per model call in USD. */
   costPerCallUsd?: number;
   durationMs?: number;
+  cpuMs?: number;
+  peakRssBytes?: number;
   durationApiMs?: number;
   /** Resolved sandbox runtime for A/B cohorting; docker-sandbox stays labeled while uncontained (#653, #655). */
   sandboxRuntime?: string;

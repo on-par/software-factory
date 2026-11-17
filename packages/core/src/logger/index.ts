@@ -77,6 +77,8 @@ export interface LogExtra {
   model?: string;
   tokens?: { input: number; output: number };
   durationMs?: number;
+  cpuMs?: number;
+  peakRssBytes?: number;
   attribution?: RunAttribution;
 }
 
@@ -192,6 +194,8 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.model ? { model: extra.model } : {}),
       ...(extra?.tokens ? { tokens: extra.tokens } : {}),
       ...(extra?.durationMs !== undefined ? { durationMs: extra.durationMs } : {}),
+      ...(extra?.cpuMs !== undefined ? { cpuMs: extra.cpuMs } : {}),
+      ...(extra?.peakRssBytes !== undefined ? { peakRssBytes: extra.peakRssBytes } : {}),
     };
     const line = JSON.stringify(event) + '\n';
     appendLine(eventsFile, line, rotation, opts.lock);

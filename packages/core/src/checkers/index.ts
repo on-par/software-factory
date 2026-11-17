@@ -47,6 +47,7 @@ import {
   workerOutputChecker,
   WORKER_OUTPUT_CHECKER,
 } from './design-smells.js';
+import { startResourceMeter } from '../utils/resource-usage.js';
 import { countPlaceholderLinks, fileExists, findHtmlFiles, probeWorktree, type WorktreeProbe } from './probe.js';
 
 export type { WorktreeProbe } from './probe.js';
@@ -80,7 +81,7 @@ export interface CheckerContext {
   env?: Record<string, string>;
   onPgid?: (pgid: number) => void;
   processGroupTracker?: Pick<ProcessGroupTracker, 'killAll'>;
-  log?: (type: EventKind, msg: string, extra?: { durationMs?: number }) => void;
+  log?: (type: EventKind, msg: string, extra?: { durationMs?: number; cpuMs?: number; peakRssBytes?: number }) => void;
   onActivity?: () => void | Promise<void>;
   outputLogDir?: string;
   testsTimeoutSeconds?: number;
@@ -736,6 +737,7 @@ export async function runAllCheckers(
     await touchActivity(ctx);
     ctx.log?.('checker_started', `checker ${checker.name} started`);
     const startedAt = Date.now();
+    const meter = startResourceMeter();
     let output: CheckerOutput;
     try {
       output = await checker.run(runCtx);
@@ -745,6 +747,7 @@ export async function runAllCheckers(
     output = requireRunnableChecker(output, constitution, ctx.log);
     ctx.log?.('checker_completed', `checker ${checker.name} completed (${output.result})`, {
       durationMs: Date.now() - startedAt,
+      ...meter.stop(),
     });
     await touchActivity(ctx);
     results.push(output);

@@ -63,6 +63,8 @@ export function logEvent(
     model?: string;
     tokens?: { input: number; output: number };
     durationMs?: number;
+    cpuMs?: number;
+    peakRssBytes?: number;
     attribution?: RunAttribution;
     paths?: string[];
     mode?: 'mechanical';
@@ -98,6 +100,8 @@ export function logEvent(
   if (extra?.model) meta.model = extra.model;
   if (extra?.tokens) meta.tokens = extra.tokens;
   if (extra?.durationMs !== undefined) meta.durationMs = extra.durationMs;
+  if (extra?.cpuMs !== undefined) meta.cpuMs = extra.cpuMs;
+  if (extra?.peakRssBytes !== undefined) meta.peakRssBytes = extra.peakRssBytes;
   if (extra?.paths) meta.paths = extra.paths;
   if (extra?.mode) meta.mode = extra.mode;
   logger[level](type, msg, Object.keys(meta).length > 0 ? meta : undefined);

@@ -6,6 +6,7 @@ import { EventEmitter } from 'node:events';
 import type { LaneLifecycleEvent, LaneLifecyclePhase, LaneLifecycleStatus } from '@on-par/contracts';
 
 import type { EventKind } from '../events/kinds.js';
+import { startResourceMeter, type ResourceProbe } from '../utils/resource-usage.js';
 
 export type { LaneLifecycleEvent, LaneLifecyclePhase, LaneLifecycleStatus };
 
@@ -56,7 +57,8 @@ export interface LifecycleContext {
   laneId?: string;
   issueId: string | number;
   worktreePath: string;
-  log?: (type: EventKind, msg: string, extra?: { durationMs?: number }) => void;
+  log?: (type: EventKind, msg: string, extra?: { durationMs?: number; cpuMs?: number; peakRssBytes?: number }) => void;
+  resources?: ResourceProbe;
 }
 
 function emitLifecycle(ctx: LifecycleContext, status: LaneLifecycleStatus, detail: string): void {
@@ -85,18 +87,21 @@ export async function withLifecycle<T>(
   emitLifecycle(ctx, 'started', `${ctx.phase} started`);
   ctx.log?.('phase_started', `${ctx.phase} started`);
   const startedAt = Date.now();
+  const meter = startResourceMeter(ctx.resources);
   let result: T;
   try {
     result = await run();
   } catch (err) {
     const detail = `${ctx.phase} threw: ${err instanceof Error ? err.message : String(err)}`;
+    const usage = meter.stop();
     emitLifecycle(ctx, 'failed', detail);
-    ctx.log?.('phase_completed', detail, { durationMs: Date.now() - startedAt });
+    ctx.log?.('phase_completed', detail, { durationMs: Date.now() - startedAt, ...usage });
     throw err;
   }
   const ok = succeeded(result);
   const detail = describe?.(result) ?? `${ctx.phase} ${ok ? 'done' : 'failed'}`;
+  const usage = meter.stop();
   emitLifecycle(ctx, ok ? 'done' : 'failed', detail);
-  ctx.log?.('phase_completed', detail, { durationMs: Date.now() - startedAt });
+  ctx.log?.('phase_completed', detail, { durationMs: Date.now() - startedAt, ...usage });
   return result;
 }
