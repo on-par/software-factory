@@ -17,6 +17,7 @@ export type {
   RoutesConfig,
   SizeGateMode,
 } from './config/index.js';
+export type { AgentEvent } from './harness/agent-events.js';
 export type { MergePolicySource } from './config/merge-policy.js';
 export {
   getConstitutionsDir,

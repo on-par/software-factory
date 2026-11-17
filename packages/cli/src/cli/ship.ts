@@ -78,6 +78,7 @@ import {
   stubAwareShipPhase,
   TERMINAL_EVENT_KINDS,
 } from './ship-steps.js';
+import { printAgentEvent } from './agent-event-line.js';
 import { baseRemoteRef, resolveShipSizeGate, type ShipIssueOptions } from './ship-options.js';
 
 type ShipArgs = Parameters<typeof shipIssueFrom> extends [string, ...infer Rest] ? Rest : never;
@@ -399,9 +400,9 @@ async function shipIssueFrom(
     trustedApprovers: factoryConfig.intake?.trustedApprovers,
     ...reworkClaim,
   };
-
   const ports: RunPorts = {
     router,
+    onAgentEvent: printAgentEvent,
     octokit,
     workspace,
     events: mkLog,

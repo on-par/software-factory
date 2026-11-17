@@ -2,6 +2,7 @@ import type { CodexSandboxMode } from '../config/sandbox-schema.js';
 import type { ModelRegistry } from '../models/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { FailoverReason, TaskType } from '../types/index.js';
+import type { AgentEvent } from './agent-events.js';
 import type { ProviderFailure, ProviderFailureKind } from './provider-failure.js';
 
 export const AGENTIC_BUILD_TASKS = [
@@ -42,6 +43,7 @@ export interface HarnessRequest {
   codexSandbox?: CodexSandboxMode;
   env?: Record<string, string>;
   onPgid?: (pgid: number) => void;
+  onEvent?: (event: AgentEvent) => void;
   onUsage?: (cumulative: HarnessLiveUsage) => void;
   contextCeiling?: number;
 }

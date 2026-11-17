@@ -11,6 +11,8 @@ import { classifyCodexFailure, extractCodexErrorText } from './codex-error.js';
 import { CODEX_COMPACT_PROMPT, resolveCodexContextCeiling } from './codex-context-ceiling.js';
 import { CODEX_GITHUB_HOSTS, CODEX_GITHUB_NETWORK_TASKS, codexWritableRoots } from './codex-policy.js';
 import type { CodingHarness, HarnessFailureReason, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
+import { agentEventPhase, createAgentEventStream } from './agent-events.js';
+import { normalizeCodexStreamLine } from './codex-stream-events.js';
 import { startCodexLiveUsage, CODEX_THREAD_ID, codexThreadIdFromStdout } from './codex-live-usage.js';
 import { HarnessError, taskRequiresAgenticHarness } from './index.js';
 import { defaultClassifyError, type ProviderFailure } from './provider-failure.js';
@@ -283,6 +285,12 @@ export class CodexCliHarness implements CodingHarness {
             read: readCodexRolloutUsage,
           })
         : undefined;
+      const events = request.onEvent
+        ? createAgentEventStream(normalizeCodexStreamLine, {
+            phase: agentEventPhase(request.task),
+            onEvent: request.onEvent,
+          })
+        : undefined;
       let execResult: { stdout: string; stderr: string };
       try {
         try {
@@ -291,10 +299,18 @@ export class CodexCliHarness implements CodingHarness {
             maxBuffer: 10 * 1024 * 1024,
             env,
             onPgid,
-            ...(live ? { onStdout: live.onStdout } : {}),
+            ...(live || events
+              ? {
+                  onStdout: (chunk: string) => {
+                    live?.onStdout(chunk);
+                    events?.onStdout(chunk);
+                  },
+                }
+              : {}),
           });
         } finally {
           live?.stop();
+          events?.flush();
         }
       } catch (err: any) {
         const stdout = typeof err.stdout === 'string' ? err.stdout : '';

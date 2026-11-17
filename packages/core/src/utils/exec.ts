@@ -147,7 +147,7 @@ export function createDefaultExecFn(deps: ExecDeps = {}): ExecFn {
   const killGroup = deps.killProcessGroup ?? killProcessGroup;
   return async (cmd, opts) => {
     const env = childProcessEnv(process.env, opts.env, { githubAuth: opts.githubAuth });
-    if (!opts.onPgid) {
+    if (!opts.onPgid && !opts.onStdout) {
       try {
         return await exec(cmd, {
           cwd: opts.cwd,
@@ -173,7 +173,7 @@ export function createDefaultExecFn(deps: ExecDeps = {}): ExecFn {
     );
 
     const pid = child.child.pid;
-    if (pid !== undefined) opts.onPgid(pid);
+    if (pid !== undefined) opts.onPgid?.(pid);
 
     try {
       return await child;
