@@ -93,6 +93,13 @@ describe('buildPlanPrompt', () => {
     }
   });
 
+  it('turns high-level criteria into concrete testable evidence claims (#3962)', () => {
+    const prompt = riskyPrompt();
+    expect(prompt).toContain('states the concrete behaviour its test or command checks');
+    expect(prompt).toContain('never use kind none only because a criterion is worded as an outcome');
+    expect(prompt).not.toContain('Its claim restates that criterion');
+  });
+
   it('asks for one evidencePlan entry per acceptance criterion (#2259)', () => {
     const prompt = riskyPrompt();
     expect(prompt).toMatch(/one evidencePlan entry per\s+acceptance criterion/);

@@ -10,6 +10,13 @@ import {
 } from './enrich.js';
 
 describe('buildReadinessEnrichmentPrompt', () => {
+  it('asks for high-level outcome criteria and Gherkin only when the source uses it', () => {
+    const prompt = buildReadinessEnrichmentPrompt({ title: 't', body: 'b', missing: ['Verification'] });
+    expect(prompt).toContain('high-level outcome that must be true when the work is done');
+    expect(prompt).toContain('Do not turn criteria into a list of code changes');
+    expect(prompt).toContain('Use Given/When/Then only when the original body already uses it');
+  });
+
   it('treats source content as data and requires the scorer-compatible sections to append', () => {
     const prompt = buildReadinessEnrichmentPrompt({
       title: 'Fix import queue',

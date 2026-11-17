@@ -125,4 +125,23 @@ describe('gradeIssueInvest', () => {
       reason: '1 criteria are checkable',
     });
   });
+
+  it('Testable passes plain-language outcome criteria', () => {
+    const r = gradeIssueInvest(body({ criteria: ['A customer can see why their order was held'] }));
+    expect(find(r, 'testable').status).toBe('pass');
+  });
+
+  it('Testable warns when a criterion describes a change, not an outcome', () => {
+    const r = gradeIssueInvest(body({ criteria: ['Add a `foo` field to `bar.ts`'] }));
+    expect(find(r, 'testable').reason).toBe('criterion 1 describes a change, not an outcome');
+  });
+
+  it('Testable passes a fenced gherkin acceptance section', () => {
+    const fenced = body().replace(
+      /### Acceptance criteria\n\n[^\n]*\n/,
+      '### Acceptance criteria\n\n```gherkin\nScenario: a\n  Given x\n  When y\n  Then z\n```\n',
+    );
+    expect(fenced).toContain('```gherkin');
+    expect(find(gradeIssueInvest(fenced), 'testable').status).toBe('pass');
+  });
 });

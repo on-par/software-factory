@@ -7,6 +7,11 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- Acceptance criteria are high-level outcomes by default: `factory check` accepts plain-language outcomes, warns on criteria that only describe code changes, and grades fenced gherkin Scenarios; `factory draft`, enrichment, decomposition and the readiness judge ask for outcomes, and Gherkin is optional (#3962).
+- Removed the CI `LOC budget override guard`: raising a `loc-budget.json` number no longer needs a human-applied `loc-budget:override` label, and the factory no longer strips that label (#4261).
+
 ## 0.9.38 - 2026-11-17
 
 Agent steps now stream live activity as `agent-event` log events, `[factory] agent-event` stdout lines and a `RunPorts.onAgentEvent` hook while Claude Code or Codex runs (#4246). Stable tags create the GitHub release from CHANGELOG.md (#4123), line budgets and knip/duplication/lint baselines can only shrink (#4124, #4125, #4126, #4051, #4052, #4053), and GitHub credentials are scoped per phase with no merge route outside land (#4120). Visual proof supports scripted steps and gif/video captures (#4054), worktree GC prunes old state backups (#4055), and `factory land` no longer tries to remove a direct checkout as a worktree (#4248).
