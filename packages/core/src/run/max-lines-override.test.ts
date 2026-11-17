@@ -27,9 +27,9 @@ describe('max-lines override (#3466)', () => {
   });
 
   it('strips human-only override labels the factory would apply', () => {
-    expect(
-      withoutHumanOnlyLabels(['no-auto-merge', 'loc-budget:override', ' LOC-BUDGET:OVERRIDE ', 'max-lines:override']),
-    ).toEqual(['no-auto-merge']);
+    expect(withoutHumanOnlyLabels(['no-auto-merge', ' MAX-LINES:OVERRIDE ', 'max-lines:override'])).toEqual([
+      'no-auto-merge',
+    ]);
   });
 
   it('puts the rule in both BUILD prompts', () => {
