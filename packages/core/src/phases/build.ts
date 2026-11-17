@@ -185,7 +185,10 @@ async function buildPhaseImpl(opts: {
   const verifyCommand =
     !hasVerifySh && (await fileExists(join(worktree, 'scripts/verify.ps1'))) ? VERIFY_PS1_ARGV.join(' ') : undefined;
   const lintCommands = hasVerifySh ? [] : await resolveLintCommands({ worktree }).catch(() => []);
-  const affectedTestsCommand = loadAffectedConfig(worktree)?.command;
+  const affectedConfig = loadAffectedConfig(worktree);
+  const affectedTestsCommand = affectedConfig?.command;
+  const affectedTypecheckCommand = affectedConfig?.typecheck;
+  const buildVerify = affectedConfig?.buildVerify ?? 'focused';
   const basePromptOpts = {
     issue,
     specPath,
@@ -196,6 +199,8 @@ async function buildPhaseImpl(opts: {
     lintCommands,
     verifyCommand,
     affectedTestsCommand,
+    affectedTypecheckCommand,
+    buildVerify,
     previousAttempt,
   };
   const promptOptsFor = (r: BuildRoutePin, pin?: string) => ({
@@ -227,6 +232,8 @@ async function buildPhaseImpl(opts: {
           lintCommands,
           verifyCommand,
           affectedTestsCommand,
+          affectedTypecheckCommand,
+          buildVerify,
           previousAttempt,
         })
       : buildCommitOnlyPrompt(promptOptsFor('claude'));

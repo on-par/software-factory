@@ -18,6 +18,22 @@ export const TestsAffectedConfigSchema = z
       .describe(
         'Affected-tests command for CHECK rework rounds; {files} expands to the changed paths, each shell-quoted. e.g. "npx vitest related --run {files}"',
       ),
+    typecheck: z
+      .string()
+      .min(1)
+      .refine((text) => tokenizeEvidenceCommand(text) !== null, {
+        message: 'must be one shell-free command (no pipes, redirects, ;, &, $, backticks, globs or VAR= prefixes)',
+      })
+      .optional()
+      .describe(
+        'Focused or incremental typecheck run in place of the full compile command during CHECK rework rounds with an affected selection, e.g. "npx tsc -b --incremental". The full compile still runs once before SHIP.',
+      ),
+    buildVerify: z
+      .enum(['focused', 'full'])
+      .optional()
+      .describe(
+        'focused (default): BUILD and rework iterate on the focused commands and CHECK runs one full gate before SHIP. full: the repo demands full verification in BUILD and every rework round (#1272).',
+      ),
     fullOn: z
       .array(z.string().min(1))
       .optional()
@@ -30,6 +46,6 @@ export const TestsConfigSchema = z.object({ affected: TestsAffectedConfigSchema.
 
 export const TestsConfigSections = {
   tests: TestsConfigSchema.optional().describe(
-    'Test selection for CHECK rework rounds. Unset: every round runs the full suite.',
+    'Test selection and optional focused typecheck for CHECK rework rounds. Unset: every round runs the full suite.',
   ),
 };

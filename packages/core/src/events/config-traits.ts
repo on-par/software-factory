@@ -10,11 +10,13 @@ export type ConfigEventKind =
   | 'github_credentials'
   | 'github_credentials_ambient'
   | 'red-main'
-  | 'red-main-cleared';
+  | 'red-main-cleared'
+  | 'verify_scope';
 
 export const CONFIG_EVENT_TRAITS: Record<ConfigEventKind, EventTraits> = {
   'red-main': { severity: 'warn', isPark: false, isTerminal: false },
   'red-main-cleared': { severity: 'info', isPark: false, isTerminal: false },
+  verify_scope: { severity: 'info', isPark: false, isTerminal: false },
   // An unknown nested config key stripped by the runtime schema, warned once per key at run start (#3568).
   config_unknown_key: { severity: 'warn', isPark: false, isTerminal: false },
   // A known config key with an unsupported value, ignored with a warning at run start (#3829, ADR-0160).

@@ -257,7 +257,7 @@ function modelNamespace(): Node[] {
       '{ source: { kind: "deployment", environment: "preview/pr-*" }, command: ["npm", "run", "smoke:preview"] }',
     ),
     unset('visualProof', doc('visualProof'), VISUAL_PROOF_HINT),
-    unset('tests', doc('tests'), '{ affected: { command: "npx vitest related --run {files}" } }'),
+    unset('tests', doc('tests'), '{ affected: { command: "npx vitest related --run {files}", typecheck: "tsc -b" } }'),
     {
       kind: 'object',
       key: 'risk',

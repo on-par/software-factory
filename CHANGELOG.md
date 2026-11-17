@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- Scoped verification: `tests.affected.typecheck` and `tests.affected.buildVerify` let BUILD and CHECK rework iterate on focused typecheck, lint and tests, with one full gate before SHIP and a `verify_scope` run-log line (#4251).
 - Stable tag publishes now create or update the GitHub release from CHANGELOG.md, and a drift check fails when npm latest and the GitHub latest release differ (#4123).
 - Per-package line budget: `npm run loc-budget` in verify and CI `static` checks `loc-budget.json`, which may only fall; raising it needs a human-applied `loc-budget:override` label (#4124).
 - Scoped per-phase GitHub credentials (App installation or fine-grained tokens) with no merge route outside land (#4120).

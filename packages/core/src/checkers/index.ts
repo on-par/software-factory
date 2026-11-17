@@ -112,6 +112,22 @@ export const compileChecker: CheckerFn = async (ctx) => {
     return tail === 'timed out' ? head : `${head}\n${tail}`;
   };
   try {
+    const focused = ctx.affectedTests?.kind === 'affected' ? ctx.affectedTests.typecheck : undefined;
+    if (focused) {
+      const r = await run(focused.argv, { cwd: ctx.worktree, timeoutMs, env: ctx.env, onPgid: ctx.onPgid }).catch(
+        () => undefined,
+      );
+      if (r?.ok) return { checker: 'compile', result: 'PASS', details: `focused typecheck: OK — ${focused.command}` };
+      if (r && !r.timedOut) {
+        return {
+          checker: 'compile',
+          result: 'FAIL',
+          details: await commandFailureDetails(ctx, 'compile', focused.command, r, evidence(r)),
+          failedCommand: { command: focused.command, exitCode: r.exitCode, timeoutSeconds },
+        };
+      }
+      ctx.log?.('affected_tests', `focused typecheck fell back to the full compile: ${r ? 'timeout' : 'tool-error'}`);
+    }
     const argv = (await resolveCompileCommand(ctx))?.argv;
     if (!argv) {
       const probed = `no checks.build in ${describeChecksProbe(ctx)}, no package.json build or typecheck script, Makefile or Cargo.toml`;
