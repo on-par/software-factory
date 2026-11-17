@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, realpathSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
@@ -215,28 +215,6 @@ export async function setupWorktree(
   return { base, head: stdout.trim(), remoteBranch };
 }
 
-function canonicalPath(p: string): string {
-  try {
-    return realpathSync(p);
-  } catch {
-    return resolve(p);
-  }
-}
-
-async function isLinkedWorktree(repoRoot: string, worktreePath: string): Promise<boolean> {
-  const listed = await execGit(['worktree', 'list', '--porcelain'], { cwd: repoRoot }).then(
-    (r) => r.stdout,
-    () => null,
-  );
-  if (listed === null) return true;
-  const target = canonicalPath(worktreePath);
-  return listed
-    .split('\n')
-    .filter((line) => line.startsWith('worktree '))
-    .slice(1)
-    .some((line) => canonicalPath(line.slice('worktree '.length).trim()) === target);
-}
-
 export async function cleanupWorktree(
   repoRoot: string,
   worktreePath: string,
@@ -246,20 +224,17 @@ export async function cleanupWorktree(
   if (sandbox) {
     await removeMicroVm({ ...sandbox, worktreePath, log });
   }
-  if (await isLinkedWorktree(repoRoot, worktreePath)) {
-    await execGit(['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot }).catch((err: any) =>
+  const git = (args: string[], where: string) =>
+    execGit(args, { cwd: repoRoot }).catch((err: any) =>
       log(
         'warn',
-        `git worktree remove failed for ${worktreePath}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
+        `git worktree ${args[1]} failed ${where}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
       ),
     );
+  if (!statSync(join(worktreePath, '.git'), { throwIfNoEntry: false })?.isDirectory()) {
+    await git(['worktree', 'remove', '--force', worktreePath], `for ${worktreePath}`);
   }
-  await execGit(['worktree', 'prune'], { cwd: repoRoot }).catch((err: any) =>
-    log(
-      'warn',
-      `git worktree prune failed in ${repoRoot}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
-    ),
-  );
+  await git(['worktree', 'prune'], `in ${repoRoot}`);
 }
 
 export interface LaneWorktreeReapResult {

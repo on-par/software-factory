@@ -74,21 +74,9 @@ describe('utils', () => {
   it('escapes strings for single-quoted shell arguments', () => {
     expect(shellEscape("it's")).toBe("'it'\\''s'");
     expect(shellEscape('plain')).toBe("'plain'");
-  });
-
-  it('wraps strings with spaces in single quotes', () => {
     expect(shellEscape('path with spaces/file.txt')).toBe("'path with spaces/file.txt'");
-  });
-
-  it('preserves double quotes and shell metacharacters inside single quotes', () => {
     expect(shellEscape('say "hi" && rm -rf /')).toBe('\'say "hi" && rm -rf /\'');
-  });
-
-  it('escapes multiple embedded single quotes', () => {
     expect(shellEscape("a'b'c")).toBe("'a'\\''b'\\''c'");
-  });
-
-  it('handles the empty string', () => {
     expect(shellEscape('')).toBe("''");
   });
 
@@ -142,6 +130,16 @@ describe('utils', () => {
     expect(factoryBranchIssue('sf/3-z', 'sf')).toBe(3);
     expect(factoryBranchIssue('feature/4-a', 'factory')).toBeNull();
     expect(factoryBranchIssue('factory/abc-x', 'factory')).toBeNull();
+  });
+
+  it('logs worktree cleanup failures without rejecting', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-cleanup-'));
+    const worktreePath = join(tmpDir, 'nonexistent-wt');
+    const { events, log: spy } = logRecorder();
+
+    await expect(cleanupWorktree(tmpDir, worktreePath, spy)).resolves.toBeUndefined();
+
+    expect(events).toContainEqual(logged('warn', expect.stringContaining('nonexistent-wt')));
   });
 
   it('does not throw when called without a log callback', async () => {
@@ -592,6 +590,17 @@ describe('gitFetch / setupWorktree', () => {
     await setupWorktree(repoRoot, 'factory/201-fresh-worktree', worktree);
 
     expect(existsSync(join(worktree, 'README.md'))).toBe(true);
+  });
+
+  it('leaves a direct clone alone instead of running git worktree remove', async () => {
+    const { repoRoot, origin } = await kit.makeThrowawayRepo();
+    const clone = kit.trackWorktree(repoRoot, 4248);
+    await execFile('git', ['clone', origin, clone]);
+    const { events, log } = logRecorder();
+
+    await cleanupWorktree(repoRoot, clone, log);
+
+    expect(events).toEqual([]);
   });
 
   it('keeps worktrees adjacent when factory state uses an external root', async () => {

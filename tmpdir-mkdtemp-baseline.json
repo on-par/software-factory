@@ -166,7 +166,7 @@
   "packages/core/src/utils/exec.test.ts": 2,
   "packages/core/src/utils/git-exec.test.ts": 1,
   "packages/core/src/utils/index.ci-failure.test.ts": 1,
-  "packages/core/src/utils/index.test.ts": 26,
+  "packages/core/src/utils/index.test.ts": 27,
   "packages/core/src/utils/local-auth-record.test.ts": 1,
   "packages/core/src/utils/lock.test.ts": 3,
   "packages/core/src/utils/run-lock.test.ts": 1,
