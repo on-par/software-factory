@@ -804,7 +804,6 @@
   "scripts/slowest-tests.ts": 8,
   "scripts/test-budget.ts": 10,
   "scripts/test-tmp-sandbox.ts": 4,
-  "scripts/test-workers.ts": 5,
   "scripts/verify-env-probe.mjs": 2,
-  "vitest.config.ts": 50
+  "vitest.config.ts": 49
 }
