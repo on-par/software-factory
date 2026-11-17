@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
@@ -215,6 +215,26 @@ export async function setupWorktree(
   return { base, head: stdout.trim(), remoteBranch };
 }
 
+function canonicalPath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+}
+
+async function isLinkedWorktree(repoRoot: string, worktreePath: string): Promise<boolean> {
+  const listed = await execGit(['worktree', 'list', '--porcelain'], { cwd: repoRoot }).catch(() => null);
+  if (!listed) return true;
+  const { stdout } = listed;
+  const target = canonicalPath(worktreePath);
+  return stdout
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .slice(1)
+    .some((line) => canonicalPath(line.slice('worktree '.length)) === target);
+}
+
 export async function cleanupWorktree(
   repoRoot: string,
   worktreePath: string,
@@ -231,7 +251,7 @@ export async function cleanupWorktree(
         `git worktree ${args[1]} failed ${where}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
       ),
     );
-  if (!statSync(join(worktreePath, '.git'), { throwIfNoEntry: false })?.isDirectory()) {
+  if (await isLinkedWorktree(repoRoot, worktreePath)) {
     await git(['worktree', 'remove', '--force', worktreePath], `for ${worktreePath}`);
   }
   await git(['worktree', 'prune'], `in ${repoRoot}`);

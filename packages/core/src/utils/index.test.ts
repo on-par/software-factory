@@ -74,9 +74,21 @@ describe('utils', () => {
   it('escapes strings for single-quoted shell arguments', () => {
     expect(shellEscape("it's")).toBe("'it'\\''s'");
     expect(shellEscape('plain')).toBe("'plain'");
+  });
+
+  it('wraps strings with spaces in single quotes', () => {
     expect(shellEscape('path with spaces/file.txt')).toBe("'path with spaces/file.txt'");
+  });
+
+  it('preserves double quotes and shell metacharacters inside single quotes', () => {
     expect(shellEscape('say "hi" && rm -rf /')).toBe('\'say "hi" && rm -rf /\'');
+  });
+
+  it('escapes multiple embedded single quotes', () => {
     expect(shellEscape("a'b'c")).toBe("'a'\\''b'\\''c'");
+  });
+
+  it('handles the empty string', () => {
     expect(shellEscape('')).toBe("''");
   });
 
