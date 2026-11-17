@@ -64,8 +64,6 @@ export function logEvent(
     model?: string;
     tokens?: { input: number; output: number };
     durationMs?: number;
-    cpuMs?: number;
-    peakRssBytes?: number;
     attribution?: RunAttribution;
     paths?: string[];
     mode?: 'mechanical';
