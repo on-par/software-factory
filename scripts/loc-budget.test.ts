@@ -5,7 +5,6 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { countLines, measurePackages, runLocBudget, type LocBudgetIo } from './loc-budget.js';
-import type { LabelEvent } from './max-lines-baseline-guard.js';
 
 const tempDirs = createTempDirs();
 
@@ -59,27 +58,6 @@ function check(source: number): { code: number; out: string } {
   return run([], root);
 }
 
-const labeled = (login: string, type: string, name: string): LabelEvent => ({
-  event: 'labeled',
-  label: { name },
-  actor: { login, type },
-});
-
-function guard(base: number, head: number, events: LabelEvent[]): { code: number; out: string; labelFetches: number } {
-  const root = fakeRepo();
-  let labelFetches = 0;
-  const result = run(['--base', 'abc', '--pr', '7'], root, {
-    env: { GITHUB_REPOSITORY: 'o/r' },
-    git: (args) => (args[0] === 'ls-tree' ? 'blob loc-budget.json' : budgetJson(base)),
-    readHead: () => budgetJson(head),
-    fetchLabelEvents: () => {
-      labelFetches += 1;
-      return events;
-    },
-  });
-  return { ...result, labelFetches };
-}
-
 describe('loc-budget', () => {
   it('counts lines like max-lines', () => {
     expect(countLines('')).toBe(0);
@@ -102,8 +80,7 @@ describe('loc-budget', () => {
     const result = check(2);
     expect(result.code).toBe(1);
     expect(result.out).toContain('Delete or reuse existing code before adding more');
-    expect(result.out).toContain('loc-budget:override');
-    expect(result.out).toContain('a human');
+    expect(result.out).toContain('set "a".source to 3 in loc-budget.json');
   });
 
   it('fails an under-budget package and names the number to lower it to', () => {
@@ -114,9 +91,6 @@ describe('loc-budget', () => {
 
   it('passes once the recorded number is lowered in the same PR', () => {
     expect(check(3).code).toBe(0);
-    const result = guard(5, 3, []);
-    expect(result.code).toBe(0);
-    expect(result.labelFetches).toBe(0);
   });
 
   it('fails a missing or stale package entry', () => {
@@ -131,41 +105,10 @@ describe('loc-budget', () => {
     expect(stale.out).toContain('entry for packages/gone, which does not exist');
   });
 
-  it('guard fails a raised budget without the override label', () => {
-    const result = guard(3, 4, []);
-    expect(result.code).toBe(1);
-    expect(result.out).toContain('raised "a".source from 3 to 4');
-    expect(result.out).toContain('delete or reuse');
-  });
-
-  it('guard passes a raised budget when a human applied loc-budget:override', () => {
-    const result = guard(3, 4, [labeled('alice', 'User', 'loc-budget:override')]);
-    expect(result.code).toBe(0);
-    expect(result.out).toContain('approved by alice via loc-budget:override');
-  });
-
-  it('guard rejects loc-budget:override applied by a bot', () => {
-    const bot = guard(3, 4, [labeled('app[bot]', 'Bot', 'loc-budget:override')]);
-    expect(bot.code).toBe(1);
-    expect(bot.out).toContain('must be applied by a human');
-    const other = guard(3, 4, [labeled('alice', 'User', 'max-lines:override')]);
-    expect(other.code).toBe(1);
-  });
-
-  it('guard passes when loc-budget.json is new at the base ref', () => {
-    const root = fakeRepo();
-    const result = run(['--base', 'abc', '--pr', '7'], root, {
-      git: () => '',
-      readHead: () => budgetJson(3),
-    });
-    expect(result.code).toBe(0);
-    expect(result.out).toContain('new at the base ref');
-  });
-
   it('rejects bad usage and malformed budgets', () => {
     const root = fakeRepo();
     expect(run(['--bogus'], root).code).toBe(2);
-    expect(run(['--base', 'abc'], root).code).toBe(2);
+    expect(run(['--base', 'abc', '--pr', '7'], root).code).toBe(2);
     write(root, 'loc-budget.json', '[]');
     expect(run([], root).code).toBe(1);
     write(root, 'loc-budget.json', budgetJson(-1));
