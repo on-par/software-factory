@@ -22,9 +22,9 @@ for arg in "$@"; do
   fi
 done
 
-# Same default as npm test / CI: 4 workers (scripts/test-workers.ts). On a heavily loaded
+# Default is one worker per available CPU, same as npm test (scripts/test-workers.ts). On a heavily loaded
 # shared host, set FACTORY_TEST_MAX_WORKERS=1 to run serially, or any N to override.
-export FACTORY_TEST_MAX_WORKERS="${FACTORY_TEST_MAX_WORKERS:-4}"
+export FACTORY_TEST_MAX_WORKERS="${FACTORY_TEST_MAX_WORKERS:-$(node -p "require('node:os').availableParallelism()")}"
 echo "verify: FACTORY_TEST_MAX_WORKERS=${FACTORY_TEST_MAX_WORKERS}"
 echo "verify: CI=${CI:-} (test budget overrun fails verify when CI is set)"
 
