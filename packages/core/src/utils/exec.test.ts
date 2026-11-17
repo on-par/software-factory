@@ -175,7 +175,7 @@ describe('defaultExecFn GitHub credential isolation', () => {
     expect(err.stderr).toContain('auth [redacted] [redacted]');
   });
 
-  it('ignores onStdout on the non-detached path', async () => {
+  it('streams onStdout chunks without onPgid', async () => {
     const chunks: string[] = [];
     const onStdout = (chunk: string) => {
       chunks.push(chunk);
@@ -184,7 +184,7 @@ describe('defaultExecFn GitHub credential isolation', () => {
     const { stdout } = await defaultExecFn('echo hi', { onStdout });
 
     expect(stdout).toBe('hi\n');
-    expect(chunks).toEqual([]);
+    expect(chunks.join('')).toBe('hi\n');
   });
 
   describe.skipIf(process.platform === 'win32')('onPgid (detached) path', () => {

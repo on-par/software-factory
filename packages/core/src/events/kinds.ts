@@ -1,6 +1,3 @@
-// src/events/kinds.ts — Closed vocabulary for FactoryEvent.type (#663): EventKind is the closed set of kinds the factory
-// emits and EVENT_TRAITS is the single table every consumer reads instead of keeping its own classification.
-
 import { COMMAND_OUTPUT_EVENT_TRAITS, type CommandOutputEventKind } from './command-output-traits.js';
 import { CONFIG_EVENT_TRAITS, type ConfigEventKind } from './config-traits.js';
 import { DECOMPOSE_EVENT_TRAITS } from './decompose-traits.js';
@@ -23,6 +20,7 @@ export type EventKind =
   | 'adr_read_degraded'
   | 'adr_skipped'
   | 'all_providers_down'
+  | 'agent-event'
   | 'agent_memory_loaded'
   | 'agent_memory_oversized'
   | 'approval_granted'
@@ -253,6 +251,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   adr_skipped: { severity: 'info', isPark: false, isTerminal: false },
   // every provider of the stage is down with no known reset; the issue parks once (#3235)
   all_providers_down: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
+  'agent-event': { severity: 'info', isPark: false, isTerminal: false },
   agent_memory_loaded: { severity: 'info', isPark: false, isTerminal: false },
   agent_memory_oversized: { severity: 'warn', isPark: false, isTerminal: false },
   approval_granted: { severity: 'info', isPark: false, isTerminal: false },

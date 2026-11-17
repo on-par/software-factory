@@ -11,6 +11,8 @@ import type { CodingHarness, HarnessRequest, HarnessResult, HarnessUsage } from 
 import { HarnessError } from './index.js';
 import type { ProviderFailure } from './provider-failure.js';
 import { defaultClassifyError, failureKindForReason } from './provider-failure.js';
+import { agentEventPhase, createAgentEventStream } from './agent-events.js';
+import { normalizeClaudeStreamLine } from './claude-stream-events.js';
 import { withTempDir } from './temp-dir.js';
 
 export type ClaudeExecFn = ExecFn;
@@ -162,21 +164,33 @@ export class ClaudeCliHarness implements CodingHarness {
     const effortEnv = effort === undefined ? {} : { CLAUDE_CODE_EFFORT_LEVEL: String(effort) };
     const hasOverlay = Object.keys(endpointEnv).length > 0 || effort !== undefined;
 
+    const events = request.onEvent
+      ? createAgentEventStream(normalizeClaudeStreamLine, {
+          phase: agentEventPhase(request.task),
+          onEvent: request.onEvent,
+        })
+      : undefined;
+
     const stdout = await withTempDir('factory-claude-prompt-', async (promptDir) => {
       const promptPath = join(promptDir, 'prompt.txt');
       await writeFile(promptPath, prompt, 'utf8');
       const cmd = `claude -p ${modelArg}${effortArg} --output-format stream-json --include-partial-messages --verbose --safe-mode --permission-mode bypassPermissions < ${shellEscape(promptPath)}`;
       const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
       try {
-        return (
-          await this.execFn(finalCmd, {
-            cwd: worktree,
-            timeoutMs: timeoutSeconds * 1000,
-            maxBuffer: 10 * 1024 * 1024,
-            env: hasOverlay ? { ...env, ...endpointEnv, ...effortEnv } : env,
-            onPgid,
-          })
-        ).stdout;
+        try {
+          return (
+            await this.execFn(finalCmd, {
+              cwd: worktree,
+              timeoutMs: timeoutSeconds * 1000,
+              maxBuffer: 10 * 1024 * 1024,
+              env: hasOverlay ? { ...env, ...endpointEnv, ...effortEnv } : env,
+              onPgid,
+              ...(events ? { onStdout: events.onStdout } : {}),
+            })
+          ).stdout;
+        } finally {
+          events?.flush();
+        }
       } catch (err: any) {
         const stdout = typeof err.stdout === 'string' && err.stdout.length > 0 ? err.stdout : undefined;
         const stdoutDiagnostic = stdout ? extractFailureDiagnosticFromStream(stdout) : undefined;

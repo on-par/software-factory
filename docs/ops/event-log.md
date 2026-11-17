@@ -42,6 +42,30 @@ A feedback round on a factory PR (`factory respond <pr>` or a queued review rewo
 - `feedback_round_replied` (info): the round answered its items, with the replies posted, the threads resolved and
   the reviewers re-requested. A failed reply, resolve or review request logs a `rework` warning and the round goes on.
 
+## Agent activity events
+
+The Claude Code and Codex harnesses normalize each line of the agent CLI's JSON output into a short `AgentEvent` as the line arrives, so long plan, build, check and ship steps are observable while they run. Other harnesses emit none.
+
+Each event goes to three places:
+
+- The run log, as an `agent-event` event with `phase` set; `msg` is the event JSON.
+- Stdout, as one line with the stable prefix `[factory] agent-event ` followed by the JSON. In `--json` mode it goes to stderr, so the final JSON stays the last stdout line.
+- The `RunPorts.onAgentEvent` hook passed to `runIssue`, for embedding hosts. A subscriber that throws is ignored and never fails the run.
+
+```
+[factory] agent-event {"phase":"build","kind":"tool_call","name":"Read","summary":"<path>","at":"2026-01-01T00:00:00.000Z"}
+```
+
+| Field     | Meaning                                                                           |
+| --------- | --------------------------------------------------------------------------------- |
+| `phase`   | `plan`, `build`, `check` or `ship`, from the task being run.                      |
+| `kind`    | `tool_call`, `tool_result`, `skill`, `mcp`, `text` or `result`.                   |
+| `name`    | Tool, skill or `server.tool` name. Absent for `text`, `tool_result` and `result`. |
+| `summary` | One line describing the step.                                                     |
+| `at`      | ISO timestamp of when the line was read.                                          |
+
+Summaries are redacted, whitespace-collapsed and capped at 200 characters; longer ones end in `…[truncated N chars]`. A tool call summarizes only its main input (a path, command, pattern or URL), never the full input or output. Lines that are not JSON or not a known event are skipped.
+
 ## Command output export events
 
 When opt-in OTLP export of CHECK command output is on (see [command-output-export.md](command-output-export.md)),

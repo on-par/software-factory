@@ -1,0 +1,10 @@
+{"type":"thread.started","thread_id":"019ff914-ffab-7d32-9e8d-2b202a31c34f"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"npm test","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"npm test","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","server":"github","tool":"get_issue","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"mcp_tool_call","server":"github","tool":"get_issue","status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"src/a.ts","kind":"update"},{"path":"src/b.ts","kind":"add"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_3","type":"reasoning","text":"Thinking"}}
+{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"Implemented the change and committed it."}}
+{"type":"turn.completed","usage":{"input_tokens":15785,"cached_input_tokens":9984,"output_tokens":5,"reasoning_output_tokens":0}}

@@ -106,3 +106,22 @@ describe('createDefaultExecFn detached path (fake child)', () => {
     expect(killCalls).toEqual([]);
   });
 });
+
+describe('createDefaultExecFn onStdout without onPgid', () => {
+  it('streams stdout chunks when onStdout is set without onPgid', async () => {
+    const child = fakeChild(4242);
+    const spawn: NonNullable<ExecDeps['spawn']> = () => child as never;
+    const exec = createDefaultExecFn({ spawn });
+    const chunks: string[] = [];
+    const result = exec('cmd', {
+      env: { FACTORY_DAEMON_GROUPS_FILE: '' },
+      onStdout: (chunk) => chunks.push(chunk),
+    });
+    child.stdout.emit('data', Buffer.from('one\n'));
+    child.stdout.emit('data', Buffer.from('two\n'));
+    expect(chunks).toEqual(['one\n', 'two\n']);
+    child.emit('exit', 0, null);
+    child.emit('close', 0, null);
+    expect((await result).stdout).toBe('one\ntwo\n');
+  });
+});

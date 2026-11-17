@@ -106,6 +106,8 @@ import { budgetGuardFor, enforceIssueBudget } from './budget.js';
 import type { IssueRunState } from '../types/index.js';
 import type { RequiredChecksVerdict } from '../utils/required-checks.js';
 import type { RunReportInfo } from './run-report-info.js';
+import { createAgentEventForwarder } from './agent-event-forwarder.js';
+import type { AgentEvent } from '../harness/agent-events.js';
 import { providerProbe, type ProviderProbe } from './provider-probe.js';
 import type { PrerequisiteStackTarget } from '../queue/prerequisite-stack.js';
 import { errorMessage } from '../checkers/preview-wait.js';
@@ -175,6 +177,7 @@ export interface RunPorts extends CiReworkPorts, LinearRunPorts {
   createSliceBranch?: (opts: { worktree: string; branch: string; startPoint: string }) => Promise<void>;
   steward?: RunStewardPorts;
   router: ModelRouter;
+  onAgentEvent?: (event: AgentEvent) => void;
   gitExec?: ExecFn;
   classifyPr?: (input: PrShadowInput) => Promise<PrShadowVerdict>;
   octokit: Octokit;
@@ -238,6 +241,7 @@ async function runIssueOnce(
   let request = initialRequest;
   const workKey = workKeyFromIssue(request.issue);
   if (request.codexWorkspacePaths) ports.router.setCodexWorkspacePaths?.(request.codexWorkspacePaths);
+  ports.router.setAgentEventSink?.(createAgentEventForwarder(ports.events, ports.onAgentEvent));
   const planPhase = ports.planPhase ?? planPhaseDefault;
   const slot = ports.hostBuildSlot ?? ((_phase, fn) => fn());
   const buildPhase: typeof buildPhaseDefault = (o) => slot('build', () => (ports.buildPhase ?? buildPhaseDefault)(o));

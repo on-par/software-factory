@@ -291,6 +291,7 @@ export type {
   HarnessRequest,
   HarnessResult,
 } from './harness/index.js';
+export type { AgentEvent } from './harness/agent-events.js';
 export { HARNESS_CATALOG, HarnessError, KNOWN_HARNESS_IDS } from './harness/index.js';
 
 // Constitutions

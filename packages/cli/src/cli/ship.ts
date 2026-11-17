@@ -1,4 +1,3 @@
-// packages/cli/src/cli/ship.ts — issue-level ship flow: resolve config, build RunRequest/RunPorts, run runIssue, map the outcome (#2788)
 import { resolve } from 'node:path';
 import { styleText } from 'node:util';
 import type {
@@ -36,6 +35,7 @@ import {
   touchLastEvent,
   touchRunActivity,
 } from '@on-par/factory-core';
+import { printAgentEvent } from './agent-event-line.js';
 import { shipHostBuildSlot } from './host-slot.js';
 import { claimReworkRequests } from './ship-review-rework.js';
 import { reportConfigSource } from './config-override-option.js';
@@ -405,6 +405,7 @@ async function shipIssueFrom(
     octokit,
     workspace,
     events: mkLog,
+    onAgentEvent: printAgentEvent,
     acquireEnvironment,
     resolveBaseUrl,
     getIssueSpend: () => issueSpend,

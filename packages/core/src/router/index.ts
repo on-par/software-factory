@@ -15,6 +15,7 @@ import type { ProviderFailure, ProviderFailureKind } from '../harness/provider-f
 import { providerFailureOf } from '../harness/provider-failure.js';
 import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
+import type { AgentEvent } from '../harness/agent-events.js';
 import { OpenCodeHarness } from '../harness/opencode.js';
 import { PiHarness } from '../harness/pi.js';
 import { isHarnessCliPresent, ModelRegistry } from '../models/index.js';
@@ -142,6 +143,7 @@ export interface ModelExecutorContext {
   onUsage?: (usage: HarnessUsage) => void;
   /** Cumulative usage while the session runs (#3320); forwarded to HarnessRequest.onUsage. */
   onLiveUsage?: (cumulative: HarnessLiveUsage) => void;
+  onAgentEvent?: (event: AgentEvent) => void;
 }
 
 /** Execute one model; failure and empty output must surface as typed errors. */
@@ -251,6 +253,7 @@ export class CliModelExecutor implements ModelExecutor {
       | 'onPgid'
       | 'onUsage'
       | 'onLiveUsage'
+      | 'onAgentEvent'
     >,
   ): Promise<string> {
     const { output, usage } = await harness.run({
@@ -269,6 +272,7 @@ export class CliModelExecutor implements ModelExecutor {
       env: ctx.env,
       onPgid: ctx.onPgid,
       onUsage: ctx.onLiveUsage,
+      onEvent: ctx.onAgentEvent,
     });
     if (usage) ctx.onUsage?.(usage);
     return output;
@@ -296,6 +300,7 @@ export class ModelRouter {
   /** Models already warned about resolving through a retired harness id; once per run (#3445). */
   private readonly retiredHarnessNoticed = new Set<string>();
   private localAuthSink?: (agent: LocalAuthAgent) => void;
+  private agentEventSink?: (event: AgentEvent) => void;
   private codexFullAccessTasks: readonly string[] = [];
   private codexSandbox?: CodexSandboxMode;
   private contextCeilings: Readonly<Record<string, number>> = { 'codex-cli': DEFAULT_CODEX_CONTEXT_CEILING };
@@ -388,6 +393,9 @@ export class ModelRouter {
    *  flag it until the next login (#2733). Receives only the agent name. */
   setLocalAuthSink(sink: (agent: LocalAuthAgent) => void): void {
     this.localAuthSink = sink;
+  }
+  setAgentEventSink(sink: ((event: AgentEvent) => void) | undefined): void {
+    this.agentEventSink = sink;
   }
   /** Register a check telling whether a provider is held for rejected credentials; held providers are skipped. */
   setProviderHold(check: ((provider: string) => Promise<boolean>) | undefined): void {
@@ -662,6 +670,7 @@ export class ModelRouter {
             contextCeiling: contextCeilingFor(task, harnessId, this.contextCeilings),
             env,
             onPgid,
+            onAgentEvent: this.agentEventSink,
             onUsage: (u) => {
               usage = u;
             },

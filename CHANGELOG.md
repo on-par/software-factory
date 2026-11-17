@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- Agent steps stream live activity: Claude Code and Codex tool calls, skills, MCP calls, text and results appear as `agent-event` log events, `[factory] agent-event {json}` stdout lines and a `RunPorts.onAgentEvent` hook while the agent runs (#4246).
 - Stable tag publishes now create or update the GitHub release from CHANGELOG.md, and a drift check fails when npm latest and the GitHub latest release differ (#4123).
 - Per-package line budget: `npm run loc-budget` in verify and CI `static` checks `loc-budget.json`, which may only fall; raising it needs a human-applied `loc-budget:override` label (#4124).
 - Scoped per-phase GitHub credentials (App installation or fine-grained tokens) with no merge route outside land (#4120).
