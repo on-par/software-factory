@@ -58,14 +58,5 @@
   "packages/core/src/run/ci-rework-loop.test.ts": 51,
   "packages/core/src/run/design-checkpoint.test.ts": 2,
   "packages/core/src/run/feedback-round-hooks.test.ts": 5,
-  "packages/core/src/run/run-issue.design-checkpoint.test.ts": 13,
-  "packages/core/src/run/run-issue.env-release.test.ts": 2,
-  "packages/core/src/run/run-issue.file-overlap-defer.test.ts": 5,
-  "packages/core/src/run/run-issue.lane-claim.test.ts": 1,
-  "packages/core/src/run/run-issue.lane-install.test.ts": 9,
-  "packages/core/src/run/run-issue.linear-writeback.test.ts": 5,
-  "packages/core/src/run/run-issue.no-diff.test.ts": 2,
-  "packages/core/src/run/run-issue.no-pr.test.ts": 10,
-  "packages/core/src/run/run-issue.opencode-breaker.test.ts": 2,
   "packages/core/src/run/run-issue.test.ts": 184
 }

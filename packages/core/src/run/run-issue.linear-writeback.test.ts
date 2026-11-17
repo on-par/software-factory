@@ -117,15 +117,16 @@ const ENV_FAIL: CheckPhaseResult = {
 const overBudget: RunPolicy = { ...policy, budget: { perIssueCapUsd: 1 } };
 
 function githubOctokit() {
-  const createComment = vi.fn();
-  const updateComment = vi.fn();
+  const posted: unknown[] = [];
+  const createComment = async (p: unknown) => posted.push(p);
+  const updateComment = async (p: unknown) => posted.push(p);
   const octokit = Object.assign({} as Octokit, {
     rest: {
       users: { getAuthenticated: vi.fn(async () => ({ data: { id: 9 } })) },
       issues: { listComments: vi.fn(async () => ({ data: [] })), createComment, updateComment },
     },
   });
-  return { octokit, createComment, updateComment };
+  return { octokit, posted };
 }
 
 function recordingWriteback(fail = false) {
@@ -142,7 +143,7 @@ function recordingWriteback(fail = false) {
 
 describe('runIssue — Linear write-back (#3894)', () => {
   it('a Linear park posts the park comment to the Linear issue and not to GitHub', async () => {
-    const { octokit, createComment, updateComment } = githubOctokit();
+    const { octokit, posted } = githubOctokit();
     const { comments, ticketWriteback } = recordingWriteback();
     const outcome = await runIssue(request, overBudget, {
       ...ports(vi.fn<Log>(), octokit),
@@ -153,24 +154,23 @@ describe('runIssue — Linear write-back (#3894)', () => {
     expect(comments).toHaveLength(1);
     expect(comments[0].key).toBe('ON-12');
     expect(comments[0].body).toContain('reason: fail');
-    expect(createComment).not.toHaveBeenCalled();
-    expect(updateComment).not.toHaveBeenCalled();
+    expect(posted).toEqual([]);
   });
 
   it('a Linear environment failure posts its comment to the Linear issue', async () => {
     vi.mocked(checkPhase).mockResolvedValue(ENV_FAIL);
-    const { octokit, createComment, updateComment } = githubOctokit();
+    const { octokit, posted } = githubOctokit();
     const { comments, ticketWriteback } = recordingWriteback();
     await runIssue(request, policy, { ...ports(vi.fn<Log>(), octokit), ticketWriteback });
     expect(comments).toHaveLength(1);
     expect(comments[0].key).toBe('ON-12');
     expect(comments[0].body).toContain('CHECK failure caused by the base');
-    expect(createComment).not.toHaveBeenCalled();
-    expect(updateComment).not.toHaveBeenCalled();
+    expect(posted).toEqual([]);
   });
 
   it('a failing Linear park comment logs a warning and the run still parks with its reason', async () => {
-    const log = vi.fn<Log>();
+    const events: Array<[string, string]> = [];
+    const log: Log = (t, m) => void events.push([t, m]);
     const { ticketWriteback } = recordingWriteback(true);
     const outcome = await runIssue(request, overBudget, {
       ...ports(log, githubOctokit().octokit),
@@ -178,8 +178,6 @@ describe('runIssue — Linear write-back (#3894)', () => {
       ticketWriteback,
     });
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
-    expect(
-      log.mock.calls.some(([type, message]) => type === 'environment_warning' && message.includes('linear down')),
-    ).toBe(true);
+    expect(events.some(([t, m]) => t === 'environment_warning' && m.includes('linear down'))).toBe(true);
   });
 });

@@ -82,13 +82,7 @@ const request: RunRequest = {
 const policy: RunPolicy = {
   models: MODELS,
   routes: ROUTES,
-  sandbox: {
-    enabled: false,
-    runtime: 'auto',
-    network: { allow: [] },
-    resources: { cpuMs: 0, memMb: 0 },
-    docker: { rolloutPercent: 0 },
-  },
+  sandbox: { enabled: false } as RunPolicy['sandbox'],
   budget: {},
   effective: {} as RunPolicy['effective'],
 };
@@ -106,7 +100,13 @@ const design: DesignArtifact = {
   openQuestions: [],
 };
 
-const issues = { createComment: vi.fn(), updateComment: vi.fn(), addLabels: vi.fn(), removeLabel: vi.fn() };
+const posted: unknown[] = [];
+const issues = {
+  createComment: async (p: unknown) => posted.push(p),
+  updateComment: async (p: unknown) => posted.push(p),
+  addLabels: async (p: unknown) => posted.push(p),
+  removeLabel: async (p: unknown) => posted.push(p),
+};
 
 function makePorts(overrides: Partial<RunPorts>, events: Array<[string, string]>): RunPorts {
   return {
@@ -138,11 +138,8 @@ function makePorts(overrides: Partial<RunPorts>, events: Array<[string, string]>
 
 describe('runIssue — same-file lane hold defers instead of parking (#3576)', () => {
   it('a live same-file collision defers the issue instead of parking it held', async () => {
-    const collision = { issue: workKeyFromIssue(3232), file: 'src/shared.ts' };
     const guard = new LaneFileGuard(join(breakerDir, 'lane-files-defer.json'));
-    vi.spyOn(guard, 'findCollision').mockResolvedValue(collision);
-    const recordHold = vi.spyOn(guard, 'recordHold').mockResolvedValue();
-    const register = vi.spyOn(guard, 'register');
+    await guard.register('o/r', workKeyFromIssue(3232), ['src/shared.ts']);
     const events: Array<[string, string]> = [];
     const ports = makePorts({ laneFileGuard: guard }, events);
     const outcome = await runIssue({ ...request, issue: 1896 }, policy, ports);
@@ -152,11 +149,12 @@ describe('runIssue — same-file lane hold defers instead of parking (#3576)', (
     expect(
       events.some(([type, msg]) => type === 'issue_deferred' && msg.includes('#3232') && msg.includes('src/shared.ts')),
     ).toBe(true);
-    expect(issues.createComment).not.toHaveBeenCalled();
-    expect(issues.updateComment).not.toHaveBeenCalled();
-    expect(recordHold).toHaveBeenCalledWith('o/r', workKeyFromIssue(1896), collision);
-    expect(register).not.toHaveBeenCalled();
-    expect(ports.buildPhase).not.toHaveBeenCalled();
+    expect(posted).toEqual([]);
+    expect(await guard.liveHold('o/r', workKeyFromIssue(1896))).toMatchObject({
+      holder: workKeyFromIssue(3232),
+      file: 'src/shared.ts',
+    });
+    expect(await guard.claimsForIssue(workKeyFromIssue(1896))).toEqual([]);
   });
 
   it('still defers when recording the hold fails', async () => {

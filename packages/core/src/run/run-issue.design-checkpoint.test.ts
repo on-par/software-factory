@@ -80,13 +80,7 @@ const request: RunRequest = {
 const policy: RunPolicy = {
   models: MODELS,
   routes: ROUTES,
-  sandbox: {
-    enabled: false,
-    runtime: 'auto',
-    network: { allow: [] },
-    resources: { cpuMs: 0, memMb: 0 },
-    docker: { rolloutPercent: 0 },
-  },
+  sandbox: { enabled: false } as RunPolicy['sandbox'],
   budget: {},
   effective: {} as RunPolicy['effective'],
 };
@@ -99,12 +93,19 @@ const PLAN_OK: PlanResult = {
   designArtifact: null,
 };
 
+const recording =
+  <A, R>(into: A[], result: R) =>
+  async (arg: A) => (into.push(arg), result);
+
 function octokitWith(labels: unknown[] | Error) {
-  const createComment = vi.fn(async () => ({ data: { id: 1 } }));
-  const get = vi.fn(async () => {
+  const comments: string[] = [];
+  const labelReads: number[] = [];
+  const createComment = async (p: unknown) => ({ data: { id: comments.push(JSON.stringify(p)) } });
+  const get = async () => {
+    labelReads.push(1);
     if (labels instanceof Error) throw labels;
     return { data: { labels } };
-  });
+  };
   const octokit = Object.assign({} as Octokit, {
     rest: {
       users: { getAuthenticated: vi.fn(async () => ({ data: { login: 'bot' } })) },
@@ -118,22 +119,24 @@ function octokitWith(labels: unknown[] | Error) {
       },
     },
   });
-  return { octokit, get, createComment };
+  return { octokit, labelReads, comments };
 }
 
 function storeWith(load: PlanResult | null) {
-  const record = vi.fn<PlanReuseStore['record']>(async () => {});
+  const recorded: Parameters<PlanReuseStore['record']>[0][] = [];
   const store: PlanReuseStore = {
     load: vi.fn<PlanReuseStore['load']>(async () => load),
-    record,
+    record: async (r) => void recorded.push(r),
     clear: vi.fn<PlanReuseStore['clear']>(async () => {}),
   };
-  return { store, record };
+  return { store, recorded };
 }
 
 function setup(labels: unknown[] | Error, planReuse?: PlanReuseStore) {
-  const planPhase = vi.fn<typeof realPlanPhase>().mockResolvedValue(PLAN_OK);
-  const buildPhase = vi.fn<typeof realBuildPhase>().mockResolvedValue({ ok: false } as never);
+  const plans: Parameters<typeof realPlanPhase>[0][] = [];
+  const builds: Parameters<typeof realBuildPhase>[0][] = [];
+  const planPhase = vi.fn<typeof realPlanPhase>(recording(plans, PLAN_OK));
+  const buildPhase = vi.fn<typeof realBuildPhase>(recording(builds, { ok: false } as never));
   const events: Array<[string, string]> = [];
   const o = octokitWith(labels);
   const ports: RunPorts = {
@@ -150,52 +153,49 @@ function setup(labels: unknown[] | Error, planReuse?: PlanReuseStore) {
     planReuse,
     readWorktreeHead: async () => 'abc123',
   };
-  return { ports, planPhase, buildPhase, events, ...o };
+  return { ports, plans, builds, events, ...o };
 }
 
 describe('runIssue — design checkpoint (#3621)', () => {
   it('parks held after a successful PLAN when the issue is labeled factory:needs-design and never calls buildPhase', async () => {
-    const { store, record } = storeWith(null);
+    const { store, recorded } = storeWith(null);
     const s = setup([{ name: 'factory:needs-design' }], store);
     const outcome = await runIssue(request, policy, s.ports);
     expect(outcome).toMatchObject({ state: 'parked', reason: 'held' });
-    expect(s.buildPhase).not.toHaveBeenCalled();
-    expect(record).toHaveBeenCalledTimes(1);
-    expect(record.mock.calls[0]?.[0]).toMatchObject({ bodyHash: issueBodyHash(WORK.brief), route: 'claude' });
-    const bodies = s.createComment.mock.calls.map((c) => JSON.stringify(c));
-    expect(bodies.some((b) => b.includes('factory:needs-design') && b.includes('/tmp/wt/spec.md'))).toBe(true);
+    expect(s.builds).toEqual([]);
+    expect(recorded).toEqual([expect.objectContaining({ bodyHash: issueBodyHash(WORK.brief), route: 'claude' })]);
+    expect(s.comments.some((b) => b.includes('factory:needs-design') && b.includes('/tmp/wt/spec.md'))).toBe(true);
   });
 
   it('after the label is removed the next claim reuses the frozen plan and builds on the same specPath and branch', async () => {
-    const { store, record } = storeWith(PLAN_OK);
+    const { store, recorded } = storeWith(PLAN_OK);
     const s = setup([], store);
     await runIssue(request, policy, s.ports);
-    expect(s.planPhase).not.toHaveBeenCalled();
-    expect(s.buildPhase).toHaveBeenCalledTimes(1);
-    expect(s.buildPhase.mock.calls[0]?.[0]).toMatchObject({ specPath: request.specPath, branch: request.branch });
-    expect(record).not.toHaveBeenCalled();
+    expect(s.plans).toEqual([]);
+    expect(s.builds).toEqual([expect.objectContaining({ specPath: request.specPath, branch: request.branch })]);
+    expect(recorded).toEqual([]);
   });
 
   it('an unlabeled issue goes from PLAN straight to BUILD with no park', async () => {
-    const { store, record } = storeWith(null);
+    const { store, recorded } = storeWith(null);
     const s = setup([{ name: 'bug' }], store);
     const outcome = await runIssue(request, policy, s.ports);
-    expect(s.buildPhase).toHaveBeenCalledTimes(1);
+    expect(s.builds).toHaveLength(1);
     expect(outcome).not.toMatchObject({ reason: 'held' });
-    expect(record).not.toHaveBeenCalled();
+    expect(recorded).toEqual([]);
   });
 
   it('a labeled issue under localOnly builds without reading labels', async () => {
     const s = setup([{ name: 'factory:needs-design' }]);
     await runIssue({ ...request, localOnly: true }, policy, s.ports);
-    expect(s.get).not.toHaveBeenCalled();
-    expect(s.buildPhase).toHaveBeenCalledTimes(1);
+    expect(s.labelReads).toEqual([]);
+    expect(s.builds).toHaveLength(1);
   });
 
   it('an issues.get throw logs environment_warning and builds', async () => {
     const s = setup(new Error('rate limited'));
     await runIssue(request, policy, s.ports);
     expect(s.events.some(([t, m]) => t === 'environment_warning' && m.includes('rate limited'))).toBe(true);
-    expect(s.buildPhase).toHaveBeenCalledTimes(1);
+    expect(s.builds).toHaveLength(1);
   });
 });

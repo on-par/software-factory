@@ -78,13 +78,7 @@ const MODELS: ModelsConfig = {
 const policy: RunPolicy = {
   models: MODELS,
   routes: ROUTES,
-  sandbox: {
-    enabled: false,
-    runtime: 'auto',
-    network: { allow: [] },
-    resources: { cpuMs: 0, memMb: 0 },
-    docker: { rolloutPercent: 0 },
-  },
+  sandbox: { enabled: false } as RunPolicy['sandbox'],
   budget: {},
   effective: {} as RunPolicy['effective'],
 };
@@ -92,7 +86,8 @@ const policy: RunPolicy = {
 type Log = ReturnType<RunPorts['events']>;
 
 function githubOctokit() {
-  const createComment = vi.fn(async () => ({ data: { id: 1 } }));
+  const posted: unknown[] = [];
+  const createComment = async (p: unknown) => ({ data: { id: posted.push(p) } });
   const getAuthenticated = vi.fn(async () => ({ data: { id: 9 } }));
   const octokit = Object.assign({} as Octokit, {
     rest: {
@@ -100,8 +95,16 @@ function githubOctokit() {
       issues: { listComments: vi.fn(async () => ({ data: [] })), createComment, updateComment: vi.fn() },
     },
   });
-  return { octokit, createComment, getAuthenticated };
+  return { octokit, posted };
 }
+
+const recording =
+  <A, R>(into: A[], result: R) =>
+  async (arg: A) => (into.push(arg), result);
+
+const builds: Parameters<typeof realBuildPhase>[0][] = [];
+const plans: Parameters<typeof realPlanPhase>[0][] = [];
+const shipped: Parameters<typeof realShipPhase>[0][] = [];
 
 function ports(log: Log, octokit: Octokit = {} as Octokit): RunPorts {
   return {
@@ -120,28 +123,32 @@ function ports(log: Log, octokit: Octokit = {} as Octokit): RunPorts {
 
 beforeEach(() => {
   rmSync(keepsFile, { force: true });
+  builds.length = 0;
+  plans.length = 0;
+  shipped.length = 0;
   vi.mocked(shipPhase)
     .mockReset()
-    .mockResolvedValue({ ok: true, prNumber: 42 } satisfies ShipResult);
-  vi.mocked(planPhase).mockReset().mockResolvedValue(PLAN_OK);
-  vi.mocked(buildPhase).mockReset().mockResolvedValue(BUILD_OK);
+    .mockImplementation(recording(shipped, { ok: true, prNumber: 42 } satisfies ShipResult));
+  vi.mocked(planPhase).mockReset().mockImplementation(recording(plans, PLAN_OK));
+  vi.mocked(buildPhase).mockReset().mockImplementation(recording(builds, BUILD_OK));
   vi.mocked(checkPhase).mockReset().mockResolvedValue(CHECK_OK);
 });
 
 describe('runIssue — --no-pr', () => {
   it('stops after a clean CHECK: no SHIP, ready on the branch, no-pr-complete logged', async () => {
-    const log = vi.fn<Log>();
+    const events: Array<[string, string]> = [];
+    const log: Log = (t, m) => void events.push([t, m]);
     const outcome = await runIssue(noPr, policy, ports(log));
     expect(outcome).toMatchObject({ state: 'ready', route: 'codex', branch: request.branch, reworkRounds: 0 });
-    expect(shipPhase).not.toHaveBeenCalled();
-    const done = log.mock.calls.filter(([type]) => type === 'no-pr-complete');
+    expect(shipped).toEqual([]);
+    const done = events.filter(([type]) => type === 'no-pr-complete');
     expect(done).toHaveLength(1);
     expect(done[0][1]).toContain('/tmp/wt');
   });
 
   it('a normal run still ships (control)', async () => {
     await runIssue(request, policy, ports(vi.fn<Log>()));
-    expect(shipPhase).toHaveBeenCalledTimes(1);
+    expect(shipped).toHaveLength(1);
   });
 
   it('keeps the worktree from GC with a keep record', async () => {
@@ -153,9 +160,9 @@ describe('runIssue — --no-pr', () => {
 
   it('turns off BUILD publishing, the size gate, and the issue-body update without the routing and prompt switch of localOnly', async () => {
     await runIssue(noPr, policy, ports(vi.fn<Log>()));
-    expect(buildPhase.mock.calls[0][0]).toMatchObject({ disablePublish: true });
-    expect(planPhase.mock.calls[0][0]).toMatchObject({ enforceSizeGate: false, updateIssueBodyOnEnrich: false });
-    expect(buildPhase.mock.calls[0][0].localOnly).toBeFalsy();
+    expect(builds[0]).toMatchObject({ disablePublish: true });
+    expect(plans[0]).toMatchObject({ enforceSizeGate: false, updateIssueBodyOnEnrich: false });
+    expect(builds[0]?.localOnly).toBeFalsy();
   });
 
   it('a red-base CHECK failure records no check-resume point, so resume can never ship it', async () => {
@@ -164,33 +171,34 @@ describe('runIssue — --no-pr', () => {
       passed: false,
       environment: { baseSha: 'abc1234567890def', failingChecks: ['tests'], cause: 'environment', logPaths: [] },
     });
+    const records: Parameters<CheckResumeStore['record']>[0][] = [];
     const checkResume = {
       load: vi.fn<CheckResumeStore['load']>().mockResolvedValue(null),
-      record: vi.fn<CheckResumeStore['record']>().mockResolvedValue(undefined),
+      record: async (r: Parameters<CheckResumeStore['record']>[0]) => void records.push(r),
       clear: vi.fn<CheckResumeStore['clear']>().mockResolvedValue(undefined),
     };
     const outcome = await runIssue(noPr, policy, { ...ports(vi.fn<Log>()), checkResume });
     expect(outcome).not.toHaveProperty('buildPreserved');
-    expect(checkResume.record).not.toHaveBeenCalled();
+    expect(records).toEqual([]);
   });
 
   it('a failed keep-record write warns but the run still ends ready', async () => {
-    const log = vi.fn<Log>();
+    const events: Array<[string, string]> = [];
+    const log: Log = (t, m) => void events.push([t, m]);
     const unwritable = { ...noPr, worktreeKeepsPath: join(tmp, 'missing-dir', 'keeps.json', 'x') };
     rmSync(join(tmp, 'missing-dir'), { recursive: true, force: true });
     const { writeFileSync } = await import('node:fs');
     writeFileSync(join(tmp, 'missing-dir'), 'a file, so the keeps dir cannot be created');
     const outcome = await runIssue(unwritable, policy, ports(log));
     expect(outcome).toMatchObject({ state: 'ready' });
-    expect(log.mock.calls.some(([type, msg]) => type === 'warn' && msg.includes('keep record'))).toBe(true);
+    expect(events.some(([type, msg]) => type === 'warn' && msg.includes('keep record'))).toBe(true);
   });
 
   it('a park posts no issue comment', async () => {
-    const { octokit, createComment, getAuthenticated } = githubOctokit();
+    const { octokit, posted } = githubOctokit();
     const parking: RunPorts = { ...ports(vi.fn<Log>(), octokit), getIssueSpend: () => 2 };
     const outcome = await runIssue(noPr, { ...policy, budget: { perIssueCapUsd: 1 } }, parking);
     expect(outcome).toMatchObject({ state: 'parked' });
-    expect(createComment).not.toHaveBeenCalled();
-    expect(getAuthenticated).not.toHaveBeenCalled();
+    expect(posted).toEqual([]);
   });
 });

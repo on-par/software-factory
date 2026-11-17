@@ -111,9 +111,6 @@ describe('runIssue — stale lane-file claim reaping (#3063)', () => {
     const guard = new LaneFileGuard(join(breakerDir, 'lane-files.json'));
     await guard.register('o/r', workKeyFromIssue(100), ['src/shared.ts']);
     const events: Array<[string, string]> = [];
-    const buildPhase = vi
-      .fn<typeof realBuildPhase>()
-      .mockResolvedValue({ ok: true, model: 'my-model', route: 'command' } satisfies BuildResult);
     const ports: RunPorts = {
       router: new ModelRouter(MODELS, ROUTES),
       octokit: {} as Octokit,
@@ -128,7 +125,9 @@ describe('runIssue — stale lane-file claim reaping (#3063)', () => {
         model: 'm',
         designArtifact: design,
       } satisfies PlanResult),
-      buildPhase,
+      buildPhase: vi
+        .fn<typeof realBuildPhase>()
+        .mockResolvedValue({ ok: true, model: 'my-model', route: 'command' } satisfies BuildResult),
       checkPhase: vi.fn<typeof realCheckPhase>().mockResolvedValue({
         passed: true,
         summary: { failures: 0, passes: 1, skips: 0, total: 1, results: [] },
@@ -139,8 +138,7 @@ describe('runIssue — stale lane-file claim reaping (#3063)', () => {
       laneClaimStaleness: async () => 'issue-closed',
     };
     const outcome = await runIssue({ ...request, issue: 200 }, policy, ports);
-    expect(outcome).not.toMatchObject({ reason: 'held' });
-    expect(buildPhase).toHaveBeenCalled();
+    expect(outcome).toMatchObject({ state: 'ready', prNumber: 42 });
     expect(events.some(([type, msg]) => type === 'lane_file_claim_reaped' && msg.includes('#100'))).toBe(true);
   });
 

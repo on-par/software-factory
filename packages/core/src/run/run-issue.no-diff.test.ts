@@ -80,13 +80,7 @@ const request: RunRequest = {
 const policy: RunPolicy = {
   models: MODELS,
   routes: ROUTES,
-  sandbox: {
-    enabled: false,
-    runtime: 'auto',
-    network: { allow: [] },
-    resources: { cpuMs: 0, memMb: 0 },
-    docker: { rolloutPercent: 0 },
-  },
+  sandbox: { enabled: false } as RunPolicy['sandbox'],
   budget: {},
   effective: {} as RunPolicy['effective'],
 };
@@ -136,13 +130,17 @@ describe('runIssue — no-diff park message (#3273)', () => {
       model: 'm',
       designArtifact: DESIGN,
     });
-    const buildPhase = vi.fn<typeof realBuildPhase>().mockResolvedValue({
-      ok: false,
-      model: 'm',
-      route: 'claude',
-      reason,
-      noDiffCause: 'sandbox',
-      noDiffDetail: 'cause: sandbox\nsandbox_apply: Operation not permitted',
+    const builds: Parameters<typeof realBuildPhase>[0][] = [];
+    const buildPhase = vi.fn<typeof realBuildPhase>(async (o) => {
+      builds.push(o);
+      return {
+        ok: false,
+        model: 'm',
+        route: 'claude',
+        reason,
+        noDiffCause: 'sandbox',
+        noDiffDetail: 'cause: sandbox\nsandbox_apply: Operation not permitted',
+      };
     });
     const events: Array<[string, string]> = [];
     const outcome = await runIssue(
@@ -155,16 +153,18 @@ describe('runIssue — no-diff park message (#3273)', () => {
     expect(parked).toContain(text);
     expect(parked).toContain('cause: sandbox');
     expect(parked).toContain('sandbox_apply');
-    expect(buildPhase.mock.calls[0][0].openQuestions).toEqual([OPEN_QUESTION]);
+    expect(builds[0]?.openQuestions).toEqual([OPEN_QUESTION]);
   });
 
   it('leaves the park message unchanged when the build carries no detail', async () => {
     const planPhase = vi
       .fn<typeof realPlanPhase>()
       .mockResolvedValue({ ok: true, route: 'claude', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null });
-    const buildPhase = vi
-      .fn<typeof realBuildPhase>()
-      .mockResolvedValue({ ok: false, model: 'm', route: 'claude', reason: 'no_diff' });
+    const builds: Parameters<typeof realBuildPhase>[0][] = [];
+    const buildPhase = vi.fn<typeof realBuildPhase>(async (o) => {
+      builds.push(o);
+      return { ok: false, model: 'm', route: 'claude', reason: 'no_diff' };
+    });
     const events: Array<[string, string]> = [];
     await runIssue(
       request,
@@ -174,6 +174,6 @@ describe('runIssue — no-diff park message (#3273)', () => {
     expect(events.find(([type]) => type === 'fail')?.[1]).toBe(
       'build produced no diff against the base ref — no implementation was produced',
     );
-    expect(buildPhase.mock.calls[0][0].openQuestions).toBeUndefined();
+    expect(builds[0]?.openQuestions).toBeUndefined();
   });
 });

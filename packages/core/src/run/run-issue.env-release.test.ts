@@ -113,36 +113,37 @@ const ENV_FAIL: CheckPhaseResult = {
 
 function statefulOctokit() {
   const store: Array<{ id: number; body: string; user: { id: number } }> = [];
-  const createComment = vi.fn(async ({ body }: { body: string }) => {
+  const edits: number[] = [];
+  const createComment = async ({ body }: { body: string }) => {
     const c = { id: store.length + 1, body, user: { id: 9 } };
     store.push(c);
     return { data: c };
-  });
-  const updateComment = vi.fn(async ({ comment_id, body }: { comment_id: number; body: string }) => {
+  };
+  const updateComment = async ({ comment_id, body }: { comment_id: number; body: string }) => {
+    edits.push(comment_id);
     const c = store.find((x) => x.id === comment_id);
     if (c) c.body = body;
     return { data: c };
-  });
+  };
   const octokit = Object.assign({} as Octokit, {
     rest: {
       users: { getAuthenticated: vi.fn(async () => ({ data: { id: 9 } })) },
       issues: { listComments: vi.fn(async () => ({ data: [...store] })), createComment, updateComment },
     },
   });
-  return { octokit, store, createComment, updateComment };
+  return { octokit, store, edits };
 }
 
 describe('runIssue — environment release comment (#3440)', () => {
   it('two environment releases on one issue leave one marker comment, updated', async () => {
     vi.mocked(checkPhase).mockResolvedValue(ENV_FAIL);
-    const { octokit, store, createComment, updateComment } = statefulOctokit();
+    const { octokit, store, edits } = statefulOctokit();
     await runIssue(request, policy, ports(vi.fn<Log>(), octokit));
     await runIssue(request, policy, ports(vi.fn<Log>(), octokit));
     const released = store.filter((c) => c.body.includes('factory-environment-release'));
     expect(store).toHaveLength(1);
     expect(released).toHaveLength(1);
-    expect(createComment).toHaveBeenCalledTimes(1);
-    expect(updateComment).toHaveBeenCalledTimes(1);
+    expect(edits).toEqual([1]);
   });
 
   it('an environment release from a locally confirmed baseline returns confirmedLocally (#3851)', async () => {
