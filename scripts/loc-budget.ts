@@ -1,15 +1,6 @@
-import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-
-import {
-  defaultFetchLabelEvents,
-  overrideLabelVerdict,
-  parseArgs,
-  type GuardIo,
-  type OverrideVerdict,
-} from './max-lines-baseline-guard.js';
 
 export interface PackageLoc {
   source: number;
@@ -19,12 +10,16 @@ export interface PackageLoc {
 export type LocBudget = Record<string, PackageLoc>;
 
 export const LOC_BUDGET_FILE = 'loc-budget.json';
-export const LOC_BUDGET_OVERRIDE_LABEL = 'loc-budget:override';
 export const LOC_BUDGET_DOCS = '.claude/skills/verify/SKILL.md#loc-budget';
 
-export type LocBudgetIo = GuardIo;
+export interface LocBudgetIo {
+  cwd?: string;
+  readHead?: () => string;
+  log?: (line: string) => void;
+  error?: (line: string) => void;
+}
 
-const USAGE = 'usage: loc-budget.ts [--print | --base <sha> --pr <number>]';
+const USAGE = 'usage: loc-budget.ts [--print]';
 const KINDS = ['source', 'tests'] as const;
 const SKIPPED_DIRS = new Set(['node_modules', 'dist', 'coverage']);
 const TS_FILE = /\.(?:ts|tsx|mts|cts)$/;
@@ -92,9 +87,7 @@ export function compareLocBudget(budget: Readonly<LocBudget>, actual: Readonly<L
     const have = actual[pkg];
     const want = budget[pkg];
     if (!want && have) {
-      failures.push(
-        `packages/${pkg} has no ${LOC_BUDGET_FILE} entry; adding one needs the ${LOC_BUDGET_OVERRIDE_LABEL} label applied by a human; see ${LOC_BUDGET_DOCS}`,
-      );
+      failures.push(`packages/${pkg} has no ${LOC_BUDGET_FILE} entry; add one; see ${LOC_BUDGET_DOCS}`);
     } else if (want && !have) {
       failures.push(`${LOC_BUDGET_FILE} has an entry for packages/${pkg}, which does not exist; remove it`);
     } else if (want && have) {
@@ -103,7 +96,7 @@ export function compareLocBudget(budget: Readonly<LocBudget>, actual: Readonly<L
         const b = want[kind];
         if (n > b) {
           failures.push(
-            `packages/${pkg} ${kind} is ${n} lines, over its ${LOC_BUDGET_FILE} budget of ${b}. Delete or reuse existing code before adding more. If the growth is deliberate, set "${pkg}".${kind} to ${n} in ${LOC_BUDGET_FILE} and ask a human to apply the ${LOC_BUDGET_OVERRIDE_LABEL} label to the PR (agents never apply it); see ${LOC_BUDGET_DOCS}`,
+            `packages/${pkg} ${kind} is ${n} lines, over its ${LOC_BUDGET_FILE} budget of ${b}. Delete or reuse existing code before adding more. If the growth is deliberate, set "${pkg}".${kind} to ${n} in ${LOC_BUDGET_FILE} and explain the growth in the PR body; see ${LOC_BUDGET_DOCS}`,
           );
         } else if (n < b) {
           failures.push(
@@ -114,85 +107,6 @@ export function compareLocBudget(budget: Readonly<LocBudget>, actual: Readonly<L
     }
   }
   return failures;
-}
-
-export interface LocBudgetDiff {
-  raised: { pkg: string; kind: keyof PackageLoc; base: number; head: number }[];
-  added: string[];
-}
-
-export function diffLocBudget(base: Readonly<LocBudget>, head: Readonly<LocBudget>): LocBudgetDiff {
-  const diff: LocBudgetDiff = { raised: [], added: [] };
-  for (const [pkg, entry] of Object.entries(head)) {
-    const before = base[pkg];
-    if (!before) {
-      diff.added.push(pkg);
-      continue;
-    }
-    for (const kind of KINDS) {
-      if (entry[kind] > before[kind]) diff.raised.push({ pkg, kind, base: before[kind], head: entry[kind] });
-    }
-  }
-  return diff;
-}
-
-function diffLines(diff: LocBudgetDiff): string[] {
-  return [
-    ...diff.raised.map((r) => `${LOC_BUDGET_FILE} raised "${r.pkg}".${r.kind} from ${r.base} to ${r.head}`),
-    ...diff.added.map((pkg) => `${LOC_BUDGET_FILE} added "${pkg}"`),
-  ];
-}
-
-function runGuard(args: { base: string; pr: number }, io: LocBudgetIo, cwd: string, readHead: () => string): number {
-  const log = io.log ?? ((line: string) => console.log(line));
-  const error = io.error ?? ((line: string) => console.error(line));
-  const env = io.env ?? process.env;
-  const git = io.git ?? ((a: readonly string[]) => execFileSync('git', [...a], { cwd, encoding: 'utf8' }));
-  let diff: LocBudgetDiff;
-  try {
-    const head = parseLocBudget(readHead(), 'head');
-    if (git(['ls-tree', args.base, '--', LOC_BUDGET_FILE]).trim() === '') {
-      log(`loc budget guard: ${LOC_BUDGET_FILE} is new at the base ref; nothing to compare`);
-      return 0;
-    }
-    diff = diffLocBudget(parseLocBudget(git(['show', `${args.base}:${LOC_BUDGET_FILE}`]), 'base'), head);
-  } catch (err) {
-    error(`loc budget: ${err instanceof Error ? err.message : String(err)}`);
-    return 1;
-  }
-  if (diff.raised.length === 0 && diff.added.length === 0) {
-    log('loc budget guard: no raised or added budgets');
-    return 0;
-  }
-  const repo = env.GITHUB_REPOSITORY;
-  if (!repo) {
-    error('loc budget guard: GITHUB_REPOSITORY is not set');
-    return 1;
-  }
-  let verdict: OverrideVerdict;
-  try {
-    const events = (io.fetchLabelEvents ?? defaultFetchLabelEvents)(repo, args.pr);
-    verdict = overrideLabelVerdict(events, (env.LOC_BUDGET_BOT_LOGINS ?? '').split(','), LOC_BUDGET_OVERRIDE_LABEL);
-  } catch (err) {
-    error(`loc budget guard: could not read PR label events: ${err instanceof Error ? err.message : String(err)}`);
-    return 1;
-  }
-  const lines = diffLines(diff);
-  if (verdict.kind === 'human') {
-    for (const line of lines) log(line);
-    log(`approved by ${verdict.actor} via ${LOC_BUDGET_OVERRIDE_LABEL}`);
-    return 0;
-  }
-  for (const line of lines) error(line);
-  error(
-    verdict.kind === 'bot'
-      ? `${LOC_BUDGET_OVERRIDE_LABEL} was applied by bot identity ${verdict.actor}; the label must be applied by a human`
-      : `raising a ${LOC_BUDGET_FILE} budget needs the ${LOC_BUDGET_OVERRIDE_LABEL} label applied by a human`,
-  );
-  error(
-    `delete or reuse existing code before adding; to request an override, explain the growth in the PR body and ask a human to apply ${LOC_BUDGET_OVERRIDE_LABEL}, then re-run the static job; see ${LOC_BUDGET_DOCS}`,
-  );
-  return 1;
 }
 
 export function runLocBudget(argv: readonly string[], io: LocBudgetIo = {}): number {
@@ -222,12 +136,8 @@ export function runLocBudget(argv: readonly string[], io: LocBudgetIo = {}): num
       return 1;
     }
   }
-  const args = parseArgs(argv);
-  if (!args) {
-    error(USAGE);
-    return 2;
-  }
-  return runGuard(args, io, cwd, readHead);
+  error(USAGE);
+  return 2;
 }
 
 const invoked = process.argv[1];

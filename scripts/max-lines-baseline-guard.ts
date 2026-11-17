@@ -61,12 +61,10 @@ export function isBotActor(actor: { login: string; type?: string }, botLogins: r
   });
 }
 
-export function overrideLabelVerdict(
-  events: readonly LabelEvent[],
-  botLogins: readonly string[],
-  label: string = MAX_LINES_OVERRIDE_LABEL,
-): OverrideVerdict {
-  const last = events.findLast((e) => (e.event === 'labeled' || e.event === 'unlabeled') && e.label?.name === label);
+export function overrideLabelVerdict(events: readonly LabelEvent[], botLogins: readonly string[]): OverrideVerdict {
+  const last = events.findLast(
+    (e) => (e.event === 'labeled' || e.event === 'unlabeled') && e.label?.name === MAX_LINES_OVERRIDE_LABEL,
+  );
   if (!last || last.event === 'unlabeled' || !last.actor) return { kind: 'absent' };
   return { kind: isBotActor(last.actor, botLogins) ? 'bot' : 'human', actor: last.actor.login };
 }

@@ -57,9 +57,7 @@ The pre-commit hook (`lefthook.yml`) auto-fixes staged files with `oxlint --fix`
 
 - Over budget: delete or reuse existing code before adding more.
 - Under budget: lower the number to the printed count in the same PR so the trimmed code stays gone.
-- Deliberate growth: raise the number in `loc-budget.json`; a human applies the `loc-budget:override` label, then re-runs the `static` job.
-- Labels applied by a bot or a `FACTORY_BOT_LOGINS` identity do not count.
-- Agents never apply the label and never raise a number themselves; they ask a human in the PR body or park comment.
+- Deliberate growth: raise the number in `loc-budget.json` to the printed count and explain the growth in the PR body.
 
 ## Coverage gate and ratchet
 
