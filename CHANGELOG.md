@@ -26,6 +26,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- The test suite's default worker count (npm test and scripts/verify.sh) is now os.availableParallelism() instead of a fixed 4; FACTORY_TEST_MAX_WORKERS still overrides it, including 1 for serial runs (#4035).
 - npm run lint fails on unused lint-disable directives; dead directives for unrun rules are removed and audited oxlint overrides are enabled or kept with a reason and follow-up issue (#4056).
 - `npm run duplication` now fails only when the jscpd clone count rises above `duplication-baseline.json`; a drop passes and prints suggested lower numbers, and the percentage is informational (#4180).
 - Direct `mkdtemp(tmpdir())` in tests is now an oxlint error (`anti-slop/no-direct-tmpdir-mkdtemp`), replacing the vitest guard, and a lefthook pre-commit hook runs `oxlint --fix` and `prettier --write` on staged files (#4050).

@@ -34,6 +34,7 @@ The factory's own CHECK phase runs `bash scripts/verify.sh --no-e2e` in the buil
 12. Tests:
     - full path: `npm run test` (Vitest with coverage thresholds), then `npm run coverage-ratchet`
     - `--no-e2e`: `npm run test` (Vitest with coverage thresholds), no ratchet
+    - tests run with `FACTORY_TEST_MAX_WORKERS` workers, defaulting to `os.availableParallelism()`; set it to `1` to run serially on a loaded host
     - after the tests, `npm run slowest-tests` prints the 5 slowest files and `npm run test-budget` compares the test-step wall-clock time against `TEST_BUDGET_SECONDS` in `scripts/test-budget.ts` (450s; override for one run with `FACTORY_TEST_BUDGET_SECONDS`). It prints `test-budget: PASS` within budget, a warning plus the slowest files when over locally, and fails verify in CI (`CI` set, e.g. `CI=true`) with `test-budget: FAIL` plus the slowest files
 13. `npm run eval -- --stub`
 14. Shell-script tests: `auto-merge-sweep`, `filter-green-prs`, `repo-merge-settings`, `repo-about`, `repo-issue-optics`, `ruleset-copilot-review`, `launchd/install-sweep-plist`, `publish-workspaces` (guards the publish list `scripts/publish-workspaces.txt` against the workspace graph)
