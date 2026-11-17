@@ -50,7 +50,7 @@
     "@vitest/coverage-v8": "^5.1.0",
     "graphql": "16.15.0",
     "jscpd": "^4.3.0",
-    "jsdom": "^30.1.3",
+    "jsdom": "^31.0.1",
     "knip": "^6.44.1",
     "lefthook": "2.2.2",
     "oxlint": "^1.91.0",
