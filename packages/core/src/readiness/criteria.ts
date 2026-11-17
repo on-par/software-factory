@@ -39,31 +39,10 @@ const OBSERVABLE_RES: readonly RegExp[] = [
   /\b(exits?|prints?|outputs?|returns?|logs?|emits?|shows?|displays?|status|error)\b/i,
 ];
 
-const COMMAND_WORDS = [
-  'npm',
-  'npx',
-  'pnpm',
-  'yarn',
-  'node',
-  'bash',
-  'sh',
-  'zsh',
-  'git',
-  'gh',
-  'factory',
-  'make',
-  'docker',
-  'curl',
-  'python',
-  'python3',
-  'pip',
-  'go',
-  'cargo',
-  'vitest',
-  'tsc',
-  'deno',
-  'bun',
-];
+const COMMAND_WORDS =
+  'npm npx pnpm yarn node bash sh zsh git gh factory make docker curl python python3 pip go cargo vitest tsc deno bun'.split(
+    ' ',
+  );
 const COMMAND_LINE_RE = new RegExp(`^(?:${COMMAND_WORDS.join('|')})(?:\\s|$)`);
 
 export const CHANGE_NOTE = 'describes a change, not an outcome';
