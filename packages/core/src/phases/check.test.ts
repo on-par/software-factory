@@ -712,7 +712,6 @@ describe('checkPhase baseline (#1925)', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].baseSha).toBe('abc1234567');
     expect(calls[0].laneWorktree).toBe(worktree);
-    expect(calls[0].ctx.env).toEqual(calls[0].ctx.env);
     expect(calls[0].ctx.env).toBeDefined();
     expect(result.baseline).toEqual(cleanReport('abc1234567'));
     expect(result.passed).toBe(without.passed);

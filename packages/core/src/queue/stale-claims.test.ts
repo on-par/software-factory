@@ -47,12 +47,6 @@ describe('findStaleClaims', () => {
     const stale = findStaleClaims(issues, { now });
     expect(stale).toEqual([]);
   });
-
-  it('is evaluable identically regardless of which host reaps it — no host/pid evidence involved', () => {
-    const label = claimExpiresLabel(NOW_SECONDS - 1);
-    const issues: QueueIssue[] = [{ number: 1, labels: [IN_PROGRESS_LABEL, label] }];
-    expect(findStaleClaims(issues, { now })).toEqual(findStaleClaims(issues, { now }));
-  });
 });
 
 describe('releaseStaleClaims', () => {

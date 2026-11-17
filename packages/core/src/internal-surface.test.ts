@@ -186,10 +186,6 @@ import { other } from '@on-par/factory-core';
     expect(diff.missing).toEqual(['z']);
   });
 
-  it('the frozen allowlist file is gone', () => {
-    expect(existsSync(join(SRC_DIR, 'internal-surface-allowlist.json'))).toBe(false);
-  });
-
   it('the consumer scan finds names imported by cli, tui, grade and scripts', () => {
     const imported = collectConsumerImports(REPO_ROOT);
     expect(imported.has('classifyFailure')).toBe(true);

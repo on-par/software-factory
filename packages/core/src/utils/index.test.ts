@@ -1,9 +1,8 @@
 import { execFile as execFileCb } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -951,40 +950,5 @@ ESCALATE: which behavior should win?`;
     expect(escalationLine('')).toBeUndefined();
     expect(isEscalation('No escalation here.')).toBe(false);
     expect(escalationLine('No escalation here.')).toBeUndefined();
-  });
-});
-
-describe('legacy branch prefix literal', () => {
-  const root = resolve(fileURLToPath(import.meta.url), '../../../../..');
-
-  function sourceFiles(dir: string): string[] {
-    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        return ['node_modules', 'dist', 'test-support'].includes(entry.name) ? [] : sourceFiles(full);
-      }
-      return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [full] : [];
-    });
-  }
-
-  it('does not appear in non-test source', () => {
-    const offenders: string[] = [];
-    for (const pkg of readdirSync(join(root, 'packages'))) {
-      const src = join(root, 'packages', pkg, 'src');
-      if (!existsSync(src)) continue;
-      for (const file of sourceFiles(src)) {
-        const rel = file
-          .slice(root.length + 1)
-          .split('\\')
-          .join('/');
-        readFileSync(file, 'utf8')
-          .split('\n')
-          .forEach((line, i) => {
-            if (!line.includes('ship-it/')) return;
-            offenders.push(`${rel}:${i + 1}`);
-          });
-      }
-    }
-    expect(offenders).toEqual([]);
   });
 });

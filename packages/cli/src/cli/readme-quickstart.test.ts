@@ -110,19 +110,6 @@ describe('README Quick start constitution step', () => {
     expect(messageIncludes(problems, '--product')).toEqual([]);
   });
 
-  it('README Step 3 code block runs only read-only constitution commands (--list, --checkers)', () => {
-    expect(messageIncludes(problems, 'Step 3 code block runs')).toEqual([]);
-    expect(messageIncludes(problems, 'missing Step 3')).toEqual([]);
-  });
-
-  it('README Step 3 says For a code repo, skip this step', () => {
-    expect(messageIncludes(problems, 'skip this step')).toEqual([]);
-  });
-
-  it('README Prerequisites defines constitution and triage before Step 3', () => {
-    expect(messageIncludes(problems, 'before Step 3')).toEqual([]);
-  });
-
   it('README has no Quick start problems', () => {
     expect(quickStartProblems(readme)).toEqual([]);
   });
