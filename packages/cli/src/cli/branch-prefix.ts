@@ -1,4 +1,3 @@
-import type { Command } from 'commander';
 import { branchPrefixSlug, resolveBranchPrefix, slugify } from '@on-par/factory-core/internal';
 
 export const BRANCH_PREFIX_OPTION_DESCRIPTION =
@@ -15,8 +14,4 @@ export function resolveBranchPrefixOption(
   if (raw === undefined) return resolveBranchPrefix(config);
   if (slugify(raw) === '') return null;
   return branchPrefixSlug(raw);
-}
-
-export function addBranchPrefixOption(cmd: Command): Command {
-  return cmd.option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION);
 }

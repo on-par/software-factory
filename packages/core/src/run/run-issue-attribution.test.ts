@@ -9,8 +9,10 @@ import type { buildPhase as realBuildPhase } from '../phases/build.js';
 import type { checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { shipPhase as realShipPhase } from '../phases/ship.js';
+import type { AgentEvent } from '../harness/agent-events.js';
 import { ProviderBreaker } from '../router/breaker.js';
-import { ModelRouter } from '../router/index.js';
+import { ModelRouter, type ModelExecutorContext } from '../router/index.js';
+import { StubModelExecutor } from '../router/stub.js';
 import type { CheckSummary } from '../types/index.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
@@ -230,5 +232,30 @@ describe('runIssue — plan/build attribution on terminal events (#3321)', () =>
 
     const call = callsOf(events, 'check').find((c) => c[1] === 'running checkers')!;
     expect(call).toHaveLength(2);
+  });
+});
+
+describe('runIssue agent events (#4246)', () => {
+  it('logs each agent event as agent-event in its phase and calls onAgentEvent', async () => {
+    const event: AgentEvent = { phase: 'build', kind: 'text', summary: 'hi', at: '2026-01-01T00:00:00.000Z' };
+    const effect = (ctx: ModelExecutorContext) => ctx.onAgentEvent?.(event);
+    const router = new ModelRouter(
+      MODELS,
+      ROUTES,
+      false,
+      new StubModelExecutor({ scripts: { build_claude: [{ output: 'b', effect }] } }),
+    );
+    const { ports, planPhase, buildPhase } = setup({});
+    planPhase.mockResolvedValue({ ...PLAN_OK, route: 'claude' });
+    buildPhase.mockImplementation(async (opts) => {
+      await opts.router.run('build_claude', 'b', {});
+      return { ok: false, model: 'm', route: 'claude', escalate: 'stop' };
+    });
+    const rows: string[][] = [];
+    const seen: AgentEvent[] = [];
+    const events = (phase?: string) => (type: string, msg: string) => void rows.push([phase ?? '', type, msg]);
+    await runIssue(request, policy, { ...ports, router, events, onAgentEvent: (e) => void seen.push(e) });
+    expect(rows.filter((row) => row[1] === 'agent-event')).toEqual([['build', 'agent-event', JSON.stringify(event)]]);
+    expect(seen).toEqual([event]);
   });
 });

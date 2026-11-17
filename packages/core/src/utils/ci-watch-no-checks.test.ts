@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { recordArgs } from '../test-support/recorders.js';
-import {
-  DEFAULT_CI_NO_CHECKS_GRACE_MS,
-  resolveCiNoChecksGraceMs,
-  watchChecks,
-  watchChecksWithInfraRerun,
-} from './ci-watch.js';
+import { watchChecks, watchChecksWithInfraRerun } from './ci-watch.js';
 
 function scriptChecks(sequence: any[][]) {
   let i = 0;
@@ -139,17 +134,6 @@ describe('watchChecks no-checks early exit and progress (#2386)', () => {
     await watchChecks({ ...base, octokit: octokit as any, onProgress: (p) => void progress.push(p), sleep, now });
 
     expect(progress).toEqual([]);
-  });
-});
-
-describe('resolveCiNoChecksGraceMs', () => {
-  it('defaults to 90s, honors a valid override, and falls back on invalid values', () => {
-    expect(resolveCiNoChecksGraceMs({})).toBe(DEFAULT_CI_NO_CHECKS_GRACE_MS);
-    expect(resolveCiNoChecksGraceMs({ FACTORY_CI_NO_CHECKS_GRACE_SECONDS: '30' })).toBe(30_000);
-    expect(resolveCiNoChecksGraceMs({ FACTORY_CI_NO_CHECKS_GRACE_SECONDS: '0' })).toBe(0);
-    for (const bad of ['abc', '-5', '']) {
-      expect(resolveCiNoChecksGraceMs({ FACTORY_CI_NO_CHECKS_GRACE_SECONDS: bad })).toBe(90_000);
-    }
   });
 });
 

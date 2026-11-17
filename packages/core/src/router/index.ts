@@ -394,8 +394,7 @@ export class ModelRouter {
   setLocalAuthSink(sink: (agent: LocalAuthAgent) => void): void {
     this.localAuthSink = sink;
   }
-
-  setAgentEventSink(sink: ((event: AgentEvent) => void) | undefined): void {
+  setAgentEventSink(sink: (event: AgentEvent) => void): void {
     this.agentEventSink = sink;
   }
   /** Register a check telling whether a provider is held for rejected credentials; held providers are skipped. */

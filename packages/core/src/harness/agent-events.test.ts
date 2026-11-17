@@ -1,111 +1,132 @@
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-import type { TaskType } from '../types/index.js';
-import type { AgentEvent } from './agent-events.js';
-import { agentEventPhase, createAgentEventStream, summarizeForEvent } from './agent-events.js';
-import { normalizeClaudeStreamLine } from './claude-stream-events.js';
-import { normalizeCodexStreamLine } from './codex-stream-events.js';
+import { describe, expect, it, vi } from 'vitest';
 
-const CTX = { phase: 'build', at: '2026-01-01T00:00:00.000Z' };
-const BAD_LINES = ['not json', '', '42', '[]', 'null', '{"type":"mystery"}'];
+import type { ExecFn } from '../utils/exec.js';
+import { agentEventStdout, claudeActivity, codexActivity, type AgentEvent } from './agent-events.js';
+import { ClaudeCliHarness } from './claude-cli.js';
+import { CodexCliHarness } from './codex-cli.js';
+import { makeContractRequest } from './contract.js';
 
-function collector() {
+type Activity = typeof claudeActivity;
+const recording = (agent: string) =>
+  readFileSync(join(__dirname, `../../../../scripts/fixtures/agents/recordings/${agent}/stream-events.stdout`), 'utf8');
+const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+const result = line({ type: 'turn.completed', usage: { output_tokens: 1 } });
+
+function stream(activity: Activity, stdout: string, onEvent?: (event: AgentEvent) => void) {
   const events: AgentEvent[] = [];
-  return { events, onEvent: (e: AgentEvent) => void events.push(e) };
+  agentEventStdout({ task: 'plan', onEvent: onEvent ?? ((e) => void events.push(e)) }, activity)?.(stdout);
+  return events;
 }
 
-describe('summarizeForEvent', () => {
-  it('caps long summaries with a truncated marker', () => {
-    const out = summarizeForEvent('a'.repeat(250));
-    expect(out).toBe(`${'a'.repeat(200)}…[truncated 50 chars]`);
-  });
-
-  it('collapses whitespace', () => {
-    expect(summarizeForEvent('  a\n\n b\t c ')).toBe('a b c');
-  });
-});
-
-describe('agentEventPhase', () => {
+describe('agent event normalizers', () => {
   it.each([
-    ['plan', 'plan'],
-    ['build_claude', 'build'],
-    ['build', 'build'],
-    ['check_tests', 'check'],
-    ['review_pr', 'check'],
-    ['security_review', 'check'],
-    ['classify_pr', 'ship'],
-    ['classify_issue', 'classify_issue'],
-  ])('maps %s to %s', (task, phase) => {
-    expect(agentEventPhase(task as TaskType)).toBe(phase);
+    [
+      'claude-cli',
+      claudeActivity,
+      [
+        ['text', undefined, 'Reading the config first.'],
+        ['tool_call', 'Read', '<path>'],
+        ['skill', 'verify', 'verify'],
+        ['mcp', 'github.get_issue', 'issue 12'],
+        ['tool_result', undefined, 'ok: export const a = 1;'],
+        ['tool_result', undefined, 'error: not found'],
+        ['tool_call', 'Bash', `echo ${'x'.repeat(195)}…[truncated 35 chars]`],
+        ['result', undefined, 'success (3 turns, 12000ms)'],
+      ],
+    ],
+    [
+      'codex',
+      codexActivity,
+      [
+        ['tool_call', 'shell', 'ls src'],
+        ['tool_result', undefined, 'ok: exit 0'],
+        ['mcp', 'github.get_issue', 'github.get_issue'],
+        ['tool_result', undefined, 'ok'],
+        ['tool_call', 'file_change', '<path>, <path>'],
+        ['text', undefined, 'Implemented the change and committed it.'],
+        ['result', undefined, 'turn completed (5 output tokens)'],
+      ],
+    ],
+  ])('maps the recorded %s stream to agent events', (agent, activity, expected) => {
+    expect(stream(activity, recording(agent)).map((e) => [e.kind, e.name, e.summary])).toEqual(expected);
+  });
+
+  it.each([
+    [{ type: 'item.completed', item: { type: 'command_execution', exit_code: 2, status: 'failed' } }, 'error: exit 2'],
+    [{ type: 'item.completed', item: { type: 'mcp_tool_call', status: 'failed' } }, 'error'],
+    [{ type: 'item.started', item: { type: 'web_search', query: 'vitest' } }, 'vitest'],
+    [{ type: 'turn.failed', error: { message: 'bad' } }, 'error: bad'],
+    [{ type: 'turn.failed' }, 'error: turn failed'],
+  ])('summarizes the codex line %j', (value, summary) => {
+    expect(stream(codexActivity, line(value)).map((e) => e.summary)).toEqual([summary]);
+  });
+
+  it('summarizes a claude error result and a tool call by its main input only', () => {
+    const error = line({ type: 'result', subtype: 'error_max_turns', is_error: true, result: 'too long' });
+    const bash = { type: 'tool_use', name: 'Bash', input: { command: 'ls -la', description: 'x'.repeat(300) } };
+    const events = stream(claudeActivity, error + line({ type: 'assistant', message: { content: [bash] } }));
+    expect(events.map((e) => e.summary)).toEqual(['error: error_max_turns too long', 'ls -la']);
+  });
+
+  it.each([claudeActivity, codexActivity])('skips bad and unknown lines', (activity) => {
+    const bad = ['not json', '', '42', '[]', 'null', '{"type":"mystery"}', '{"type":"stream_event","event":{}}'];
+    expect(stream(activity, `${bad.join('\n')}\n`)).toEqual([]);
   });
 });
 
-describe('normalizers on bad input', () => {
-  it('summarizes a tool call from its main input only', () => {
-    const line = JSON.stringify({
-      type: 'assistant',
-      message: {
-        content: [
-          { type: 'tool_use', name: 'Bash', input: { command: 'ls -la', description: 'x'.repeat(300), extra: 'y' } },
-        ],
-      },
-    });
-    expect(normalizeClaudeStreamLine(line, CTX)).toEqual([
-      { phase: 'build', kind: 'tool_call', name: 'Bash', summary: 'ls -la', at: CTX.at },
-    ]);
-  });
-
-  it('skips bad and unknown lines without throwing', () => {
-    const { events, onEvent } = collector();
-    for (const line of BAD_LINES) {
-      expect(normalizeClaudeStreamLine(line, CTX)).toEqual([]);
-      expect(normalizeCodexStreamLine(line, CTX)).toEqual([]);
-    }
-    const stream = createAgentEventStream(normalizeClaudeStreamLine, { phase: 'build', onEvent });
-    stream.onStdout(`${BAD_LINES.join('\n')}\n`);
-    stream.flush();
+describe('agentEventStdout', () => {
+  it('emits an event once its line completes, with the task phase and arrival time', () => {
+    vi.useFakeTimers({ now: new Date('2026-01-01T00:00:00.000Z') });
+    const events: AgentEvent[] = [];
+    const write = agentEventStdout({ task: 'check_tests', onEvent: (e) => void events.push(e) }, codexActivity);
+    write?.(result.slice(0, 10));
     expect(events).toEqual([]);
-  });
-});
-
-describe('createAgentEventStream', () => {
-  const line = JSON.stringify({ type: 'result', subtype: 'success', num_turns: 1, duration_ms: 5 });
-
-  it('emits each event as its line arrives across split chunks', () => {
-    const { events, onEvent } = collector();
-    const stream = createAgentEventStream(normalizeClaudeStreamLine, {
-      phase: 'plan',
-      onEvent,
-      now: () => new Date('2026-01-01T00:00:00.000Z'),
-    });
-    stream.onStdout(line.slice(0, 10));
-    expect(events).toEqual([]);
-    stream.onStdout(`${line.slice(10)}\n`);
+    write?.(result.slice(10));
+    vi.useRealTimers();
     expect(events).toEqual([
-      { phase: 'plan', kind: 'result', summary: 'success (1 turns, 5ms)', at: '2026-01-01T00:00:00.000Z' },
+      { phase: 'check', kind: 'result', summary: 'turn completed (1 output tokens)', at: '2026-01-01T00:00:00.000Z' },
     ]);
-    stream.onStdout(line);
-    expect(events).toHaveLength(1);
-    stream.flush();
-    expect(events).toHaveLength(2);
-    stream.flush();
-    expect(events).toHaveLength(2);
   });
 
-  it('a throwing subscriber does not stop the stream', () => {
-    const second = collector();
-    let first = true;
-    const stream = createAgentEventStream(normalizeClaudeStreamLine, {
-      phase: 'plan',
-      onEvent: (e) => {
-        if (first) {
-          first = false;
-          throw new Error('boom');
-        }
-        second.onEvent(e);
-      },
+  it('keeps streaming after a subscriber throws', () => {
+    const seen: string[] = [];
+    stream(codexActivity, result + result, (e) => {
+      seen.push(e.summary);
+      if (seen.length === 1) throw new Error('boom');
     });
-    stream.onStdout(`${line}\n${line}\n`);
-    expect(second.events).toHaveLength(1);
+    expect(seen).toHaveLength(2);
+  });
+
+  it('passes chunks through to another stdout reader', () => {
+    const chunks: string[] = [];
+    const also = (chunk: string) => void chunks.push(chunk);
+    expect(agentEventStdout({ task: 'plan' }, codexActivity, also)).toBe(also);
+    agentEventStdout({ task: 'plan', onEvent: () => {} }, codexActivity, also)?.(result);
+    expect(chunks).toEqual([result]);
+  });
+});
+
+describe('harness agent events', () => {
+  const bash = { type: 'tool_use', name: 'Bash', input: { command: 'ls' } };
+  const claudeStdout =
+    line({ type: 'assistant', message: { content: [bash] } }) + line({ type: 'result', result: 'done' });
+  const codexStdout = line({ type: 'item.started', item: { type: 'command_execution', command: 'ls' } }) + result;
+
+  it.each([
+    ['claude', claudeStdout, (exec: ExecFn) => new ClaudeCliHarness(exec)],
+    ['codex', codexStdout, (exec: ExecFn) => new CodexCliHarness(exec, { readFile: async () => 'done' })],
+  ])('%s delivers events while the agent is still running', async (_agent, stdout, make) => {
+    const events: AgentEvent[] = [];
+    let beforeExit: string[] = [];
+    const run = make(async (_cmd, opts) => {
+      opts.onStdout?.(stdout);
+      beforeExit = events.map((e) => `${e.phase} ${e.kind}`);
+      return { stdout, stderr: '' };
+    }).run(makeContractRequest({ onEvent: (e) => void events.push(e) }));
+    expect((await run).output).toBe('done');
+    expect(beforeExit).toEqual(['build tool_call', 'build result']);
   });
 });

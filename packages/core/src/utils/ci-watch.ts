@@ -9,7 +9,6 @@ export { detectNoCiConfigured };
 export type CiOutcome = 'success' | 'failure' | 'timeout' | 'no-checks';
 
 export { DEFAULT_CI_DEADLINE_MS };
-export const DEFAULT_CI_NO_CHECKS_GRACE_MS = 90_000;
 const DEFAULT_CI_INITIAL_INTERVAL_MS = 15_000;
 const DEFAULT_CI_MAX_INTERVAL_MS = 60_000;
 
@@ -96,29 +95,6 @@ const DEFAULT_MAX_POLL_ERRORS = 3;
 const DEFAULT_SETTLE_MS = 30_000;
 const DEFAULT_MIN_CHECKS = 0;
 const DEFAULT_PROGRESS_INTERVAL_MS = 60_000;
-
-export function resolveCiNoChecksGraceMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env.FACTORY_CI_NO_CHECKS_GRACE_SECONDS?.trim();
-  if (!raw) return DEFAULT_CI_NO_CHECKS_GRACE_MS;
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 1000) : DEFAULT_CI_NO_CHECKS_GRACE_MS;
-}
-
-export function noChecksVerdictMs(
-  graceMs: number = DEFAULT_CI_NO_CHECKS_GRACE_MS,
-  initialIntervalMs: number = DEFAULT_CI_INITIAL_INTERVAL_MS,
-  maxIntervalMs: number = DEFAULT_CI_MAX_INTERVAL_MS,
-): number {
-  if (graceMs <= 0) return 0;
-  if (initialIntervalMs <= 0) return graceMs;
-  let t = 0;
-  let interval = initialIntervalMs;
-  while (t < graceMs) {
-    t += interval;
-    interval = Math.min(interval * 2, maxIntervalMs);
-  }
-  return t;
-}
 
 export type CheckRunLike = {
   id?: number;

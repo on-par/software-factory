@@ -20,7 +20,6 @@ import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { codexUnavailable } from '../phases/route-capabilities.js';
 import { beginBuildRoute, compatibleBuildModel, laneRouteCapabilities } from './route-sync.js';
 import { classifyCheckFailure } from './check-verdict.js';
-import { createAgentEventForwarder } from './agent-event-forwarder.js';
 import { withSingleTerminalEvent } from './terminal-events.js';
 import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
 import { parkPayload, postEnvironmentReleaseComment, publishParkComment } from './park-comment.js';
@@ -241,7 +240,10 @@ async function runIssueOnce(
   let request = initialRequest;
   const workKey = workKeyFromIssue(request.issue);
   if (request.codexWorkspacePaths) ports.router.setCodexWorkspacePaths?.(request.codexWorkspacePaths);
-  ports.router.setAgentEventSink?.(createAgentEventForwarder(ports.events, ports.onAgentEvent));
+  ports.router.setAgentEventSink?.((event) => {
+    ports.events(event.phase)('agent-event', JSON.stringify(event));
+    ports.onAgentEvent?.(event);
+  });
   const planPhase = ports.planPhase ?? planPhaseDefault;
   const slot = ports.hostBuildSlot ?? ((_phase, fn) => fn());
   const buildPhase: typeof buildPhaseDefault = (o) => slot('build', () => (ports.buildPhase ?? buildPhaseDefault)(o));
