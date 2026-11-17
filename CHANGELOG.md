@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.38 - 2026-11-17
+
+Agent steps now stream live activity as `agent-event` log events, `[factory] agent-event` stdout lines and a `RunPorts.onAgentEvent` hook while Claude Code or Codex runs (#4246). Stable tags create the GitHub release from CHANGELOG.md (#4123), line budgets and knip/duplication/lint baselines can only shrink (#4124, #4125, #4126, #4051, #4052, #4053), and GitHub credentials are scoped per phase with no merge route outside land (#4120). Visual proof supports scripted steps and gif/video captures (#4054), worktree GC prunes old state backups (#4055), and `factory land` no longer tries to remove a direct checkout as a worktree (#4248).
+All seven published `@on-par` packages move to 0.9.38 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - Agent steps stream live activity: Claude Code and Codex tool calls, skills, MCP calls, text and results appear as `agent-event` log events, `[factory] agent-event {json}` stdout lines and a `RunPorts.onAgentEvent` hook while the agent runs (#4246).
@@ -38,6 +44,10 @@ section to `## X.Y.Z - date`. See
 - `@on-par/factory-core` no longer exports the unused `resolveAdrMandate`, and the dead config exports and re-exports reported by knip are deleted (#4155).
 - `@on-par/factory-core/internal` no longer re-exports the last 56 unused names, the unused `createLinearTicketWriteback` is deleted, and the export-surface guard drops its allowlist so `internal.ts` must export exactly what consumers import (#3787).
 
+### Fixed
+
+- Worktree cleanup after ship and in `factory land` no longer runs `git worktree remove` on a direct (in-place or container) checkout, so the "is not a working tree" warning is gone (#4248).
+
 ## 0.9.37 - 2026-11-14
 
 SHIP no longer parks a run just because CI is still pending at the CI-watch deadline: the visual-proof gate classifies and captures regardless of CI, leaving the usual CI-pending draft (#4047). Requiring UI proof is now configurable with `visualProof.mode` (`required` default, `advisory`, `off`) (#4047), visual proof uploads for factory-opened PRs (#4038), and queue preflight adopts a factory draft left without a draft reason (#4039).
@@ -46,7 +56,6 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Fixed
 
-- Worktree cleanup after ship and in `factory land` no longer runs `git worktree remove` on a direct (in-place or container) checkout, so the "is not a working tree" warning is gone (#4248).
 - Visual proof now uploads for factory-opened PRs; the guard refuses only an evidence branch equal to the PR head branch or under `factory/` (#4038).
 - Queue preflight now adopts the issue's own factory draft PR left without a draft reason (an interrupted SHIP or a ci-failed park): green or pending CI lands it, red CI queues CI rework, instead of parking it as "is draft" (#4039).
 - SHIP no longer parks a run just because CI is still pending: the visual-proof gate still classifies (non-UI changes are not required) and captures locally, so SHIP leaves the usual CI-pending draft; a capture failure still fails SHIP (#4047).
