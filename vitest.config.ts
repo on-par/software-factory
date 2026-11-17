@@ -40,11 +40,10 @@ export default defineConfig({
     // One per-run TMPDIR sandbox, removed at the end, plus a guard that names prefixes leaking into the real TMPDIR (#3114).
     globalSetup: [fileURLToPath(new URL('./scripts/test-tmp-sandbox.ts', import.meta.url))],
     setupFiles: [fileURLToPath(new URL('./packages/core/src/test-support/setup-env.ts', import.meta.url))],
-    // Test files run in parallel with 4 workers by default (DEFAULT_TEST_MAX_WORKERS
-    // in scripts/test-workers.ts), bounded so the instrumented coverage run stays
-    // inside CI's heap limit and 4 vCPUs (measured in
-    // docs/research/coverage-worker-scaling-2752.md). Set FACTORY_TEST_MAX_WORKERS=N
-    // to change it and FACTORY_TEST_MAX_WORKERS=1 to run serially.
+    // Test files run in parallel with one worker per available CPU by default
+    // (os.availableParallelism(), via resolveTestMaxWorkers in scripts/test-workers.ts).
+    // Set FACTORY_TEST_MAX_WORKERS=N to change it and FACTORY_TEST_MAX_WORKERS=1
+    // to run serially.
     maxWorkers,
     fileParallelism: maxWorkers > 1,
     // Many unit suites spawn real subprocesses (git init/clone/push/worktree,
