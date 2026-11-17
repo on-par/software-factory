@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -224,18 +224,17 @@ export async function cleanupWorktree(
   if (sandbox) {
     await removeMicroVm({ ...sandbox, worktreePath, log });
   }
-  await execGit(['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot }).catch((err: any) =>
-    log(
-      'warn',
-      `git worktree remove failed for ${worktreePath}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
-    ),
-  );
-  await execGit(['worktree', 'prune'], { cwd: repoRoot }).catch((err: any) =>
-    log(
-      'warn',
-      `git worktree prune failed in ${repoRoot}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
-    ),
-  );
+  const real = (p: string) => (existsSync(p) ? realpathSync(p) : p);
+  const listed = await execGit(['worktree', 'list', '--porcelain'], { cwd: repoRoot }).catch(() => null);
+  const linked =
+    !listed ||
+    [...listed.stdout.matchAll(/^worktree (.+)$/gm)].slice(1).some((m) => real(m[1]!) === real(worktreePath));
+  const git = (args: string[], what: string) =>
+    execGit(args, { cwd: repoRoot }).catch((err: any) =>
+      log('warn', `git worktree ${what}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`),
+    );
+  if (linked) await git(['worktree', 'remove', '--force', worktreePath], `remove failed for ${worktreePath}`);
+  await git(['worktree', 'prune'], `prune failed in ${repoRoot}`);
 }
 
 export interface LaneWorktreeReapResult {

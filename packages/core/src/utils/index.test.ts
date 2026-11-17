@@ -148,16 +148,8 @@ describe('utils', () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-cleanup-'));
     const worktreePath = join(tmpDir, 'nonexistent-wt');
     const { events, log: spy } = logRecorder();
-
     await expect(cleanupWorktree(tmpDir, worktreePath, spy)).resolves.toBeUndefined();
-
     expect(events).toContainEqual(logged('warn', expect.stringContaining('nonexistent-wt')));
-  });
-
-  it('does not throw when called without a log callback', async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), 'factory-cleanup-'));
-    const worktreePath = join(tmpDir, 'nonexistent-wt');
-
     await expect(cleanupWorktree(tmpDir, worktreePath)).resolves.toBeUndefined();
   });
 
@@ -602,6 +594,14 @@ describe('gitFetch / setupWorktree', () => {
     await setupWorktree(repoRoot, 'factory/201-fresh-worktree', worktree);
 
     expect(existsSync(join(worktree, 'README.md'))).toBe(true);
+  });
+
+  it('leaves a direct clone alone instead of running git worktree remove', async () => {
+    const { repoRoot, origin } = await kit.makeThrowawayRepo();
+    const clone = kit.trackWorktree(repoRoot, 4248);
+    await execFile('git', ['clone', origin, clone]);
+    await cleanupWorktree(repoRoot, clone);
+    expect(existsSync(join(clone, 'README.md'))).toBe(true);
   });
 
   it('keeps worktrees adjacent when factory state uses an external root', async () => {
