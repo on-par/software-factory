@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { createLifecycleBus, withLifecycle } from '../bus/index.js';
+import { createLifecycleBus, withLifecycle, type LifecycleContext } from '../bus/index.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { createLogger } from '../logger/index.js';
 import { logEvent } from './index.js';
@@ -46,9 +46,16 @@ it('computes cpuMs delta and max sampled rss, clears its timer, and fails open',
 it('flows cpuMs and peakRssBytes through withLifecycle, createLogger and logEvent', async () => {
   const logged: unknown[][] = [];
   const log = (...args: unknown[]) => void logged.push(args);
-  const ctx = { phase: 'plan', issueId: 1, worktreePath: '/w', bus: createLifecycleBus(), log, resources: probe([5]) };
+  const ctx: LifecycleContext = {
+    phase: 'plan',
+    issueId: 1,
+    worktreePath: '/w',
+    bus: createLifecycleBus(),
+    log,
+    resources: probe([5]),
+  };
   await withLifecycle(
-    ctx as never,
+    ctx,
     async () => 1,
     () => true,
   );
