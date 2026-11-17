@@ -28,9 +28,22 @@ function truncate(text: string, limit: number): string {
  * Reads both top-level child-process fields (plain exec errors) and
  * HarnessError's `details` bag. Returns '' when there is nothing useful.
  */
+function primitiveText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint' ||
+    typeof value === 'symbol'
+  ) {
+    return String(value);
+  }
+  return typeof value === 'function' ? String(value as () => unknown) : '';
+}
+
 export function describeFailureDetail(err: unknown): string {
   if (err === null || err === undefined) return '';
-  if (typeof err !== 'object') return redactSecrets(truncate(collapse(String(err)), MESSAGE_LIMIT));
+  if (typeof err !== 'object') return redactSecrets(truncate(collapse(primitiveText(err)), MESSAGE_LIMIT));
   const e = err as Record<string, unknown>;
   const details = (typeof e.details === 'object' && e.details !== null ? e.details : {}) as Record<string, unknown>;
   const parts: string[] = [];

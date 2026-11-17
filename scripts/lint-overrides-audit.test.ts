@@ -5,10 +5,13 @@ import { describe, expect, it } from 'vitest';
 
 import config from '../oxlint.config.js';
 
-const ENABLED = ['typescript/no-misused-spread', 'typescript/require-array-sort-compare'] as const;
+const ENABLED = [
+  'typescript/no-misused-spread',
+  'typescript/require-array-sort-compare',
+  'typescript/no-base-to-string',
+] as const;
 
 const KEPT = [
-  'typescript/no-base-to-string',
   'typescript/unbound-method',
   'unicorn/no-thenable',
   'typescript/prefer-promise-reject-errors',

@@ -10,6 +10,8 @@ import { main } from './index.js';
 import { createFactoryOctokit } from './octokit.js';
 
 /** In-memory GitHub double: #2253 is at factory:order:1, #2319 is parked with no order label, both in lane self-repair. */
+const bodyText = (body: unknown): string => (typeof body === 'string' ? body : '');
+
 function githubFetch(): typeof fetch {
   const state = new Map<number, Set<string>>([
     [2253, new Set(['factory:queued', 'factory:lane:self-repair', 'factory:order:1'])],
@@ -20,7 +22,7 @@ function githubFetch(): typeof fetch {
     const method = (init?.method ?? 'GET').toUpperCase();
     const reply = (status: number, body: unknown) =>
       new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-    const body = init?.body === undefined ? {} : JSON.parse(String(init.body));
+    const body = init?.body === undefined ? {} : JSON.parse(bodyText(init.body));
     if (method === 'GET' && url.pathname === '/repos/o/r/issues') {
       const wanted = (url.searchParams.get('labels') ?? '').split(',').filter(Boolean);
       return reply(

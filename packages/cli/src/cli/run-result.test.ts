@@ -193,6 +193,10 @@ describe('buildRunResult', () => {
     expect(outcomes).toEqual(['merged', 'pr-open', 'held', 'ci-failed', 'parked', 'failed']);
   });
 
+  it('uses a plain string error verbatim as the exitReason', () => {
+    expect(buildRunResult(input({ error: 'plain failure' })).exitReason).toBe('plain failure');
+  });
+
   it('lifecycle awaiting-review wins and validates against the schema', () => {
     const shipped: RunOutcome = { state: 'shipped', route, branch: 'b', reworkRounds: 0, prNumber: 7 };
     const merge: MergeResult = { kind: 'held', gate: 'risk', detail: 'x' };

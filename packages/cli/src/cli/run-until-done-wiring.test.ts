@@ -18,6 +18,8 @@ import {
 import type { MergeResult } from './run-issue-merge.js';
 import type { FeedbackRoundResult } from './respond-command.js';
 
+const bodyText = (body: unknown): string => (typeof body === 'string' ? body : '');
+
 const pull = (number: number, ref: string, over: Partial<PullSummary> = {}): PullSummary => ({
   number,
   state: 'open',
@@ -232,7 +234,7 @@ function fakeGitHub(reviewBody: string) {
       return json({ data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } });
     }
     if (method === 'POST' && path.endsWith('/issues/7/comments')) {
-      posted.push(String(init?.body ?? ''));
+      posted.push(bodyText(init?.body));
       return json({ id: 99, body: '' }, 201);
     }
     if (path === '/user') return json({ id: 1, login: 'bot' });

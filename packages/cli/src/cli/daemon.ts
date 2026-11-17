@@ -217,10 +217,9 @@ export interface FactorydConfig {
 
 function positiveInt(value: unknown, fallback: number, name: string): number {
   if (value === undefined) return fallback;
-  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
-    throw new DaemonCtlError(`invalid ${name} "${String(value)}" — expected a positive integer`, 2);
-  }
-  return value;
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value;
+  const shown = typeof value === 'string' ? value : JSON.stringify(value);
+  throw new DaemonCtlError(`invalid ${name} "${shown}" — expected a positive integer`, 2);
 }
 
 /** Resolves `factory daemon run` options into a FactorydConfig. Throws

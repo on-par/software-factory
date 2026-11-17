@@ -6,6 +6,8 @@ import { createLinearClient, LinearApiError } from './linear-client.js';
 
 const fixture = JSON.parse(readFileSync(new URL('./__fixtures__/linear-issue-on-12.json', import.meta.url), 'utf8'));
 
+const bodyText = (body: unknown): string => (typeof body === 'string' ? body : '');
+
 function respond(body: unknown, status = 200) {
   const requests: Array<[string | Request | URL, RequestInit | undefined]> = [];
   const fetch = async (url: string | Request | URL, init?: RequestInit) => {
@@ -24,7 +26,7 @@ describe('createLinearClient', () => {
     expect(url).toBe('https://api.linear.app/graphql');
     expect(init?.method).toBe('POST');
     expect(init?.headers).toMatchObject({ Authorization: 'test-key' });
-    expect(JSON.parse(String(init?.body)).variables).toEqual({ id: 'ON-12' });
+    expect(JSON.parse(bodyText(init?.body)).variables).toEqual({ id: 'ON-12' });
   });
 
   it('returns a normalized record', async () => {

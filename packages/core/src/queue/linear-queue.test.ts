@@ -25,6 +25,8 @@ interface Entry {
   state: string;
 }
 
+const bodyText = (body: unknown): string => (typeof body === 'string' ? body : '');
+
 function fakeClient(issues: LinearQueueIssue[], store?: Map<string, Entry>) {
   const map =
     store ??
@@ -233,7 +235,7 @@ describe('linear queue graphql client', () => {
   it('writes: creates a missing label, adds, removes and moves state', async () => {
     const seen: string[] = [];
     const f: typeof fetch = async (_url, init) => {
-      const { query } = JSON.parse(String(init?.body)) as { query: string };
+      const { query } = JSON.parse(bodyText(init?.body)) as { query: string };
       seen.push(
         query.match(/(teams|issueLabels|issueLabelCreate|issueAddLabel|issueRemoveLabel|issueUpdate|issue)\b/)![1]!,
       );
@@ -296,9 +298,9 @@ describe('linear queue lifecycle client methods and lanes (#3918)', () => {
   it('createLinearQueueGraphqlClient serves the lifecycle methods over the same endpoint', async () => {
     const seen: Array<{ url: string; auth: string; query: string; variables: Record<string, unknown> }> = [];
     const f: typeof fetch = async (url, init) => {
-      const body = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
+      const body = JSON.parse(bodyText(init?.body)) as { query: string; variables: Record<string, unknown> };
       seen.push({
-        url: String(url),
+        url: typeof url === 'string' ? url : url instanceof URL ? url.href : url.url,
         auth: new Headers(init?.headers).get('Authorization') ?? '',
         query: body.query,
         variables: body.variables,

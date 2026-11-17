@@ -21,7 +21,7 @@ function stubFetch(status: number, payload: unknown): { fetch: typeof fetch; cal
   const calls: Call[] = [];
   const stub = async (input: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> => {
     calls.push({
-      url: String(input),
+      url: typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
       method: init?.method ?? 'GET',
       headers: { ...(init?.headers as Record<string, string>) },
       body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,

@@ -56,10 +56,9 @@ export default defineConfig({
     'typescript/consistent-type-imports': ['error', { prefer: 'type-imports', fixStyle: 'separate-type-imports' }],
     'typescript/no-floating-promises': 'error',
     'typescript/return-await': 'error',
-    // typescript/no-base-to-string stays off: 16 hits across fetch-mock tests and error stringifiers, over this audit's fix budget (#4191).
-    'typescript/no-base-to-string': 'off',
     // #4056: audited overrides, enabled once their violations were fixed.
     'typescript/no-misused-spread': 'error',
+    'typescript/no-base-to-string': 'error',
     'typescript/require-array-sort-compare': 'error',
     // typescript/unbound-method stays off: 104 hits across 20+ files, over this audit's fix budget (#4192).
     'typescript/unbound-method': 'off',

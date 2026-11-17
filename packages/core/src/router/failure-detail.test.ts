@@ -25,6 +25,12 @@ describe('describeFailureDetail', () => {
     expect(detail).toContain('trace=/tmp/t.json');
   });
 
+  it('stringifies primitive failures verbatim', () => {
+    expect(describeFailureDetail(42)).toBe('42');
+    expect(describeFailureDetail('boom')).toBe('boom');
+    expect(describeFailureDetail(true)).toBe('true');
+  });
+
   it('omits absent fields', () => {
     expect(describeFailureDetail(new Error('x'))).toBe('msg="x"');
   });

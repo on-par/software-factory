@@ -19,6 +19,8 @@ const { privateKey } = generateKeyPairSync('rsa', {
 
 const APP = { appId: 7, installationId: 9 };
 
+const bodyText = (body: unknown): string => (typeof body === 'string' ? body : '');
+
 function mintingFetch(): { fetch: typeof fetch; bodies: unknown[]; deleted: string[] } {
   const bodies: unknown[] = [];
   const deleted: string[] = [];
@@ -28,7 +30,7 @@ function mintingFetch(): { fetch: typeof fetch; bodies: unknown[]; deleted: stri
       deleted.push(String((init.headers as Record<string, string>)['Authorization']));
       return new Response(null, { status: 204 });
     }
-    bodies.push(JSON.parse(String(init?.body)));
+    bodies.push(JSON.parse(bodyText(init?.body)));
     counter += 1;
     return new Response(JSON.stringify({ token: `ghs_minted${counter}abcdefgh` }), { status: 201 });
   };

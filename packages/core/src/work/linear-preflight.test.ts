@@ -12,6 +12,8 @@ const linear: LinearTrackerConfig = {
   states: { ready: 'Todo', inProgress: 'In Progress', parked: 'Todo' },
 };
 
+const bodyText = (body: unknown): string => (typeof body === 'string' ? body : '');
+
 const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status });
 const page = (nodes: unknown[], next?: string, teams: unknown[] = [{ id: 't' }]) => ({
   data: {
@@ -22,7 +24,7 @@ const page = (nodes: unknown[], next?: string, teams: unknown[] = [{ id: 't' }])
 const fakeFetch = (...responses: Response[]) => {
   const calls: { url: string; init: RequestInit }[] = [];
   const fn: typeof fetch = async (url, init) => {
-    calls.push({ url: String(url), init: init ?? {} });
+    calls.push({ url: typeof url === 'string' ? url : url instanceof URL ? url.href : url.url, init: init ?? {} });
     const next = responses.shift();
     if (!next) throw new Error('no more responses');
     return next;
@@ -74,7 +76,7 @@ describe('probeLinearSetup (#3891)', () => {
     const result = await probeLinearSetup({ apiKey: KEY, linear }, fn);
     expect(result).toEqual({ kind: 'ok', readyIssues: 2, unmappedProjects: ['P1', 'P2'] });
     expect(calls).toHaveLength(2);
-    expect(JSON.parse(String(calls[1]?.init.body)).variables.after).toBe('cur1');
+    expect(JSON.parse(bodyText(calls[1]?.init.body)).variables.after).toBe('cur1');
   });
 
   it('redacts the key from network error messages', async () => {
@@ -105,7 +107,7 @@ describe('probeLinearSetup (#3891)', () => {
     expect(calls[0]?.url).toBe(LINEAR_GRAPHQL_URL);
     expect(calls[0]?.init.method).toBe('POST');
     expect(calls[0]?.init.headers).toEqual({ 'Content-Type': 'application/json', Authorization: KEY });
-    expect(JSON.parse(String(calls[0]?.init.body)).variables).toEqual({
+    expect(JSON.parse(bodyText(calls[0]?.init.body)).variables).toEqual({
       team: 'ENG',
       label: 'factory:ready',
       state: 'Todo',

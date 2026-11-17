@@ -32,7 +32,10 @@ export interface RunResultInput {
 
 function errorMessage(error: unknown): string | undefined {
   if (error === undefined || error === null) return undefined;
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (typeof error === 'object' || typeof error === 'function') return JSON.stringify(error) ?? 'unknown error';
+  return String(error as number | boolean | bigint | symbol);
 }
 
 function classifyMerge(merge: MergeResult): { outcome: RunResultOutcome; exitReason: string } | undefined {

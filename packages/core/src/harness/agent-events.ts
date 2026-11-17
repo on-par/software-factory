@@ -19,6 +19,10 @@ const MAIN_INPUT_KEYS = ['file_path', 'notebook_path', 'path', 'command', 'patte
 const MCP_NAME = /^mcp__(.+?)__(.+)$/;
 
 const str = (value: unknown): string => (typeof value === 'string' ? value : '');
+const scalarText = (value: unknown): string =>
+  typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint'
+    ? String(value)
+    : '?';
 const field = (value: unknown, key: string): unknown => (isPlainObject(value) ? value[key] : undefined);
 const joinField = (list: unknown, key: string, sep: string): string =>
   (Array.isArray(list) ? list : []).map((item) => str(field(item, key))).join(sep);
@@ -50,7 +54,7 @@ function claudeToolResult(block: Json): Activity {
 function claudeResult(parsed: Json): string {
   const subtype = str(parsed.subtype);
   if (parsed.is_error === true) return `error: ${subtype || 'unknown'} ${str(parsed.result)}`;
-  return `${subtype || 'done'} (${String(parsed.num_turns ?? '?')} turns, ${String(parsed.duration_ms ?? '?')}ms)`;
+  return `${subtype || 'done'} (${scalarText(parsed.num_turns)} turns, ${scalarText(parsed.duration_ms)}ms)`;
 }
 
 export function claudeActivity(parsed: Json): Activity[] {
@@ -68,7 +72,7 @@ export function codexActivity(parsed: Json): Activity[] {
   const item = isPlainObject(parsed.item) ? parsed.item : {};
   const status = item.status === 'failed' || item.error || (item.exit_code ?? 0) !== 0 ? 'error' : 'ok';
   const mcp = `${str(item.server)}.${str(item.tool)}`;
-  const tokens = String(field(parsed.usage, 'output_tokens') ?? '?');
+  const tokens = scalarText(field(parsed.usage, 'output_tokens'));
   switch (`${str(parsed.type)}:${str(item.type)}`) {
     case 'turn.completed:':
       return [{ kind: 'result', summary: `turn completed (${tokens} output tokens)` }];
@@ -77,7 +81,7 @@ export function codexActivity(parsed: Json): Activity[] {
     case 'item.started:command_execution':
       return [{ kind: 'tool_call', name: 'shell', summary: str(item.command) }];
     case 'item.completed:command_execution':
-      return [{ kind: 'tool_result', summary: `${status}: exit ${String(item.exit_code ?? '?')}` }];
+      return [{ kind: 'tool_result', summary: `${status}: exit ${scalarText(item.exit_code)}` }];
     case 'item.started:mcp_tool_call':
       return [{ kind: 'mcp', name: mcp, summary: mcp }];
     case 'item.completed:mcp_tool_call':

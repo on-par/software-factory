@@ -16,7 +16,7 @@ interface Seen {
 function setup(opts: { status?: number; initialPhase?: 'plan' | 'ship' | 'land' } = {}) {
   const seen: Seen[] = [];
   const fetchStub = async (input: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> => {
-    const request = input instanceof Request ? input : new Request(String(input), init);
+    const request = input instanceof Request ? input : new Request(input, init);
     seen.push({
       method: request.method,
       path: new URL(request.url).pathname,
@@ -167,7 +167,7 @@ describe('GitHub scope guard', () => {
   it('sends check requests without authorization when no ambient token exists', async () => {
     const seen: Array<string | null> = [];
     const fetchStub = async (input: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> => {
-      seen.push(new Request(String(input), init).headers.get('authorization'));
+      seen.push(new Request(input, init).headers.get('authorization'));
       return new Response('{}', { headers: { 'content-type': 'application/json' } });
     };
     const source: GitHubCredentialSource = {

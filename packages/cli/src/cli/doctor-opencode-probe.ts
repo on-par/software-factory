@@ -97,6 +97,11 @@ export function opencodeLiveAuthCheck(result: OpencodeAuthProbeResult): DoctorCh
 }
 
 /** Runs the one `opencode run` probe; a thrown exec error keeps its stdout, status and timeout flag. */
+function outputText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  return Buffer.isBuffer(value) ? value.toString() : '';
+}
+
 export function runOpencodeAuthProbe(rt: DoctorRuntime, repoRoot: string | null): OpencodeAuthProbeResult {
   if (!rt.coreOps.isCommandAvailable('opencode')) return { kind: 'skipped' };
   let providerModel: string | undefined;
@@ -122,8 +127,8 @@ export function runOpencodeAuthProbe(rt: DoctorRuntime, repoRoot: string | null)
     return {
       kind: 'ran',
       exitCode: typeof e.status === 'number' ? e.status : 1,
-      stdout: String(e.stdout ?? ''),
-      stderr: String(e.stderr ?? ''),
+      stdout: outputText(e.stdout),
+      stderr: outputText(e.stderr),
     };
   }
 }

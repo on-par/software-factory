@@ -13,7 +13,7 @@ const seen: Array<string | null> = [];
 function stubFetch(): void {
   seen.length = 0;
   vi.stubGlobal('fetch', async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    seen.push(new Request(String(input), init).headers.get('authorization'));
+    seen.push(new Request(input, init).headers.get('authorization'));
     return new Response('{"title":"x"}', { headers: { 'content-type': 'application/json' } });
   });
 }

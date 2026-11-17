@@ -110,9 +110,16 @@ export async function setupInPlaceCheckout(
   try {
     await execGit(['switch', '--no-track', '-c', branch, base], { cwd: repoRoot });
   } catch (err) {
-    const stderr = ((err as { stderr?: unknown })?.stderr ?? (err instanceof Error ? err.message : String(err)))
-      .toString()
-      .trim();
+    const rawStderr = (err as { stderr?: unknown })?.stderr;
+    const stderr = (
+      typeof rawStderr === 'string'
+        ? rawStderr
+        : Buffer.isBuffer(rawStderr)
+          ? rawStderr.toString()
+          : err instanceof Error
+            ? err.message
+            : String(err)
+    ).trim();
     throw new Error(
       `in-place run refused: could not create branch '${branch}' in the checkout (${stderr}) — delete the local branch or use a fresh clone`,
       { cause: err },

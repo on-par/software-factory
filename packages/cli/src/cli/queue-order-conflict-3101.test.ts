@@ -12,6 +12,8 @@ import { main } from './index.js';
 import { createFactoryOctokit } from './octokit.js';
 
 /** In-memory GitHub double: issues #3/#4 share factory:order:1, #5 is at factory:order:2, all in lane dup. */
+const bodyText = (body: unknown): string => (typeof body === 'string' ? body : '');
+
 function githubFetch(): typeof fetch {
   const state = new Map<number, Set<string>>(
     [
@@ -25,7 +27,7 @@ function githubFetch(): typeof fetch {
     const method = (init?.method ?? 'GET').toUpperCase();
     const reply = (status: number, body: unknown) =>
       new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-    const body = init?.body === undefined ? {} : JSON.parse(String(init.body));
+    const body = init?.body === undefined ? {} : JSON.parse(bodyText(init.body));
     if (method === 'GET' && url.pathname === '/repos/o/r/issues') {
       const wanted = (url.searchParams.get('labels') ?? '').split(',').filter(Boolean);
       return reply(
