@@ -16,6 +16,7 @@ import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
+import { policy as baseline } from './ci-rework-test-helpers.js';
 
 const WORK: WorkRequest = {
   id: 'github-issue:o/r#1',
@@ -89,7 +90,7 @@ const request: RunRequest = {
 const policy: RunPolicy = {
   models: { version: 1, models: {}, tiers: {}, failover: request.failover as never, routingRules: {} } as never,
   routes: ROUTES,
-  sandbox: { enabled: false } as RunPolicy['sandbox'],
+  sandbox: baseline.sandbox,
   budget: {},
   effective: {} as RunPolicy['effective'],
 };

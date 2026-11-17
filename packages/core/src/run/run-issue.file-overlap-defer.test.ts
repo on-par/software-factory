@@ -18,6 +18,7 @@ import type { RunPolicy } from './policy.js';
 import { LaneFileGuard } from './lane-file-guard.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
+import { policy as baseline } from './ci-rework-test-helpers.js';
 
 const WORK: WorkRequest = {
   id: 'github-issue:o/r#1',
@@ -82,7 +83,7 @@ const request: RunRequest = {
 const policy: RunPolicy = {
   models: MODELS,
   routes: ROUTES,
-  sandbox: { enabled: false } as RunPolicy['sandbox'],
+  sandbox: baseline.sandbox,
   budget: {},
   effective: {} as RunPolicy['effective'],
 };
@@ -101,12 +102,8 @@ const design: DesignArtifact = {
 };
 
 const posted: unknown[] = [];
-const issues = {
-  createComment: async (p: unknown) => posted.push(p),
-  updateComment: async (p: unknown) => posted.push(p),
-  addLabels: async (p: unknown) => posted.push(p),
-  removeLabel: async (p: unknown) => posted.push(p),
-};
+const post = async (p: unknown) => posted.push(p);
+const issues = { createComment: post, updateComment: post, addLabels: post, removeLabel: post };
 
 function makePorts(overrides: Partial<RunPorts>, events: Array<[string, string]>): RunPorts {
   return {
@@ -150,10 +147,8 @@ describe('runIssue — same-file lane hold defers instead of parking (#3576)', (
       events.some(([type, msg]) => type === 'issue_deferred' && msg.includes('#3232') && msg.includes('src/shared.ts')),
     ).toBe(true);
     expect(posted).toEqual([]);
-    expect(await guard.liveHold('o/r', workKeyFromIssue(1896))).toMatchObject({
-      holder: workKeyFromIssue(3232),
-      file: 'src/shared.ts',
-    });
+    const hold = await guard.liveHold('o/r', workKeyFromIssue(1896));
+    expect(hold).toMatchObject({ holder: workKeyFromIssue(3232), file: 'src/shared.ts' });
     expect(await guard.claimsForIssue(workKeyFromIssue(1896))).toEqual([]);
   });
 

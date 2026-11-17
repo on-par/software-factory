@@ -18,6 +18,7 @@ import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
+import { policy as baseline } from './ci-rework-test-helpers.js';
 
 const planPhase = vi.fn<typeof realPlanPhase>();
 const buildPhase = vi.fn<typeof realBuildPhase>();
@@ -78,7 +79,7 @@ const MODELS: ModelsConfig = {
 const policy: RunPolicy = {
   models: MODELS,
   routes: ROUTES,
-  sandbox: { enabled: false } as RunPolicy['sandbox'],
+  sandbox: baseline.sandbox,
   budget: {},
   effective: {} as RunPolicy['effective'],
 };
