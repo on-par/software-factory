@@ -169,6 +169,12 @@
     "durationMs": {
       "type": "number"
     },
+    "cpuMs": {
+      "type": "number"
+    },
+    "peakRssBytes": {
+      "type": "number"
+    },
     "cursor": {
       "type": "string"
     }

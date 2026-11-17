@@ -168,7 +168,7 @@ describe('withLifecycle', () => {
 
     expect(logged).toEqual([
       ['phase_started', 'plan started'],
-      ['phase_completed', 'plan complete (42)', { durationMs: expect.any(Number) }],
+      ['phase_completed', 'plan complete (42)', expect.objectContaining({ durationMs: expect.any(Number) })],
     ]);
     expect((logged[1][2] as { durationMs: number }).durationMs).toBeGreaterThanOrEqual(0);
   });
@@ -190,7 +190,11 @@ describe('withLifecycle', () => {
 
     expect(logged).toEqual([
       ['phase_started', 'plan started'],
-      ['phase_completed', expect.stringContaining('router exhausted'), { durationMs: expect.any(Number) }],
+      [
+        'phase_completed',
+        expect.stringContaining('router exhausted'),
+        expect.objectContaining({ durationMs: expect.any(Number) }),
+      ],
     ]);
   });
 
