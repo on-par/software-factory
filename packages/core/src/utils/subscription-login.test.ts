@@ -5,7 +5,7 @@ import { defaultModelsConfig } from '@on-par/factory-config';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
-import { resolveRoleModel, type ProviderOrder } from '../config/provider-order.js';
+import { subscriptionProviderOf, type ProviderOrder } from '../config/provider-order.js';
 import { filterRefusedProviders, subscriptionLogin, type SubscriptionLoginDeps } from './subscription-login.js';
 
 const models = defaultModelsConfig.models;
@@ -75,7 +75,7 @@ describe('filterRefusedProviders (#3335)', () => {
     const { execs, deps } = harness({ ANTHROPIC_API_KEY: 'sk-ant', CODEX_HOME: codexHome(chatgptAuth) });
     const { order: filtered, refused } = filterRefusedProviders(order, models, deps);
     expect(filtered.boss[0]).toBe('gpt-5.6-terra-high');
-    expect(resolveRoleModel(filtered, 'boss', 'claude')).toBeUndefined();
+    expect(filtered.boss.some((id) => subscriptionProviderOf(id, models[id]) === 'claude')).toBe(false);
     expect(refused).toMatchObject([{ provider: 'claude', login: 'api' }]);
     expect(execs.filter((f) => f === 'claude' || f === 'security')).toEqual([]);
   });

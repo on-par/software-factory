@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
 export const TRACKER_KINDS = ['github', 'linear'] as const;
-export type TrackerKind = (typeof TRACKER_KINDS)[number];
 
 const name = z.string().trim().min(1);
 

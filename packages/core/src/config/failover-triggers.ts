@@ -10,12 +10,6 @@ export const FAILOVER_TRIGGER_KINDS = [
   'usage_cap',
 ] as const satisfies readonly ProviderFailureKind[];
 
-export const DEFAULT_FAILOVER_TRIGGERS = [
-  'rate_limit',
-  'unavailable',
-  'auth',
-] as const satisfies readonly ProviderFailureKind[];
-
 /** Legacy failure-reason names mapped to their kind; only used to make error messages helpful. */
 const LEGACY_REASON_KIND: Record<string, string> = {
   timeout: 'unavailable',

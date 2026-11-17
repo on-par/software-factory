@@ -13,11 +13,11 @@ export type {
   FactoryConfig,
   IngestSettings,
   MergePolicyOverrides,
-  MergePolicySource,
   ModelsConfig,
   RoutesConfig,
   SizeGateMode,
 } from './config/index.js';
+export type { MergePolicySource } from './config/merge-policy.js';
 export {
   getConstitutionsDir,
   getFactoryPaths,
@@ -25,7 +25,6 @@ export {
   loadFactoryConfigForRepo,
   loadModelsConfig,
   loadRoutesConfig,
-  resolveAdrMandate,
   resolveAutoFailover,
   resolveDefectWindowDays,
   resolveEnvironmentPorts,

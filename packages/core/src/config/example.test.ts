@@ -21,12 +21,12 @@ import {
   loadRepoConfig,
   RepoFactoryConfigV2Schema,
   resolveCodexDisabled,
-  resolveEffectiveBuildRoute,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
   resolveUsageCap,
   resolveWatchdogPolicy,
 } from './repo.js';
+import { resolveEffectiveBuildRoute } from './build-route.js';
 
 const EXAMPLE_PATH = fileURLToPath(new URL('../../../../docs/config.example.yaml', import.meta.url));
 

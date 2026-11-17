@@ -41,14 +41,7 @@ import { markSizeGateModeWarned, warnSizeGateModeOnce } from './size-gate.js';
 import { ModelEffortsSchema } from './effort.js';
 import { HarnessDeclarationSchema, type HarnessDeclaration } from './harness-declaration.js';
 
-export {
-  HARNESS_ERROR_PATTERN_REASONS,
-  HARNESS_OUTPUT_MODES,
-  HARNESS_PROMPT_MODES,
-  HARNESS_USAGE_MODES,
-  HarnessDeclarationSchema,
-  type HarnessDeclaration,
-} from './harness-declaration.js';
+export { HarnessDeclarationSchema, type HarnessDeclaration } from './harness-declaration.js';
 
 // ---------- Schemas ----------
 
@@ -591,18 +584,8 @@ export {
   isExplicitStackMode,
   parseSizeGateMode,
   resolveSizeGateMode,
-  sizeGateDeprecationLine,
 } from './size-gate.js';
 export { resolveGitHubCredentialsConfig } from './github-section.js';
-export {
-  TRACKER_KINDS,
-  type TrackerKind,
-  TrackerConfigSchema,
-  type TrackerConfig,
-  type LinearTrackerConfig,
-  DEFAULT_TRACKER_CONFIG,
-  resolveTrackerConfig,
-} from './tracker-section.js';
 
 /** --max-slices value: a whole number from 1 to SLICE_CAP_CEILING, else undefined (ADR-0156). */
 export function parseMaxSlices(raw: string): number | undefined {
@@ -643,10 +626,6 @@ export function resolveReadinessUpdateIssueBody(config: FactoryConfig, env: Node
 
 export function resolvePlanApproval(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveEnabledFlag(env, 'FACTORY_APPROVE_PLAN', config.plan_approval?.enabled ?? dPlanApproval.enabled);
-}
-
-export function resolveAdrMandate(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
-  return resolveEnabledFlag(env, 'FACTORY_ADR_MANDATE', config.adr?.mandate ?? defaultSchemaFields.adrMandate);
 }
 
 export function resolveDefectWindowDays(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): number {
@@ -769,7 +748,6 @@ export {
   type EffectiveMergePolicy,
   type EffectivePrClassifierPolicy,
   type MergePolicyOverrides,
-  type MergePolicySource,
 } from './merge-policy.js';
 
 export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {

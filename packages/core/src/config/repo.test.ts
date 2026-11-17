@@ -10,6 +10,7 @@ import { ModelRouter } from '../router/index.js';
 import { computeReviewFloor, DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { loadModelsConfig, type ModelsConfig, type RoutesConfig } from './index.js';
+import { resolveEffectiveBuildRoute } from './build-route.js';
 import {
   adaptV1ToV2,
   applyRepoConfig,
@@ -17,7 +18,6 @@ import {
   loadRepoConfig,
   repoRoutingConfigIssues,
   resolveCodexDisabled,
-  resolveEffectiveBuildRoute,
   resolveEffectiveConfig,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,

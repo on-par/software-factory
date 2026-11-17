@@ -5,25 +5,10 @@ import {
   deriveProviderOrder,
   isOpenCodeZenModel,
   providerOrderIssues,
-  resolveRoleModel,
   subscriptionProviderOf,
-  type ProviderOrder,
 } from './provider-order.js';
 
 const models = defaultModelsConfig.models;
-
-describe('resolveRoleModel', () => {
-  const order: ProviderOrder = {
-    ...defaultModelsConfig.providerOrder,
-    checker: ['claude-sonnet-5', 'gpt-5.6-luna-high'],
-  };
-
-  it("returns the role's model for the provider and never another provider's", () => {
-    expect(resolveRoleModel(order, 'checker', 'codex')).toBe('gpt-5.6-luna-high');
-    expect(resolveRoleModel(order, 'checker', 'claude')).toBe('claude-sonnet-5');
-    expect(resolveRoleModel(order, 'checker', 'opencode-go')).toBeUndefined();
-  });
-});
 
 describe('deriveProviderOrder', () => {
   it('equals the packaged providerOrder literal (drift guard)', () => {
