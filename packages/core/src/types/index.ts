@@ -339,6 +339,8 @@ export interface FactoryEvent {
    *  can't be read or doesn't parse to `owner/name`. Qualifies `lane`, whose meaning and format are unchanged. */
   repo?: string;
   phase?: string;
+  cpuMs?: number;
+  peakRssBytes?: number;
   /** Human who performed the action, for human-* event types (#420). */
   actor?: string;
   failoverReason?: FailoverReason;
@@ -403,8 +405,6 @@ export interface CostEntry {
   /** Average cost per model call in USD. */
   costPerCallUsd?: number;
   durationMs?: number;
-  cpuMs?: number;
-  peakRssBytes?: number;
   durationApiMs?: number;
   /** Resolved sandbox runtime for A/B cohorting; docker-sandbox stays labeled while uncontained (#653, #655). */
   sandboxRuntime?: string;
