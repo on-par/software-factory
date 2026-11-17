@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- Acceptance criteria are high-level outcomes by default: `factory check` accepts plain-language outcomes, warns on criteria that only describe code changes, and grades fenced gherkin Scenarios; `factory draft`, enrichment, decomposition and the readiness judge ask for outcomes, and Gherkin is optional (#3962).
 - Removed the CI `LOC budget override guard`: raising a `loc-budget.json` number no longer needs a human-applied `loc-budget:override` label, and the factory no longer strips that label (#4261).
 
 ## 0.9.38 - 2026-11-17

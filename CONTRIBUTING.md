@@ -56,6 +56,10 @@ The run works in an isolated git worktree and ends at a ready-for-review PR. `fa
 
 File new work with the **Factory task** issue template, [`.github/ISSUE_TEMPLATE/factory-task.yml`](.github/ISSUE_TEMPLATE/factory-task.yml). It asks for the problem statement, in/out of scope, acceptance criteria, and verification that the factory needs to ship an issue on its own. Bugs use `factory-bug.yml`.
 
+### Writing acceptance criteria
+
+Write acceptance criteria as high-level outcomes in plain business language: what must be true when the work is done, from the user's or the business's point of view. The factory decides how during planning. A good criterion is "A customer can see why their order was held". A bad one is "Add a `holdReason` field to `order.ts`", which describes a change, not an outcome. Given/When/Then, including a fenced `gherkin` block, is optional and still passes. `factory check` warns, without blocking, when a criterion describes a change rather than an outcome.
+
 ## Steer events
 
 When you or a bot steer a factory run, record it with `factory steer`:

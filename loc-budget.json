@@ -5,7 +5,7 @@
   },
   "cli": {
     "source": 28385,
-    "tests": 54302
+    "tests": 54309
   },
   "config": {
     "source": 1222,
@@ -16,8 +16,8 @@
     "tests": 1143
   },
   "core": {
-    "source": 70702,
-    "tests": 141160
+    "source": 70727,
+    "tests": 141236
   },
   "repo-context": {
     "source": 685,

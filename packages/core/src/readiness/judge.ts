@@ -40,6 +40,7 @@ const RUBRIC = [
   '- "ready-with-assumptions": buildable once 1-5 stated assumptions are made. "questions" is empty.',
   '- "not-ready": there are 1-5 blocking questions only a human can answer, for example a contradiction or a missing product decision. It may also carry up to 5 assumptions.',
   "Plain text with no headings is fine. Never judge size. If the author grants latitude, assume, don't ask.",
+  'Acceptance criteria are best written as high-level outcomes in plain business language. Never ask for Given/When/Then wording, file names or commands; Gherkin is optional and fine when present.',
   'Output exactly one JSON object and nothing else, shaped like:',
   '{"schemaVersion": 1, "verdict": "ready" | "ready-with-assumptions" | "not-ready", "summary": "<=200 chars", "assumptions": [{"aspect": "...", "text": "..."}], "questions": [{"aspect": "...", "text": "..."}]}',
   'The aspect is one of: problem, scope, acceptance, verification, contradiction, decision, other.',

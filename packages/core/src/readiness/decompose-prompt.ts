@@ -71,7 +71,7 @@ Every story must be independently INVEST-valid:
 - Valuable: it must carry a non-empty "soThat" and trace to intent (non-empty "tracesTo").
 - Estimable: it must carry acceptance criteria and verification steps.
 - Small: at most 5 in-scope items and at most 5 acceptance criteria.
-- Testable: every acceptance criterion has a When and a Then.
+- Testable: every acceptance criterion has a When and a Then. Its name and Then state a high-level outcome a user or the business can observe, in plain language, not a code change.
 
 Split along separate code: each story should change different files. If the stories would mostly edit the same files, they belong in one story.
 

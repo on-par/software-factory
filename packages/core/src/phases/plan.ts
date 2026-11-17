@@ -156,7 +156,10 @@ ${constitutionCtx ? '5. The constitution above defines the standards for this pr
    Any behaviorDelta row with verdict worse or unknown must be fixed in the approach or
    also listed in openQuestions. For any other change, omit these three keys.
 7. EVIDENCE PLAN. Decide what evidence will prove each acceptance criterion in the issue.
-   Write one evidencePlan entry per acceptance criterion. Its claim restates that criterion.
+   Write one evidencePlan entry per acceptance criterion. Its claim names the criterion it proves, then
+   states the concrete behaviour its test or command checks. Criteria are often high-level business
+   outcomes: translate each into concrete, testable behaviour. Never just restate a business sentence
+   that no test can check, and never use kind none only because a criterion is worded as an outcome.
    Each entry has a kind, and each kind has required fields:
    - fail-to-pass-test: claim, test — the test file path followed by each test name in double
      quotes, e.g. src/foo.test.ts "does x" (pytest: tests/test_foo.py::test_x); no prose, flags
@@ -206,7 +209,7 @@ design:
   openQuestions: []   # anything you could not resolve; empty list if none
   evidencePlan:   # one entry per acceptance criterion — see step 7
     - kind: fail-to-pass-test
-      claim: <acceptance criterion this proves>
+      claim: <criterion it proves> — <concrete behaviour the test checks>
       test: <test file path then each test name in double quotes, e.g. src/foo.test.ts "does x">
     - kind: command
       claim: <acceptance criterion>
