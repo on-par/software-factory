@@ -76,13 +76,7 @@ const MODELS: ModelsConfig = {
   routingRules: {},
 };
 
-const policy: RunPolicy = {
-  models: MODELS,
-  routes: ROUTES,
-  sandbox: baseline.sandbox,
-  budget: {},
-  effective: {} as RunPolicy['effective'],
-};
+const policy: RunPolicy = { ...baseline, models: MODELS, routes: ROUTES };
 
 type Log = ReturnType<RunPorts['events']>;
 

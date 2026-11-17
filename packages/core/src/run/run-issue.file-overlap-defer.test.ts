@@ -18,7 +18,6 @@ import type { RunPolicy } from './policy.js';
 import { LaneFileGuard } from './lane-file-guard.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
-import { policy as baseline } from './ci-rework-test-helpers.js';
 
 const WORK: WorkRequest = {
   id: 'github-issue:o/r#1',
@@ -83,7 +82,13 @@ const request: RunRequest = {
 const policy: RunPolicy = {
   models: MODELS,
   routes: ROUTES,
-  sandbox: baseline.sandbox,
+  sandbox: {
+    enabled: false,
+    runtime: 'auto',
+    network: { allow: [] },
+    resources: { cpuMs: 0, memMb: 0 },
+    docker: { rolloutPercent: 0 },
+  },
   budget: {},
   effective: {} as RunPolicy['effective'],
 };
