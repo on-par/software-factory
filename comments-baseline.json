@@ -414,7 +414,7 @@
   "packages/core/src/config/pr-section.ts": 1,
   "packages/core/src/config/precedence.ts": 5,
   "packages/core/src/config/provider-order-exports.ts": 3,
-  "packages/core/src/config/provider-order.ts": 15,
+  "packages/core/src/config/provider-order.ts": 14,
   "packages/core/src/config/qa-section.ts": 1,
   "packages/core/src/config/queue-config.test.ts": 1,
   "packages/core/src/config/repo-build-pin.ts": 2,

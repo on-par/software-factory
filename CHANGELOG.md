@@ -33,6 +33,7 @@ section to `## X.Y.Z - date`. See
 
 ### Removed
 
+- `@on-par/factory-core` no longer exports the unused `resolveAdrMandate`, and the dead config exports and re-exports reported by knip are deleted (#4155).
 - `@on-par/factory-core/internal` no longer re-exports the last 56 unused names, the unused `createLinearTicketWriteback` is deleted, and the export-surface guard drops its allowlist so `internal.ts` must export exactly what consumers import (#3787).
 
 ## 0.9.37 - 2026-11-14

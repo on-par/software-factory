@@ -1,12 +1,6 @@
-import { defaultModelsConfig } from '@on-par/factory-config';
 import { describe, expect, it } from 'vitest';
 
-import {
-  DEFAULT_FAILOVER_TRIGGERS,
-  FAILOVER_TRIGGER_KINDS,
-  failoverConfigWarnings,
-  FailoverTriggersSchema,
-} from './failover-triggers.js';
+import { FAILOVER_TRIGGER_KINDS, failoverConfigWarnings, FailoverTriggersSchema } from './failover-triggers.js';
 
 const messages = (input: unknown): string[] => {
   const result = FailoverTriggersSchema.safeParse(input);
@@ -37,12 +31,6 @@ describe('FailoverTriggersSchema', () => {
 
   it('rejects non-string entries', () => {
     expect(messages([3])).toHaveLength(1);
-  });
-});
-
-describe('DEFAULT_FAILOVER_TRIGGERS', () => {
-  it('equals the packaged default', () => {
-    expect([...DEFAULT_FAILOVER_TRIGGERS]).toEqual(defaultModelsConfig.failover.triggers);
   });
 });
 

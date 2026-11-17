@@ -6,13 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ModelRegistry } from '../models/index.js';
 import { loadModelsConfig, type ModelsConfig } from './index.js';
-import {
-  applyRepoConfig,
-  loadRepoConfig,
-  resolveEffectiveBuildRoute,
-  resolveEffectiveModelPins,
-  routeForBuildModel,
-} from './repo.js';
+import { applyRepoConfig, loadRepoConfig, resolveEffectiveModelPins } from './repo.js';
+import { resolveEffectiveBuildRoute, routeForBuildModel } from './build-route.js';
 
 type ModelDef = ModelsConfig['models'][string];
 

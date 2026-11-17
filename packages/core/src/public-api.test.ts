@@ -21,7 +21,6 @@ const PUBLIC_API_KEYS = [
   'loadFactoryConfigForRepo',
   'loadModelsConfig',
   'loadRoutesConfig',
-  'resolveAdrMandate',
   'resolveAutoFailover',
   'resolveDefectWindowDays',
   'resolveEnvironmentPorts',

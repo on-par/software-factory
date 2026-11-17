@@ -6,7 +6,6 @@
 // picks a provider from it at each phase boundary and reruns a capped phase on the
 // next one (#3338).
 
-import { defaultModelsConfig } from '@on-par/factory-config';
 import { z } from 'zod';
 
 import { retiredModelHint } from '../models/overrides.js';
@@ -117,14 +116,4 @@ export function providerOrderIssues(
     });
   }
   return issues;
-}
-
-/** The role's model for a provider, or undefined. Never returns another provider's model. */
-export function resolveRoleModel(
-  order: ProviderOrder,
-  role: ProviderOrderRole,
-  providerId: SubscriptionProviderId,
-  models: Record<string, ProviderModelDef> = defaultModelsConfig.models,
-): string | undefined {
-  return order[role].find((id) => subscriptionProviderOf(id, models[id]) === providerId);
 }

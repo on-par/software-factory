@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ModelRegistry } from '../models/index.js';
 import type { ModelsConfig } from './index.js';
-import { loadRepoConfig, resolveEffectiveBuildRoute } from './repo.js';
+import { resolveEffectiveBuildRoute } from './build-route.js';
+import { loadRepoConfig } from './repo.js';
 
 const tempDirs = new Set<string>();
 

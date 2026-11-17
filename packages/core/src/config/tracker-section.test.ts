@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTempDirs } from '@on-par/factory-core/testing';
 
-import { loadFactoryConfig, loadFactoryConfigForRepo, resolveTrackerConfig, TrackerConfigSchema } from './index.js';
+import { loadFactoryConfig, loadFactoryConfigForRepo } from './index.js';
 import { loadRepoConfig } from './repo.js';
+import { resolveTrackerConfig, TrackerConfigSchema } from './tracker-section.js';
 
 const tempDirs = createTempDirs();
 

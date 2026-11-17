@@ -887,5 +887,5 @@ export function resolveT1SampleRate(repo: RepoFactoryConfig | null): number {
   return repo?.classifier?.t1SampleRate ?? DEFAULT_T1_SAMPLE_RATE;
 }
 
-export { decideBuildRoute, resolveEffectiveBuildRoute, routeForBuildModel } from './build-route.js';
-export type { BuildRouteDecisionInput, BuildRoutePin, EffectiveBuildRoute } from './build-route.js';
+export { decideBuildRoute, routeForBuildModel } from './build-route.js';
+export type { BuildRoutePin, EffectiveBuildRoute } from './build-route.js';

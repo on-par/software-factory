@@ -8,6 +8,8 @@
   // scripts/verify-env-probe.mjs is run by scripts/verify.sh through node, which knip does not follow (#3332).
   "ignore": ["tools/oxlint/anti-slop/**", "scripts/verify-env-probe.mjs", "scripts/loc-budget.ts"],
   "workspaces": {
+    // The config-example generator is the real consumer of renderConfigExample (#4155).
+    ".": { "entry": ["scripts/gen-config-example.ts!"] },
     "packages/core": {
       "includeEntryExports": true,
       "project": ["**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}!", "!**/test-support/**!"],

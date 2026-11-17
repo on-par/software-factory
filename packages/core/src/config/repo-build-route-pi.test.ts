@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ModelRegistry } from '../models/index.js';
 import { loadModelsConfig } from './index.js';
-import { resolveEffectiveBuildRoute, routeForBuildModel } from './repo.js';
+import { resolveEffectiveBuildRoute, routeForBuildModel } from './build-route.js';
 
 describe('build route from a Pi build pin (#2909)', () => {
   it('resolveEffectiveBuildRoute derives the command route from a Pi build pin (#2909)', () => {
