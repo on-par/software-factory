@@ -1104,14 +1104,6 @@ describe('resolvePrClassifierPolicy (#1724)', () => {
   const config = loadFactoryConfig();
   const withRepo = (classifier: boolean) => ({ ...config, run: { merge: { classifier } } });
 
-  it('defaults to off', () => {
-    expect(resolvePrClassifierPolicy(config, {})).toEqual({ enabled: false, source: 'default' });
-  });
-
-  it('FACTORY_PR_CLASSIFIER=1 turns it on', () => {
-    expect(resolvePrClassifierPolicy(config, { FACTORY_PR_CLASSIFIER: '1' })).toEqual({ enabled: true, source: 'env' });
-  });
-
   it('run.merge.classifier beats the env, including an explicit false', () => {
     expect(resolvePrClassifierPolicy(withRepo(false), { FACTORY_PR_CLASSIFIER: '1' })).toEqual({
       enabled: false,

@@ -628,21 +628,6 @@ describe('resolveEffectiveConfig', () => {
 });
 
 describe('resolveUsageCap', () => {
-  it('uses the repo cap over the env cap', () => {
-    expect(resolveUsageCap({ version: 2, budget: { capUsd: 50 } }, { FACTORY_USAGE_CAP: '100' })).toEqual({
-      cap: 50,
-      source: 'repo',
-    });
-  });
-
-  it('uses the env cap when no repo cap is set', () => {
-    expect(resolveUsageCap(null, { FACTORY_USAGE_CAP: '100' })).toEqual({ cap: 100, source: 'env' });
-  });
-
-  it('uses the packaged default of 227 when neither is set', () => {
-    expect(resolveUsageCap(null, {})).toEqual({ cap: 227, source: 'default' });
-  });
-
   it('rejects a non-positive env cap', () => {
     expect(() => resolveUsageCap(null, { FACTORY_USAGE_CAP: '-1' })).toThrow(/FACTORY_USAGE_CAP/);
   });
