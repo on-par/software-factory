@@ -5,6 +5,42 @@ const issue = (ac: string, verification?: string) =>
   `### Acceptance criteria\n\n${ac}\n${verification === undefined ? '' : `\n### Verification\n\n${verification}\n`}`;
 
 describe('assessAcceptanceCriteria', () => {
+  it('treats a plain-language business outcome as observable', () => {
+    const [f] = assessAcceptanceCriteria('- [ ] A customer can see why their order was held');
+    expect(f).toMatchObject({ grade: 'unstructured', observable: true });
+    expect(f?.note).toBeUndefined();
+  });
+
+  it('flags a criterion that only prescribes a code change', () => {
+    const text = '- [ ] Add a `foo` field to `bar.ts`';
+    const [f] = assessAcceptanceCriteria(text);
+    expect(f).toMatchObject({ observable: false, note: 'describes a change, not an outcome' });
+    expect(gradeIssueCriteria(issue(text, '`npm test`')).pass).toBe(true);
+  });
+
+  it('grades each Scenario in a fenced gherkin block as structured', () => {
+    const ac = [
+      '```gherkin',
+      'Feature: x',
+      'Scenario: a',
+      '  Given a',
+      '  When b',
+      '  Then c',
+      '',
+      'Scenario: b',
+      '  Given d',
+      '  When e',
+      '  Then f',
+      '```',
+    ].join('\n');
+    const findings = assessAcceptanceCriteria(ac);
+    expect(findings).toHaveLength(2);
+    expect(findings.every((f) => f.grade === 'structured')).toBe(true);
+    expect(findings[0]?.text.startsWith('Scenario: a')).toBe(true);
+    expect(findings[1]?.text.startsWith('Scenario: b')).toBe(true);
+    expect(gradeIssueCriteria(issue(ac)).problems).not.toContain('no acceptance criteria');
+  });
+
   it('accepts the When/Then house format as structured', () => {
     const [f] = assessAcceptanceCriteria('- [ ] Structured accepted (When: x — Then: y)');
     expect(f).toMatchObject({ index: 1, grade: 'structured', observable: true });

@@ -1,5 +1,5 @@
 // packages/core/src/readiness/invest.ts — deterministic INVEST report for a raw issue in factory check (#1731). Pure — no I/O.
-import { assessAcceptanceCriteria } from './criteria.js';
+import { assessAcceptanceCriteria, CHANGE_NOTE } from './criteria.js';
 import type { InvestLetter } from './decompose.js';
 import { extractIssueSections, findSection } from './index.js';
 import { checkIssueSize } from './size.js';
@@ -69,6 +69,8 @@ function assessTestable(ac: string): IssueInvestFinding {
   if (findings.length === 0) return warn('no acceptance criteria');
   const empty = findings.find((f) => f.grade === 'empty');
   if (empty) return warn(`criterion ${empty.index} is empty`);
+  const change = findings.find((f) => f.note === CHANGE_NOTE);
+  if (change) return warn(`criterion ${change.index} ${CHANGE_NOTE}`);
   const vague = findings.find((f) => f.grade === 'unstructured' && !f.observable);
   if (vague) return warn(`criterion ${vague.index} has no observable outcome`);
   return { letter: 'testable', status: 'pass', reason: `${findings.length} criteria are checkable` };

@@ -66,40 +66,80 @@ const COMMAND_WORDS = [
 ];
 const COMMAND_LINE_RE = new RegExp(`^(?:${COMMAND_WORDS.join('|')})(?:\\s|$)`);
 
+export const CHANGE_NOTE = 'describes a change, not an outcome';
+
+const OUTCOME_CUE_RE =
+  /\b(?:can|cannot|can't|sees?|gets?|receives?|knows?|finds?|passes|fails?|stays?|keeps?|appears?|reaches|is (?:shown|told|notified|blocked|rejected|accepted|visible|listed|available)|are (?:shown|listed|visible)|no longer|still|without)\b/i;
+const CHANGE_START_RE =
+  /^(?:(?:we|i|to)\s+)?(?:add|adds|remove|delete|rename|refactor|move|extract|create|update|change|replace|introduce|implement|wire|bump|edit|modify)\b/i;
+const FENCE_OPEN_RE = /^\s*(`{3,}|~{3,})\s*(\w+)?/;
+const SCENARIO_RE = /^\s*(?:Scenario(?: Outline)?|Example):/;
+
+function wordCount(text: string): number {
+  return text.match(/\S+/g)?.length ?? 0;
+}
+
 function gradeText(text: string): Omit<CriterionFinding, 'index' | 'text'> {
   if (text === '') return { grade: 'empty', observable: false };
   const when = /\bwhen\b/i.exec(text);
   const structured = when !== null && /\bthen\b/i.test(text.slice(when.index + when[0].length));
-  const observable = OBSERVABLE_RES.some((re) => re.test(text));
+  const prescriptive =
+    !structured && CHANGE_START_RE.test(text) && !/\bso(?: that)?\b/i.test(text) && !/\bthen\b/i.test(text);
+  if (prescriptive) return { grade: 'unstructured', observable: false, note: CHANGE_NOTE };
+  const observable = OBSERVABLE_RES.some((re) => re.test(text)) || (OUTCOME_CUE_RE.test(text) && wordCount(text) >= 4);
   if (structured) return { grade: 'structured', observable };
   return observable
     ? { grade: 'unstructured', observable }
     : { grade: 'unstructured', observable, note: 'no observable outcome' };
 }
 
+interface RawCriterion {
+  text: string;
+  gherkin: boolean;
+}
+
 export function assessAcceptanceCriteria(section: string): CriterionFinding[] {
-  const texts: string[] = [];
+  const raws: RawCriterion[] = [];
   let inFence = false;
+  let gherkinFence = false;
   let open = false;
   for (const line of section.split('\n')) {
     if (FENCE_RE.test(line)) {
+      if (!inFence) {
+        const info = FENCE_OPEN_RE.exec(line)?.[2]?.toLowerCase();
+        gherkinFence = info === 'gherkin' || info === 'feature';
+      }
       inFence = !inFence;
       open = false;
       continue;
     }
-    if (inFence) continue;
+    if (inFence) {
+      if (!gherkinFence) continue;
+      if (SCENARIO_RE.test(line)) {
+        raws.push({ text: line.trim(), gherkin: true });
+        open = true;
+      } else if (open && line.trim() !== '') {
+        const last = raws.length - 1;
+        raws[last] = { text: `${raws[last]?.text} ${line.trim()}`, gherkin: true };
+      }
+      continue;
+    }
     const box = CHECKBOX_LINE_RE.exec(line);
     if (box) {
-      texts.push((box[1] ?? '').trim());
+      raws.push({ text: (box[1] ?? '').trim(), gherkin: false });
       open = true;
     } else if (open && CONTINUATION_RE.test(line) && !LIST_ITEM_RE.test(line)) {
-      const last = texts.length - 1;
-      texts[last] = `${texts[last]} ${line.trim()}`.trim();
+      const last = raws.length - 1;
+      raws[last] = { text: `${raws[last]?.text} ${line.trim()}`.trim(), gherkin: false };
     } else {
       open = false;
     }
   }
-  return texts.map((text, i) => ({ index: i + 1, text, ...gradeText(text) }));
+  return raws.map((raw, i) => ({
+    index: i + 1,
+    text: raw.text,
+    ...(raw.gherkin ? { grade: 'structured' as const, observable: true } : gradeText(raw.text)),
+  }));
 }
 
 export function hasRunnableCommand(section: string): boolean {
