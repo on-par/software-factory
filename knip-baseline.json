@@ -306,7 +306,6 @@
     "production|files|scripts/sandbox-ab-report.ts|scripts/sandbox-ab-report.ts",
     "production|files|scripts/slowest-tests.ts|scripts/slowest-tests.ts",
     "production|files|scripts/test-budget.ts|scripts/test-budget.ts",
-    "production|files|scripts/test-tmp-sandbox.ts|scripts/test-tmp-sandbox.ts",
     "production|files|scripts/test-workers.ts|scripts/test-workers.ts",
     "production|types|packages/cli/src/cli/cost-json.ts|CostModelRowJson",
     "production|types|packages/cli/src/cli/daemon.ts|DaemonStatusJson",
