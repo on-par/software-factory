@@ -78,7 +78,7 @@ import {
   stubAwareShipPhase,
   TERMINAL_EVENT_KINDS,
 } from './ship-steps.js';
-import { baseRemoteRef, resolveShipSizeGate, type ShipIssueOptions } from './ship-options.js';
+import { baseRemoteRef, resolveShipSizeGate, type ContinueFrom, type ShipIssueOptions } from './ship-options.js';
 
 type ShipArgs = Parameters<typeof shipIssueFrom> extends [string, ...infer Rest] ? Rest : never;
 
@@ -129,6 +129,7 @@ async function shipIssueFrom(
     resumeFrom?: CheckResumeRecord; // Resume at CHECK on a kept worktree (#2564).
     /** Aborts when the lane loses this issue's claim lease (#3146); becomes RunPorts.claimSignal. */
     signal?: AbortSignal;
+    continueFrom?: ContinueFrom;
     rebuild?: { branch: string }; // #3325: a fresh branch off origin/main, built from the frozen spec with no PLAN
     /** Run-state slice-plan store for a stacked brief (#3813); becomes RunPorts.slicePlanStore. */
     slicePlanStore?: SlicePlanStore;
@@ -322,7 +323,7 @@ async function shipIssueFrom(
     ghName,
     git,
     paths,
-    startPoint: baseRemoteRef(opts.baseBranch),
+    startPoint: ctx?.continueFrom?.headSha ?? baseRemoteRef(opts.baseBranch),
     inPlace: opts.inPlace,
   });
 

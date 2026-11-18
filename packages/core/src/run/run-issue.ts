@@ -3,7 +3,7 @@ import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
 import { laneEnv } from '../environment/index.js';
-import { buildPhase as buildPhaseDefault } from '../phases/build.js';
+import { buildPhase as buildPhaseDefault, type BuildResult } from '../phases/build.js';
 import { installLaneDependencies as installLaneDependenciesDefault } from './lane-install.js';
 import { checkPhase as checkPhaseDefault, type CheckPhaseResult } from '../phases/check.js';
 import {
@@ -13,7 +13,8 @@ import {
   type TimeBudgetSettings,
 } from '../phases/check-time-budget.js';
 import { createRunStop } from './run-stop.js';
-import { buildHandoff, handoffNote, postHandoffComment, saveWip } from './handoff.js';
+import { buildHandoff, handoffNote, postHandoffComment, saveWip, type RemainingWorkHandoff } from './handoff.js';
+import { continuationDone, continuationNote, loadContinuationPlan } from './continuation.js';
 import type { SizeBudget } from '../readiness/size.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
@@ -169,6 +170,7 @@ export interface RunRequest extends ReworkRequestFields {
   preferredRoute?: BuildRoute;
   parentBaseRef?: string;
   prerequisiteStack?: PrerequisiteStackTarget;
+  continuation?: RemainingWorkHandoff;
   resumeFrom?: { phase: 'check'; diffBase?: string; route: BuildRoute; model: string; buildMinutes: number };
   eventsFile?: string;
   logsDir?: string;
@@ -554,7 +556,9 @@ async function runIssueOnce(
     const feedbackPlan = await feedbackRound.prepareFeedbackForRun(request, ports, log);
     const idle = await feedbackRound.idleFeedbackRound(feedbackPlan, request, ports, route, log);
     if (idle) return idle;
-    previousAttemptNote = feedbackRound.feedbackReplanNote(previousAttemptNote, feedbackPlan);
+    previousAttemptNote = request.continuation
+      ? continuationNote(request.continuation)
+      : feedbackRound.feedbackReplanNote(previousAttemptNote, feedbackPlan);
     const resumed = request.resumeFrom ?? reviewReworkResume(request, feedbackPlan);
     if (resumed) {
       ports.events('check')(
@@ -590,7 +594,11 @@ async function runIssueOnce(
       }
 
       const planReuse = feedbackPlan?.replan ? undefined : ports.planReuse;
-      const reused = await loadReusablePlan(planReuse, { ...request, issue: workKey }, log, ports.events('plan'));
+      const continued = request.continuation
+        ? await loadContinuationPlan(request.continuation, request.specPath, ports.events('plan'))
+        : null;
+      const reused =
+        continued ?? (await loadReusablePlan(planReuse, { ...request, issue: workKey }, log, ports.events('plan')));
       const routeCaps = await laneRouteCapabilities(request, ports, ports.events('plan'));
       const planGate = reused ? undefined : await capGate.enterPlan(route, ports.events('plan'));
       if (planGate?.released) return planGate.released;
@@ -777,9 +785,21 @@ async function runIssueOnce(
           parentBaseRef: request.parentBaseRef,
           openQuestions: plan.designArtifact?.openQuestions,
         });
-      const build = await (orderedBuild
-        ? runStage('build', buildAt, { beforeRerun: restoreBuild })
-        : buildAt(undefined));
+      const skipBuild = request.continuation !== undefined && continuationDone(request.continuation);
+      if (skipBuild) {
+        ports.events('build')(
+          'build',
+          `every criterion is done on ${request.continuation?.wipBranch ?? 'the WIP branch'} — BUILD skipped, running the full gate`,
+        );
+      }
+      const build: BuildResult = skipBuild
+        ? {
+            ok: true,
+            route: buildRoute,
+            model: buildModel ?? ports.router.resolveAll(`build_${buildRoute}`)[0] ?? 'continued',
+            diffBase: request.continuation?.baseSha ?? undefined,
+          }
+        : await (orderedBuild ? runStage('build', buildAt, { beforeRerun: restoreBuild }) : buildAt(undefined));
       route = build.route;
       if (runStop.reason()) return await handOff();
       await syncSpecRoute(build.route, 'build-failover');

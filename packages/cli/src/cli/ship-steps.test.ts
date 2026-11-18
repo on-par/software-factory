@@ -55,6 +55,9 @@ it('passes the resolved factory state and primary git directory to Codex', () =>
   });
   expect(request.parkOverBudget).toBe(true);
   expect(request.specPath.startsWith(`${paths.state}/plans/`)).toBe(true);
+  expect(request.continuation).toBeUndefined();
+  const handoff = { headSha: 'a'.repeat(40) } as NonNullable<typeof request.continuation>;
+  expect(buildRunRequest({ ...input, ctx: { continueFrom: { handoff } } }).continuation).toBe(handoff);
 });
 
 it('buildRunRequest adds sandbox.writablePaths to codex writable roots', () => {

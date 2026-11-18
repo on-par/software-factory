@@ -48,6 +48,12 @@ function run(octokit: Octokit, extra: Partial<Parameters<typeof resolveRunBranch
 }
 
 describe('resolveRunBranch', () => {
+  it('names a new branch on the WIP head for --continue-from and never adopts an open PR (#4271)', async () => {
+    const octokit = {} as Octokit;
+    const branch = await run(octokit, { ctx: { continueFrom: { headSha: 'abcdef1234567890' } } });
+    expect(branch).toBe(`${branchFor(workKeyFromIssue(2253), 'New title', 'factory')}-cont-abcdef1`);
+  });
+
   it("adopts the open factory PR's branch when the issue title changed since the park", async () => {
     const { octokit, list } = stub([pr(7, 'factory/2253-old-title')]);
     const branch = await run(octokit);

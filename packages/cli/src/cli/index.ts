@@ -119,10 +119,6 @@ import {
   renderKpiReport,
   renderKpiTrend,
   resolveDefectWindowDays,
-  parseSizeGateMode,
-  parseMaxSlices,
-  SIZE_GATE_MODES,
-  type SizeGateMode,
   resolveEffectiveModelPins,
   resolveEnvironmentProxy,
   resolveMergePolicy,
@@ -236,12 +232,10 @@ import {
   detectClaudePlan,
   findSlicePlanComment,
   listBlockedBy,
-  aliasDeprecatedSizeGateMode,
   checkResumeBaseDrift,
   formatBaseMovedRefusal,
 } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
-import { baseBranchConflict, baseBranchOrExit, inPlaceConflict, resolveWorkspaceMode } from './ship-options.js';
 import { runIssueStack } from './stack-run.js';
 import { withRepoRunLock } from './repo-run-lock.js';
 
@@ -251,6 +245,9 @@ import { resolveAwaitingCiCapMs } from '@on-par/factory-core/internal';
 import { IssueSkippedError } from './issue-skipped-error.js';
 import { parkOnOpenPrerequisites } from './run-issue-prerequisites.js';
 import { withRunReport, validateRunReportFlags } from './run-report.js';
+import { resolveContinueFrom } from './continue-from.js';
+import { runIssueModeOrExit } from './run-issue-flags.js';
+import { baseBranchOrExit } from './ship-options.js';
 import { driveToMerge, exitForMerge, shouldDriveAfterShipFailure, validateMergeFlags } from './run-issue-merge.js';
 import { formatSteerabilityReport } from '@on-par/factory-core/internal';
 import { buildTierEvidence, formatTierEvidence, resolveTrustTier } from '@on-par/factory-core/internal';
@@ -1095,24 +1092,6 @@ function branchPrefixOrExit(raw: string | undefined, configPath: string): string
   const prefix = resolveBranchPrefixOption(raw, config);
   if (prefix === null) throw new CliExitError(INVALID_BRANCH_PREFIX_MESSAGE, 2);
   return prefix;
-}
-
-function sizeGateOrExit(raw: string | undefined): SizeGateMode | undefined {
-  if (raw === undefined) return undefined;
-  const mode = parseSizeGateMode(aliasDeprecatedSizeGateMode(raw));
-  if (mode === undefined) {
-    throw new CliExitError(`factory: invalid --size-gate '${raw}' — expected one of: ${SIZE_GATE_MODES.join(', ')}`, 2);
-  }
-  return mode;
-}
-
-function maxSlicesOrExit(raw: string | undefined): number | undefined {
-  if (raw === undefined) return undefined;
-  const n = parseMaxSlices(raw);
-  if (n === undefined) {
-    throw new CliExitError(`factory: invalid --max-slices '${raw}' — expected a whole number from 1 to 20`, 2);
-  }
-  return n;
 }
 
 // Product names become a filename in the constitutions dir; keep them to a safe,
@@ -2371,6 +2350,8 @@ async function cmdRunIssue(
     approvePlan?: boolean;
     branchPrefix?: string;
     baseBranch?: string;
+    continueFrom?: string;
+    handoff?: string;
     runChildren?: boolean;
     sizeGate?: string;
     stack?: boolean;
@@ -2399,12 +2380,14 @@ async function cmdRunIssue(
   const {
     runChildren: _removed,
     sizeGate: rawSizeGate,
-    maxSlices: rawMaxSlices,
+    maxSlices: _maxSlices,
     stack,
     merge,
     mergeTimeout,
     admin,
     inPlace: _inPlaceFlag,
+    continueFrom: continueBranch,
+    handoff: handoffFile,
     json,
     export: exportDir,
     ...shipOpts
@@ -2415,27 +2398,7 @@ async function cmdRunIssue(
   );
   validateRunReportFlags({ json, export: exportDir, stack: stack || rawSizeGate === 'stack' });
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
-  const parsedSizeGate = sizeGateOrExit(rawSizeGate);
-  if (stack && parsedSizeGate !== undefined && parsedSizeGate !== 'stack') {
-    throw new CliExitError('factory: --stack is --size-gate stack — drop one of them', 2);
-  }
-  const sizeGate = stack ? 'stack' : parsedSizeGate;
-  const explicitStack = stack === true || rawSizeGate === 'stack';
-  const maxSlices = maxSlicesOrExit(rawMaxSlices);
-  const baseBranch = baseBranchOrExit(opts.baseBranch);
-  const conflict = baseBranchConflict({ baseBranch, sizeGate });
-  if (conflict) throw new CliExitError(conflict, 2);
-  if (sizeGate === 'stack' && opts.pr === false) {
-    throw new CliExitError('factory: --stack opens a PR per slice — drop --no-pr or drop --stack', 2);
-  }
-  if (opts.pr === false && sizeGate !== undefined && sizeGate !== 'off') {
-    throw new CliExitError('factory: --no-pr runs with the size gate off — drop --size-gate or drop --no-pr', 2);
-  }
-  const inPlace = resolveWorkspaceMode(opts.inPlace, process.env) === 'in-place';
-  if (inPlace) {
-    const inPlaceMsg = inPlaceConflict({ baseBranch, sizeGate });
-    if (inPlaceMsg) throw new CliExitError(inPlaceMsg, 2);
-  }
+  const { sizeGate, explicitStack, maxSlices, baseBranch, inPlace } = runIssueModeOrExit(opts, process.env);
 
   const reportCtx = {
     issue: issueNum,
@@ -2475,6 +2438,17 @@ async function cmdRunIssue(
             2,
           );
         }
+        const continueFrom =
+          continueBranch === undefined
+            ? undefined
+            : await resolveContinueFrom({
+                branch: continueBranch,
+                handoffFile,
+                octokit: getOctokit(),
+                repo: ghRepo,
+                issue: issueNum,
+                repoRoot,
+              });
         console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
         // A one-job in-place container has no other lanes to collect.
         if (!inPlace) await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
@@ -2552,6 +2526,7 @@ async function cmdRunIssue(
                 repoRoot,
                 ghRepo,
                 workRequest: work,
+                continueFrom,
                 onOutcome: (o) => {
                   outcome = o;
                   report.recordOutcome(o);

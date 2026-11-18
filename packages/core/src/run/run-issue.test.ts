@@ -27,8 +27,10 @@ import type { RunPolicy } from './policy.js';
 import type { Environment, Workspace } from './ports.js';
 import { createPlanReuseStore, issueBodyHash, type CheckResumeStore, type PlanReuseStore } from './resume-context.js';
 import { writeSpec } from '../spec/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { schemaErrorCheckerOutput } from '../checkers/index.js';
 import { preflightConfigTokens } from '../config/template-tokens.js';
+import type { RemainingWorkHandoff } from './handoff.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 const planPhase = vi.fn<typeof realPlanPhase>();
 const buildPhase = vi.fn<typeof realBuildPhase>();
@@ -2351,5 +2353,104 @@ describe('runIssue — preserved build on a non-code CHECK failure (#2564)', () 
     expect(outcome.state).toBe('parked');
     expect(checkResume.record).not.toHaveBeenCalled();
     expect(checkResume.clear).not.toHaveBeenCalled();
+  });
+});
+
+describe('runIssue — continue from a WIP branch and handoff (#4271)', () => {
+  const specDirs = createTempDirs();
+  afterAll(() => specDirs.cleanup());
+  const handoff = (over: Partial<RemainingWorkHandoff> = {}): RemainingWorkHandoff => ({
+    version: 1,
+    stopReason: 'deadline',
+    phase: 'build',
+    baseSha: 'b'.repeat(40),
+    wipBranch: 'wip/issue-1-fix-the-thing',
+    headSha: 'a'.repeat(40),
+    specPath: 'spec.md',
+    criteria: [
+      { criterion: 'adds the flag', status: 'not_started', proof: 'test' },
+      { criterion: 'documents it', status: 'not_started', proof: null },
+    ],
+    lastFailure: null,
+    nextStep: 'Finish BUILD',
+    fitsOneRun: false,
+    ...over,
+  });
+  const spec = async (data?: Record<string, unknown>): Promise<string> => {
+    const specPath = join(specDirs.makeSync('continue-spec-'), 'issue-1.md');
+    await writeSpec(specPath, { body: '# spec', ...(data ? { data } : {}) });
+    return specPath;
+  };
+  const rig = () => {
+    const phases: string[] = [];
+    const events: Array<[string, string]> = [];
+    const builds: Array<Parameters<typeof realBuildPhase>[0]> = [];
+    const ports = basePorts({
+      events: () => (type: string, msg: string) => void events.push([type, msg]),
+      planPhase: async () => (phases.push('plan'), PLAN_OK),
+      buildPhase: async (o) => (phases.push('build'), builds.push(o), BUILD_OK),
+      checkPhase: async () => (phases.push('check'), CHECK_OK),
+      shipPhase: async () => (phases.push('ship'), SHIP_OK),
+    });
+    return { phases, events, builds, ports };
+  };
+
+  it('reuses the frozen spec, skips PLAN, and builds the remaining criteria with the last failure', async () => {
+    const { phases, events, builds, ports } = rig();
+    const continuation = handoff({ lastFailure: 'tests: expected 2 got 1' });
+    const specPath = await spec({ route: 'claude' });
+    const outcome = await runIssue(baseRequest({ specPath, continuation }), basePolicy(), ports);
+    expect(outcome.state).toBe('ready');
+    expect(phases).toEqual(['build', 'check', 'ship']);
+    expect(events.map(([type]) => type)).toContain('plan_reused');
+    expect(builds[0].route).toBe('claude');
+    expect(builds[0].previousAttempt).toContain(`continues from wip/issue-1-fix-the-thing @ ${'a'.repeat(40)}`);
+    expect(builds[0].previousAttempt).toContain('- adds the flag (not_started)');
+    expect(builds[0].previousAttempt).toContain('tests: expected 2 got 1');
+    expect(builds[0].previousAttempt).not.toContain('Already done');
+  });
+
+  it('does not rebuild when every criterion is done, and still runs the full gate once before SHIP', async () => {
+    const { phases, ports } = rig();
+    const continuation = handoff({
+      phase: 'ship',
+      criteria: [{ criterion: 'adds the flag', status: 'done', proof: 'test' }],
+    });
+    const outcome = await runIssue(
+      baseRequest({ specPath: await spec({ route: 'claude' }), continuation }),
+      basePolicy(),
+      ports,
+    );
+    expect(outcome.state).toBe('ready');
+    expect(phases).toEqual(['check', 'ship']);
+  });
+
+  it('plans when the handoff has no frozen spec', async () => {
+    const { phases, builds, ports } = rig();
+    await runIssue(baseRequest({ continuation: handoff({ specPath: null }) }), basePolicy(), ports);
+    expect(phases).toEqual(['plan', 'build', 'check', 'ship']);
+    expect(builds[0].previousAttempt).toContain('Continuing a stopped run');
+  });
+
+  it('warns and plans when the frozen spec is missing or has no route', async () => {
+    const missing = rig();
+    await runIssue(
+      baseRequest({ specPath: '/nonexistent/issue-1.md', continuation: handoff() }),
+      basePolicy(),
+      missing.ports,
+    );
+    expect(missing.phases[0]).toBe('plan');
+    expect(missing.events.find(([type]) => type === 'environment_warning')?.[1]).toContain(
+      'could not read the frozen spec',
+    );
+
+    const noRoute = rig();
+    const specPath = await spec();
+    await runIssue(baseRequest({ specPath, continuation: handoff() }), basePolicy(), noRoute.ports);
+    expect(noRoute.phases[0]).toBe('plan');
+    expect(noRoute.events).toContainEqual([
+      'environment_warning',
+      `frozen spec ${specPath} has no build route — planning`,
+    ]);
   });
 });
