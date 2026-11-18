@@ -4,8 +4,8 @@
     "tests": 1041
   },
   "cli": {
-    "source": 28610,
-    "tests": 54540
+    "source": 28672,
+    "tests": 54735
   },
   "config": {
     "source": 1222,

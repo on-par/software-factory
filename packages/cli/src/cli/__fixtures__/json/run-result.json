@@ -20,5 +20,6 @@
     }
   ],
   "cost": { "usd": 0.42, "byModel": { "model-a": 0.42 } },
-  "reworkRounds": 0
+  "reworkRounds": 0,
+  "prerequisites": []
 }

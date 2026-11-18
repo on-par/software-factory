@@ -242,6 +242,8 @@ import { withRepoRunLock } from './repo-run-lock.js';
 export { CliExitError, withRepoRunLock };
 import type { StopMarker } from '@on-par/factory-core/internal';
 import { resolveAwaitingCiCapMs } from '@on-par/factory-core/internal';
+import { IssueSkippedError } from './issue-skipped-error.js';
+import { parkOnOpenPrerequisites } from './run-issue-prerequisites.js';
 import { withRunReport, validateRunReportFlags } from './run-report.js';
 import { resolveContinueFrom } from './continue-from.js';
 import { runIssueModeOrExit } from './run-issue-flags.js';
@@ -2458,6 +2460,9 @@ async function cmdRunIssue(
           });
         }
 
+        const log = (type: 'warn' | 'issue_deferred', msg: string) => logEvent(paths.events, type, issueNum, msg);
+        const prereqs = { brief: work.brief, repo: ghRepo, octokit: () => getOctokit(), report, log };
+        if (sizeGate !== 'stack' && !baseBranch && (await parkOnOpenPrerequisites(prereqs))) return;
         try {
           if (sizeGate === 'stack') {
             await runIssueStack(issueNum, baseBranch, {
@@ -3563,6 +3568,7 @@ export function laneQueueDeps(
 }
 
 export { preflightQueuedIssue };
+export { IssueSkippedError };
 export type { OpenPullRequestEvidence, QueuePreflightOps, SlicePullState } from './queue-preflight.js';
 
 export function createQueuePreflightOps(
@@ -3616,17 +3622,6 @@ export async function planRunLanes(input: {
     lanes: lanes.map((lane) => ({ lane, issues: [], deps: laneQueueDeps(backend, lane, input.onUnshippable) })),
     diagnostics: [],
   };
-}
-
-/** The target issue was already resolved before the run started — a clean skip,
- *  not a park. Callers advance to the next queue entry. (#681) */
-export class IssueSkippedError extends Error {
-  constructor(
-    message: string,
-    readonly reason: 'already-closed',
-  ) {
-    super(message);
-  }
 }
 
 export function issueFromFactoryBranch(branch: string, prefix?: string): number | undefined {

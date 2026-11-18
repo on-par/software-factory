@@ -20,6 +20,7 @@ export interface RunResultInput {
   outcome: RunOutcome | undefined;
   merge: MergeResult | undefined;
   lifecycle?: LifecycleResult | undefined;
+  prerequisites?: number[] | undefined;
   error: unknown;
   startedAt: string;
   finishedAt: string;
@@ -157,6 +158,7 @@ export function buildRunResult(input: RunResultInput): RunResultJson {
     phases: buildPhases(events, costs, input.finishedAt),
     cost: { usd: round6(total), byModel },
     reworkRounds: outcome?.reworkRounds ?? 0,
+    prerequisites: input.prerequisites ?? [],
     ...(merge?.kind === 'land-deferred' ? { landDeferrals: merge.deferrals ?? 0 } : {}),
     ...(outcome?.state === 'parked' && outcome.handoff ? { handoff: outcome.handoff } : {}),
   };

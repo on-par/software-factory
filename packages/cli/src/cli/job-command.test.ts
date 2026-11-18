@@ -26,6 +26,7 @@ const RESULT = (outcome: string, pr: unknown = null) =>
     phases: [],
     cost: { usd: 0, byModel: {} },
     reworkRounds: 0,
+    prerequisites: [],
   });
 
 interface Harness {
