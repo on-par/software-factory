@@ -156,7 +156,7 @@ cap is 6 h). Claude usage is billed to the given credential.
 
 A one-shot host (a container that is destroyed after the run) can pass `--json` and `--export <dir>` to
 `factory run-issue`, `run-brief` or `ship`. `--json` prints the final result (outcome, PR, SHAs, phase
-timings, cost in USD; outcome `land-deferred` with a `landDeferrals` count when the base kept moving until the `--merge` timeout, exit 14) as one `schemaVersion 1` line on stdout and moves progress to stderr; the schema is
+timings, cost in USD; outcome `land-deferred` with a `landDeferrals` count when the base kept moving until the `--merge` timeout, exit 14; a `prerequisites` array listing the open `Depends on:` issues a `run-issue` parked on, otherwise empty) as one `schemaVersion 1` line on stdout and moves progress to stderr; the schema is
 `schemas/run-result.schema.json`. `--export` copies the run's state file, events, costs and `run-result.json`
 into `<dir>` on every exit path, so the host can upload them before it exits. Neither flag changes the exit code.
 

@@ -483,6 +483,7 @@ export const runResultJsonSchema = z.object({
   ),
   cost: z.object({ usd: z.number(), byModel: z.record(z.string(), z.number()) }),
   reworkRounds: z.number().int(),
+  prerequisites: z.array(z.number().int()),
   /** How many times the land gave up on a moving base before `--merge` timed out (#3957); set with outcome `land-deferred`. */
   landDeferrals: z.number().int().optional(),
   handoff: handoffJsonSchema.optional(),
