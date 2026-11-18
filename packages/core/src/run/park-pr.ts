@@ -32,6 +32,7 @@ export function parkedPrAction(reason: ParkReason, greenAndChecked: boolean): 'c
     case 'all_providers_down':
     case 'sandbox-env':
     case 'check-infra':
+    case 'time-budget':
       return greenAndChecked ? 'ready' : 'leave';
     default: {
       const unreachable: never = reason;

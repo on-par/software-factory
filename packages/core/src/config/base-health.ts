@@ -30,16 +30,47 @@ export const CheckConfigSchema = z
       .describe(
         'Hours a cached baseline (base SHA) checker result is reused before CHECK and base health re-run it (#3540). Unset: 24.',
       ),
+    timeBudget: z
+      .object({
+        verifyMinutes: z
+          .number()
+          .positive()
+          .optional()
+          .describe('Expected minutes for one verify pass before this run has measured one. Unset: 10.'),
+        reworkBuildMinutes: z
+          .number()
+          .positive()
+          .optional()
+          .describe('Minutes allowed for one rework build, added to one verify for a rework round. Unset: 10.'),
+        safetyMarginMinutes: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe('Minutes kept in reserve before the run deadline. Unset: 2.'),
+      })
+      .strict()
+      .optional()
+      .describe(
+        'Estimates CHECK uses when FACTORY_RUN_DEADLINE_AT sets a run deadline (#4264): a flake re-run or rework round that would not finish before the deadline is skipped and the issue parks time-budget. No effect without a deadline.',
+      ),
   })
   .strict()
   .optional()
-  .describe('CHECK phase settings (#3272, #3540).');
+  .describe('CHECK phase settings (#3272, #3540, #4264).');
 
 export const DEFAULT_BASELINE_CACHE_TTL_HOURS = 24;
 
 /** Hours a cached baseline checker result is reused (#3540); 24 unless the repo sets check.baselineCacheTtlHours. */
 export function resolveBaselineCacheTtlHours(repo: { check?: { baselineCacheTtlHours?: number } } | null): number {
   return repo?.check?.baselineCacheTtlHours ?? DEFAULT_BASELINE_CACHE_TTL_HOURS;
+}
+
+export function resolveCheckTimeBudget(
+  repo: {
+    check?: { timeBudget?: { verifyMinutes?: number; reworkBuildMinutes?: number; safetyMarginMinutes?: number } };
+  } | null,
+): { verifyMinutes?: number; reworkBuildMinutes?: number; safetyMarginMinutes?: number } {
+  return { ...repo?.check?.timeBudget };
 }
 
 /** Repo-config keys for base health and CHECK settings, spread into the V2 schema. */

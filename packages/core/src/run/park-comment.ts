@@ -73,6 +73,8 @@ const PARK_HINTS: Record<ParkReason, string> = {
   config: 'fix the named config file and line, then run `factory unpark <n>`.',
   'check-infra':
     'CHECK failed twice on infrastructure (network reset, registry fetch or missing tool), not the change. Fix the network or install the tool on the runner, then run `factory unpark <n>`.',
+  'time-budget':
+    'CHECK stopped before a flake re-run or rework round that would not finish before the run deadline (FACTORY_RUN_DEADLINE_AT). The check failure above is the real one; the branch keeps the work. Start a run with more time, then run `factory unpark <n>`.',
   'sandbox-env':
     'the BUILD sandbox denied a loopback bind (listen EPERM on 127.0.0.1 or a TMPDIR pipe). This is an environment limit, not a code failure. Run the build in a sandbox mode that allows loopback binds (see #3081), then run `factory unpark <n>`.',
 };

@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- CHECK respects an optional run deadline: set `FACTORY_RUN_DEADLINE_AT` (epoch ms or ISO-8601) and CHECK skips a flake re-run or rework round that would not finish before it, logs `skipped <rerun|rework> — needs ~Xm, Ym left in the run budget`, and parks the issue `time-budget` with the real check failure. `check.timeBudget` (`verifyMinutes`, `reworkBuildMinutes`, `safetyMarginMinutes`) tunes the estimates. Without a deadline nothing changes (#4264).
+
 ### Changed
 
 - CHECK skips the flaky re-run when the tests checker failed only on a deterministic gate (coverage threshold, test-time budget or LOC budget) with no failing test, logs `flaky re-run: skipped — deterministic gate failed (<gate>)`, and sends the threshold lines plus uncovered lines in changed files straight to rework (#4263).

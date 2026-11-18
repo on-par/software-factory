@@ -94,6 +94,16 @@ describe('EVENT_TRAITS', () => {
     expect(isParkKind('check_triage')).toBe(false);
   });
 
+  it('classifies time-budget as a parked terminal event (#4264)', () => {
+    expect(EVENT_TRAITS['time-budget']).toEqual({
+      severity: 'error',
+      isPark: true,
+      isTerminal: true,
+      laneStatus: 'parked',
+    });
+    expect(isParkKind('time-budget')).toBe(true);
+  });
+
   it('classifies flaky_tests as non-park evidence (#2302)', () => {
     expect(EVENT_TRAITS.flaky_tests).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });

@@ -134,3 +134,63 @@ describe('runIssue — check-infra park (#3371)', () => {
     expect(hint).toContain('factory unpark 7');
   });
 });
+
+describe('runIssue — time-budget park (#4264)', () => {
+  const FAILED: CheckSummary = {
+    failures: 1,
+    passes: 0,
+    skips: 0,
+    total: 1,
+    results: [{ checker: 'tests', result: 'FAIL', details: 'coverage 96.87% < 96.9%' }],
+  };
+
+  it('parks time-budget with the check failure and passes the parsed deadline to CHECK', async () => {
+    const worktree = tempDirs.makeSync('time-budget-park-');
+    const { calls: events, fn: log } = recordArgs((_type: string, _msg: string) => {});
+    const message = 'time budget: skipped rework — needs ~20m, 4m left in the run budget\ntests: coverage';
+    const seen: Parameters<NonNullable<RunPorts['checkPhase']>>[0][] = [];
+    const checkPhase: RunPorts['checkPhase'] = async (o) => {
+      seen.push(o);
+      return { passed: false, summary: FAILED, reworkRounds: 0, failureSignature: 'tests:sig', timeBudget: message };
+    };
+    const deadline = '2026-11-18T01:50:00.000Z';
+    const outcome = await runIssue(
+      { ...request, runDeadlineAt: deadline, checkTimeBudget: { verifyMinutes: 9 } },
+      policy,
+      ports(log, worktree, checkPhase),
+    );
+    expect(outcome).toMatchObject({
+      state: 'parked',
+      reason: 'time-budget',
+      failureSignature: 'tests:sig',
+      failingChecks: ['tests'],
+    });
+    expect(seen[0]).toMatchObject({
+      runDeadlineAtMs: Date.parse(deadline),
+      timeBudget: { verifyMinutes: 9 },
+    });
+    expect(events).toContainEqual(['time-budget', expect.stringContaining(message), expect.anything()]);
+  });
+
+  it('warns and runs without a deadline when the value does not parse', async () => {
+    const worktree = tempDirs.makeSync('time-budget-bad-');
+    const { calls: events, fn: log } = recordArgs((_type: string, _msg: string) => {});
+    const seen: Parameters<NonNullable<RunPorts['checkPhase']>>[0][] = [];
+    const checkPhase: RunPorts['checkPhase'] = async (o) => {
+      seen.push(o);
+      return { passed: false, summary: FAILED, reworkRounds: 1 };
+    };
+    await runIssue({ ...request, runDeadlineAt: 'soon' }, policy, ports(log, worktree, checkPhase));
+    expect(seen[0]?.runDeadlineAtMs).toBeUndefined();
+    expect(events).toContainEqual([
+      'environment_warning',
+      expect.stringContaining("FACTORY_RUN_DEADLINE_AT='soon' is not epoch ms or ISO-8601"),
+    ]);
+  });
+
+  it('has a park hint naming the run deadline', () => {
+    const hint = parkUnblockHint('time-budget', workKeyFromIssue(7));
+    expect(hint).toContain('FACTORY_RUN_DEADLINE_AT');
+    expect(hint).toContain('factory unpark 7');
+  });
+});

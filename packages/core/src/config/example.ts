@@ -14,7 +14,7 @@
 import { z } from 'zod';
 
 import { isPlainObject, loadFactoryConfig, loadModelsConfig, type FactoryConfig } from './index.js';
-import { githubExampleNode, trackerExampleNode } from './example-nodes.js';
+import { CHECK_TIME_BUDGET_EXAMPLE, githubExampleNode, trackerExampleNode } from './example-nodes.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import {
   DEFAULT_T1_SAMPLE_RATE,
@@ -315,6 +315,7 @@ function modelNamespace(): Node[] {
       children: [
         unset('hermeticGit', doc('check', 'hermeticGit'), true),
         unset('baselineCacheTtlHours', doc('check', 'baselineCacheTtlHours'), 24),
+        unset('timeBudget', doc('check', 'timeBudget'), CHECK_TIME_BUDGET_EXAMPLE),
       ],
     },
   ];
