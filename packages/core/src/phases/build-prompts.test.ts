@@ -41,13 +41,41 @@ describe('verify rule', () => {
 describe('verify rule with tests.affected (#3260)', () => {
   const affectedTestsCommand = 'npx vitest related --run {files}';
 
-  it('names the affected template and says CHECK runs the full suite before SHIP', () => {
+  it('names the affected template and says CHECK runs one full gate before SHIP', () => {
     for (const prompt of [
       buildCommitOnlyPrompt({ ...base, affectedTestsCommand }),
       buildClaudePrompt({ ...claudeBase, affectedTestsCommand }),
     ]) {
       expect(prompt).toContain(`\`${affectedTestsCommand}\``);
-      expect(prompt).toContain('CHECK runs the full suite before SHIP');
+      expect(prompt).toContain('CHECK runs one full gate before SHIP');
+    }
+  });
+
+  it('focused buildVerify drops the finish-with-full-command demand and names the focused typecheck and affected tests', () => {
+    for (const prompt of [
+      buildCommitOnlyPrompt({
+        ...base,
+        affectedTestsCommand,
+        affectedTypecheckCommand: 'npx tsc -b --incremental',
+        buildVerify: 'focused',
+      }),
+      buildClaudePrompt({ ...claudeBase, affectedTestsCommand, affectedTypecheckCommand: 'npx tsc -b --incremental' }),
+    ]) {
+      expect(prompt).not.toContain('finish with the full command above');
+      expect(prompt).toContain(
+        'run only the focused commands: typecheck `npx tsc -b --incremental` and affected tests',
+      );
+      expect(prompt).toContain(`\`${affectedTestsCommand}\``);
+    }
+  });
+
+  it('buildVerify full keeps the finish-with-full-command wording', () => {
+    for (const prompt of [
+      buildCommitOnlyPrompt({ ...base, affectedTestsCommand, buildVerify: 'full' }),
+      buildClaudePrompt({ ...claudeBase, affectedTestsCommand, buildVerify: 'full' }),
+    ]) {
+      expect(prompt).toContain('so finish with the full command above.');
+      expect(prompt).not.toContain('run only the focused commands');
     }
   });
 

@@ -90,6 +90,34 @@ describe('listChangedFiles', () => {
   });
 });
 
+describe('tests.affected.typecheck (#4251)', () => {
+  const withTypecheck = (typecheck: string | undefined, changedFiles: string[]) =>
+    resolveAffectedTestsCommand({
+      repo: { tests: { affected: { command: 'npx vitest related --run {files}', typecheck } } },
+      constitution: null,
+      changedFiles,
+    });
+
+  it('carries the typecheck argv and command and expands {files}', () => {
+    expect(withTypecheck('npx tsc -b --incremental', ['src/a.ts'])).toMatchObject({
+      kind: 'affected',
+      typecheck: { argv: ['npx', 'tsc', '-b', '--incremental'], command: 'npx tsc -b --incremental' },
+    });
+    expect(withTypecheck('tsc --noEmit {files}', ['src/my a.ts'])).toMatchObject({
+      typecheck: { argv: ['tsc', '--noEmit', 'src/my a.ts'], command: "tsc --noEmit 'src/my a.ts'" },
+    });
+  });
+
+  it('has no typecheck when it is unset', () => {
+    expect(withTypecheck(undefined, ['src/a.ts'])).not.toHaveProperty('typecheck');
+  });
+
+  it('names the typecheck in the description', () => {
+    const r = withTypecheck('npx tsc -b', ['src/a.ts']);
+    expect(describeAffectedResolution(r, 2)).toContain('; typecheck — npx tsc -b');
+  });
+});
+
 describe('describeAffectedResolution', () => {
   it('names reason and trigger', () => {
     expect(describeAffectedResolution({ kind: 'full', reason: 'trigger', trigger: 'a', fileCount: 2 }, 2)).toBe(

@@ -35,7 +35,12 @@ import type { RequiredChecksVerdict } from '../utils/required-checks.js';
 import { baselineCacheOptions, describeBaseline } from './check-baseline.js';
 import { LENS_REVIEW_CHECKER, lensShowstopperRefs, remainingShowstoppers } from './check-showstoppers.js';
 import { failureSignature } from './check-signature.js';
-import { affectedVerifyInstruction, createAffectedSelector, fullTestsBeforeShip } from './check-affected.js';
+import {
+  affectedVerifyInstruction,
+  createAffectedSelector,
+  fullGateBeforeShip,
+  logVerifyScope,
+} from './check-affected.js';
 import { resolveReworkRoute } from './plan-routes.js';
 
 export { LENS_REVIEW_CHECKER, lensShowstopperRefs, remainingShowstoppers };
@@ -342,6 +347,7 @@ async function checkPhaseImpl(opts: {
 
   const hermeticGitNote = `hermetic git: ${hermeticGit ? 'on (GIT_CONFIG_GLOBAL=/dev/null, GIT_CONFIG_NOSYSTEM=1)' : 'off (check.hermeticGit false)'}`;
   log('check', hermeticGitNote);
+  await logVerifyScope(undefined, ctx, 0, log);
   let summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
   summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
   let reworkRounds = 0;
@@ -542,9 +548,10 @@ async function checkPhaseImpl(opts: {
     ctx.probe = probe;
     ctx.outputLogDir = roundLogDir(reworkRounds);
     ctx.affectedTests = await selectAffected(reworkRounds);
+    await logVerifyScope(ctx.affectedTests, ctx, reworkRounds, log);
     log('check', hermeticGitNote);
     summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
-    summary = await fullTestsBeforeShip(summary, ctx, reworkRounds, log);
+    summary = await fullGateBeforeShip(summary, ctx, reworkRounds, log);
     ctx.affectedTests = undefined;
     summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
