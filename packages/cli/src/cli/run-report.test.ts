@@ -71,6 +71,20 @@ describe('withRunReport', () => {
     });
   });
 
+  it('recordMerge reaches the printed result', async () => {
+    const s = setup();
+    await withRunReport(
+      { json: true },
+      s.ctx,
+      async (r) => {
+        r.recordOutcome(shipped);
+        r.recordMerge({ kind: 'merged', prNumber: 7, detail: 'merged' });
+      },
+      s.deps,
+    );
+    expect(JSON.parse(s.out[0])).toMatchObject({ outcome: 'merged', pr: { number: 7, state: 'merged' } });
+  });
+
   it('recordPrerequisites reaches the printed result (#4270)', async () => {
     const s = setup();
     await withRunReport({ json: true }, s.ctx, async (r) => r.recordPrerequisites([4269, 4264]), s.deps);

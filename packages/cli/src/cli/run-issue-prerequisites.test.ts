@@ -85,6 +85,17 @@ describe('parkOnOpenPrerequisites', () => {
     expect(recorded.logs).toEqual(['issue_deferred: waiting for prerequisites: #3, #2']);
   });
 
+  it('logs a failed lookup as a warn and does not park on it', async () => {
+    const { input, recorded } = harness([]);
+    const failing = { ...input, octokit: () => fakeOctokit({ graphql: async () => ({}) }).octokit as Octokit };
+    expect(await parkOnOpenPrerequisites(failing)).toBe(false);
+    expect(recorded.logs).toEqual([
+      'warn: prerequisite #3 lookup failed: prerequisite #3 response was incomplete',
+      'warn: prerequisite #1 lookup failed: prerequisite #1 response was incomplete',
+      'warn: prerequisite #2 lookup failed: prerequisite #2 response was incomplete',
+    ]);
+  });
+
   it('does not park when every prerequisite is closed', async () => {
     const { input, recorded } = harness([]);
     expect(await parkOnOpenPrerequisites(input)).toBe(false);
