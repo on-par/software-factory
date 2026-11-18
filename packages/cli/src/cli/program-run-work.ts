@@ -78,6 +78,14 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     .option('--no-draft-pr', 'Mark the PR ready for review after CI, overriding run.pr.draft in the repo config')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .option('--base-branch <ref>', BASE_BRANCH_OPTION_DESCRIPTION)
+    .option(
+      '--continue-from <branch>',
+      "Continue a budget-stopped run from its WIP branch: reuse the frozen spec, build only what's left, and open the PR from a new branch on the WIP head",
+    )
+    .option(
+      '--handoff <file>',
+      "With --continue-from: read the handoff JSON from <file> instead of the issue's handoff comment",
+    )
     .option('--run-children', 'Removed: exits 2 — oversized issues stack with --stack')
     .option(
       '--size-gate <mode>',

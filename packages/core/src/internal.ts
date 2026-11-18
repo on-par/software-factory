@@ -53,6 +53,7 @@ export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix, resolveHost
 // Signal shutdown registry (#1615)
 export { killTrackedProcessGroups, registerProcessGroup, trackedProcessGroups } from './environment/process-groups.js';
 export { requestRunStop } from './run/run-stop.js';
+export { readHandoffComment, type RemainingWorkHandoff } from './run/handoff.js';
 export { evaluateLoadGuard, formatLoadHold, readHostLoad, type LoadGuardDecision } from './environment/load-guard.js';
 export {
   claimDiskAlert,

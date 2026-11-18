@@ -322,6 +322,7 @@ const INTERNAL_API_KEYS = [
   'MAX_REWORK_ROUNDS',
   'killTrackedProcessGroups',
   'requestRunStop',
+  'readHandoffComment',
   'loadPrRunState',
   'prRunStatusFor',
   'reconcilePrRunState',

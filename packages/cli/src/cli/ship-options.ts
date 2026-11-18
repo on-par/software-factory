@@ -5,8 +5,18 @@ import {
   type FactoryConfig,
   type SizeGateMode,
 } from '@on-par/factory-core';
-import { isExplicitStackMode, type PrerequisiteStackTarget } from '@on-par/factory-core/internal';
+import {
+  isExplicitStackMode,
+  type PrerequisiteStackTarget,
+  type RemainingWorkHandoff,
+} from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
+
+export interface ContinueFrom {
+  branch: string;
+  headSha: string;
+  handoff: RemainingWorkHandoff;
+}
 
 export interface ShipSizeGate {
   noPr: boolean;

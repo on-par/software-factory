@@ -322,6 +322,7 @@ export interface RunRequestInput {
     workSource?: { kind: WorkRequestSourceKind; params: unknown };
     localOnly?: LocalOnlyPolicy;
     resumeFrom?: CheckResumeRecord;
+    continueFrom?: { handoff: RunRequest['continuation'] };
   };
   autoRework: boolean;
   planApprovalEnabled: boolean;
@@ -446,6 +447,7 @@ export function buildRunRequest({
           },
         }
       : {}),
+    ...(ctx?.continueFrom ? { continuation: ctx.continueFrom.handoff } : {}),
     eventsFile: paths.events,
     logsDir: paths.logs,
     baselineCachePath: paths.baselineCache,

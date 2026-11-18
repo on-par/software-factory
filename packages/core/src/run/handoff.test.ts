@@ -13,7 +13,9 @@ import {
   buildHandoff,
   handoffMarker,
   handoffNote,
+  parseHandoffComment,
   postHandoffComment,
+  readHandoffComment,
   renderHandoffComment,
   saveWip,
   splitProof,
@@ -131,6 +133,26 @@ describe('postHandoffComment', () => {
     });
     expect(store).toHaveLength(1);
     expect(store[0].body).toContain('during CHECK');
+  });
+});
+
+describe('readHandoffComment', () => {
+  it('round-trips the posted handoff JSON, even when the failure holds backticks', async () => {
+    const { octokit } = commentStoreOctokit();
+    expect(await readHandoffComment({ octokit, repo: 'o/r', issue: K7 })).toBeUndefined();
+    const ticks: CheckSummary = {
+      ...FAILED,
+      results: [{ checker: 'tests', result: 'FAIL', details: '```ts\nboom\n```' }],
+    };
+    const h = buildHandoff({ ...base, phase: 'check', planned: true, criteria: CRITERIA, summary: ticks });
+    await postHandoffComment({ octokit, repo: 'o/r', issue: K7, handoff: h });
+    expect(await readHandoffComment({ octokit, repo: 'o/r', issue: K7 })).toEqual(h);
+  });
+
+  it('returns undefined for a comment without parseable handoff JSON', () => {
+    expect(parseHandoffComment('no details here')).toBeUndefined();
+    expect(parseHandoffComment('<summary>handoff JSON</summary>\n\n`````\nnot json\n`````')).toBeUndefined();
+    expect(parseHandoffComment('<summary>handoff JSON</summary>\nunfenced')).toBeUndefined();
   });
 });
 

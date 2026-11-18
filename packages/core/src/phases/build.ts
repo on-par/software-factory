@@ -188,7 +188,7 @@ async function buildPhaseImpl(opts: {
   const affectedConfig = loadAffectedConfig(worktree);
   const affectedTestsCommand = affectedConfig?.command;
   const affectedTypecheckCommand = affectedConfig?.typecheck;
-  const buildVerify = affectedConfig?.buildVerify ?? 'focused';
+  const buildVerify = affectedConfig?.buildVerify;
   const basePromptOpts = {
     issue,
     specPath,

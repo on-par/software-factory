@@ -7,13 +7,22 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.39 - 2026-11-17
+
+Runs spend less time re-verifying: scoped checks stay focused through BUILD in a repo that set `buildVerify: focused`, even when its agent instruction files say to verify before every commit (#4272), CHECK skips the flaky re-run after a deterministic gate miss (#4263) and parks `time-budget` instead of starting a re-run or rework that cannot finish before the run deadline (#4264). A run stopped by its time budget or SIGTERM hands back a structured remaining-work handoff (#4269), `run-issue --continue-from <branch>` picks it up without re-planning (#4271), and `run-issue` parks on an open `Depends on:` prerequisite and lists it in `--json` (#4270).
+All seven published `@on-par` packages move to 0.9.39 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
+- `factory run-issue <N> --continue-from <branch> [--handoff <file>]` continues a budget-stopped run instead of re-planning. It reads the handoff from `--handoff` (a handoff or a `run-issue --json` result) or from the issue's handoff comment, checks that the branch head matches the handoff's head sha, reuses the frozen spec when PLAN had finished, and starts BUILD with only the remaining criteria and the last failing check as context; when every criterion is done it skips BUILD and runs the full gate once before SHIP. The PR opens from a new branch on the WIP head (`<branch>-cont-<sha7>`), so nothing is force-pushed. A missing branch or a head that does not match exits 2, naming both shas, before any worktree or PR exists (#4271).
 - CHECK respects an optional run deadline: set `FACTORY_RUN_DEADLINE_AT` (epoch ms or ISO-8601) and CHECK skips a flake re-run or rework round that would not finish before it, logs `skipped <rerun|rework> — needs ~Xm, Ym left in the run budget`, and parks the issue `time-budget` with the real check failure. `check.timeBudget` (`verifyMinutes`, `reworkBuildMinutes`, `safetyMarginMinutes`) tunes the estimates. Without a deadline nothing changes (#4264).
+- `factory run-issue` parks before PLAN when the issue declares an open `Depends on:` / `Prerequisite:` issue, logs `issue_deferred`, and `--json` lists those issues in a new `prerequisites` array (empty for every other run). `--stack` and `--base-branch` skip the check (#4270).
 - A run stopped by its time budget or by SIGTERM hands back what is left: at the next safe point it commits the work to `wip/<branch>` and pushes it, posts one remaining-work handoff comment on the issue (marker `factory-handoff v1`, updated on a repeat stop) and parks `time-budget` with the handoff as the reason. `run-issue --json` reports `outcome: "budget_exhausted"` with a versioned `handoff` object (base sha, WIP branch and head sha, phase, frozen spec path, per-criterion status and proof, last failing check, next step, `fitsOneRun`). The run result moves to `schemaVersion` 4 and the `factory job` status line to `schemaVersion` 2 for the new outcome (#4269).
 
 ### Changed
 
+- In a repo that sets `tests.affected.buildVerify: focused` explicitly, the BUILD verify rule says the focused commands satisfy a generic verify-before-commit rule in `CLAUDE.md` or `AGENTS.md`, so BUILD stops running the full verify before every commit. A frozen spec that demands full BUILD verification still wins, CHECK still runs one full gate before SHIP, and an unset `buildVerify` keeps today's wording. This repo's `AGENTS.md` and `CLAUDE.md` name the focused-handoff exception (#4272).
 - CHECK skips the flaky re-run when the tests checker failed only on a deterministic gate (coverage threshold, test-time budget or LOC budget) with no failing test, logs `flaky re-run: skipped — deterministic gate failed (<gate>)`, and sends the threshold lines plus uncovered lines in changed files straight to rework (#4263).
 - This repo's own factory runs turn on the BUILD-to-CHECK handoff: `.factory/config.yaml` sets `tests.affected` (`npx vitest related --run {files}`, `buildVerify: focused`) and `.factory/constitution.md` documents it, so BUILD verifies the changed paths and CHECK still runs the full gate before SHIP (#4004).
 - Acceptance criteria are high-level outcomes by default: `factory check` accepts plain-language outcomes, warns on criteria that only describe code changes, and grades fenced gherkin Scenarios; `factory draft`, enrichment, decomposition and the readiness judge ask for outcomes, and Gherkin is optional (#3962).
