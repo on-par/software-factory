@@ -17,15 +17,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { claimExpiresLabel } from '../queue/github-queue.js';
 import { fakeOctokit } from '../test-support/index.js';
-import {
-  findCredentialFiles,
-  formatGcReport,
-  IssueWarnDedup,
-  parseWorktreeList,
-  scrubFile,
-  sweepWorktrees,
-  zeroFill,
-} from './worktree-gc.js';
+import { findCredentialFiles, scrubFile, zeroFill } from '../worktree/worktree-gc-scrub.js';
+import { formatGcReport, IssueWarnDedup, parseWorktreeList, sweepWorktrees } from './worktree-gc.js';
 import type { SweepDeps } from './worktree-gc.js';
 import { countUnpushedCommits, isWorktreeClean } from './worktree-gc.js';
 
