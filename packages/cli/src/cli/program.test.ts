@@ -96,6 +96,21 @@ describe('buildProgram', () => {
     expect(cmdRunBriefCalls[0]).toMatchObject([['a.md'], { baseBranch: 'feat/x' }]);
   });
 
+  it('run-issue passes --continue-from and --handoff to its handler (#4271)', async () => {
+    const { calls, fn: cmdRunIssue } = recorder();
+    await buildProgram({ ...PROGRAM_HANDLERS, cmdRunIssue }, {}).parseAsync([
+      'node',
+      'factory',
+      'run-issue',
+      '5',
+      '--continue-from',
+      'wip/factory/5-x',
+      '--handoff',
+      'h.json',
+    ]);
+    expect(calls[0]).toMatchObject([5, { continueFrom: 'wip/factory/5-x', handoff: 'h.json' }]);
+  });
+
   it('run-issue and run-brief register --merge, --merge-timeout and --admin (#3905)', async () => {
     const { calls: cmdRunIssueCalls, fn: cmdRunIssue } = recorder();
     const { calls: cmdRunBriefCalls, fn: cmdRunBrief } = recorder();

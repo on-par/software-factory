@@ -13,6 +13,7 @@ import {
   ticketKeyOf,
   type CheckResumeRecord,
 } from '@on-par/factory-core/internal';
+import { continuedBranchFor } from './continue-from.js';
 import { findSliceIndex } from './ship-steps.js';
 import { shipRuntime } from './ship-runtime.js';
 
@@ -32,7 +33,13 @@ export async function resolveRunBranch(opts: {
   explicitStack?: boolean;
   parkOverBudget?: boolean;
   work: WorkRequest;
-  ctx?: { localOnly?: LocalOnlyPolicy; resumeFrom?: CheckResumeRecord; lane?: string; rebuild?: { branch: string } };
+  ctx?: {
+    localOnly?: LocalOnlyPolicy;
+    resumeFrom?: CheckResumeRecord;
+    lane?: string;
+    rebuild?: { branch: string };
+    continueFrom?: { headSha: string };
+  };
   /** --no-pr: always a fresh branch, never an adopted open PR's. */
   noPr?: boolean;
   /** --base-branch (#3764): a run started from another ref never adopts an open PR. */
@@ -60,6 +67,7 @@ export async function resolveRunBranch(opts: {
     : await findSliceIndex({ sizeGateMode, ctx, work, octokit, ghRepo, issueNum });
   if (ctx?.resumeFrom) return ctx.resumeFrom.branch;
   const fresh = branchFor(ticketKeyOf(work) ?? workKeyFromIssue(issueNum), issueTitle, branchPrefix, sliceIndex);
+  if (ctx?.continueFrom) return continuedBranchFor(fresh, ctx.continueFrom.headSha);
   if (
     ctx?.localOnly ||
     noPr ||

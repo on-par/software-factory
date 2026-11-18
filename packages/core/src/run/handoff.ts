@@ -6,7 +6,7 @@ import { fenceExcerpt } from '../filing/sanitize.js';
 import type { CheckSummary, FailurePhase } from '../types/index.js';
 import { execGit } from '../utils/git-exec.js';
 import type { WorkKey } from '../work/work-key.js';
-import { upsertMarkerComment } from './park-comment.js';
+import { findOwnMarkerComment, upsertMarkerComment } from './park-comment.js';
 import type { RunStopReason } from './run-stop.js';
 
 export const HANDOFF_VERSION = 1;
@@ -183,4 +183,21 @@ export async function postHandoffComment(deps: {
   const marker = handoffMarker(deps.issue);
   const body = renderHandoffComment(deps.issue, deps.handoff);
   return upsertMarkerComment({ octokit: deps.octokit, repo: deps.repo, issue: deps.issue, marker, body });
+}
+
+export function parseHandoffComment(body: string): unknown {
+  const start = body.indexOf('<summary>handoff JSON</summary>');
+  if (start === -1) return undefined;
+  const fenced = /(`{5,})\n([\s\S]*?)\n\1(?!`)/.exec(body.slice(start));
+  if (!fenced) return undefined;
+  try {
+    return JSON.parse(fenced[2]);
+  } catch {
+    return undefined;
+  }
+}
+
+export async function readHandoffComment(deps: { octokit: Octokit; repo: string; issue: WorkKey }): Promise<unknown> {
+  const found = await findOwnMarkerComment({ ...deps, marker: handoffMarker(deps.issue) });
+  return found === undefined ? undefined : parseHandoffComment(found.body);
 }
