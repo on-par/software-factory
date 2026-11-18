@@ -38,6 +38,12 @@ import {
   extractFailedTestEvidence,
   parseCommandCounts,
 } from './command-output.js';
+import {
+  type DeterministicGate,
+  describeDeterministicGate,
+  detectDeterministicGate,
+  uncoveredChangedLines,
+} from './deterministic-gate.js';
 import { type AffectedTestsResolution, describeAffectedResolution } from './affected-tests.js';
 
 export { writeCommandLog };
@@ -186,6 +192,13 @@ async function onPath(bin: string, env?: NodeJS.ProcessEnv): Promise<boolean> {
   return false;
 }
 
+async function gateDetails(ctx: CheckerContext, r: CommandResult, gate: DeterministicGate): Promise<string> {
+  if (gate.kind !== 'coverage threshold') return describeDeterministicGate(gate, []);
+  const diff = await resolveLintDiff(ctx);
+  const uncovered = 'unavailable' in diff ? diff : uncoveredChangedLines(`${r.stdout}\n${r.stderr}`, diff.changed);
+  return describeDeterministicGate(gate, uncovered);
+}
+
 const runFullTests: CheckerFn = async (ctx) => {
   try {
     const run = ctx.runCommand ?? runCommand;
@@ -222,12 +235,15 @@ const runFullTests: CheckerFn = async (ctx) => {
       });
       if (r.ok) return { checker: 'tests', result: 'PASS', details: TESTS_PASS_DETAILS[cmd.runner] };
       const marker = sandboxEnvMarkerLine(r);
+      const gate = r.timedOut ? null : detectDeterministicGate(`${r.stdout}\n${r.stderr}`);
+      const summary = gate ? `${describeFailure(r)}\n${await gateDetails(ctx, r, gate)}` : describeFailure(r);
       return {
         checker: 'tests',
         result: 'FAIL',
-        details: await commandFailureDetails(ctx, 'tests', cmd.label, r, describeFailure(r)),
+        details: await commandFailureDetails(ctx, 'tests', cmd.label, r, summary),
         ...(r.timedOut ? { timedOut: true } : {}),
         ...(marker ? { sandboxEnv: marker } : {}),
+        ...(gate ? { deterministicGate: gate.kind } : {}),
         failedCommand: { command: cmd.argv.join(' '), exitCode: r.exitCode, timeoutSeconds },
       };
     }

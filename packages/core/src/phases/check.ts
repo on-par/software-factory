@@ -397,7 +397,9 @@ async function checkPhaseImpl(opts: {
 
   let flakeRerun: FlakeRerun | undefined;
   const testsFail = summary.results.find((r) => r.checker === 'tests' && r.result === 'FAIL');
-  if (testsFail) {
+  if (testsFail?.deterministicGate) {
+    log('check', `flaky re-run: skipped — deterministic gate failed (${testsFail.deterministicGate})`);
+  } else if (testsFail) {
     flakeRerun = await rerunTestsChecker({ ...ctx, runCommand: runCommand ?? ctx.runCommand }, testsFail.details);
     log(
       'check',

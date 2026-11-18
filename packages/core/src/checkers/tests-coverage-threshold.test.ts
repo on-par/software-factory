@@ -44,4 +44,25 @@ describe('testsChecker coverage thresholds (#3536)', () => {
     expect(output.result).toBe('FAIL');
     expect(output.details).toContain('Coverage for statements (96.83%) does not meet');
   });
+
+  it('marks a coverage miss with no failing test as a deterministic gate and names it in details (#4263)', async () => {
+    const output = await runWithStderr(THRESHOLD_LINE);
+
+    expect(output.deterministicGate).toBe('coverage threshold');
+    expect(output.details).toContain('deterministic gate failed (coverage threshold)');
+    expect(output.details).toContain('uncovered lines in changed files unavailable');
+  });
+
+  it('leaves the gate unset when a test also failed (#4263)', async () => {
+    const output = await runWithStderr(` × suite > adds\n${THRESHOLD_LINE}`);
+
+    expect(output.deterministicGate).toBeUndefined();
+  });
+
+  it('marks a test-time budget failure as a deterministic gate (#4263)', async () => {
+    const output = await runWithStderr('test-budget: FAIL — test step took 900s, over the 600s budget');
+
+    expect(output.deterministicGate).toBe('test-time budget');
+    expect(output.details).toContain('deterministic gate failed (test-time budget)');
+  });
 });

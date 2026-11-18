@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- CHECK skips the flaky re-run when the tests checker failed only on a deterministic gate (coverage threshold, test-time budget or LOC budget) with no failing test, logs `flaky re-run: skipped — deterministic gate failed (<gate>)`, and sends the threshold lines plus uncovered lines in changed files straight to rework (#4263).
 - This repo's own factory runs turn on the BUILD-to-CHECK handoff: `.factory/config.yaml` sets `tests.affected` (`npx vitest related --run {files}`, `buildVerify: focused`) and `.factory/constitution.md` documents it, so BUILD verifies the changed paths and CHECK still runs the full gate before SHIP (#4004).
 - Acceptance criteria are high-level outcomes by default: `factory check` accepts plain-language outcomes, warns on criteria that only describe code changes, and grades fenced gherkin Scenarios; `factory draft`, enrichment, decomposition and the readiness judge ask for outcomes, and Gherkin is optional (#3962).
 - Removed the CI `LOC budget override guard`: raising a `loc-budget.json` number no longer needs a human-applied `loc-budget:override` label, and the factory no longer strips that label (#4261).

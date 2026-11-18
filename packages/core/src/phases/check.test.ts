@@ -2672,6 +2672,45 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
     expect(result.flakeRerun).toBeUndefined();
     expect(result.environment).toBeDefined();
   });
+  it('skips the re-run and goes straight to rework on a deterministic gate failure (#4263)', async () => {
+    const { argvs, fake } = recordRuns();
+    const worktree = await setup.worktree('check-gate-');
+    await writeFile(join(worktree, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }));
+    const { router, stub } = makeRouter();
+    const logs: string[] = [];
+    let verifyRuns = 0;
+    const details = 'deterministic gate failed (coverage threshold); no test failed, so this is not a flake.';
+    const result = await checkPhase({
+      issue: workKeyFromIssue(5),
+      worktree,
+      specPath: join(worktree, 'spec.md'),
+      router,
+      constitution: null,
+      maxReworkRounds: 1,
+      log: (_t, msg) => {
+        logs.push(msg);
+      },
+      runCheckers: async () => {
+        verifyRuns++;
+        return {
+          results: [{ checker: 'tests', result: 'FAIL', details, deterministicGate: 'coverage threshold' }],
+          failures: 1,
+          passes: 0,
+          skips: 0,
+          total: 1,
+        };
+      },
+      runCommand: fake as never,
+    });
+    expect(argvs).toEqual([]);
+    expect(verifyRuns).toBe(2);
+    expect(result.reworkRounds).toBe(1);
+    expect(stub.calls[0]?.prompt).toContain(details);
+    expect(result.flakeRerun).toBeUndefined();
+    expect(result.passed).toBe(false);
+    expect(logs).toContain('flaky re-run: skipped — deterministic gate failed (coverage threshold)');
+  });
+
   it('re-runs on any tests failure, whatever the base verdict (#4029)', async () => {
     const { argvs, fake } = recordRuns();
     const { result } = await run(['tests'], 'clean-on-base', fake, { maxReworkRounds: 0 });
