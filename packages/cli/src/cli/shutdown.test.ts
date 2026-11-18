@@ -71,6 +71,61 @@ describe('installShutdown export flush', () => {
     expect(order).toEqual(['kill', `flush ${sig}`, 'flushed', 'exit 130']);
   });
 
+  it('SIGTERM stops active runs and waits for the run to hand off before flushing (#4269)', async () => {
+    const signals = fakeSignals();
+    const order: string[] = [];
+    const { exits, exit } = exitRecorder((code) => order.push(`exit ${code}`));
+    let finish: () => void = () => {};
+    installShutdown(new AbortController(), {
+      stopFile: () => '/unused',
+      writeStop: () => {},
+      signals,
+      exit,
+      log: () => {},
+      stopRuns: () => (order.push('stop runs'), 1),
+      runDone: new Promise<void>((resolve) => (finish = resolve)),
+      killTracked: async () => {
+        order.push('kill');
+      },
+      flushExports: async () => (order.push('flush'), []),
+    });
+    signals.emit('SIGTERM', 'SIGTERM');
+    await tick();
+    await tick();
+    expect(order).toEqual(['stop runs', 'kill']);
+    order.push('handed off');
+    finish();
+    await vi.waitFor(() => expect(exits).toEqual([130]));
+    expect(order).toEqual(['stop runs', 'kill', 'handed off', 'flush', 'exit 130']);
+  });
+
+  it('SIGTERM gives up waiting for the handoff after the grace period', async () => {
+    vi.useFakeTimers();
+    try {
+      const signals = fakeSignals();
+      const { exits, exit } = exitRecorder();
+      installShutdown(new AbortController(), {
+        stopFile: () => '/unused',
+        writeStop: () => {},
+        signals,
+        exit,
+        log: () => {},
+        stopRuns: () => 1,
+        runDone: new Promise(() => {}),
+        handoffGraceMs: 1000,
+        killTracked: async () => {},
+        flushExports: async () => [],
+      });
+      signals.emit('SIGTERM', 'SIGTERM');
+      await vi.advanceTimersByTimeAsync(999);
+      expect(exits).toEqual([]);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(exits).toEqual([130]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a hung flush is abandoned after the guard and still exits 130', async () => {
     vi.useFakeTimers();
     try {

@@ -5,7 +5,7 @@ import { runResultJsonSchema } from './json-contract.js';
 
 /** `factory job` final stdout line. Additive changes only; bump schemaVersion on a breaking change. */
 export const jobStatusJsonSchema = runResultJsonSchema.pick({ outcome: true }).extend({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   kind: z.literal('factory-job'),
   repo: z.string(),
   issue: z.number().int(),

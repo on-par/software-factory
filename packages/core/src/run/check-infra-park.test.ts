@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -20,6 +22,9 @@ import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 import { recordArgs } from '../test-support/recorders.js';
+import { commentStoreOctokit } from '../test-support/comment-store.js';
+import { makeRepo } from '../test-support/git-repo.js';
+import { requestRunStop } from './run-stop.js';
 
 const tempDirs = createTempDirs();
 afterAll(() => tempDirs.cleanup());
@@ -144,7 +149,7 @@ describe('runIssue — time-budget park (#4264)', () => {
     results: [{ checker: 'tests', result: 'FAIL', details: 'coverage 96.87% < 96.9%' }],
   };
 
-  it('parks time-budget with the check failure and passes the parsed deadline to CHECK', async () => {
+  it('hands off with the check failure and passes the parsed deadline to CHECK', async () => {
     const worktree = tempDirs.makeSync('time-budget-park-');
     const { calls: events, fn: log } = recordArgs((_type: string, _msg: string) => {});
     const message = 'time budget: skipped rework — needs ~20m, 4m left in the run budget\ntests: coverage';
@@ -153,7 +158,7 @@ describe('runIssue — time-budget park (#4264)', () => {
       seen.push(o);
       return { passed: false, summary: FAILED, reworkRounds: 0, failureSignature: 'tests:sig', timeBudget: message };
     };
-    const deadline = '2026-11-18T01:50:00.000Z';
+    const deadline = '2099-01-01T00:00:00.000Z';
     const outcome = await runIssue(
       { ...request, runDeadlineAt: deadline, checkTimeBudget: { verifyMinutes: 9 } },
       policy,
@@ -169,7 +174,10 @@ describe('runIssue — time-budget park (#4264)', () => {
       runDeadlineAtMs: Date.parse(deadline),
       timeBudget: { verifyMinutes: 9 },
     });
-    expect(events).toContainEqual(['time-budget', expect.stringContaining(message), expect.anything()]);
+    expect(outcome).toMatchObject({
+      handoff: { phase: 'check', nextStep: 'Fix tests on the run branch, then re-run CHECK.' },
+    });
+    expect(events).toContainEqual(['time-budget', expect.stringContaining('budget exhausted'), expect.anything()]);
   });
 
   it('warns and runs without a deadline when the value does not parse', async () => {
@@ -192,5 +200,106 @@ describe('runIssue — time-budget park (#4264)', () => {
     const hint = parkUnblockHint('time-budget', workKeyFromIssue(7));
     expect(hint).toContain('FACTORY_RUN_DEADLINE_AT');
     expect(hint).toContain('factory unpark 7');
+  });
+});
+
+describe('runIssue — remaining-work handoff (#4269)', () => {
+  const DEADLINE = Date.parse('2026-11-18T02:00:00.000Z');
+  const FAILED: CheckSummary = {
+    failures: 1,
+    passes: 0,
+    skips: 0,
+    total: 1,
+    results: [{ checker: 'tests', result: 'FAIL', details: 'killed by SIGTERM' }],
+  };
+  const handoffRequest: RunRequest = {
+    ...request,
+    issue: 7,
+    branch: 'issue-7-x',
+    work: { ...WORK, acceptanceCriteria: ['Stops with a handoff. proof: run test', 'Docs updated'] },
+    runDeadlineAt: new Date(DEADLINE).toISOString(),
+  };
+  const git = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+
+  it('a budget that expires during BUILD parks with a handoff listing every criterion as remaining', async () => {
+    const worktree = makeRepo(tempDirs, 'handoff-build-', { 'a.txt': 'a' });
+    const { calls: events, fn: log } = recordArgs((_type: string, _msg: string) => {});
+    let now = DEADLINE - 60 * 60_000;
+    let checked = false;
+    const checkPhase: RunPorts['checkPhase'] = async () => {
+      checked = true;
+      return { passed: true, summary: FAILED, reworkRounds: 0 };
+    };
+    const outcome = await runIssue(handoffRequest, policy, {
+      ...ports(log, worktree, checkPhase),
+      now: () => now,
+      buildPhase: async () => {
+        writeFileSync(join(worktree, 'b.txt'), 'half done');
+        now = DEADLINE - 60_000;
+        return BUILD_OK;
+      },
+    });
+    expect(outcome).toMatchObject({
+      state: 'parked',
+      reason: 'time-budget',
+      handoff: {
+        version: 1,
+        stopReason: 'deadline',
+        phase: 'build',
+        wipBranch: 'wip/issue-7-x',
+        fitsOneRun: false,
+        criteria: [
+          { criterion: 'Stops with a handoff.', proof: 'run test', status: 'not_started' },
+          { criterion: 'Docs updated', proof: null, status: 'not_started' },
+        ],
+      },
+    });
+    expect(checked).toBe(false);
+    expect(git(worktree, ['rev-parse', 'wip/issue-7-x'])).toBe(git(worktree, ['rev-parse', 'HEAD']));
+    expect(events).toContainEqual(['time-budget', expect.stringContaining('budget exhausted'), expect.anything()]);
+  });
+
+  it('SIGTERM during CHECK pushes the WIP branch and posts one handoff comment', async () => {
+    const worktree = makeRepo(tempDirs, 'handoff-check-', { 'a.txt': 'a' });
+    const origin = tempDirs.makeSync('handoff-origin-');
+    git(origin, ['init', '-q', '--bare']);
+    git(worktree, ['remote', 'add', 'origin', origin]);
+    git(worktree, ['push', '-q', 'origin', 'HEAD:refs/heads/main']);
+    const { calls: events, fn: log } = recordArgs((_type: string, _msg: string) => {});
+    const { store, octokit } = commentStoreOctokit();
+    const checkPhase: RunPorts['checkPhase'] = async (o) => {
+      writeFileSync(join(worktree, 'c.txt'), 'rework');
+      requestRunStop();
+      expect(o.stopRequested?.()).toBe(true);
+      return { passed: false, summary: FAILED, reworkRounds: 0, failureSignature: 'tests:sig' };
+    };
+    const outcome = await runIssue(
+      { ...handoffRequest, localOnly: false, runDeadlineAt: undefined, parentBaseRef: 'origin/main' },
+      policy,
+      {
+        ...ports(log, worktree, checkPhase),
+        octokit,
+      },
+    );
+    expect(outcome).toMatchObject({
+      state: 'parked',
+      reason: 'time-budget',
+      failureSignature: 'tests:sig',
+      failingChecks: ['tests'],
+      handoff: {
+        stopReason: 'sigterm',
+        phase: 'check',
+        fitsOneRun: true,
+        lastFailure: 'tests: killed by SIGTERM',
+        criteria: [{ status: 'failing' }, { status: 'failing' }],
+      },
+    });
+    const handoff = outcome.state === 'parked' ? outcome.handoff : undefined;
+    expect(git(origin, ['rev-parse', 'refs/heads/wip/issue-7-x'])).toBe(handoff?.headSha);
+    expect(handoff?.baseSha).toBe(git(origin, ['rev-parse', 'refs/heads/main']));
+    const handoffComments = store.filter((c) => c.body.includes('<!-- factory-handoff v1 issue:7 -->'));
+    expect(handoffComments).toHaveLength(1);
+    expect(store.find((c) => c.body.includes('factory-issue-state'))?.body).toContain('budget exhausted: SIGTERM');
+    expect(events).toContainEqual(['time-budget', expect.stringContaining('during CHECK'), expect.anything()]);
   });
 });

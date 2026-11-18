@@ -193,6 +193,29 @@ describe('buildRunResult', () => {
     expect(outcomes).toEqual(['merged', 'pr-open', 'held', 'ci-failed', 'parked', 'failed']);
   });
 
+  it('a parked run with a handoff reports budget_exhausted with the handoff and validates (#4269)', () => {
+    const schema = JSON.parse(
+      readFileSync(new URL('../../schemas/run-result.schema.json', import.meta.url), 'utf-8'),
+    ) as object;
+    const handoff = {
+      version: 1 as const,
+      stopReason: 'deadline' as const,
+      phase: 'build' as const,
+      baseSha: 'a'.repeat(40),
+      wipBranch: 'wip/b',
+      headSha: 'b'.repeat(40),
+      specPath: '.factory/spec.md',
+      criteria: [{ criterion: 'It works', status: 'not_started' as const, proof: 'npm test' }],
+      lastFailure: null,
+      nextStep: 'Finish BUILD from wip/b, then run CHECK.',
+      fitsOneRun: false,
+    };
+    const r = buildRunResult(input({ outcome: { state: 'parked', reason: 'time-budget', branch: 'b', handoff } }));
+    expect(r).toMatchObject({ outcome: 'budget_exhausted', exitReason: 'parked: time-budget', handoff });
+    expect(new Ajv2020().compile(schema)(r)).toBe(true);
+    expect(runResultJsonSchema.parse(r).handoff).toEqual(handoff);
+  });
+
   it('lifecycle awaiting-review wins and validates against the schema', () => {
     const shipped: RunOutcome = { state: 'shipped', route, branch: 'b', reworkRounds: 0, prNumber: 7 };
     const merge: MergeResult = { kind: 'held', gate: 'risk', detail: 'x' };

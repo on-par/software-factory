@@ -321,6 +321,7 @@ const INTERNAL_API_KEYS = [
   'pruneStateBackups',
   'MAX_REWORK_ROUNDS',
   'killTrackedProcessGroups',
+  'requestRunStop',
   'loadPrRunState',
   'prRunStatusFor',
   'reconcilePrRunState',

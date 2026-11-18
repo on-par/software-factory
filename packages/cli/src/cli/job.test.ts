@@ -270,7 +270,7 @@ describe('jobStatusLine', () => {
     constitutionSource: 'con',
   };
   const run = (outcome: RunResultJson['outcome'], pr: RunResultJson['pr']): RunResultJson => ({
-    schemaVersion: 3,
+    schemaVersion: 4,
     issue: 7,
     repo: 'a/b',
     outcome,
