@@ -266,6 +266,7 @@ async function checkPhaseImpl(opts: {
   runDeadlineAtMs?: number;
   timeBudget?: TimeBudgetSettings;
   now?: () => number;
+  stopRequested?: () => boolean;
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -304,7 +305,12 @@ async function checkPhaseImpl(opts: {
     runEvidence,
     now = Date.now,
   } = opts;
-  const timeBudget = createTimeBudget({ deadlineAtMs: opts.runDeadlineAtMs, now, settings: opts.timeBudget });
+  const timeBudget = createTimeBudget({
+    deadlineAtMs: opts.runDeadlineAtMs,
+    now,
+    settings: opts.timeBudget,
+    stopRequested: opts.stopRequested,
+  });
   const roundLogDir = (round: number): string | undefined =>
     logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, `check-r${round}`);
   const checkBaseDir = logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, 'check-base');

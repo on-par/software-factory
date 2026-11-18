@@ -59,6 +59,13 @@ describe('createTimeBudget (#4264)', () => {
     expect(budget.fit('rework')).toMatchObject({ fits: true, neededMs: 9 * MIN });
   });
 
+  it('never fits once the run is asked to stop (#4269)', () => {
+    const budget = createTimeBudget({ deadlineAtMs: undefined, now: () => START, stopRequested: () => true });
+    const fit = budget.fit('rerun');
+    expect(fit).toEqual({ fits: false, neededMs: 0, leftMs: 0, stopped: true });
+    expect(describeTimeBudgetSkip('rerun', fit)).toBe('skipped rerun — the run was asked to stop');
+  });
+
   it('describes the skip and keeps the real failure in the park message', () => {
     const fit = { fits: false, neededMs: 19.5 * MIN, leftMs: 3.8 * MIN };
     expect(describeTimeBudgetSkip('rework', fit)).toBe('skipped rework — needs ~20m, 3m left in the run budget');

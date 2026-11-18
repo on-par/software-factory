@@ -21,6 +21,7 @@ export type ParkReason = Extract<
 import type { BuildRoutePin } from '../config/repo.js';
 import type { ShipDraftReason, ShipResult } from '../phases/ship-types.js';
 import type { BaseHealthEvidence } from '../checkers/base-health.js';
+import type { RemainingWorkHandoff } from './handoff.js';
 
 export type BuildRoute = BuildRoutePin;
 
@@ -73,6 +74,7 @@ export type RunOutcome =
         providers: string[];
         detail: 'untimed_breakers' | 'only_metered_left';
       };
+      handoff?: RemainingWorkHandoff;
       attribution?: RunAttribution;
     }
   | {

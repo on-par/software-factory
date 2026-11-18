@@ -161,7 +161,7 @@ export interface JobStatusInput {
 export function jobStatusLine(input: JobStatusInput): JobStatusJson {
   const { flags, sources, run, startedAt, finishedAt } = input;
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: 'factory-job',
     repo: flags.repo,
     issue: flags.issue,

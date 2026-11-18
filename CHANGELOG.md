@@ -11,6 +11,7 @@ section to `## X.Y.Z - date`. See
 
 - CHECK respects an optional run deadline: set `FACTORY_RUN_DEADLINE_AT` (epoch ms or ISO-8601) and CHECK skips a flake re-run or rework round that would not finish before it, logs `skipped <rerun|rework> — needs ~Xm, Ym left in the run budget`, and parks the issue `time-budget` with the real check failure. `check.timeBudget` (`verifyMinutes`, `reworkBuildMinutes`, `safetyMarginMinutes`) tunes the estimates. Without a deadline nothing changes (#4264).
 - `factory run-issue` parks before PLAN when the issue declares an open `Depends on:` / `Prerequisite:` issue, logs `issue_deferred`, and `--json` lists those issues in a new `prerequisites` array (empty for every other run). `--stack` and `--base-branch` skip the check (#4270).
+- A run stopped by its time budget or by SIGTERM hands back what is left: at the next safe point it commits the work to `wip/<branch>` and pushes it, posts one remaining-work handoff comment on the issue (marker `factory-handoff v1`, updated on a repeat stop) and parks `time-budget` with the handoff as the reason. `run-issue --json` reports `outcome: "budget_exhausted"` with a versioned `handoff` object (base sha, WIP branch and head sha, phase, frozen spec path, per-criterion status and proof, last failing check, next step, `fitsOneRun`). The run result moves to `schemaVersion` 4 and the `factory job` status line to `schemaVersion` 2 for the new outcome (#4269).
 
 ### Changed
 

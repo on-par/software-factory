@@ -12,7 +12,7 @@ const CLAUDE = 'sk-ant-SENTINEL';
 
 const RESULT = (outcome: string, pr: unknown = null) =>
   JSON.stringify({
-    schemaVersion: 3,
+    schemaVersion: 4,
     issue: 12,
     repo: 'on-par/foreman',
     outcome,

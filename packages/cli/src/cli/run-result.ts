@@ -80,6 +80,7 @@ export function classifyRunOutcome(
       }
       return { outcome: 'pr-open', exitReason: `PR #${outcome.prNumber} opened${outcome.draft ? ' (draft)' : ''}` };
     case 'parked':
+      if (outcome.handoff) return { outcome: 'budget_exhausted', exitReason: withError(`parked: ${outcome.reason}`) };
       if (CI_PARKS.has(outcome.reason))
         return { outcome: 'ci-failed', exitReason: withError(`parked: ${outcome.reason}`) };
       if (outcome.reason === 'held') return { outcome: 'held', exitReason: withError('parked: held') };
@@ -141,7 +142,7 @@ export function buildRunResult(input: RunResultInput): RunResultJson {
   }
   for (const model of Object.keys(byModel)) byModel[model] = round6(byModel[model]);
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     issue: input.issue,
     repo,
     ...classifyRunOutcome(outcome, merge, input.error, lifecycle),
@@ -159,5 +160,6 @@ export function buildRunResult(input: RunResultInput): RunResultJson {
     reworkRounds: outcome?.reworkRounds ?? 0,
     prerequisites: input.prerequisites ?? [],
     ...(merge?.kind === 'land-deferred' ? { landDeferrals: merge.deferrals ?? 0 } : {}),
+    ...(outcome?.state === 'parked' && outcome.handoff ? { handoff: outcome.handoff } : {}),
   };
 }

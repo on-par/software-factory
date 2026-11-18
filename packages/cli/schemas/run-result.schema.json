@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "number",
-      "const": 3
+      "const": 4
     },
     "issue": {
       "type": "integer",
@@ -25,7 +25,8 @@
         "failed",
         "land-deferred",
         "closed",
-        "awaiting-review"
+        "awaiting-review",
+        "budget_exhausted"
       ]
     },
     "exitReason": {
@@ -136,6 +137,78 @@
       "type": "integer",
       "minimum": -9007199254740991,
       "maximum": 9007199254740991
+    },
+    "handoff": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "stopReason": {
+          "type": "string",
+          "enum": ["deadline", "sigterm"]
+        },
+        "phase": {
+          "type": "string",
+          "enum": ["plan", "build", "check", "ship"]
+        },
+        "baseSha": {
+          "type": ["string", "null"]
+        },
+        "wipBranch": {
+          "type": ["string", "null"]
+        },
+        "headSha": {
+          "type": ["string", "null"]
+        },
+        "specPath": {
+          "type": ["string", "null"]
+        },
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "criterion": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["done", "failing", "not_started"]
+              },
+              "proof": {
+                "type": ["string", "null"]
+              }
+            },
+            "required": ["criterion", "status", "proof"],
+            "additionalProperties": false
+          }
+        },
+        "lastFailure": {
+          "type": ["string", "null"]
+        },
+        "nextStep": {
+          "type": "string"
+        },
+        "fitsOneRun": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "version",
+        "stopReason",
+        "phase",
+        "baseSha",
+        "wipBranch",
+        "headSha",
+        "specPath",
+        "criteria",
+        "lastFailure",
+        "nextStep",
+        "fitsOneRun"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [

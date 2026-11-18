@@ -6,7 +6,14 @@ import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import { installLaneDependencies as installLaneDependenciesDefault } from './lane-install.js';
 import { checkPhase as checkPhaseDefault, type CheckPhaseResult } from '../phases/check.js';
-import { parseRunDeadline, RUN_DEADLINE_ENV, type TimeBudgetSettings } from '../phases/check-time-budget.js';
+import {
+  DEFAULT_SAFETY_MARGIN_MINUTES,
+  parseRunDeadline,
+  RUN_DEADLINE_ENV,
+  type TimeBudgetSettings,
+} from '../phases/check-time-budget.js';
+import { createRunStop } from './run-stop.js';
+import { buildHandoff, handoffNote, postHandoffComment, saveWip } from './handoff.js';
 import type { SizeBudget } from '../readiness/size.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
@@ -209,6 +216,7 @@ export interface RunPorts extends CiReworkPorts, LinearRunPorts {
   shipPhase?: typeof shipPhaseDefault;
   requiredChecksVerdict?: (sha: string) => Promise<RequiredChecksVerdict>;
   planReuse?: PlanReuseStore;
+  now?: () => number;
   checkResume?: CheckResumeStore;
   readReviewFloorChanges?: (
     worktree: string,
@@ -264,6 +272,16 @@ async function runIssueOnce(
   });
   const tracker = new ProcessGroupTracker();
   const budgetStop = budgetGuardFor(policy, ports, tracker, request.processGroupGraceMs, log);
+  const now = ports.now ?? Date.now;
+  const runDeadlineAtMs = parseRunDeadline(request.runDeadlineAt);
+  if (request.runDeadlineAt !== undefined && request.runDeadlineAt.trim() !== '' && runDeadlineAtMs === undefined) {
+    log(
+      'environment_warning',
+      `${RUN_DEADLINE_ENV}='${request.runDeadlineAt}' is not epoch ms or ISO-8601 — ignoring the run deadline`,
+    );
+  }
+  const marginMs = (request.checkTimeBudget?.safetyMarginMinutes ?? DEFAULT_SAFETY_MARGIN_MINUTES) * 60_000;
+  const runStop = createRunStop({ deadlineAtMs: runDeadlineAtMs, marginMs, now });
   let environment: Environment | undefined;
   let released = false;
   let route: BuildRoute | undefined;
@@ -448,6 +466,43 @@ async function runIssueOnce(
   const gitExec = ports.gitExec ?? defaultExecFn;
   const capGate = providerCapGate(ports.router, ports.breaker, { ...request, issue: workKey }, log, gateDeps.probe);
 
+  let planned = false;
+  const handOff = async (check?: { summary: CheckSummary; failureSignature?: string }): Promise<RunOutcome> => {
+    const summary = check?.summary;
+    const remote = !request.localOnly && !request.noPr;
+    const wip = await saveWip({
+      worktree: ports.workspace.path,
+      branch: request.branch,
+      issue: workKey,
+      phase: failurePhase,
+      baseRef: request.parentBaseRef,
+      push: remote,
+    });
+    if (wip.error) log('environment_warning', `could not save the WIP branch: ${wip.error}`);
+    const handoff = buildHandoff({
+      stopReason: runStop.reason() ?? 'deadline',
+      phase: failurePhase,
+      planned,
+      specPath: request.specPath,
+      worktree: ports.workspace.path,
+      criteria: request.work.acceptanceCriteria,
+      summary,
+      wip,
+    });
+    if (remote && request.work.kind !== LOCAL_BRIEF_SOURCE) {
+      await postHandoffComment({ octokit: ports.octokit, repo: request.repo, issue: workKey, handoff }).catch(
+        (err: unknown) => log('environment_warning', `could not post the handoff comment: ${errorMessage(err)}`),
+      );
+    }
+    const failingChecks = summary?.results.filter((r) => r.result === 'FAIL').map((r) => r.checker) ?? [];
+    const signature = failingChecks.length > 0 ? check?.failureSignature : undefined;
+    const parked = await terminalParked(
+      'time-budget',
+      handoffNote(handoff),
+      signature ? { failureSignature: signature, failingChecks } : undefined,
+    );
+    return parked.state === 'parked' ? { ...parked, handoff } : parked;
+  };
   try {
     if (ports.acquireEnvironment) {
       try {
@@ -515,6 +570,7 @@ async function runIssueOnce(
       recordedModel = resumed.model;
       pinNote = undefined;
       buildMinutes = resumed.buildMinutes;
+      planned = true;
     } else {
       await setPhase('plan');
       const decision = decideBuildRoute(ports.router.registryRef, {
@@ -577,6 +633,8 @@ async function runIssueOnce(
         });
       const plan = reused ?? (await runStage('plan', planAt));
       route = plan.route;
+      planned = plan.ok;
+      if (runStop.reason()) return await handOff();
       if (!plan.ok) {
         if (plan.sliced) {
           return await terminalEscalated(
@@ -723,6 +781,7 @@ async function runIssueOnce(
         ? runStage('build', buildAt, { beforeRerun: restoreBuild })
         : buildAt(undefined));
       route = build.route;
+      if (runStop.reason()) return await handOff();
       await syncSpecRoute(build.route, 'build-failover');
       if (!build.ok && build.reason !== 'budget_exceeded') {
         if (build.sandboxEnv) return await terminalParked('sandbox-env', build.sandboxEnv);
@@ -755,13 +814,6 @@ async function runIssueOnce(
 
     await setPhase('check');
     const priorFailureSignature = await ports.reworkHistory?.priorSignature(request.issue);
-    const runDeadlineAtMs = parseRunDeadline(request.runDeadlineAt);
-    if (request.runDeadlineAt !== undefined && request.runDeadlineAt.trim() !== '' && runDeadlineAtMs === undefined) {
-      log(
-        'environment_warning',
-        `${RUN_DEADLINE_ENV}='${request.runDeadlineAt}' is not epoch ms or ISO-8601 — ignoring the run deadline`,
-      );
-    }
     const checkOpts = {
       budgetGuard: budgetStop.guard,
       runId,
@@ -798,6 +850,7 @@ async function runIssueOnce(
       requiredChecksVerdict: ports.requiredChecksVerdict,
       runDeadlineAtMs,
       timeBudget: request.checkTimeBudget,
+      stopRequested: () => runStop.reason() !== undefined,
     };
     capGate.watchCheck(builtRoute, builtModel);
     await runRequestedReviewRework(request, ports, checkOpts, feedbackPlan);
@@ -828,16 +881,7 @@ async function runIssueOnce(
     ): Promise<RunOutcome> => {
       if (failed.sandboxEnv) return terminalParked('sandbox-env', failed.sandboxEnv);
       if (failed.infra) return terminalParked('check-infra', failed.infra);
-      if (failed.timeBudget) {
-        const failure =
-          failed.failureSignature !== undefined
-            ? {
-                failureSignature: failed.failureSignature,
-                failingChecks: failed.summary.results.filter((r) => r.result === 'FAIL').map((r) => r.checker),
-              }
-            : undefined;
-        return terminalParked('time-budget', failed.timeBudget, failure);
-      }
+      if (failed.timeBudget || runStop.reason()) return handOff(failed);
       if (failed.environment) {
         const env = failed.environment;
         if (env.cause === 'config') {
@@ -948,6 +992,7 @@ async function runIssueOnce(
     const checkBudget = await assertBudget('CHECK');
     if (checkBudget) return checkBudget;
     if (!check.passed) return await finishFailedCheck(check);
+    if (runStop.reason()) return await handOff(check);
     await clearCheckResume();
     await ports.reworkHistory?.clear(request.issue);
 
@@ -1081,6 +1126,7 @@ async function runIssueOnce(
     };
   } catch (err) {
     if (ports.claimSignal?.aborted) throw err;
+    if (runStop.reason()) return await handOff(checkSummary ? { summary: checkSummary } : undefined);
     if ((err as { reason?: unknown } | null | undefined)?.reason === 'local_auth') {
       log(
         'environment_warning',
@@ -1101,6 +1147,7 @@ async function runIssueOnce(
       designSmellFindingFor(err),
     );
   } finally {
+    runStop.dispose();
     await release();
   }
 }

@@ -10,6 +10,7 @@ import {
   flushCommandOutputExports,
   formatStopMarker,
   killTrackedProcessGroups,
+  requestRunStop,
 } from '@on-par/factory-core/internal';
 
 type ShutdownSignal = 'SIGINT' | 'SIGTERM';
@@ -30,6 +31,9 @@ export interface ShutdownOptions {
   flushExports?: (signal: NodeJS.Signals) => Promise<readonly CommandOutputFlushReport[]>;
   exit?: (code: number) => void;
   log?: (line: string) => void;
+  stopRuns?: () => number;
+  runDone?: Promise<unknown>;
+  handoffGraceMs?: number;
 }
 
 export interface ShutdownHandle {
@@ -38,6 +42,7 @@ export interface ShutdownHandle {
 
 export const SHUTDOWN_EXIT_CODE = 130;
 export const SHUTDOWN_GRACE_MS = 3000;
+export const HANDOFF_GRACE_MS = 60_000;
 /** Must exceed the 2 s export flush budget plus the 500 ms exporter shutdown. */
 export const SHUTDOWN_FLUSH_GUARD_MS = 3000;
 
@@ -58,12 +63,14 @@ export function installShutdown(controller: AbortController, options: ShutdownOp
   const writeStop = options.writeStop ?? defaultWriteStop;
   const exit = options.exit ?? ((code: number) => process.exit(code));
   const log = options.log ?? ((line: string) => console.error(styleText('dim', line)));
+  const stopRuns = options.stopRuns ?? requestRunStop;
   let shuttingDown = false;
 
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
     log(`factory: ${signal} received — stopping agents (send again to exit now)`);
     controller.abort();
     process.exitCode = SHUTDOWN_EXIT_CODE;
+    const handingOff = signal === 'SIGTERM' && options.runDone !== undefined && stopRuns() > 0;
     try {
       const path = await options.stopFile();
       writeStop(path, formatStopMarker('manual', new Date(), `factory received ${signal}`));
@@ -74,6 +81,18 @@ export function installShutdown(controller: AbortController, options: ShutdownOp
       await killTracked({ graceMs });
     } catch {
       // Exit regardless of sweep failures.
+    }
+    if (handingOff) {
+      log('factory: waiting for the run to save its work and post the handoff');
+      let handoffTimer: NodeJS.Timeout | undefined;
+      await Promise.race([
+        options.runDone?.catch(() => undefined),
+        new Promise<void>((resolve) => {
+          handoffTimer = setTimeout(resolve, options.handoffGraceMs ?? HANDOFF_GRACE_MS);
+          handoffTimer.unref();
+        }),
+      ]);
+      clearTimeout(handoffTimer);
     }
     let guardTimer: NodeJS.Timeout | undefined;
     try {
@@ -131,10 +150,13 @@ export function withShutdown<A extends unknown[], R>(
 ): (...args: A) => Promise<R> {
   return async (...args: A): Promise<R> => {
     const controller = new AbortController();
-    const handle = installShutdown(controller, { stopFile: defaultStopFile, ...options });
+    let finished: () => void = () => {};
+    const runDone = new Promise<void>((resolve) => (finished = resolve));
+    const handle = installShutdown(controller, { stopFile: defaultStopFile, runDone, ...options });
     try {
       return await fn(...args);
     } finally {
+      finished();
       handle.dispose();
     }
   };

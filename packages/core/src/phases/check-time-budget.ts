@@ -21,6 +21,7 @@ export interface TimeBudgetFit {
   fits: boolean;
   neededMs: number;
   leftMs: number;
+  stopped?: true;
 }
 
 export interface TimeBudget {
@@ -40,8 +41,9 @@ export function createTimeBudget(opts: {
   deadlineAtMs: number | undefined;
   now: () => number;
   settings?: TimeBudgetSettings;
+  stopRequested?: () => boolean;
 }): TimeBudget {
-  const { deadlineAtMs, now, settings = {} } = opts;
+  const { deadlineAtMs, now, settings = {}, stopRequested } = opts;
   const defaultVerifyMs = (settings.verifyMinutes ?? DEFAULT_VERIFY_MINUTES) * MINUTE_MS;
   const reworkBuildMs = (settings.reworkBuildMinutes ?? DEFAULT_REWORK_BUILD_MINUTES) * MINUTE_MS;
   const marginMs = (settings.safetyMarginMinutes ?? DEFAULT_SAFETY_MARGIN_MINUTES) * MINUTE_MS;
@@ -51,6 +53,7 @@ export function createTimeBudget(opts: {
       verifyMs = verifyMs === undefined ? ms : Math.max(verifyMs, ms);
     },
     fit(step) {
+      if (stopRequested?.()) return { fits: false, neededMs: 0, leftMs: 0, stopped: true };
       if (deadlineAtMs === undefined) return { fits: true, neededMs: 0, leftMs: Infinity };
       const verify = verifyMs ?? defaultVerifyMs;
       const neededMs = (step === 'rework' ? reworkBuildMs : 0) + verify + marginMs;
@@ -65,6 +68,7 @@ function minutes(ms: number): number {
 }
 
 export function describeTimeBudgetSkip(step: TimeBudgetStep, fit: TimeBudgetFit): string {
+  if (fit.stopped) return `skipped ${step} — the run was asked to stop`;
   return `skipped ${step} — needs ~${minutes(fit.neededMs)}m, ${Math.max(0, Math.floor(fit.leftMs / MINUTE_MS))}m left in the run budget`;
 }
 
