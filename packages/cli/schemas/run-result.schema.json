@@ -124,6 +124,14 @@
       "minimum": -9007199254740991,
       "maximum": 9007199254740991
     },
+    "prerequisites": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": -9007199254740991,
+        "maximum": 9007199254740991
+      }
+    },
     "landDeferrals": {
       "type": "integer",
       "minimum": -9007199254740991,
@@ -144,7 +152,8 @@
     "finishedAt",
     "phases",
     "cost",
-    "reworkRounds"
+    "reworkRounds",
+    "prerequisites"
   ],
   "additionalProperties": false
 }

@@ -67,7 +67,16 @@ describe('withRunReport', () => {
       headSha: 'head-sha',
       baseSha: 'base-sha',
       reworkRounds: 1,
+      prerequisites: [],
     });
+  });
+
+  it('recordPrerequisites reaches the printed result (#4270)', async () => {
+    const s = setup();
+    await withRunReport({ json: true }, s.ctx, async (r) => r.recordPrerequisites([4269, 4264]), s.deps);
+    const result = JSON.parse(s.out[0]);
+    expect(validate(result), JSON.stringify(validate.errors)).toBe(true);
+    expect(result.prerequisites).toEqual([4269, 4264]);
   });
 
   it('recordLifecycle reaches the printed result', async () => {

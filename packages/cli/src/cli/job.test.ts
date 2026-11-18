@@ -284,6 +284,7 @@ describe('jobStatusLine', () => {
     phases: [],
     cost: { usd: 0, byModel: {} },
     reworkRounds: 0,
+    prerequisites: [],
   });
   const input = { flags, sources, startedAt: 1000, cloneMs: 5, runMs: 20, finishedAt: 4000, error: undefined };
 

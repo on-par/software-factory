@@ -10,6 +10,7 @@ section to `## X.Y.Z - date`. See
 ### Added
 
 - CHECK respects an optional run deadline: set `FACTORY_RUN_DEADLINE_AT` (epoch ms or ISO-8601) and CHECK skips a flake re-run or rework round that would not finish before it, logs `skipped <rerun|rework> — needs ~Xm, Ym left in the run budget`, and parks the issue `time-budget` with the real check failure. `check.timeBudget` (`verifyMinutes`, `reworkBuildMinutes`, `safetyMarginMinutes`) tunes the estimates. Without a deadline nothing changes (#4264).
+- `factory run-issue` parks before PLAN when the issue declares an open `Depends on:` / `Prerequisite:` issue, logs `issue_deferred`, and `--json` lists those issues in a new `prerequisites` array (empty for every other run). `--stack` and `--base-branch` skip the check (#4270).
 
 ### Changed
 

@@ -37,6 +37,7 @@ export interface RunReportSink {
   recordOutcome(o: RunOutcome): void;
   recordMerge(r: MergeResult): void;
   recordLifecycle(r: LifecycleResult): void;
+  recordPrerequisites(issues: number[]): void;
   recordError(e: unknown): void;
 }
 
@@ -50,6 +51,7 @@ const noopSink: RunReportSink = {
   recordOutcome: () => {},
   recordMerge: () => {},
   recordLifecycle: () => {},
+  recordPrerequisites: () => {},
   recordError: () => {},
 };
 
@@ -118,7 +120,13 @@ export async function withRunReport(
   if (!opts.json && opts.export === undefined) return run(noopSink);
   const now = deps.now ?? (() => new Date());
   const startedAt = now().toISOString();
-  const seen: { outcome?: RunOutcome; merge?: MergeResult; lifecycle?: LifecycleResult; error?: unknown } = {};
+  const seen: {
+    outcome?: RunOutcome;
+    merge?: MergeResult;
+    lifecycle?: LifecycleResult;
+    prerequisites?: number[];
+    error?: unknown;
+  } = {};
   const sink: RunReportSink = {
     recordOutcome: (o) => {
       seen.outcome = o;
@@ -128,6 +136,9 @@ export async function withRunReport(
     },
     recordLifecycle: (r) => {
       seen.lifecycle = r;
+    },
+    recordPrerequisites: (issues) => {
+      seen.prerequisites = issues;
     },
     recordError: (e) => {
       seen.error = e;
@@ -162,6 +173,7 @@ export async function withRunReport(
       outcome: seen.outcome,
       merge: seen.merge,
       lifecycle: seen.lifecycle,
+      prerequisites: seen.prerequisites,
       error: seen.error,
       startedAt,
       finishedAt: now().toISOString(),
