@@ -13,12 +13,13 @@
         "failed",
         "land-deferred",
         "closed",
-        "awaiting-review"
+        "awaiting-review",
+        "budget_exhausted"
       ]
     },
     "schemaVersion": {
       "type": "number",
-      "const": 1
+      "const": 2
     },
     "kind": {
       "type": "string",

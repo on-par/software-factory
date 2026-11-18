@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { handoffJsonSchema } from './handoff-contract.js';
+
 const loosePayloadSchema = z.object({}).catchall(z.any());
 
 /** Open draft PRs on factory branches (#3553); null when the PR listing was unreadable. */
@@ -442,7 +444,7 @@ export type UnparkJson = z.infer<typeof unparkJsonSchema>;
 
 /** `factory run-issue|run-brief|ship --json` final run result (#3907). Additive changes only; bump schemaVersion on a breaking change. */
 export const runResultJsonSchema = z.object({
-  schemaVersion: z.literal(3),
+  schemaVersion: z.literal(4),
   issue: z.number().int(),
   repo: z.string().nullable(),
   outcome: z.enum([
@@ -455,6 +457,7 @@ export const runResultJsonSchema = z.object({
     'land-deferred',
     'closed',
     'awaiting-review',
+    'budget_exhausted',
   ]),
   exitReason: z.string().min(1),
   pr: z
@@ -482,6 +485,7 @@ export const runResultJsonSchema = z.object({
   reworkRounds: z.number().int(),
   /** How many times the land gave up on a moving base before `--merge` timed out (#3957); set with outcome `land-deferred`. */
   landDeferrals: z.number().int().optional(),
+  handoff: handoffJsonSchema.optional(),
 });
 export type RunResultJson = z.infer<typeof runResultJsonSchema>;
 export type RunResultOutcome = RunResultJson['outcome'];
