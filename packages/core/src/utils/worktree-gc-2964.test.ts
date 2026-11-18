@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CLAIMED_BY_LABEL_PREFIX, claimExpiresLabel } from '../queue/github-queue.js';
 import { fakeOctokit } from '../test-support/index.js';
-import { isZeroCommitLane, sweepWorktrees } from './worktree-gc.js';
+import { isZeroCommitLane } from '../worktree/worktree-gc-evidence.js';
+import { sweepWorktrees } from './worktree-gc.js';
 import type { SweepDeps } from './worktree-gc.js';
 
 describe('sweepWorktrees in-flight lanes, claims and zero-commit branches (#2964)', () => {

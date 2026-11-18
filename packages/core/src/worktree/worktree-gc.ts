@@ -33,8 +33,7 @@ import { isFactoryDirName } from './worktree-name.js';
 import { readWorktreeKeeps, releaseWorktreeKeeps, type WorktreeKeep } from './worktree-keeps.js';
 
 export * from './worktree-gc-types.js';
-export { findCredentialFiles, scrubFile, zeroFill } from './worktree-gc-scrub.js';
-export { countUnpushedCommits, isWorktreeClean, isZeroCommitLane } from './worktree-gc-evidence.js';
+export { countUnpushedCommits, isWorktreeClean } from './worktree-gc-evidence.js';
 
 /** Removal reasons that prove the work reached the remote — the only ones whose local
  *  branch is safe to force-delete unconditionally. `ttl-expired` fires on age alone and is
