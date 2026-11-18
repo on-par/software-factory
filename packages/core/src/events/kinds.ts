@@ -216,6 +216,7 @@ export type EventKind =
   | 'stopped'
   | 'stuck'
   | 'supervisor-done'
+  | 'time-budget'
   | 'timeout'
   | 'triage'
   | 'triage_accepted'
@@ -274,7 +275,6 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   budget_exceeded: { severity: 'warn', isPark: false, isTerminal: false },
   build: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   check: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
-  // #3371
   'check-infra': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   check_triage: { severity: 'info', isPark: false, isTerminal: false },
   checker_completed: { severity: 'info', isPark: false, isTerminal: false },
@@ -474,6 +474,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   stopped: { severity: 'warn', isPark: false, isTerminal: true, laneStatus: 'stopped' },
   stuck: { severity: 'warn', isPark: true, isTerminal: false },
   'supervisor-done': { severity: 'info', isPark: false, isTerminal: false },
+  'time-budget': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   timeout: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   triage: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   triage_accepted: { severity: 'info', isPark: false, isTerminal: false },

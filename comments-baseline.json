@@ -496,7 +496,7 @@
   "packages/core/src/events/index.ts": 17,
   "packages/core/src/events/kind-lookup.ts": 6,
   "packages/core/src/events/kinds.test.ts": 21,
-  "packages/core/src/events/kinds.ts": 45,
+  "packages/core/src/events/kinds.ts": 44,
   "packages/core/src/events/payloads.ts": 38,
   "packages/core/src/events/queue-traits.ts": 5,
   "packages/core/src/events/rotation.ts": 4,

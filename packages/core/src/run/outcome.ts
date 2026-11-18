@@ -15,6 +15,7 @@ export type ParkReason = Extract<
   | 'all_providers_down'
   | 'sandbox-env'
   | 'check-infra'
+  | 'time-budget'
 >;
 
 import type { BuildRoutePin } from '../config/repo.js';

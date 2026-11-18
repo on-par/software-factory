@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- CHECK respects an optional run deadline: set `FACTORY_RUN_DEADLINE_AT` (epoch ms or ISO-8601) and CHECK skips a flake re-run or rework round that would not finish before it, logs `skipped <rerun|rework> — needs ~Xm, Ym left in the run budget`, and parks the issue `time-budget` with the real check failure. `check.timeBudget` (`verifyMinutes`, `reworkBuildMinutes`, `safetyMarginMinutes`) tunes the estimates. Without a deadline nothing changes (#4264).
+
 ### Changed
 
 - Acceptance criteria are high-level outcomes by default: `factory check` accepts plain-language outcomes, warns on criteria that only describe code changes, and grades fenced gherkin Scenarios; `factory draft`, enrichment, decomposition and the readiness judge ask for outcomes, and Gherkin is optional (#3962).

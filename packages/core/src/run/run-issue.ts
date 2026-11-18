@@ -6,6 +6,7 @@ import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import { installLaneDependencies as installLaneDependenciesDefault } from './lane-install.js';
 import { checkPhase as checkPhaseDefault, type CheckPhaseResult } from '../phases/check.js';
+import { parseRunDeadline, RUN_DEADLINE_ENV, type TimeBudgetSettings } from '../phases/check-time-budget.js';
 import type { SizeBudget } from '../readiness/size.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
@@ -166,6 +167,8 @@ export interface RunRequest extends ReworkRequestFields {
   logsDir?: string;
   baselineCachePath?: string;
   baselineCacheTtlHours?: number;
+  runDeadlineAt?: string;
+  checkTimeBudget?: TimeBudgetSettings;
   repoConfigFile?: { absPath: string; relPath: string };
   flakyLedgerPath?: string;
   worktreeKeepsPath?: string;
@@ -752,6 +755,13 @@ async function runIssueOnce(
 
     await setPhase('check');
     const priorFailureSignature = await ports.reworkHistory?.priorSignature(request.issue);
+    const runDeadlineAtMs = parseRunDeadline(request.runDeadlineAt);
+    if (request.runDeadlineAt !== undefined && request.runDeadlineAt.trim() !== '' && runDeadlineAtMs === undefined) {
+      log(
+        'environment_warning',
+        `${RUN_DEADLINE_ENV}='${request.runDeadlineAt}' is not epoch ms or ISO-8601 — ignoring the run deadline`,
+      );
+    }
     const checkOpts = {
       budgetGuard: budgetStop.guard,
       runId,
@@ -786,6 +796,8 @@ async function runIssueOnce(
       baselineCachePath: request.baselineCachePath,
       baselineCacheTtlHours: request.baselineCacheTtlHours,
       requiredChecksVerdict: ports.requiredChecksVerdict,
+      runDeadlineAtMs,
+      timeBudget: request.checkTimeBudget,
     };
     capGate.watchCheck(builtRoute, builtModel);
     await runRequestedReviewRework(request, ports, checkOpts, feedbackPlan);
@@ -816,6 +828,16 @@ async function runIssueOnce(
     ): Promise<RunOutcome> => {
       if (failed.sandboxEnv) return terminalParked('sandbox-env', failed.sandboxEnv);
       if (failed.infra) return terminalParked('check-infra', failed.infra);
+      if (failed.timeBudget) {
+        const failure =
+          failed.failureSignature !== undefined
+            ? {
+                failureSignature: failed.failureSignature,
+                failingChecks: failed.summary.results.filter((r) => r.result === 'FAIL').map((r) => r.checker),
+              }
+            : undefined;
+        return terminalParked('time-budget', failed.timeBudget, failure);
+      }
       if (failed.environment) {
         const env = failed.environment;
         if (env.cause === 'config') {

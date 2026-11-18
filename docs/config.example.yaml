@@ -175,7 +175,7 @@ version: 2
   # the branch-protection required checks, else the check runs of the push workflow named CI. Other
   # failed push workflows (Release, deploy) log base_push_workflow_failed and never hold.
   # checks: ["<check-run name>"]
-# CHECK phase settings (#3272, #3540).
+# CHECK phase settings (#3272, #3540, #4264).
 # check:
   # Run CHECK commands with an empty global and system git config (GIT_CONFIG_GLOBAL=/dev/null,
   # GIT_CONFIG_NOSYSTEM=1), as on a CI runner. Set false when checks need host git settings such as
@@ -184,6 +184,10 @@ version: 2
   # Hours a cached baseline (base SHA) checker result is reused before CHECK and base health re-run
   # it (#3540). Unset: 24.
   # baselineCacheTtlHours: 24
+  # Estimates CHECK uses when FACTORY_RUN_DEADLINE_AT sets a run deadline (#4264): a flake re-run or
+  # rework round that would not finish before the deadline is skipped and the issue parks
+  # time-budget. No effect without a deadline.
+  # timeBudget: { verifyMinutes: 10, reworkBuildMinutes: 10, safetyMarginMinutes: 2 }
 # Branch prefix and merge policy. `factory run` and `supervise` read `auto`; `factory land` reads
 # `admin`. `factory ship` and `run-issue` stop at a ready-for-review PR unless `pr.draft` /
 # `--draft-pr` is set.

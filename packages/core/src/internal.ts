@@ -37,7 +37,12 @@ export { resolveFilingPolicy, resolvePrClassifierPolicy } from './config/index.j
 export { aliasDeprecatedSizeGateMode, isExplicitStackMode } from './config/index.js';
 export { describeDraftPrPolicy, resolveDraftPrPolicy, resolveRunMaxLanes } from './config/run-section.js';
 export type { TrustTier } from './config/repo.js';
-export { resolveBaseHealthChecks, resolveBaselineCacheTtlHours, resolveHermeticGit } from './config/base-health.js';
+export {
+  resolveBaseHealthChecks,
+  resolveBaselineCacheTtlHours,
+  resolveCheckTimeBudget,
+  resolveHermeticGit,
+} from './config/base-health.js';
 export {
   resolveEffectiveConfig,
   resolveReviewFloorRules,
@@ -265,6 +270,7 @@ export { loadPrRunState, prRunStatusFor, reconcilePrRunState, savePrRunState } f
 export type { PrRunRound, PrRunState } from './run/pr-run-state.js';
 export { loadPrFrozenSpec, savePrFrozenSpec } from './run/pr-frozen-spec.js'; // frozen spec of an in-place run (#4025)
 export { MAX_REWORK_ROUNDS } from './phases/check.js';
+export { RUN_DEADLINE_ENV } from './phases/check-time-budget.js';
 export { readStackSliceGate } from './phases/stack-approval.js';
 export type { StackPullReviews } from './phases/stack-approval.js';
 export { createShipExecutor } from './daemon/ship-executor.js';

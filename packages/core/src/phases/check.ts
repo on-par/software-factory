@@ -42,6 +42,12 @@ import {
   logVerifyScope,
 } from './check-affected.js';
 import { resolveReworkRoute } from './plan-routes.js';
+import {
+  createTimeBudget,
+  describeTimeBudgetSkip,
+  type TimeBudgetSettings,
+  timeBudgetParkMessage,
+} from './check-time-budget.js';
 
 export { LENS_REVIEW_CHECKER, lensShowstopperRefs, remainingShowstoppers };
 import type {
@@ -80,6 +86,7 @@ export interface CheckPhaseResult {
   flakeRerun?: FlakeRerun;
   sandboxEnv?: string;
   infra?: string;
+  timeBudget?: string;
 }
 
 export const MAX_REWORK_ROUNDS = 3;
@@ -256,6 +263,9 @@ async function checkPhaseImpl(opts: {
   runCommand?: CheckerContext['runCommand'];
   runEvidence?: typeof runEvidencePlan;
   testsAffected?: TestsAffectedConfig | null;
+  runDeadlineAtMs?: number;
+  timeBudget?: TimeBudgetSettings;
+  now?: () => number;
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -292,7 +302,9 @@ async function checkPhaseImpl(opts: {
     hermeticGit = true,
     runCommand,
     runEvidence,
+    now = Date.now,
   } = opts;
+  const timeBudget = createTimeBudget({ deadlineAtMs: opts.runDeadlineAtMs, now, settings: opts.timeBudget });
   const roundLogDir = (round: number): string | undefined =>
     logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, `check-r${round}`);
   const checkBaseDir = logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, 'check-base');
@@ -348,7 +360,9 @@ async function checkPhaseImpl(opts: {
   const hermeticGitNote = `hermetic git: ${hermeticGit ? 'on (GIT_CONFIG_GLOBAL=/dev/null, GIT_CONFIG_NOSYSTEM=1)' : 'off (check.hermeticGit false)'}`;
   log('check', hermeticGitNote);
   await logVerifyScope(undefined, ctx, 0, log);
+  const firstVerifyStartedAt = now();
   let summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
+  timeBudget.recordVerify(now() - firstVerifyStartedAt);
   summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
   let reworkRounds = 0;
   const maxRounds = autoRework ? Math.min(maxReworkRounds, MAX_REWORK_ROUNDS) : 0;
@@ -397,7 +411,9 @@ async function checkPhaseImpl(opts: {
 
   let flakeRerun: FlakeRerun | undefined;
   const testsFail = summary.results.find((r) => r.checker === 'tests' && r.result === 'FAIL');
-  if (testsFail) {
+  const rerunFit = testsFail ? timeBudget.fit('rerun') : undefined;
+  if (rerunFit && !rerunFit.fits) log('check', describeTimeBudgetSkip('rerun', rerunFit));
+  if (testsFail && rerunFit?.fits) {
     flakeRerun = await rerunTestsChecker({ ...ctx, runCommand: runCommand ?? ctx.runCommand }, testsFail.details);
     log(
       'check',
@@ -442,17 +458,19 @@ async function checkPhaseImpl(opts: {
   const baseFailing = baseFailingCheckers(baseline);
   if (baseFailing.size > 0) log('check', `dropping base-failing checkers from rework: ${[...baseFailing].join(', ')}`);
 
-  const triaged = await infraTriage(
-    summary,
-    (s) => excludeBaseFailing(s, baseFailing),
-    async () => {
-      ctx.outputLogDir = checkTriageDir;
-      const rerun = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
-      return appendEvidencePlanStep(rerun, ctx, constitution, runEvidence);
-    },
-    log,
-    logFailures,
-  );
+  const triaged = !timeBudget.fit('rerun').fits
+    ? { summary }
+    : await infraTriage(
+        summary,
+        (s) => excludeBaseFailing(s, baseFailing),
+        async () => {
+          ctx.outputLogDir = checkTriageDir;
+          const rerun = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
+          return appendEvidencePlanStep(rerun, ctx, constitution, runEvidence);
+        },
+        log,
+        logFailures,
+      );
   summary = triaged.summary;
   if (triaged.infra !== undefined) {
     return {
@@ -490,11 +508,18 @@ async function checkPhaseImpl(opts: {
 
   let stuck = false;
   let noProgressStreak = 0;
+  let timeBudgetPark = rerunFit && !rerunFit.fits ? timeBudgetParkMessage('rerun', rerunFit, summary) : undefined;
 
   while (summary.failures > 0 && reworkRounds < maxRounds) {
     const target = excludeBaseFailing(summary, baseFailing);
     if (target.failures === 0) {
       log('check', `only base-failing checkers remain (${failingCheckerNames(summary).join(', ')}) — stopping rework`);
+      break;
+    }
+    const reworkFit = timeBudget.fit('rework');
+    if (!reworkFit.fits) {
+      log('check', describeTimeBudgetSkip('rework', reworkFit));
+      timeBudgetPark ??= timeBudgetParkMessage('rework', reworkFit, summary);
       break;
     }
     reworkRounds++;
@@ -550,8 +575,10 @@ async function checkPhaseImpl(opts: {
     ctx.affectedTests = await selectAffected(reworkRounds);
     await logVerifyScope(ctx.affectedTests, ctx, reworkRounds, log);
     log('check', hermeticGitNote);
+    const verifyStartedAt = now();
     summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
     summary = await fullGateBeforeShip(summary, ctx, reworkRounds, log);
+    timeBudget.recordVerify(now() - verifyStartedAt);
     ctx.affectedTests = undefined;
     summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
@@ -614,6 +641,7 @@ async function checkPhaseImpl(opts: {
     failureSignature: summary.failures > 0 ? stuckSignature(summary, baseFailing) : undefined,
     ...(baseline ? { baseline } : {}),
     ...(flakeRerun ? { flakeRerun } : {}),
+    ...(timeBudgetPark !== undefined && summary.failures > 0 ? { timeBudget: timeBudgetPark } : {}),
   };
 }
 
