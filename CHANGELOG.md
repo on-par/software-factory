@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.39 - 2026-11-17
+
+Runs spend less time re-verifying: scoped checks stay focused through BUILD in a repo that set `buildVerify: focused`, even when its agent instruction files say to verify before every commit (#4272), CHECK skips the flaky re-run after a deterministic gate miss (#4263) and parks `time-budget` instead of starting a re-run or rework that cannot finish before the run deadline (#4264). A run stopped by its time budget or SIGTERM hands back a structured remaining-work handoff (#4269), `run-issue --continue-from <branch>` picks it up without re-planning (#4271), and `run-issue` parks on an open `Depends on:` prerequisite and lists it in `--json` (#4270).
+All seven published `@on-par` packages move to 0.9.39 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - `factory run-issue <N> --continue-from <branch> [--handoff <file>]` continues a budget-stopped run instead of re-planning. It reads the handoff from `--handoff` (a handoff or a `run-issue --json` result) or from the issue's handoff comment, checks that the branch head matches the handoff's head sha, reuses the frozen spec when PLAN had finished, and starts BUILD with only the remaining criteria and the last failing check as context; when every criterion is done it skips BUILD and runs the full gate once before SHIP. The PR opens from a new branch on the WIP head (`<branch>-cont-<sha7>`), so nothing is force-pushed. A missing branch or a head that does not match exits 2, naming both shas, before any worktree or PR exists (#4271).
