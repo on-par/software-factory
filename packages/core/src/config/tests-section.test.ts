@@ -19,6 +19,22 @@ describe('tests.affected repo config (#3260)', () => {
     expect(parse({ affected: { command } }).success).toBe(false);
   });
 
+  it('accepts a shell-free typecheck and a buildVerify value (#4251)', () => {
+    const cmd = 'npx vitest related --run {files}';
+    const r = parse({ affected: { command: cmd, typecheck: 'npx tsc -b --incremental', buildVerify: 'full' } });
+    expect(r.success).toBe(true);
+    expect(r.data?.tests?.affected).toMatchObject({ typecheck: 'npx tsc -b --incremental', buildVerify: 'full' });
+    expect(parse({ affected: { command: cmd, buildVerify: 'focused' } }).success).toBe(true);
+  });
+
+  it.each([
+    ['a shell-metachar typecheck', { typecheck: 'tsc -b && echo hi' }],
+    ['an empty typecheck', { typecheck: '' }],
+    ['an unknown buildVerify', { buildVerify: 'sometimes' }],
+  ])('rejects %s', (_name, extra) => {
+    expect(parse({ affected: { command: 'npx vitest related --run {files}', ...extra } }).success).toBe(false);
+  });
+
   it('rejects an unknown tests key', () => {
     expect(parse({ foo: {} }).success).toBe(false);
   });

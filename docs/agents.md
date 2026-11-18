@@ -185,6 +185,10 @@ not ready, 2 is invalid).
 
 On a disposable, one-job container the clone is already the isolation boundary. `factory run-issue <N> --in-place` (or `FACTORY_WORKSPACE=in-place`) runs plan, build, check and ship in the current checkout on the normal factory branch, with no second worktree and no second install. It refuses to start, before PLAN, unless the checkout is clean and on the default branch at the fetched `origin/<default>` tip; the refusal names each dirty file with its git status code (for example `M README.md, ?? new.txt`). The size gate is off in place, and `--base-branch` and `--stack` are refused. Worktree mode stays the default. A host whose disk does not survive the run adds `--json` (the final result as one `schemaVersion 3` object on the last stdout line, progress on stderr; schema in `packages/cli/schemas/run-result.schema.json`) and `--export <dir>` (the run's state file, events and cost records, written on every exit path); both also work on `run-brief` and `ship`, for one run only.
 
+## Scoped verification
+
+A repo that opts in with `tests.affected` iterates on a focused path. BUILD and CHECK rework rounds run the affected tests, plus `tests.affected.typecheck` (for example `npx tsc -b --incremental`) in place of the full compile, and lint on the changed files; the BUILD prompt no longer asks for a second full suite. When a focused round passes, CHECK runs one full compile and one full test pass before SHIP, so exactly one independent full gate remains. Each round logs a `verify_scope` line with the exact commands and whether the full gate is still pending. Falls back to the full commands when the change set is unknown, a trigger file changed, or no `typecheck` is declared; nothing is inferred. `tests.affected.buildVerify: full` keeps full verification in BUILD and every rework round for repos that demand it.
+
 ## Repairing a red base
 
 No base-health check runs before PLAN. Every run enters PLAN, and CHECK runs the full verify once and is the only test gate. A failing test, including one already red on `main`, goes back to BUILD until CHECK is green; it is never waived against a base baseline.

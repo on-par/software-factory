@@ -45,7 +45,13 @@ export type AffectedFullReason =
   'not-configured' | 'no-diff-base' | 'no-changed-files' | 'too-many-files' | 'trigger' | 'zero-tests' | 'tool-error';
 
 export type AffectedTestsResolution =
-  | { kind: 'affected'; command: string; argv: string[]; fileCount: number }
+  | {
+      kind: 'affected';
+      command: string;
+      argv: string[];
+      fileCount: number;
+      typecheck?: { argv: string[]; command: string };
+    }
   | { kind: 'full'; reason: AffectedFullReason; trigger?: string; fileCount: number };
 
 export function shellQuotePath(path: string): string {
@@ -78,11 +84,16 @@ export function resolveAffectedTestsCommand(input: {
 
   const tokens = tokenizeEvidenceCommand(cfg.command);
   if (!tokens?.includes('{files}')) return { kind: 'full', reason: 'not-configured', fileCount };
+  const expand = (parts: readonly string[]): { argv: string[]; command: string } => ({
+    argv: parts.flatMap((t) => (t === '{files}' ? files : [t])),
+    command: parts.map((t) => (t === '{files}' ? files.map(shellQuotePath).join(' ') : t)).join(' '),
+  });
+  const typecheckTokens = cfg.typecheck === undefined ? null : tokenizeEvidenceCommand(cfg.typecheck);
   return {
     kind: 'affected',
-    argv: tokens.flatMap((t) => (t === '{files}' ? files : [t])),
-    command: tokens.map((t) => (t === '{files}' ? files.map(shellQuotePath).join(' ') : t)).join(' '),
+    ...expand(tokens),
     fileCount,
+    ...(typecheckTokens ? { typecheck: expand(typecheckTokens) } : {}),
   };
 }
 
@@ -108,6 +119,9 @@ export async function listChangedFiles(
 
 export function describeAffectedResolution(r: AffectedTestsResolution, round: number): string {
   const head = `affected tests (round ${round}):`;
-  if (r.kind === 'affected') return `${head} affected — ${r.command} (${r.fileCount} files)`;
+  if (r.kind === 'affected') {
+    const typecheck = r.typecheck ? `; typecheck — ${r.typecheck.command}` : '';
+    return `${head} affected — ${r.command} (${r.fileCount} files)${typecheck}`;
+  }
   return `${head} full — ${r.reason}${r.trigger === undefined ? '' : ` (${r.trigger})`} (${r.fileCount} files)`;
 }

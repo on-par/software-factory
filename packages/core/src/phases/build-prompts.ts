@@ -43,6 +43,8 @@ export function buildCommitOnlyPrompt(opts: {
   lintCommands?: readonly LintCommand[];
   verifyCommand?: string;
   affectedTestsCommand?: string;
+  affectedTypecheckCommand?: string;
+  buildVerify?: 'focused' | 'full';
   previousAttempt?: string;
 }): string {
   const {
@@ -69,7 +71,7 @@ ${parseSpec(spec).body.trim()}
 ${previousAttempt ? `${previousAttempt}\n\n` : ''}## Rules
 - ${READ_BEFORE_EDIT_RULE}
 - Match the surrounding code style. Add or update the tests in the spec's Tests section.
-- ${verifyRule(lintCommands, verifyCommand, affectedTestsCommand)}
+- ${verifyRule(lintCommands, verifyCommand, affectedTestsCommand, opts.affectedTypecheckCommand, opts.buildVerify)}
 - ${MAX_LINES_OVERRIDE_RULE}
 - Commit atomically: one commit per independently testable functional change, with a clear conventional message (no brief ids). Never mix unrelated functional changes in one commit. A single-slice task yields exactly ONE commit.
 - Do NOT push, do NOT open a pull request, do NOT merge. CHECK and SHIP run next.
@@ -92,6 +94,8 @@ export function buildClaudePrompt(opts: {
   verifyCommand?: string;
   affectedTestsCommand?: string;
   previousAttempt?: string;
+  affectedTypecheckCommand?: string;
+  buildVerify?: 'focused' | 'full';
 }): string {
   const { previousAttempt } = opts;
   const {
@@ -117,7 +121,7 @@ The frozen, approved spec is at ${specPath}. Read it and follow it as the plan. 
 ${UNTRUSTED_ISSUE_BODY_NOTICE}
 
 ${previousAttempt ? `${previousAttempt}\n\n` : ''}- ${READ_BEFORE_EDIT_RULE}
-- ${verifyRule(lintCommands, verifyCommand, affectedTestsCommand)}
+- ${verifyRule(lintCommands, verifyCommand, affectedTestsCommand, opts.affectedTypecheckCommand, opts.buildVerify)}
 - ${MAX_LINES_OVERRIDE_RULE}
 - Commit atomically: one commit per independently testable functional change, with a clear conventional message. Never mix unrelated functional changes in one commit.
 - Do NOT merge (the factory merges). Your session ends when you end your turn, so do not stop until: (1) branch ${branch} is pushed, (2) an open PR exists with 'Closes #${issue}' in its body, ${skipCI ? '(3) local verify passes (CI is intentionally skipped: do not block on GitHub Actions CI or escalate if CI cannot run), (4) the PR is ready.' : '(3) CI is green, (4) the PR is ready.'}
@@ -136,13 +140,19 @@ function verifyRule(
   lintCommands: readonly LintCommand[] = [],
   verifyCommand?: string,
   affectedTestsCommand?: string,
+  affectedTypecheckCommand?: string,
+  buildVerify?: 'focused' | 'full',
 ): string {
   const base = verifyCommand
     ? `Verify with the command CHECK runs: \`${verifyCommand}\` (this repo's gate is scripts/verify.ps1), plus any verify command the constitution names. Fix failures before finishing and report the exact command and its output.`
     : VERIFY_RULE_BASE;
-  const affected = affectedTestsCommand
-    ? ` While iterating, you may run only the affected tests with \`${affectedTestsCommand}\` ({files} = the paths you changed, each shell-quoted); CHECK runs the full suite before SHIP, so finish with the full command above.`
-    : '';
+  const typecheck = affectedTypecheckCommand ? `typecheck \`${affectedTypecheckCommand}\` and ` : '';
+  const focused = ` While iterating and before finishing, run only the focused commands: ${typecheck}affected tests \`${affectedTestsCommand}\` ({files} = the paths you changed, each shell-quoted). Do not also run the full command above unless the standards above require it; CHECK runs one full gate before SHIP.`;
+  const affected = !affectedTestsCommand
+    ? ''
+    : buildVerify !== 'full'
+      ? focused
+      : ` While iterating, you may run only the affected tests with \`${affectedTestsCommand}\` ({files} = the paths you changed, each shell-quoted); CHECK runs the full suite before SHIP, so finish with the full command above.`;
   if (lintCommands.length === 0) return `${base}${affected}`;
   const cmds = lintCommands.map((c) => `\`${c.argv.join(' ')}\``).join(' and ');
   return `${base} Also run ${cmds} (CHECK's lint checker runs them) and fix their failures before finishing.${affected}`;
