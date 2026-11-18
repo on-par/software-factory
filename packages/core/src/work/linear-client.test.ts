@@ -1,12 +1,11 @@
 import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
+import { bodyText } from '../testing/fetch-body.js';
 
 import { createLinearClient, LinearApiError } from './linear-client.js';
 
 const fixture = JSON.parse(readFileSync(new URL('./__fixtures__/linear-issue-on-12.json', import.meta.url), 'utf8'));
-
-const bodyText = (body: unknown): string => (typeof body === 'string' ? body : '');
 
 function respond(body: unknown, status = 200) {
   const requests: Array<[string | Request | URL, RequestInit | undefined]> = [];

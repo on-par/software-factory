@@ -4,13 +4,14 @@ import { execFileSync } from 'node:child_process';
 
 import { createGithubQueue, createOctokitQueueClient } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
+import { bodyText } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { bodyText } from '@on-par/factory-core/testing';
 
 import { main } from './index.js';
 import { createFactoryOctokit } from './octokit.js';
 
 /** In-memory GitHub double: #2253 is at factory:order:1, #2319 is parked with no order label, both in lane self-repair. */
-const bodyText = (body: unknown): string => (typeof body === 'string' ? body : '');
 
 function githubFetch(): typeof fetch {
   const state = new Map<number, Set<string>>([

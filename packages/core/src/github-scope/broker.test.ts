@@ -1,5 +1,6 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { bodyText } from '../testing/fetch-body.js';
 import {
   ambientSource,
   createGitHubCredentialBroker,
@@ -18,8 +19,6 @@ const { privateKey } = generateKeyPairSync('rsa', {
 });
 
 const APP = { appId: 7, installationId: 9 };
-
-const bodyText = (body: unknown): string => (typeof body === 'string' ? body : '');
 
 function mintingFetch(): { fetch: typeof fetch; bodies: unknown[]; deleted: string[] } {
   const bodies: unknown[] = [];

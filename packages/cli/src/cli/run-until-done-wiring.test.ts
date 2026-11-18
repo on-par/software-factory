@@ -2,7 +2,9 @@ import { Octokit } from '@octokit/rest';
 import { getFactoryPaths, loadFactoryConfig, type RunOutcome } from '@on-par/factory-core';
 import { createTempDirs } from '@on-par/factory-core/testing';
 
+import { bodyText } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { bodyText } from '@on-par/factory-core/testing';
 
 import { CliExitError } from './errors.js';
 import { IssueSkippedError } from './index.js';
@@ -17,8 +19,6 @@ import {
 } from './run-until-done-wiring.js';
 import type { MergeResult } from './run-issue-merge.js';
 import type { FeedbackRoundResult } from './respond-command.js';
-
-const bodyText = (body: unknown): string => (typeof body === 'string' ? body : '');
 
 const pull = (number: number, ref: string, over: Partial<PullSummary> = {}): PullSummary => ({
   number,

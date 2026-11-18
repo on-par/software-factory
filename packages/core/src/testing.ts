@@ -31,3 +31,4 @@ export type { StubModelExecutorOptions } from './router/stub.js';
 export { StubModelExecutor } from './router/stub.js';
 export { simWorkspace } from './run/ports.js';
 export { loadReusablePlan } from './run/plan-reuse-load.js'; // plan-reuse assertions (#4025)
+export { bodyText } from './testing/fetch-body.js';

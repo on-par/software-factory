@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { bodyText } from '../testing/fetch-body.js';
 
 import type { LinearTrackerConfig } from '../config/tracker-section.js';
 import { LINEAR_GRAPHQL_URL, probeLinearSetup } from './linear-preflight.js';
@@ -11,8 +12,6 @@ const linear: LinearTrackerConfig = {
   laneLabelGroup: 'lane',
   states: { ready: 'Todo', inProgress: 'In Progress', parked: 'Todo' },
 };
-
-const bodyText = (body: unknown): string => (typeof body === 'string' ? body : '');
 
 const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status });
 const page = (nodes: unknown[], next?: string, teams: unknown[] = [{ id: 't' }]) => ({

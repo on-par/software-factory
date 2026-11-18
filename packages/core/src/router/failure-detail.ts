@@ -23,11 +23,6 @@ function truncate(text: string, limit: number): string {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 }
 
-/**
- * One-line, sanitized, truncated description of a model-attempt failure.
- * Reads both top-level child-process fields (plain exec errors) and
- * HarnessError's `details` bag. Returns '' when there is nothing useful.
- */
 function primitiveText(value: unknown): string {
   if (typeof value === 'string') return value;
   if (
@@ -38,9 +33,14 @@ function primitiveText(value: unknown): string {
   ) {
     return String(value);
   }
-  return typeof value === 'function' ? String(value as () => unknown) : '';
+  return typeof value === 'function' ? value.name : '';
 }
 
+/**
+ * One-line, sanitized, truncated description of a model-attempt failure.
+ * Reads both top-level child-process fields (plain exec errors) and
+ * HarnessError's `details` bag. Returns '' when there is nothing useful.
+ */
 export function describeFailureDetail(err: unknown): string {
   if (err === null || err === undefined) return '';
   if (typeof err !== 'object') return redactSecrets(truncate(collapse(primitiveText(err)), MESSAGE_LIMIT));

@@ -35,7 +35,15 @@ function errorMessage(error: unknown): string | undefined {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
   if (typeof error === 'object' || typeof error === 'function') return JSON.stringify(error) ?? 'unknown error';
-  return String(error as number | boolean | bigint | symbol);
+  if (
+    typeof error === 'number' ||
+    typeof error === 'boolean' ||
+    typeof error === 'bigint' ||
+    typeof error === 'symbol'
+  ) {
+    return String(error);
+  }
+  return 'unknown error';
 }
 
 function classifyMerge(merge: MergeResult): { outcome: RunResultOutcome; exitReason: string } | undefined {

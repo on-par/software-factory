@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { bodyText } from '../testing/fetch-body.js';
 import { LinearTrackerSchema } from '../config/tracker-section.js';
 import { LinearApiError } from '../work/linear-client.js';
 import { claimedByLabel } from './github-queue.js';
@@ -24,8 +25,6 @@ interface Entry {
   labels: Set<string>;
   state: string;
 }
-
-const bodyText = (body: unknown): string => (typeof body === 'string' ? body : '');
 
 function fakeClient(issues: LinearQueueIssue[], store?: Map<string, Entry>) {
   const map =
