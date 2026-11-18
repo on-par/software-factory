@@ -189,6 +189,8 @@ On a disposable, one-job container the clone is already the isolation boundary. 
 
 A repo that opts in with `tests.affected` iterates on a focused path. BUILD and CHECK rework rounds run the affected tests, plus `tests.affected.typecheck` (for example `npx tsc -b --incremental`) in place of the full compile, and lint on the changed files; the BUILD prompt no longer asks for a second full suite. When a focused round passes, CHECK runs one full compile and one full test pass before SHIP, so exactly one independent full gate remains. Each round logs a `verify_scope` line with the exact commands and whether the full gate is still pending. Falls back to the full commands when the change set is unknown, a trigger file changed, or no `typecheck` is declared; nothing is inferred. `tests.affected.buildVerify: full` keeps full verification in BUILD and every rework round for repos that demand it.
 
+When a repo sets `tests.affected.buildVerify: focused` explicitly, the BUILD prompt also says the focused commands satisfy a generic "run the full verify before every commit" rule in the repo's `CLAUDE.md` or `AGENTS.md`, so BUILD does not run the full gate once per commit. A frozen spec that demands full BUILD verification still wins, and CHECK still runs one full gate before SHIP. When `buildVerify` is unset, the BUILD wording does not change.
+
 ## Repairing a red base
 
 No base-health check runs before PLAN. Every run enters PLAN, and CHECK runs the full verify once and is the only test gate. A failing test, including one already red on `main`, goes back to BUILD until CHECK is green; it is never waived against a base baseline.

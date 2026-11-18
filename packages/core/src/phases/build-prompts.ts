@@ -147,7 +147,7 @@ function verifyRule(
     ? `Verify with the command CHECK runs: \`${verifyCommand}\` (this repo's gate is scripts/verify.ps1), plus any verify command the constitution names. Fix failures before finishing and report the exact command and its output.`
     : VERIFY_RULE_BASE;
   const typecheck = affectedTypecheckCommand ? `typecheck \`${affectedTypecheckCommand}\` and ` : '';
-  const focused = ` While iterating and before finishing, run only the focused commands: ${typecheck}affected tests \`${affectedTestsCommand}\` ({files} = the paths you changed, each shell-quoted). Do not also run the full command above unless the standards above require it; CHECK runs one full gate before SHIP.`;
+  const focused = ` While iterating and before finishing, run only the focused commands: ${typecheck}affected tests \`${affectedTestsCommand}\` ({files} = the paths you changed, each shell-quoted). Do not also run the full command above${buildVerify === 'focused' ? ', even before a commit: this repo set `buildVerify: focused`, so these focused commands satisfy a generic verify-before-commit rule in CLAUDE.md or AGENTS.md. A frozen spec that demands full BUILD verification still wins' : ' unless the standards above require it'}; CHECK runs one full gate before SHIP.`;
   const affected = !affectedTestsCommand
     ? ''
     : buildVerify !== 'full'

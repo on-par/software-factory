@@ -16,6 +16,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- In a repo that sets `tests.affected.buildVerify: focused` explicitly, the BUILD verify rule says the focused commands satisfy a generic verify-before-commit rule in `CLAUDE.md` or `AGENTS.md`, so BUILD stops running the full verify before every commit. A frozen spec that demands full BUILD verification still wins, CHECK still runs one full gate before SHIP, and an unset `buildVerify` keeps today's wording. This repo's `AGENTS.md` and `CLAUDE.md` name the focused-handoff exception (#4272).
 - CHECK skips the flaky re-run when the tests checker failed only on a deterministic gate (coverage threshold, test-time budget or LOC budget) with no failing test, logs `flaky re-run: skipped — deterministic gate failed (<gate>)`, and sends the threshold lines plus uncovered lines in changed files straight to rework (#4263).
 - This repo's own factory runs turn on the BUILD-to-CHECK handoff: `.factory/config.yaml` sets `tests.affected` (`npx vitest related --run {files}`, `buildVerify: focused`) and `.factory/constitution.md` documents it, so BUILD verifies the changed paths and CHECK still runs the full gate before SHIP (#4004).
 - Acceptance criteria are high-level outcomes by default: `factory check` accepts plain-language outcomes, warns on criteria that only describe code changes, and grades fenced gherkin Scenarios; `factory draft`, enrichment, decomposition and the readiness judge ask for outcomes, and Gherkin is optional (#3962).
