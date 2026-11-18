@@ -25,6 +25,11 @@ The factory builds itself, so a change here must keep the factory able to ship t
 - `bash scripts/verify.sh --no-e2e` passes from the repo root: format check, build, ADR index,
   type-check, oxlint with `--deny-warnings`, knip, vitest with coverage, the test budget and the
   stub evals.
+- BUILD-to-CHECK handoff: a factory BUILD in this repo may verify with the focused
+  `tests.affected` command in `.factory/config.yaml` on the paths it changed, instead of the full
+  verify above. It reports the exact command it ran, its result, and that the full gate is still
+  pending. CHECK then runs the full verification independently before SHIP, and required CI is
+  unchanged. A spec that demands full verification in BUILD wins over this handoff.
 - Coverage thresholds in `vitest.config.ts` never go down. When the coverage ratchet reports a
   rise, the same change raises the threshold.
 - No test is skipped, disabled or deleted to get green. Lint rules are not switched off inline
