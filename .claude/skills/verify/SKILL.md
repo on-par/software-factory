@@ -30,14 +30,13 @@ The factory's own CHECK phase runs `bash scripts/verify.sh --no-e2e` in the buil
 8. `npm run lint` — Oxlint, type-aware, `--deny-warnings`
 9. `npm run knip` — dead code and unused dependencies (default and `--production` runs) against the shrink-only `knip-baseline.json`; `npm run knip:raw` shows the human-readable report
 10. `npm run duplication` — jscpd clones against `duplication-baseline.json`; fails only when clones rise, a drop prints suggested lower numbers and passes, percentage is informational
-11. `npm run loc-budget` — per-package line budget against loc-budget.json
-12. Tests:
+11. Tests:
     - full path: `npm run test` (Vitest with coverage thresholds), then `npm run coverage-ratchet`
     - `--no-e2e`: `npm run test` (Vitest with coverage thresholds), no ratchet
     - tests run with `FACTORY_TEST_MAX_WORKERS` workers, defaulting to `os.availableParallelism()`; set it to `1` to run serially on a loaded host
     - after the tests, `npm run slowest-tests` prints the 5 slowest files and `npm run test-budget` compares the test-step wall-clock time against `TEST_BUDGET_SECONDS` in `scripts/test-budget.ts` (450s; override for one run with `FACTORY_TEST_BUDGET_SECONDS`). It prints `test-budget: PASS` within budget, a warning plus the slowest files when over locally, and fails verify in CI (`CI` set, e.g. `CI=true`) with `test-budget: FAIL` plus the slowest files
-13. `npm run eval -- --stub`
-14. Shell-script tests: `auto-merge-sweep`, `filter-green-prs`, `repo-merge-settings`, `repo-about`, `repo-issue-optics`, `ruleset-copilot-review`, `launchd/install-sweep-plist`, `publish-workspaces` (guards the publish list `scripts/publish-workspaces.txt` against the workspace graph)
+12. `npm run eval -- --stub`
+13. Shell-script tests: `auto-merge-sweep`, `filter-green-prs`, `repo-merge-settings`, `repo-about`, `repo-issue-optics`, `ruleset-copilot-review`, `launchd/install-sweep-plist`, `publish-workspaces` (guards the publish list `scripts/publish-workspaces.txt` against the workspace graph)
 
 CI (`.github/workflows/ci.yml`) runs the same checks as the full path, split into parallel jobs: `static` (format, build, guards, typecheck, lint, knip, Duplication) and `test (1/3)`…`test (3/3)` (Vitest shards that write blob reports with raw coverage and no thresholds, via `FACTORY_COVERAGE_SHARD=1`). The required `ci` job fails unless all of them succeeded, then merges the shard reports (`vitest --merge-reports`) and enforces the coverage thresholds, the ratchet, and the stub eval on the merged result. A red `ci` names the failing job; read that job's log. CI also runs `scripts/quickstart-smoke.sh` in a separate job. It does not run the `install-sweep-plist` test.
 
@@ -50,14 +49,6 @@ The pre-commit hook (`lefthook.yml`) auto-fixes staged files with `oxlint --fix`
 `anti-slop/no-comments` fails `npm run lint` on any comment except justified lint overrides, rule notes in `oxlint.config.ts` and toolchain directives; to lower an entry in `comments-baseline.json`, delete comments then set the entry to the new count (or delete it at 0), never add or raise one (the CI guard fails it), and the rule cannot be disabled inline.
 
 `anti-slop/package-boundaries` fails `npm run lint` on a forbidden package edge: config importing a workspace package or declaring runtime dependencies, core importing cli or tui, a relative import leaving its package, a deep import of another package's `src/`, another package's `test-support/`, or `@on-par/factory-core/internal` and `/testing` outside the places ADR-0004 allows. The fix is the one each message names (import the published name, move the code, or use the public root). The rule is never disabled inline.
-
-## LOC budget
-
-`npm run loc-budget` compares each package's TypeScript line counts with `loc-budget.json`. Every `.ts`, `.tsx`, `.mts` and `.cts` file under `packages/<pkg>/` counts, `*.test.*` files as tests and the rest as source; blank lines and comments count.
-
-- Over budget: delete or reuse existing code before adding more.
-- Under budget: lower the number to the printed count in the same PR so the trimmed code stays gone.
-- Deliberate growth: raise the number in `loc-budget.json` to the printed count and explain the growth in the PR body.
 
 ## Coverage gate and ratchet
 
@@ -113,7 +104,6 @@ Local `verify.sh` does not enforce this.
 | `lint` / test: `max-lines`                | See [Max-lines guard](#max-lines-guard).                                                                                                      |
 | `knip`                                    | Fix the finding. If you fixed a baselined one, delete its key from knip-baseline.json. Never add keys for new findings.                       |
 | `duplication`                             | Clones rose: deduplicate via existing test or harness helpers. A drop passes and prints suggested lower numbers; percentage is informational. |
-| `loc-budget`                              | See [LOC budget](#loc-budget).                                                                                                                |
 | `test` threshold                          | Add tests for the uncovered lines the report names.                                                                                           |
 | `coverage-ratchet`                        | Raise the named threshold in `vitest.config.ts` to the suggested value.                                                                       |
 | `eval --stub`                             | See the `run-evals` skill.                                                                                                                    |
