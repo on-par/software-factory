@@ -10,6 +10,7 @@ section to `## X.Y.Z - date`. See
 ### Changed
 
 - SHIP publishes UI visual proof as PR attachments: it writes the PR body with the marked proof block and `./<file>` references into the capture directory and runs `gh pr edit --body-file <file> --attach` with each after and before screenshot and clip, so GitHub hosts the images and no proof is committed to a side branch. This needs gh 2.103.0 or newer; a missing or older gh, or a failed `gh pr edit`, fails the proof with the reason in the PR body and the `factory/visual-proof` status. A proof file name with a character other than letters, digits, `.`, `_`, `-` and a `/` between directories fails the proof before gh runs, so a name like `before (1).png` cannot break the proof block's markdown or leave uploads outside it (#4284).
+- A partial visual-proof attach (gh uploaded some files, failed on others and still updated the PR) now fails the proof: SHIP rewrites the proof block to `Visual proof unavailable: partial attach: ...` with gh's error and no image references, and in `required` mode the `failure` status keeps land from merging the head. `advisory` mode still stamps an `advisory:` success, and `off` mode never runs gh (#4285).
 
 ## 0.9.39 - 2026-11-17
 

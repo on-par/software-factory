@@ -15,8 +15,7 @@ import {
 } from './visual-proof-attach.js';
 import type { VisualProofImage, VisualProofResult } from './visual-proof.js';
 
-const BODY_FILE = 'visual-proof-pr-body.md';
-const EDIT_TIMEOUT_MS = 300_000;
+const PARTIAL = 'partial attach: gh uploaded some proof files and failed on others, so the proof was withdrawn';
 const SAFE_NAME = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
 const ref = (file: string): string => `./${file}`;
 
@@ -55,22 +54,16 @@ export async function publishVisualProofWithGh(
   mode: PublishedVisualProofMode = 'required',
   run: typeof runCommand = runCommand,
 ): Promise<VisualProofResult> {
-  const failWith = async (diagnostic: string): Promise<VisualProofResult> => {
-    const { headSha, runId, captures } = result;
-    const failed: VisualProofResult = { status: 'fail', headSha, runId, captures, diagnostic };
-    await publishVisualProof(octokit, target, failed, mode);
-    return failed;
-  };
-  if (result.status !== 'pass') {
-    await publishVisualProof(octokit, target, result, mode);
-    return result;
-  }
+  const publish = (r: VisualProofResult) => publishVisualProof(octokit, target, r, mode).then(() => r);
+  const { headSha, runId, captures } = result;
+  const failWith = (diagnostic: string) => publish({ status: 'fail', headSha, runId, captures, diagnostic });
+  if (result.status !== 'pass') return publish(result);
   if (!result.outDir) return failWith('attach failed: capture output directory unknown');
   const preflight = unsafeName(result) ?? (await checkGhVersion(run));
   if (preflight) return failWith(preflight);
   const { owner, repo, prNumber } = target;
   const proof = { ...result, images: imagesFor(result) };
-  const bodyFile = join(result.outDir, BODY_FILE);
+  const bodyFile = join(result.outDir, 'visual-proof-pr-body.md');
   try {
     const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
     writeFileSync(bodyFile, upsertVisualProofBlock(data.body, renderVisualProofBlock(proof, mode), mode));
@@ -78,8 +71,11 @@ export async function publishVisualProofWithGh(
     return failWith(`attach failed: could not write the PR body: ${errorMessage(err)}`);
   }
   const edit = ['gh', 'pr', 'edit', String(prNumber), '--repo', `${owner}/${repo}`, '--body-file', bodyFile];
-  const r = await run([...edit, ...attachArgs(result)], { cwd: result.outDir, timeoutMs: EDIT_TIMEOUT_MS });
-  if (!r.ok) return failWith(`gh pr edit --attach failed (exit ${r.exitCode}): ${r.stderr.trim()}`);
+  const r = await run([...edit, ...attachArgs(result)], { cwd: result.outDir, timeoutMs: 300_000 });
+  if (!r.ok) {
+    const partial = new RegExp(`/pull/${prNumber}\\b`).test(r.stdout);
+    return failWith(`${partial ? PARTIAL : `gh pr edit --attach failed (exit ${r.exitCode})`}: ${r.stderr.trim()}`);
+  }
   await stampVisualProofStatus(octokit, target, proof, mode);
   return proof;
 }

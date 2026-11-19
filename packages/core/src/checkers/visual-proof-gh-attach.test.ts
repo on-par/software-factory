@@ -7,7 +7,7 @@ import { createTempDirs } from '../harness/temp-dir.js';
 import { fakeOctokit, type FakeOctokitOptions } from '../test-support/fake-octokit.js';
 import { cmdResult } from '../test-support/visual-proof-test-helpers.js';
 import type { CommandResult } from '../utils/command-runner.js';
-import { VISUAL_PROOF_START } from './visual-proof-attach.js';
+import { VISUAL_PROOF_END, VISUAL_PROOF_START } from './visual-proof-attach.js';
 import { publishVisualProofWithGh } from './visual-proof-gh-attach.js';
 import type { VisualProofCapture, VisualProofResult } from './visual-proof.js';
 
@@ -17,20 +17,11 @@ afterAll(() => dirs.cleanup());
 const HEAD = 'abcdef0123456789abcdef0123456789abcdef01';
 const target = { owner: 'o', repo: 'r', prNumber: 7 };
 const NEW_GH = { stdout: 'gh version 2.103.0 (2026-11-01)\n' };
-const capture: VisualProofCapture = {
-  route: '/items',
-  state: 'created',
-  viewport: { width: 1280, height: 800 },
-  finalPath: '/items',
-  file: 'after.png',
-  bytes: 4,
-  before: { file: 'before.png', finalPath: '/items', bytes: 4 },
-};
+const before = { file: 'before.png', finalPath: '/items', bytes: 4 };
+const view = { route: '/items', state: 'created', viewport: { width: 1280, height: 800 }, finalPath: '/items' };
+const capture: VisualProofCapture = { ...view, file: 'after.png', bytes: 4, before };
 
-function setup(
-  gh: { version?: Partial<CommandResult>; edit?: Partial<CommandResult> } = {},
-  opts?: FakeOctokitOptions,
-) {
+function setup(gh: Partial<Record<'version' | 'edit', Partial<CommandResult>>> = {}, opts?: FakeOctokitOptions) {
   const outDir = dirs.makeSync('visual-proof-gh-');
   const { octokit, calls } = fakeOctokit(opts);
   const argv: string[][] = [];
@@ -42,8 +33,7 @@ function setup(
     return cmdResult(gh.edit ?? { stdout: 'https://github.com/o/r/pull/7\n' });
   };
   const result: VisualProofResult = { status: 'pass', headSha: HEAD, runId: 'run-9', outDir, captures: [capture] };
-  const publish = (r: VisualProofResult = result, mode?: 'required' | 'advisory') =>
-    publishVisualProofWithGh(octokit, target, r, mode, run);
+  const publish = (r = result) => publishVisualProofWithGh(octokit, target, r, 'required', run);
   return { outDir, calls, argv, seen, result, publish };
 }
 
@@ -51,33 +41,31 @@ describe('publishVisualProofWithGh', () => {
   it('attaches before and after screenshots through gh pr edit --attach', async () => {
     const { outDir, calls, argv, seen, publish } = setup();
     const r = await publish();
-    const bodyFile = join(outDir, 'visual-proof-pr-body.md');
     expect(argv).toEqual([
       ['gh', '--version'],
-      ['gh', 'pr', 'edit', '7', '--repo', 'o/r', '--body-file', bodyFile]
+      ['gh', 'pr', 'edit', '7', '--repo', 'o/r', '--body-file', join(outDir, 'visual-proof-pr-body.md')]
         .concat(['--attach', './after.png#/items created after at abcdef012345'])
         .concat(['--attach', './before.png#/items created before']),
     ]);
     expect(seen.cwd).toBe(outDir);
-    expect(seen.body).toContain('Original body');
-    expect(seen.body).toContain(VISUAL_PROOF_START);
-    expect(seen.body).toContain('](./before.png)');
-    expect(seen.body).toContain('](./after.png)');
+    for (const text of ['Original body', VISUAL_PROOF_START, '](./before.png)', '](./after.png)']) {
+      expect(seen.body).toContain(text);
+    }
     expect(calls.pullsUpdate).toEqual([]);
     expect(calls.createCommitStatus).toEqual([expect.objectContaining({ sha: HEAD, state: 'success' })]);
     expect(r).toMatchObject({ status: 'pass', images: [{ url: './after.png', beforeUrl: './before.png' }] });
   });
 
   it('attaches a gif clip with alt text and a video clip without', async () => {
-    for (const [format, arg] of [
-      ['gif', './clip.gif#clip'],
-      ['webm', './clip.webm'],
-    ] as const) {
-      const { argv, result, publish } = setup();
-      const clip = { file: `clip.${format}`, format, bytes: 4 };
-      await publish({ ...result, captures: [{ ...capture, before: undefined, clip }] });
-      expect(argv[1]?.slice(-4)).toEqual(['--attach', './after.png#/items created at abcdef012345', '--attach', arg]);
-    }
+    const { argv, result, publish } = setup();
+    const clip = (format: 'gif' | 'webm') => ({ file: `c.${format}`, format, bytes: 4 });
+    const captures = [
+      { ...capture, clip: clip('gif') },
+      { ...view, file: 'b.png', bytes: 4, clip: clip('webm') },
+    ];
+    await publish({ ...result, captures });
+    expect(argv[1]?.slice(-4)).toEqual(['--attach', './b.png#/items created at abcdef012345', '--attach', './c.webm']);
+    expect(argv[1]).toContain('./c.gif#clip');
   });
 
   it('fails the proof naming the 2.103.0 minimum when gh is not found', async () => {
@@ -85,11 +73,10 @@ describe('publishVisualProofWithGh', () => {
       const { argv, calls, publish } = setup({ version });
       const r = await publish();
       expect(r.status).toBe('fail');
-      expect(r.diagnostic).toContain('2.103.0');
+      expect(r.diagnostic).toMatch(version.ok === false ? /not found.+2\.103\.0/ : /2\.92\.0 found.+2\.103\.0/);
       expect(argv).toEqual([['gh', '--version']]);
       expect(calls.createCommitStatus[0]?.state).toBe('failure');
       expect(calls.pullsUpdate[0]?.body).toContain('Visual proof unavailable:');
-      expect(r.diagnostic).toContain(version.ok === false ? 'not found' : '2.92.0 found');
     }
   });
 
@@ -116,23 +103,30 @@ describe('publishVisualProofWithGh', () => {
 
   it('fails the proof with gh stderr when gh pr edit exits non-zero', async () => {
     const stderr = 'HTTP 403: Resource not accessible\nthe pull request was not changed\n';
-    const { calls, publish } = setup({ edit: { ok: false, exitCode: 1, stderr } });
-    const r = await publish();
-    expect(r).toMatchObject({
-      status: 'fail',
-      diagnostic: expect.stringContaining('HTTP 403: Resource not accessible'),
-    });
-    expect(r.diagnostic).toContain('exit 1');
+    const { calls, publish } = setup({ edit: { ok: false, exitCode: 1, stderr, stdout: 'https://x/o/r/pull/70' } });
+    expect((await publish()).diagnostic).toMatch(/^gh pr edit --attach failed \(exit 1\): HTTP 403: Resource/);
     expect(calls.createCommitStatus[0]?.state).toBe('failure');
+  });
+
+  it('replaces a partially attached block with the unavailable reason', async () => {
+    const half = `Intro\n${VISUAL_PROOF_START}\n![a](https://x/assets/1)\n![b](./before.png)\n${VISUAL_PROOF_END}`;
+    const edit = { ok: false, stdout: 'https://github.com/o/r/pull/7', stderr: 'could not upload ./before.png' };
+    const { calls, publish } = setup({ edit }, { prBodies: ['Original body', half] });
+    const r = await publish();
+    const body = calls.pullsUpdate[0]?.body ?? '';
+    expect(r.diagnostic).toMatch(/^partial attach: .+: could not upload \.\/before\.png$/);
+    expect(body).toMatch(/Visual proof unavailable: partial attach: .+: could not upload \.\/before\.png/);
+    expect(body).not.toContain('![');
+    expect(calls.createCommitStatus[0]).toMatchObject({ state: 'failure', description: r.diagnostic?.slice(0, 140) });
   });
 
   it('publishes a non-pass result or a missing capture directory without running gh pr edit', async () => {
     const { argv, calls, result, publish } = setup();
     const unavailable = { ...result, status: 'unavailable' as const, diagnostic: 'no port' };
-    expect(await publish(unavailable, 'advisory')).toBe(unavailable);
+    expect(await publish(unavailable)).toBe(unavailable);
     const r = await publish({ ...result, outDir: undefined });
     expect(r.diagnostic).toBe('attach failed: capture output directory unknown');
     expect(argv).toEqual([]);
-    expect(calls.createCommitStatus.map((s) => s.state)).toEqual(['success', 'failure']);
+    expect(calls.createCommitStatus.map((s) => s.description)).toEqual(['no port', r.diagnostic]);
   });
 });

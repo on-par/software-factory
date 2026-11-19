@@ -19,19 +19,14 @@ import {
 beforeEach(resetCiReworkMocks);
 afterAll(() => tmp.cleanup());
 
-const VISUAL_PROOF = VisualProofConfigSchema.parse({
-  uiPaths: ['web/**'],
-  routes: [{ route: '/items', assert: '#item-1', paths: ['web/items/**'] }],
-  command: ['node', 'scripts/capture.mjs'],
-});
-const HEAD = 'a'.repeat(40);
+const routes = [{ route: '/items', assert: '#item-1', paths: ['web/items/**'] }];
+const VISUAL_PROOF = VisualProofConfigSchema.parse({ uiPaths: ['web/**'], routes, command: ['node', 'capture.mjs'] });
+const NEW_GH = { stdout: 'gh version 2.103.0 (2026-11-01)\n' };
 
 async function shipGate(config = VISUAL_PROOF, edit: Partial<CommandResult> = {}) {
   let shipOpts: Parameters<typeof shipPhase>[0] | undefined;
-  shipPhase.mockImplementationOnce(async (opts) => {
-    shipOpts = opts;
-    return { ok: true, prNumber: 9 };
-  });
+  shipPhase.mockImplementationOnce(async (opts) => ((shipOpts = opts), { ok: true, prNumber: 9 }));
+  listPrChangedFiles.mockResolvedValue(['web/items/a.css']);
   const { octokit, calls } = fakeOctokit();
   const git: string[] = [];
   octokit.rest.git = new Proxy({}, { get: (_, name) => (git.push(String(name)), async () => ({ data: {} })) });
@@ -44,12 +39,9 @@ async function shipGate(config = VISUAL_PROOF, edit: Partial<CommandResult> = {}
     octokit,
     loadVisualProofConfig: () => config,
     captureVisualProof: async ({ headSha, runId }) => ({ status: 'pass', headSha, runId, outDir, captures }),
-    runGh: async (args) => {
-      gh.push([...args]);
-      return cmdResult(args[1] === '--version' ? { stdout: 'gh version 2.103.0 (2026-11-01)\n' } : edit);
-    },
+    runGh: async (args) => (gh.push([...args]), cmdResult(args[1] === '--version' ? NEW_GH : edit)),
   });
-  return { calls, git, gh, shipOpts, run: () => shipOpts?.visualProofGate?.({ prNumber: 9, headSha: HEAD }) };
+  return { calls, git, gh, shipOpts, run: () => shipOpts?.visualProofGate?.({ prNumber: 9, headSha: 'a'.repeat(40) }) };
 }
 
 describe('shipWithCiRework — visual proof gate always publishes (#4054)', () => {
@@ -63,12 +55,25 @@ describe('shipWithCiRework — visual proof gate always publishes (#4054)', () =
   });
 
   it('publishes a passing capture through gh attach without git blobs', async () => {
-    listPrChangedFiles.mockResolvedValueOnce(['web/items/a.css']);
     const { calls, git, gh, run } = await shipGate();
     expect(await run()).toMatchObject({ status: 'pass', images: [{ url: './after.png' }] });
-    expect(gh[1]?.slice(0, 4)).toEqual(['gh', 'pr', 'edit', '9']);
-    expect(gh[1]).toContain('--attach');
+    expect(gh[1]?.join(' ')).toMatch(/^gh pr edit 9 --repo o\/r --body-file .+ --attach \.\/after\.png#/);
     expect(git).toEqual([]);
     expect(calls.createCommitStatus.map((s) => s.state)).toEqual(['success']);
+  });
+
+  it('advisory mode does not block on a failed attach', async () => {
+    const edit = { ok: false, exitCode: 1, stderr: 'upload refused' };
+    const { calls, shipOpts, run } = await shipGate({ ...VISUAL_PROOF, mode: 'advisory' }, edit);
+    expect(await run()).toMatchObject({ status: 'fail', diagnostic: expect.stringContaining('upload refused') });
+    const [status] = calls.createCommitStatus;
+    expect(`${status?.state} ${status?.description}`).toMatch(/^success advisory:/);
+    expect(shipOpts?.visualProofMode).toBe('advisory');
+  });
+
+  it('off mode never invokes gh', async () => {
+    const { calls, gh, shipOpts } = await shipGate({ ...VISUAL_PROOF, mode: 'off' });
+    expect(shipOpts?.visualProofGate).toBeUndefined();
+    expect([gh, calls.pullsUpdate, calls.createCommitStatus]).toEqual([[], [], []]);
   });
 });
