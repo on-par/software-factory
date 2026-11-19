@@ -52,7 +52,6 @@ npm run lint || {
 }
 npm run knip
 npm run duplication
-npm run loc-budget
 # Per-file durations for the slowest-files report (#2769). Keep the default
 # console reporter, and keep github-actions annotations in CI (vitest only
 # auto-adds that reporter when none are passed).

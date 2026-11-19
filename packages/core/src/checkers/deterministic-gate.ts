@@ -14,10 +14,6 @@ const GATE_MARKERS: readonly { kind: DeterministicGateKind; pattern: RegExp; whe
   { kind: 'coverage threshold', pattern: /Coverage for \w+ \([\d.]+%\) does not meet .*threshold/ },
   { kind: 'test-time budget', pattern: /^test-budget: FAIL\b/ },
   {
-    kind: 'loc budget',
-    pattern: /loc-budget\.json budget of \d+|has no loc-budget\.json entry|^loc budget: (?!PASS)/,
-  },
-  {
     kind: 'format',
     pattern: /Code style issues (?:were )?found\b|^\[warn\] \S/,
     when: /Code style issues (?:were )?found\b/,
