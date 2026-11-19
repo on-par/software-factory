@@ -121,7 +121,8 @@ export interface RegressionFinding {
   reproduced: boolean;
 }
 
-export type DeterministicGateKind = 'coverage threshold' | 'test-time budget' | 'loc budget';
+export type DeterministicGateKind =
+  'coverage threshold' | 'test-time budget' | 'loc budget' | 'format' | 'lint' | 'typecheck';
 
 export interface CheckerOutput {
   checker: string;

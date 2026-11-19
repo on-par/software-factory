@@ -8,13 +8,33 @@ export interface DeterministicGate {
   lines: string[];
 }
 
-const GATE_MARKERS: readonly { kind: DeterministicGateKind; pattern: RegExp }[] = [
+const LINT_DIAGNOSTIC = /^[×⚠!]\s+[\w@./-]+\([\w@./-]+\)/;
+
+const GATE_MARKERS: readonly { kind: DeterministicGateKind; pattern: RegExp; when?: RegExp; ignore?: RegExp }[] = [
   { kind: 'coverage threshold', pattern: /Coverage for \w+ \([\d.]+%\) does not meet .*threshold/ },
   { kind: 'test-time budget', pattern: /^test-budget: FAIL\b/ },
   {
     kind: 'loc budget',
     pattern: /loc-budget\.json budget of \d+|has no loc-budget\.json entry|^loc budget: (?!PASS)/,
   },
+  {
+    kind: 'format',
+    pattern: /Code style issues (?:were )?found\b|^\[warn\] \S/,
+    when: /Code style issues (?:were )?found\b/,
+  },
+  {
+    kind: 'lint',
+    pattern:
+      /^Found \d+ warnings? and [1-9]\d* errors?\b|^✖ \d+ problems? \([1-9]\d* errors?, \d+ warnings?\)|^ESLint found too many warnings\b|^Exceeded maximum number of warnings\b/,
+    ignore: LINT_DIAGNOSTIC,
+  },
+  {
+    kind: 'lint',
+    pattern: /^Found [1-9]\d* warnings? and 0 errors?\b/,
+    when: /--deny-warnings\b|--max-warnings[= ]0\b/,
+    ignore: LINT_DIAGNOSTIC,
+  },
+  { kind: 'typecheck', pattern: /\berror TS\d+:/ },
 ];
 
 const MAX_GATE_LINES = 12;
@@ -24,10 +44,14 @@ export function detectDeterministicGate(output: string): DeterministicGate | nul
   const lines = stripAnsi(output)
     .split(/\r?\n/)
     .map((line) => line.trim());
-  for (const { kind, pattern } of GATE_MARKERS) {
+  const text = lines.join('\n');
+  for (const { kind, pattern, when, ignore } of GATE_MARKERS) {
+    if (when && !when.test(text)) continue;
     const matched = lines.filter((line) => pattern.test(line));
     if (matched.length === 0) continue;
-    const rest = lines.filter((line) => !GATE_MARKERS.some((m) => m.pattern.test(line))).join('\n');
+    const rest = lines
+      .filter((line) => !GATE_MARKERS.some((m) => m.pattern.test(line)) && !ignore?.test(line))
+      .join('\n');
     if (extractFailingTestNames(rest).length > 0 || (parseCommandCounts(rest)?.failed ?? 0) > 0) return null;
     return { kind, lines: [...new Set(matched)].slice(0, MAX_GATE_LINES) };
   }
