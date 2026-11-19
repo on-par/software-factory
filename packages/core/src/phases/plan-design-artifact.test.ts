@@ -1,4 +1,5 @@
 import { workKeyFromIssue } from '../work/work-key.js';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,10 +7,16 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { readSpec } from '../spec/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { buildDesignArtifactRetryPrompt, MAX_DESIGN_ARTIFACT_RETRIES, planPhase } from './plan.js';
-import { DESIGN_ARTIFACT_LOSS, designArtifactInvalidMessage } from './plan-design-retry.js';
+import {
+  buildDesignBlockRepairPrompt,
+  DESIGN_ARTIFACT_LOSS,
+  designArtifactInvalidMessage,
+  extractDesignBlock,
+} from './plan-design-retry.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -103,7 +110,7 @@ async function runPlanOutputs(outputs: string[]) {
     octokit,
     log: (type, msg) => logs.push({ type, msg }),
   });
-  return { result, logs, stub };
+  return { result, logs, stub, specPath, worktree };
 }
 
 describe('design artifact edgeInputs coercion (#2802)', () => {
@@ -224,5 +231,76 @@ describe('blocked plan notes', () => {
     expect(logs.some((entry) => entry.type === 'escalate' && entry.msg === result.escalate)).toBe(true);
     expect(logs.some((entry) => entry.type === 'design_artifact_invalid')).toBe(false);
     expect(stub.calls.filter((call) => call.task === 'plan')).toHaveLength(1);
+  });
+});
+
+describe('design block repair (#4289)', () => {
+  const body = '# Spec\n\n## Files / approach\n\nUpdate packages/core/src/foo.ts.\n';
+  const noDesignSpec = `---\nroute: codex\n---\n${body}`;
+  const repairReply = `${validDesignYaml}  openQuestions: []\n`;
+  const planCalls = (stub: StubModelExecutor) => stub.calls.filter((c) => c.task === 'plan');
+
+  it('repairs a missing design block without re-planning', async () => {
+    const { result, logs, stub, specPath, worktree } = await runPlanOutputs([noDesignSpec, repairReply]);
+
+    expect(planCalls(stub)).toHaveLength(2);
+    expect(existsSync(join(worktree, '.archive'))).toBe(false);
+    const spec = await readSpec(specPath);
+    expect(spec.body.trim()).toBe(body.trim());
+    expect(spec.route).toBe('codex');
+    expect(result.designArtifact).not.toBeNull();
+    expect(logs.some((l) => l.msg.startsWith('design artifact repaired'))).toBe(true);
+    expect(logs.some((l) => l.msg.includes('re-prompting planner'))).toBe(false);
+  });
+
+  it('repair prompt asks for the design block only', async () => {
+    const { stub } = await runPlanOutputs([noDesignSpec, repairReply]);
+
+    const prompt = planCalls(stub)[1]?.prompt ?? '';
+    expect(prompt).toContain('no design block in spec frontmatter');
+    expect(prompt).toContain('ONLY the design: YAML block');
+    expect(prompt).not.toContain('Write the complete spec again');
+
+    const direct = buildDesignBlockRepairPrompt('BASE', ['err one']);
+    expect(direct.startsWith('BASE')).toBe(true);
+    expect(direct).toContain('- err one');
+    expect(direct).not.toContain('Write the complete spec again');
+
+    expect(extractDesignBlock(`\`\`\`yaml\n${validDesignYaml}\`\`\``)).toMatchObject({
+      restatedProblem: 'The problem statement, restated.',
+    });
+    expect(extractDesignBlock(validDesignYaml)).toMatchObject({ riskBlastRadius: 'Nothing breaks.' });
+    expect(extractDesignBlock(withDesign(validDesignYaml))).toMatchObject({ riskBlastRadius: 'Nothing breaks.' });
+    expect(extractDesignBlock('not yaml at all: [')).toBeUndefined();
+  });
+
+  it('falls back to the existing loss message when repair keeps failing', async () => {
+    const { result, logs, stub } = await runPlanOutputs([noDesignSpec, 'not yaml at all: [', 'not yaml at all: [']);
+
+    expect(planCalls(stub)).toHaveLength(1 + MAX_DESIGN_ARTIFACT_RETRIES);
+    expect(result.designArtifact).toBeNull();
+    expect(result.ok).toBe(true);
+    const invalid = logs.filter((l) => l.type === 'design_artifact_invalid');
+    expect(invalid).toHaveLength(1);
+    expect(invalid[0]?.msg).toContain(DESIGN_ARTIFACT_LOSS);
+    expect(invalid[0]?.msg).toContain(`after ${MAX_DESIGN_ARTIFACT_RETRIES + 1} attempt(s)`);
+  });
+
+  it('empty or blocked specs keep the current retry path', async () => {
+    const { logs, stub, worktree } = await runPlanOutputs([
+      '---\nroute: codex\n---\n# Spec\n',
+      withDesign(validDesignYaml),
+    ]);
+
+    expect(planCalls(stub)[1]?.prompt).toContain('Write the complete spec again');
+    expect(logs.some((l) => l.msg.includes('re-prompting planner'))).toBe(true);
+    expect(existsSync(join(worktree, '.archive'))).toBe(true);
+
+    const blocked = await runPlanOutputs([
+      '---\nroute: codex\n---\nBlocked: sandbox policy prevents writing.\n\nNo files were changed.\n',
+    ]);
+    expect(planCalls(blocked.stub)).toHaveLength(1);
+    expect(blocked.result.ok).toBe(false);
+    expect(blocked.result.escalate).toBe('PLAN returned a blocked/no-change note instead of a frozen spec');
   });
 });
