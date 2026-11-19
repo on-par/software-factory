@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- PLAN repairs a missing or invalid `design:` block by asking the planner for only that block and merging it into the kept spec, instead of archiving the spec and re-planning from scratch. Run logs show `design artifact repaired` (#4289).
+
 ## 0.9.39 - 2026-11-17
 
 Runs spend less time re-verifying: scoped checks stay focused through BUILD in a repo that set `buildVerify: focused`, even when its agent instruction files say to verify before every commit (#4272), CHECK skips the flaky re-run after a deterministic gate miss (#4263) and parks `time-budget` instead of starting a re-run or rework that cannot finish before the run deadline (#4264). A run stopped by its time budget or SIGTERM hands back a structured remaining-work handoff (#4269), `run-issue --continue-from <branch>` picks it up without re-planning (#4271), and `run-issue` parks on an open `Depends on:` prerequisite and lists it in `--json` (#4270).
