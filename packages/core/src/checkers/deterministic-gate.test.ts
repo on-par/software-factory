@@ -33,14 +33,6 @@ describe('detectDeterministicGate (#4263)', () => {
     expect(detectDeterministicGate(`${PASSING_RUN}\n${line}`)).toEqual({ kind: 'test-time budget', lines: [line] });
   });
 
-  it('classifies a LOC budget failure', () => {
-    const line =
-      'packages/core source is 120 lines, over its loc-budget.json budget of 100. Delete or reuse existing code before adding more.';
-    expect(detectDeterministicGate(`> npm run loc-budget\n${line}`)).toEqual({ kind: 'loc budget', lines: [line] });
-    expect(detectDeterministicGate('loc budget: head loc-budget.json must be a JSON object')?.kind).toBe('loc budget');
-    expect(detectDeterministicGate('loc budget: PASS (4 packages)')).toBeNull();
-  });
-
   it('returns null when a test failed, so the flake re-run still happens', () => {
     expect(detectDeterministicGate(` × suite > adds 3ms\n${COVERAGE_LINE}`)).toBeNull();
     expect(detectDeterministicGate(`      Tests  1 failed | 10 passed (11)\n${COVERAGE_LINE}`)).toBeNull();

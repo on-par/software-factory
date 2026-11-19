@@ -85,9 +85,6 @@ jobs:
       - name: Duplication
         run: npm run duplication
 
-      - name: LOC budget
-        run: npm run loc-budget
-
       # The job token is a GitHub App installation token: REST GET /user refuses it, so this exercises the real
       # GraphQL self-identity fallback against GitHub. Read-only; the suite skips wherever the variable is unset.
       - name: App installation-token identity (live)

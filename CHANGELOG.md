@@ -12,6 +12,10 @@ section to `## X.Y.Z - date`. See
 - PLAN repairs a missing or invalid `design:` block by asking the planner for only that block and merging it into the kept spec, instead of archiving the spec and re-planning from scratch. Run logs show `design artifact repaired` (#4289).
 - CHECK now also skips the flaky re-run when the tests checker failed only on a format (Prettier `--check`), lint (oxlint/ESLint errors, or warnings under `--deny-warnings` / `--max-warnings 0`) or typecheck (`error TS<n>:`) step, with no failing test. The skip logs `flaky re-run: skipped — deterministic gate failed (<gate>)` and the rework details list the matched lines (#4290).
 
+### Removed
+
+- The per-package line budget is gone: `loc-budget.json`, `npm run loc-budget` and its verify and CI `static` steps are removed, and CHECK no longer classifies a LOC budget failure as a deterministic gate. The per-file `max-lines` limit and its baseline guard are unchanged (#4124, #4282).
+
 ## 0.9.39 - 2026-11-17
 
 Runs spend less time re-verifying: scoped checks stay focused through BUILD in a repo that set `buildVerify: focused`, even when its agent instruction files say to verify before every commit (#4272), CHECK skips the flaky re-run after a deterministic gate miss (#4263) and parks `time-budget` instead of starting a re-run or rework that cannot finish before the run deadline (#4264). A run stopped by its time budget or SIGTERM hands back a structured remaining-work handoff (#4269), `run-issue --continue-from <branch>` picks it up without re-planning (#4271), and `run-issue` parks on an open `Depends on:` prerequisite and lists it in `--json` (#4270).
