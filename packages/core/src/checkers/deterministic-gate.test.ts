@@ -92,3 +92,40 @@ describe('describeDeterministicGate (#4263)', () => {
     );
   });
 });
+
+describe('detectDeterministicGate format, lint and typecheck (#4290)', () => {
+  it('detects a format-only failure', () => {
+    const lines = [
+      '[warn] src/a.ts',
+      '[warn] src/b.ts',
+      '[warn] Code style issues found in 2 files. Run Prettier with --write to fix.',
+    ];
+    expect(detectDeterministicGate(`${PASSING_RUN}\n${lines.join('\n')}`)).toEqual({ kind: 'format', lines });
+    expect(detectDeterministicGate(`${PASSING_RUN}\nCode style issues found in 2 files`)?.kind).toBe('format');
+    expect(detectDeterministicGate(`${COVERAGE_LINE}\nCode style issues found in 2 files`)?.kind).toBe(
+      'coverage threshold',
+    );
+  });
+
+  it('detects lint and typecheck failures', () => {
+    const oxlint =
+      "  × eslint(no-unused-vars): Variable 'x' is declared but never used.\nFound 0 warnings and 3 errors.";
+    const gate = detectDeterministicGate(`${PASSING_RUN}\n${oxlint}`);
+    expect(gate?.kind).toBe('lint');
+    expect(gate?.lines).toContain('Found 0 warnings and 3 errors.');
+    expect(detectDeterministicGate(`${PASSING_RUN}\n✖ 3 problems (2 errors, 1 warning)`)?.kind).toBe('lint');
+    expect(detectDeterministicGate('> oxlint --deny-warnings\nFound 2 warnings and 0 errors.')?.kind).toBe('lint');
+    const a = "src/a.ts(3,5): error TS2322: Type 'string' is not assignable to type 'number'.";
+    const b = "src/b.ts:1:1 - error TS2322: Type 'string' is not assignable to type 'number'.";
+    expect(detectDeterministicGate(`${PASSING_RUN}\n${a}\n${b}`)).toEqual({ kind: 'typecheck', lines: [a, b] });
+  });
+
+  it('a failing test keeps the re-run', () => {
+    const summary = 'Code style issues found in 2 files';
+    expect(detectDeterministicGate(`${summary}\n × suite > adds 3ms`)).toBeNull();
+    expect(detectDeterministicGate(`${summary}\n      Tests  1 failed | 10 passed (11)`)).toBeNull();
+    expect(detectDeterministicGate('Found 2 warnings and 0 errors.')).toBeNull();
+    expect(detectDeterministicGate('Found 0 warnings and 0 errors.')).toBeNull();
+    expect(detectDeterministicGate('[warn] something')).toBeNull();
+  });
+});
