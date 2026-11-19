@@ -16,6 +16,7 @@ import type { SandboxPolicy } from '../sandbox/index.js';
 import type { BaselineReport } from '../checkers/baseline.js';
 import { BaselineCache } from '../checkers/baseline-cache.js';
 import type { EvidencePlanResult } from '../checkers/evidence-plan.js';
+import { describeDeterministicGate, detectDeterministicGate } from '../checkers/deterministic-gate.js';
 import { schemaErrorCheckerOutput, unfilledPlaceholderCheckerOutput, unknownCheckerOutput } from '../checkers/index.js';
 import type { CheckSummary, Constitution, ReworkInfo } from '../types/index.js';
 import { renderEvidencePack } from '../reports/evidence-pack.js';
@@ -2709,6 +2710,41 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
     expect(result.flakeRerun).toBeUndefined();
     expect(result.passed).toBe(false);
     expect(logs).toContain('flaky re-run: skipped — deterministic gate failed (coverage threshold)');
+  });
+
+  it('format gate skips the flaky re-run', async () => {
+    const { argvs, fake } = recordRuns();
+    const worktree = await setup.worktree('check-gate-');
+    await writeFile(join(worktree, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }));
+    const { router, stub } = makeRouter();
+    const logs: string[] = [];
+    const gate = detectDeterministicGate(
+      ' Tests  10 passed (10)\n[warn] src/a.ts\n[warn] Code style issues found in 2 files. Run Prettier with --write to fix.',
+    );
+    const details = describeDeterministicGate(gate!, []);
+    const result = await checkPhase({
+      issue: workKeyFromIssue(5),
+      worktree,
+      specPath: join(worktree, 'spec.md'),
+      router,
+      constitution: null,
+      maxReworkRounds: 1,
+      log: (_t, msg) => {
+        logs.push(msg);
+      },
+      runCheckers: async () => ({
+        results: [{ checker: 'tests', result: 'FAIL', details, deterministicGate: gate?.kind }],
+        failures: 1,
+        passes: 0,
+        skips: 0,
+        total: 1,
+      }),
+      runCommand: fake as never,
+    });
+    expect(argvs).toEqual([]);
+    expect(result.flakeRerun).toBeUndefined();
+    expect(logs).toContain('flaky re-run: skipped — deterministic gate failed (format)');
+    expect(stub.calls[0]?.prompt).toContain('Code style issues found in 2 files');
   });
 
   it('re-runs on any tests failure, whatever the base verdict (#4029)', async () => {

@@ -10,6 +10,7 @@ section to `## X.Y.Z - date`. See
 ### Changed
 
 - PLAN repairs a missing or invalid `design:` block by asking the planner for only that block and merging it into the kept spec, instead of archiving the spec and re-planning from scratch. Run logs show `design artifact repaired` (#4289).
+- CHECK now also skips the flaky re-run when the tests checker failed only on a format (Prettier `--check`), lint (oxlint/ESLint errors, or warnings under `--deny-warnings` / `--max-warnings 0`) or typecheck (`error TS<n>:`) step, with no failing test. The skip logs `flaky re-run: skipped — deterministic gate failed (<gate>)` and the rework details list the matched lines (#4290).
 
 ## 0.9.39 - 2026-11-17
 
