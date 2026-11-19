@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- Opt-in `tests.affected.fullGate: ci`: CHECK runs only the focused set (affected tests, focused typecheck, lint on changed files) in round 0 and every rework round and never runs the full gate; the PR's required checks are the full gate, and a failing one goes through the existing CI rework loop. `verify_scope` says `full gate: ci (required checks)`. A trigger file still runs the full suite in CHECK. Without code-health checks on the base branch CHECK logs `fullGate ci refused: …` and runs the full gate as with `check`, the default (#4293).
+
 ### Changed
 
 - PLAN repairs a missing or invalid `design:` block by asking the planner for only that block and merging it into the kept spec, instead of archiving the spec and re-planning from scratch. Run logs show `design artifact repaired` (#4289).
