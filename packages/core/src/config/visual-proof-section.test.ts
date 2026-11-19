@@ -8,7 +8,8 @@ const base = { uiPaths: ['src/**'], routes: [route], command: ['node', 'capture.
 describe('VisualProofConfigSchema (#2232)', () => {
   it('applies defaults', () => {
     const parsed = VisualProofConfigSchema.parse(base);
-    expect(parsed).toMatchObject({ maxCaptures: 3, timeoutSeconds: 300, evidenceBranch: 'factory-evidence' });
+    expect(parsed).toMatchObject({ maxCaptures: 3, timeoutSeconds: 300 });
+    expect(parsed).not.toHaveProperty('evidenceBranch');
     expect(parsed.routes[0]).toMatchObject({ state: 'default', viewport: { width: 1280, height: 800 } });
   });
 
@@ -41,11 +42,10 @@ describe('VisualProofConfigSchema (#2232)', () => {
     expect(VisualProofConfigSchema.safeParse({ ...base, routes: [{ ...route, extra: 1 }] }).success).toBe(false);
   });
 
-  it('rejects evidence branches that are factory/ prefixed or malformed', () => {
-    const branch = (evidenceBranch: string) => VisualProofConfigSchema.safeParse({ ...base, evidenceBranch }).success;
-    expect(branch('factory/evidence')).toBe(false);
-    expect(branch('bad branch')).toBe(false);
-    expect(branch('proof/images')).toBe(true);
+  it('rejects the removed evidenceBranch key with a removal message', () => {
+    const parsed = VisualProofConfigSchema.safeParse({ ...base, evidenceBranch: 'proof' });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.message).toMatch(/^visualProof\.evidenceBranch was removed: .+delete the key$/);
   });
 });
 
