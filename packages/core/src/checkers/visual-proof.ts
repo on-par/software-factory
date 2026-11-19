@@ -31,7 +31,6 @@ export interface VisualProofImage {
   url: string;
   beforeUrl?: string;
   clipUrl?: string;
-  clipFormat?: 'gif' | 'webm' | 'mp4';
   steps?: VisualProofStep[];
 }
 

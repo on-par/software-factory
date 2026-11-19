@@ -11,6 +11,7 @@ section to `## X.Y.Z - date`. See
 
 - SHIP publishes UI visual proof as PR attachments: it writes the PR body with the marked proof block and `./<file>` references into the capture directory and runs `gh pr edit --body-file <file> --attach` with each after and before screenshot and clip, so GitHub hosts the images and no proof is committed to a side branch. This needs gh 2.103.0 or newer; a missing or older gh, or a failed `gh pr edit`, fails the proof with the reason in the PR body and the `factory/visual-proof` status. A proof file name with a character other than letters, digits, `.`, `_`, `-` and a `/` between directories fails the proof before gh runs, so a name like `before (1).png` cannot break the proof block's markdown or leave uploads outside it (#4284).
 - A partial visual-proof attach (gh uploaded some files, failed on others and still updated the PR) now fails the proof: SHIP rewrites the proof block to `Visual proof unavailable: partial attach: ...` with gh's error and no image references, and in `required` mode the `failure` status keeps land from merging the head. `advisory` mode still stamps an `advisory:` success, and `off` mode never runs gh (#4285).
+- A webm or mp4 visual-proof clip renders as a `![clip](./<clip>)` embed alone in its own paragraph, which `gh pr edit --attach` turns into a bare asset URL that GitHub plays in a native video player. The `[▶ clip (<format>)](...)` link is gone; gif clips stay inline images (#4286).
 
 ## 0.9.39 - 2026-11-17
 

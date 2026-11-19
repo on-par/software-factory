@@ -11,7 +11,7 @@ import {
   VisualProofMissingError,
 } from './visual-proof-attach.js';
 import { fakeOctokit } from '../test-support/fake-octokit.js';
-import type { VisualProofResult } from './visual-proof.js';
+import type { VisualProofImage, VisualProofResult } from './visual-proof.js';
 
 const HEAD = 'abcdef0123456789abcdef0123456789abcdef01';
 const target = { owner: 'o', repo: 'r', prNumber: 7 };
@@ -188,31 +188,29 @@ describe('assertVisualProofForHead', () => {
 describe('stateful visual proof (#4054)', () => {
   const steps = [{ click: '#new' }, { fill: '#name', value: 'Demo' }, { press: 'Enter' }];
 
-  it('renders a before and after table with steps and clip', () => {
-    const image = {
-      route: '/items',
-      state: 'item-created',
-      viewport: { width: 1280, height: 800 },
-      url: 'https://x/after.png',
-      beforeUrl: 'https://x/before.png',
-      clipUrl: 'https://x/clip.gif',
-      clipFormat: 'gif' as const,
-      steps,
-    };
-    const block = renderVisualProofBlock({ ...passResult, images: [image] });
-    expect(block).toContain('| Before | After |');
-    expect(block).toContain('| --- | --- |');
+  const viewport = { width: 1280, height: 800 };
+  const image: VisualProofImage = { route: '/items', state: 'item-created', viewport, url: './after.png', steps };
+  const render = (clip: Partial<VisualProofImage>) =>
+    renderVisualProofBlock({ ...passResult, images: [{ ...image, beforeUrl: './before.png', ...clip }] });
+
+  it('renders a before and after table with steps', () => {
+    const block = render({});
     expect(block).toContain(
-      '| ![/items item-created before](https://x/before.png) | ![/items item-created after at abcdef012345](https://x/after.png) |',
+      '| Before | After |\n| --- | --- |\n| ![/items item-created before](./before.png) | ![/items item-created after at abcdef012345](./after.png) |',
     );
     expect(block).toContain('Steps: 1. click "#new" · 2. fill "#name" with "Demo" · 3. press Enter');
-    expect(block).toContain('![clip](https://x/clip.gif)');
-    const video = renderVisualProofBlock({
-      ...passResult,
-      images: [{ ...image, clipUrl: 'https://x/clip.webm', clipFormat: 'webm' as const }],
-    });
-    expect(video).toContain('[▶ clip (webm)](https://x/clip.webm)');
-    expect(video).not.toContain('![clip]');
+  });
+
+  it('renders a video clip as a standalone attachment line for a native player', () => {
+    for (const format of ['webm', 'mp4']) {
+      const block = render({ clipUrl: `./clip.${format}` });
+      expect(block).toContain(`\n\n![clip](./clip.${format})\n\n`);
+      expect(block).not.toContain('▶ clip');
+    }
+  });
+
+  it('keeps a gif clip as an inline image', () => {
+    expect(render({ clipUrl: './clip.gif' })).toContain('\n![clip](./clip.gif)\n');
   });
 
   it('renders a coverage warning for uncovered UI files', () => {

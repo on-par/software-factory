@@ -50,12 +50,7 @@ export function renderVisualProofBlock(result: VisualProofResult, mode: Publishe
     if (image.steps?.length) {
       lines.push(`Steps: ${image.steps.map((st, n) => `${n + 1}. ${describeVisualProofStep(st)}`).join(' · ')}`, '');
     }
-    if (image.clipUrl) {
-      lines.push(
-        image.clipFormat === 'gif' ? `![clip](${image.clipUrl})` : `[▶ clip (${image.clipFormat})](${image.clipUrl})`,
-        '',
-      );
-    }
+    if (image.clipUrl) lines.push(`![clip](${image.clipUrl})`, '');
   }
   if (result.uncovered?.length) {
     lines.push(`- Coverage warning: UI files not covered by any visualProof route: ${result.uncovered.join(', ')}`, '');

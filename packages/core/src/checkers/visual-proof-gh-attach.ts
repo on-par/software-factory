@@ -43,7 +43,7 @@ const imagesFor = (result: VisualProofResult): VisualProofImage[] =>
     viewport: c.viewport,
     url: ref(c.file),
     ...(c.before ? { beforeUrl: ref(c.before.file) } : {}),
-    ...(c.clip ? { clipUrl: ref(c.clip.file), clipFormat: c.clip.format } : {}),
+    ...(c.clip ? { clipUrl: ref(c.clip.file) } : {}),
     ...(c.steps ? { steps: c.steps } : {}),
   }));
 
