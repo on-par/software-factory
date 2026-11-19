@@ -91,7 +91,7 @@ export interface CheckerContext {
   outputLogDir?: string;
   testsTimeoutSeconds?: number;
   compileTimeoutSeconds?: number;
-  affectedTests?: AffectedTestsResolution & { round: number };
+  affectedTests?: AffectedTestsResolution & { round: number; fullGate?: 'ci' };
 }
 
 export type CheckerFn = (ctx: CheckerContext) => Promise<CheckerOutput>;

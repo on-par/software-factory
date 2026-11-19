@@ -25,12 +25,14 @@ describe('tests.affected repo config (#3260)', () => {
     expect(r.success).toBe(true);
     expect(r.data?.tests?.affected).toMatchObject({ typecheck: 'npx tsc -b --incremental', buildVerify: 'full' });
     expect(parse({ affected: { command: cmd, buildVerify: 'focused' } }).success).toBe(true);
+    for (const fullGate of ['check', 'ci']) expect(parse({ affected: { command: cmd, fullGate } }).success).toBe(true);
   });
 
   it.each([
     ['a shell-metachar typecheck', { typecheck: 'tsc -b && echo hi' }],
     ['an empty typecheck', { typecheck: '' }],
     ['an unknown buildVerify', { buildVerify: 'sometimes' }],
+    ['an unknown fullGate', { fullGate: 'nope' }],
   ])('rejects %s', (_name, extra) => {
     expect(parse({ affected: { command: 'npx vitest related --run {files}', ...extra } }).success).toBe(false);
   });

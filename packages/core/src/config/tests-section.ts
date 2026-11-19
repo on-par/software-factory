@@ -34,6 +34,12 @@ export const TestsAffectedConfigSchema = z
       .describe(
         'focused (default): BUILD and rework iterate on the focused commands and CHECK runs one full gate before SHIP. full: the repo demands full verification in BUILD and every rework round (#1272).',
       ),
+    fullGate: z
+      .enum(['check', 'ci'])
+      .optional()
+      .describe(
+        'check (default): CHECK runs one full gate before SHIP. ci: CHECK runs only the focused commands in every round and the PR required checks are the full gate; refused (behaves as check) when the base branch has no code-health checks (#4293).',
+      ),
     fullOn: z
       .array(z.string().min(1))
       .optional()
