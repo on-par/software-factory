@@ -1,6 +1,6 @@
 import { PREVIEW_REWORK_INSTRUCTIONS, previewReworkSummary, runPreviewCheck } from '../checkers/preview-check.js';
 import { createOctokitPreviewGitHub } from '../checkers/preview-source-octokit.js';
-import { attachVisualProof, publishVisualProof } from '../checkers/visual-proof-attach.js';
+import { publishVisualProofWithGh } from '../checkers/visual-proof-gh-attach.js';
 import { classifyVisualProof, runVisualProofCapture } from '../checkers/visual-proof.js';
 import type { PreviewConfig } from '../config/preview-section.js';
 import { loadRepoConfig } from '../config/repo.js';
@@ -28,6 +28,7 @@ import type {
   Constitution,
 } from '../types/index.js';
 import { collectFailingJobLogs as collectFailingJobLogsDefault } from '../utils/ci-evidence.js';
+import type { runCommand } from '../utils/command-runner.js';
 import {
   attributableCodeqlAlerts,
   attributeByJobLogs,
@@ -70,6 +71,8 @@ export interface CiReworkPorts {
   claimSignal?: AbortSignal;
   loadPreviewConfig?: (worktree: string) => PreviewConfig | undefined;
   loadVisualProofConfig?: (worktree: string) => VisualProofConfig | undefined;
+  captureVisualProof?: typeof runVisualProofCapture;
+  runGh?: typeof runCommand;
 }
 
 export interface CiReworkLoopContext {
@@ -185,7 +188,7 @@ export async function shipWithCiRework(
             const base = { headSha: pr.headSha, runId: ctx.runId, captures: [] };
             if (!requirement.required) return { status: 'not-required', ...base };
             result = visualProofConfig
-              ? await runVisualProofCapture({
+              ? await (ports.captureVisualProof ?? runVisualProofCapture)({
                   requirement,
                   qa: loadRepoConfig(ports.workspace.path)?.qa ?? null,
                   config: visualProofConfig,
@@ -199,13 +202,6 @@ export async function shipWithCiRework(
                   log: (m) => ports.events('ship')('warn', m),
                 })
               : { status: 'fail', ...base, diagnostic: requirement.diagnostic };
-            if (result.status === 'pass' && visualProofConfig) {
-              result = await attachVisualProof(
-                ports.octokit,
-                { ...target, branch: request.branch, evidenceBranch: visualProofConfig.evidenceBranch },
-                result,
-              );
-            }
           } catch (err) {
             ports.events('ship')(
               'warn',
@@ -219,8 +215,7 @@ export async function shipWithCiRework(
               diagnostic: err instanceof Error ? err.message : String(err),
             };
           }
-          await publishVisualProof(ports.octokit, target, result, visualProofMode);
-          return result;
+          return publishVisualProofWithGh(ports.octokit, target, result, visualProofMode, ports.runGh);
         }
       : undefined;
   const shipOpts = {

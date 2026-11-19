@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- SHIP publishes UI visual proof as PR attachments: it writes the PR body with the marked proof block and `./<file>` references into the capture directory and runs `gh pr edit --body-file <file> --attach` with each after and before screenshot and clip, so GitHub hosts the images and no proof is committed to a side branch. This needs gh 2.103.0 or newer; a missing or older gh, or a failed `gh pr edit`, fails the proof with the reason in the PR body and the `factory/visual-proof` status. A proof file name with a character other than letters, digits, `.`, `_`, `-` and a `/` between directories fails the proof before gh runs, so a name like `before (1).png` cannot break the proof block's markdown or leave uploads outside it (#4284).
+
 ## 0.9.39 - 2026-11-17
 
 Runs spend less time re-verifying: scoped checks stay focused through BUILD in a repo that set `buildVerify: focused`, even when its agent instruction files say to verify before every commit (#4272), CHECK skips the flaky re-run after a deterministic gate miss (#4263) and parks `time-budget` instead of starting a re-run or rework that cannot finish before the run deadline (#4264). A run stopped by its time budget or SIGTERM hands back a structured remaining-work handoff (#4269), `run-issue --continue-from <branch>` picks it up without re-planning (#4271), and `run-issue` parks on an open `Depends on:` prerequisite and lists it in `--json` (#4270).

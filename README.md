@@ -370,6 +370,7 @@ A route with `steps` is stateful. The capture command loads the route and captur
 - an assertion that did not pass or names another target
 - a viewport other than the configured one
 - a `file` that is absolute, contains `..` or leaves the out dir
+- a screenshot, `before` or clip `file` with any character other than letters, digits, `.`, `_`, `-` and a `/` between directory names (`unsafe proof file name for <route> (state <s>)`); SHIP fails the proof before it runs gh
 - a file that is not a PNG, is under 2048 bytes (`blank or empty image`) or is over 5 MiB
 - an image that decodes to a near-uniform colour (`blank image <file> (uniform colour)`) or does not decode (`is not a decodable PNG`)
 - a failed step (`<route> (state <s>) step 2 click "#missing" failed: <message>`)
