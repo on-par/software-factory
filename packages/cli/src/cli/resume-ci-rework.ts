@@ -10,6 +10,7 @@ import {
 } from '@on-par/factory-core/internal';
 
 import { CliExitError } from './errors.js';
+import { requireFactoryInitialized } from './first-run.js';
 import { findOpenPRForIssue } from './land-find-pr.js';
 import { withRepoRunLock } from './repo-run-lock.js';
 import { shipRuntime } from './ship-runtime.js';
@@ -114,6 +115,7 @@ async function runOneRound(
 export async function resumeFromCiRework(issueNum: number, rt: CiReworkEntryRuntime): Promise<void> {
   const repoRoot = await rt.getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
+  requireFactoryInitialized(paths.root);
   const scope = { kind: 'issue' as const, key: workKeyFromIssue(issueNum) };
   await withRepoRunLock(
     paths,
