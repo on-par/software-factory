@@ -1,13 +1,3 @@
-import type { IssueRunState } from '../types/index.js';
-import type { WorkKey } from '../work/work-key.js';
-import { resolveMaxCiReworkRounds } from './ci-rework.js';
-import { readIssueRunState, runStateFile } from './state.js';
-
-export interface CiReworkBudget {
-  used: number;
-  cap: number;
-}
-
 export function mergeCiReworkRounds(
   ...maps: (Readonly<Record<string, number>> | undefined)[]
 ): Record<string, number> | undefined {
@@ -20,24 +10,4 @@ export function mergeCiReworkRounds(
     }
   }
   return Object.keys(merged).length === 0 ? undefined : merged;
-}
-
-export function ciReworkBudget(
-  state: Pick<IssueRunState, 'ciReworkRounds'> | null | undefined,
-  prNumber: number,
-  env: NodeJS.ProcessEnv = process.env,
-): CiReworkBudget {
-  return {
-    used: mergeCiReworkRounds(state?.ciReworkRounds)?.[String(prNumber)] ?? 0,
-    cap: resolveMaxCiReworkRounds(env),
-  };
-}
-
-export async function readCiReworkBudget(
-  runsDir: string,
-  key: WorkKey,
-  prNumber: number,
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<CiReworkBudget> {
-  return ciReworkBudget(await readIssueRunState(runStateFile(runsDir, key)), prNumber, env);
 }

@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import { workKeyFromIssue } from '../work/work-key.js';
-import { ciReworkBudget, mergeCiReworkRounds, readCiReworkBudget } from './ci-rework-state.js';
-import { nextIssueRunState, runStateFile, writeIssueRunState } from './state.js';
+import { mergeCiReworkRounds } from './ci-rework-state.js';
+import { nextIssueRunState, readIssueRunState, runStateFile, writeIssueRunState } from './state.js';
 
 const base = {
   issue: 42,
@@ -32,38 +32,18 @@ describe('ci rework state (#4311)', () => {
     return { dir, file };
   };
 
-  it('returns zero used and the default cap 2 when no round is recorded', async () => {
-    const empty = await dirs.make('ci-rework-state-');
-    expect(await readCiReworkBudget(empty, key, 7, {})).toEqual({ used: 0, cap: 2 });
-    const { dir } = await write({});
-    expect(await readCiReworkBudget(dir, key, 7, {})).toEqual({ used: 0, cap: 2 });
+  it('persists the rounds recorded per PR', async () => {
+    const { file } = await write({ ciReworkRounds: { '7': 2, '9': 1 } });
+    expect((await readIssueRunState(file))?.ciReworkRounds).toEqual({ '7': 2, '9': 1 });
   });
 
-  it('returns the rounds recorded for the PR and ignores other PRs', async () => {
-    const { dir } = await write({ ciReworkRounds: { '7': 2, '9': 1 } });
-    expect((await readCiReworkBudget(dir, key, 7, {})).used).toBe(2);
-    expect((await readCiReworkBudget(dir, key, 9, {})).used).toBe(1);
-    expect((await readCiReworkBudget(dir, key, 8, {})).used).toBe(0);
-  });
-
-  it('honours FACTORY_MAX_CI_REWORK_ROUNDS for the cap', async () => {
-    const { dir } = await write({ ciReworkRounds: { '7': 1 } });
-    expect(await readCiReworkBudget(dir, key, 7, { FACTORY_MAX_CI_REWORK_ROUNDS: '4' })).toEqual({ used: 1, cap: 4 });
-  });
-
-  it('treats a malformed ciReworkRounds value as zero', async () => {
-    for (const bad of [{ '7': -1, x: 3 }, 'bad', [3]]) {
-      const { dir } = await write({ ciReworkRounds: bad });
-      expect((await readCiReworkBudget(dir, key, 7, {})).used).toBe(0);
-    }
-    expect(ciReworkBudget(null, 7, {})).toEqual({ used: 0, cap: 2 });
+  it('records no rounds when none were written', async () => {
+    const { file } = await write({});
+    expect((await readIssueRunState(file))?.ciReworkRounds).toBeUndefined();
   });
 
   it('a second process reads the count the first process wrote', async () => {
-    const { dir, file } = await write({ ciReworkRounds: { '7': 1 } });
-    vi.resetModules();
-    const fresh = await import('./ci-rework-state.js');
-    expect(await fresh.readCiReworkBudget(dir, key, 7, {})).toEqual({ used: 1, cap: 2 });
+    const { file } = await write({ ciReworkRounds: { '7': 1 } });
     const script =
       "const fs=require('fs');process.stdout.write(String(JSON.parse(fs.readFileSync(process.argv[1],'utf8')).ciReworkRounds['7']))";
     expect(execFileSync(process.execPath, ['-e', script, join(file)], { encoding: 'utf8' })).toBe('1');

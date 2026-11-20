@@ -1,12 +1,6 @@
 // packages/cli/src/cli/ship-run-state.test.ts — shipIssue persists IssueRunState as the run progresses (#3194)
 import { workKeyFromIssue } from '@on-par/factory-core';
-import {
-  appendSteerEvent,
-  readCiReworkBudget,
-  readIssueRunState,
-  runStateFile,
-  writeIssueRunState,
-} from '@on-par/factory-core/internal';
+import { appendSteerEvent, readIssueRunState, runStateFile, writeIssueRunState } from '@on-par/factory-core/internal';
 import { describe, expect, it } from 'vitest';
 
 import { runStateRecorder } from './ship-run-state.js';
@@ -151,7 +145,6 @@ describe('shipIssue run state (#3194)', () => {
     await runStateRecorder(runs, mk('2026-01-02T00:00:00.000Z'))({ status: 'planning' });
     const file = runStateFile(runs, workKeyFromIssue(42));
     expect((await readIssueRunState(file))?.ciReworkRounds).toEqual({ '7': 1 });
-    expect(await readCiReworkBudget(runs, workKeyFromIssue(42), 7, {})).toEqual({ used: 1, cap: 2 });
   });
 });
 
