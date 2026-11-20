@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.43 - 2026-11-20
+
+SHIP can now open or update the PR and return without watching CI (`ship.watchCi: false`), while `factory land` still requires green CI (#4304).
+All seven published `@on-par` packages move to 0.9.43 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - ship: `ship.watchCi: false` makes SHIP open or update the PR and return without watching CI (the run result says CI was not watched), while `factory land` still requires green CI; `ci.skip` is unchanged (#4304)
