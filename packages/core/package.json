@@ -1,6 +1,6 @@
 {
   "name": "@on-par/factory-core",
-  "version": "0.9.39",
+  "version": "0.9.40",
   "description": "Core engine: model router, constitutions, checkers, and pipeline phases for the Software Factory.",
   "type": "module",
   "main": "dist/index.js",
@@ -55,10 +55,10 @@
   },
   "dependencies": {
     "@octokit/rest": "^22.0.0",
-    "@on-par/adr-kit": "^0.9.39",
-    "@on-par/contracts": "^0.9.39",
-    "@on-par/factory-config": "^0.9.39",
-    "@on-par/repo-context": "^0.9.39",
+    "@on-par/adr-kit": "^0.9.40",
+    "@on-par/contracts": "^0.9.40",
+    "@on-par/factory-config": "^0.9.40",
+    "@on-par/repo-context": "^0.9.40",
     "@opentelemetry/core": "^3.1.1",
     "@opentelemetry/exporter-logs-otlp-http": "^0.301.2",
     "@opentelemetry/exporter-logs-otlp-proto": "^0.301.2",
