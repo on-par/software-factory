@@ -1,6 +1,10 @@
 // packages/cli/src/cli/first-run.ts — designed first-run copy: overview + structured error messages
 
+import { existsSync } from 'node:fs';
+
 import { openCodeVersion } from '@on-par/factory-core/internal';
+
+import { CliExitError } from './errors.js';
 
 export const DOCS_URL = 'https://github.com/on-par/software-factory#readme';
 export const CLAUDE_CODE_URL = 'https://docs.anthropic.com/en/docs/claude-code';
@@ -49,4 +53,8 @@ export function missingTokenMessage(): string {
 
 export function notInitializedMessage(): string {
   return 'factory not initialized — run `factory init` first';
+}
+
+export function requireFactoryInitialized(root: string): void {
+  if (!existsSync(root)) throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
 }

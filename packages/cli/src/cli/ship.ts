@@ -134,6 +134,7 @@ async function shipIssueFrom(
     /** Run-state slice-plan store for a stacked brief (#3813); becomes RunPorts.slicePlanStore. */
     slicePlanStore?: SlicePlanStore;
     feedbackRound?: { prNumber: number }; // #3910: a feedback round on this PR (`factory respond` or a claimed review rework)
+    ciRework?: { prNumber: number; used: number };
   },
   deps: Pick<
     CliDeps,
@@ -172,7 +173,6 @@ async function shipIssueFrom(
   const shipPhaseForMode = stubAwareShipPhase(phases.shipPhase);
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo(shell));
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
-  // GitHub REST deprecations seen on this run's client become one warn event per route (#2218).
   const scope = shipGitHubScope(deps.octokit, (o) => getOctokit(shell, o), loaders, {
     ghRepo,
     issueNum,
@@ -333,7 +333,6 @@ async function shipIssueFrom(
   if (!portsSettings.enabled) {
     log('environment_lease', 'port leasing disabled (environment.ports.enabled=false or FACTORY_ENV_PORTS=0)');
   }
-  // recordPgid/release only persist/deallocate the lease; process-group killing is runIssue's own tracker (Invariant 3).
   const acquireEnvironment = portsSettings.enabled
     ? resolveEnvironmentAcquirer({
         laneSandboxRuntime: sandboxPolicy?.runtime ?? 'none',
@@ -363,7 +362,8 @@ async function shipIssueFrom(
     log,
     frozenSpec: opts.inPlace ? { specPath, brief: work.brief } : undefined,
   });
-  const reworkClaim = claimReworkRequests(paths, issueNum, ctx?.resumeFrom || ctx?.localOnly || noPr, log);
+  const skipClaim = ctx?.resumeFrom || ctx?.ciRework || ctx?.localOnly || noPr;
+  const reworkClaim = claimReworkRequests(paths, issueNum, skipClaim, log);
   const request = {
     ...buildRunRequest({
       issueNum,

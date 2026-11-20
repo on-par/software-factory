@@ -48,6 +48,7 @@ import {
 } from './ci-rework.js';
 import { renderCiFailureNote } from './ci-failure-note.js';
 import { type CiReworkReentry, type CiReworkRoundPlan, runCiReworkRound } from './ci-rework-round.js';
+import { ciReworkRoundLimit, type CiReworkResume, resumeReentry, reworkStopSuffix } from './ci-rework-resume.js';
 import {
   describeSuppression,
   mergeBaseIntoWorktree as mergeBaseIntoWorktreeDefault,
@@ -97,6 +98,7 @@ export interface CiReworkShipInputs {
   pinNote: string | undefined;
   planSlice: PlanResult['slice'];
   pr?: RunPolicy['pr'];
+  resume?: CiReworkResume;
 }
 
 export interface ShipWithCiReworkResult {
@@ -258,11 +260,17 @@ export async function shipWithCiRework(
       : {}),
   };
   ports.claimSignal?.throwIfAborted();
-  let ship = await shipPhase({ ...shipOpts, checkSummary: check.summary, reworkRounds: check.reworkRounds });
+  let ship = await shipPhase({
+    ...shipOpts,
+    checkSummary: check.summary,
+    reworkRounds: check.reworkRounds,
+    ...resumeReentry(inputs.resume),
+  });
   ports.claimSignal?.throwIfAborted();
 
   const maxRounds = resolveMaxCiReworkRounds();
-  let rounds = 0;
+  const roundLimit = ciReworkRoundLimit(inputs.resume, maxRounds);
+  let rounds = inputs.resume?.used ?? 0;
   let lastCiFailure = ship.ciFailure;
   let suffix = '';
   let diagnose = false;
@@ -288,8 +296,8 @@ export async function shipWithCiRework(
   while (!ship.ok && ship.prNumber !== undefined && (ship.ciOutcome === 'failure' || isPreviewRework(ship))) {
     let plan: CiReworkRoundPlan & { label: string };
     if (ship.previewCheck && isPreviewRework(ship)) {
-      if (rounds >= maxRounds) {
-        suffix = ` — preview rework budget exhausted after ${rounds} round${rounds === 1 ? '' : 's'}`;
+      if (rounds >= roundLimit) {
+        suffix = reworkStopSuffix('preview', rounds, maxRounds);
         break;
       }
       rounds++;
@@ -375,8 +383,8 @@ export async function shipWithCiRework(
       const failingChecks =
         attributable.length === 0 && base ? attributableNonCodeqlChecks(ship.ciFailure, attribution.items) : [];
       if (attributable.length === 0 && failingChecks.length === 0) break;
-      if (rounds >= maxRounds) {
-        suffix = ` — CI rework budget exhausted after ${rounds} round${rounds === 1 ? '' : 's'}`;
+      if (rounds >= roundLimit) {
+        suffix = reworkStopSuffix('CI', rounds, maxRounds);
         diagnose = true;
         break;
       }

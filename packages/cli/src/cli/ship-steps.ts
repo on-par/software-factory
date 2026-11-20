@@ -324,6 +324,7 @@ export interface RunRequestInput {
     localOnly?: LocalOnlyPolicy;
     resumeFrom?: CheckResumeRecord;
     continueFrom?: { handoff: RunRequest['continuation'] };
+    ciRework?: RunRequest['ciReworkResume'];
   };
   autoRework: boolean;
   planApprovalEnabled: boolean;
@@ -450,6 +451,7 @@ export function buildRunRequest({
         }
       : {}),
     ...(ctx?.continueFrom ? { continuation: ctx.continueFrom.handoff } : {}),
+    ...(ctx?.ciRework ? { ciReworkResume: ctx.ciRework } : {}),
     eventsFile: paths.events,
     logsDir: paths.logs,
     baselineCachePath: paths.baselineCache,

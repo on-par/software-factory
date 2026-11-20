@@ -327,6 +327,7 @@ import {
   missingAgentCliMessage,
   missingTokenMessage,
   notInitializedMessage,
+  requireFactoryInitialized,
 } from './first-run.js';
 import { resolveFactoryCheckoutCommit, runFilingPreview } from './filing.js';
 import { cmdRisk } from './risk.js';
@@ -4106,9 +4107,7 @@ async function resumeFromCheck(issueNum: number): Promise<void> {
   }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  if (!existsSync(paths.root)) {
-    throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
-  }
+  requireFactoryInitialized(paths.root);
   const record = await createCheckResumeStore(resolve(paths.plans, `issue-${issueNum}.md`)).load();
   if (!record || !existsSync(record.worktree)) {
     throw new CliExitError(

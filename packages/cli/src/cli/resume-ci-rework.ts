@@ -10,10 +10,14 @@ import {
 } from '@on-par/factory-core/internal';
 
 import { CliExitError } from './errors.js';
+import { requireFactoryInitialized } from './first-run.js';
 import { findOpenPRForIssue } from './land-find-pr.js';
+import { withRepoRunLock } from './repo-run-lock.js';
+import { shipRuntime } from './ship-runtime.js';
+import { shipIssue } from './ship.js';
 
 const CAP_REACHED_EXIT = 1;
-const WOULD_REWORK_EXIT = 3;
+const ROUND_FAILED_EXIT = 1;
 
 interface CiReworkEntryRuntime {
   getRepoRoot: () => Promise<string>;
@@ -25,7 +29,7 @@ interface CiReworkEntryRuntime {
 type CiReworkVerdict =
   | { kind: 'no-change'; reason: string }
   | { kind: 'refused'; reason: string }
-  | { kind: 'would-rework'; reason: string };
+  | { kind: 'accepted'; reason: string; prNumber: number; used: number };
 
 export function resumePhase(from: string | undefined): 'check' | 'ci-rework' {
   if (from === 'check' || from === 'ci-rework') return from;
@@ -43,11 +47,13 @@ async function headChecks(octokit: Octokit, owner: string, repo: string, prNumbe
   return classifyHeadChecks(required, runs);
 }
 
-async function decideCiRework(issueNum: number, rt: CiReworkEntryRuntime): Promise<CiReworkVerdict> {
-  const runsDir = getFactoryPaths(await rt.getRepoRoot()).runs;
+const readRun = (runsDir: string, issueNum: number) =>
+  readIssueRunState(runStateFile(runsDir, workKeyFromIssue(issueNum)));
+
+async function decideCiRework(issueNum: number, runsDir: string, rt: CiReworkEntryRuntime): Promise<CiReworkVerdict> {
   const [owner = '', repo = ''] = (await rt.getGitHubRepo()).split('/');
   const octokit = rt.getOctokit();
-  const state = await readIssueRunState(runStateFile(runsDir, workKeyFromIssue(issueNum)));
+  const state = await readRun(runsDir, issueNum);
   const pr = await findOpenPRForIssue(octokit, owner, repo, issueNum);
   if (!pr) {
     const last = state?.prNumber === undefined ? '' : ` (PR #${state.prNumber} is closed or merged)`;
@@ -72,14 +78,54 @@ async function decideCiRework(issueNum: number, rt: CiReworkEntryRuntime): Promi
     };
   }
   return {
-    kind: 'would-rework',
-    reason: `PR #${pr.number} for #${issueNum} would rework: round ${used + 1} of ${cap} (failing: ${failing}); no round started`,
+    kind: 'accepted',
+    prNumber: pr.number,
+    used,
+    reason: `PR #${pr.number} for #${issueNum} has failing checks (${failing}); starting CI rework round ${used + 1} of ${cap}`,
   };
 }
 
+async function runOneRound(
+  issueNum: number,
+  verdict: Extract<CiReworkVerdict, { kind: 'accepted' }>,
+  where: { repoRoot: string; runsDir: string },
+  rt: CiReworkEntryRuntime,
+): Promise<void> {
+  const { prNumber, used } = verdict;
+  const ghRepo = await rt.getGitHubRepo();
+  let branch: string;
+  try {
+    branch = await shipIssue(issueNum, {}, { repoRoot: where.repoRoot, ghRepo, ciRework: { prNumber, used } });
+  } catch (err) {
+    if (err instanceof shipRuntime().IssueSkippedError) return;
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new CliExitError(
+      `factory: CI rework resume of PR #${prNumber} for #${issueNum} failed: ${detail}`,
+      ROUND_FAILED_EXIT,
+    );
+  }
+  const after = ciReworkRoundsFor(await readRun(where.runsDir, issueNum), prNumber);
+  rt.log(
+    after.used > used
+      ? `factory: PR #${prNumber} for #${issueNum} ran CI rework round ${after.used} of ${after.cap}, pushed ${branch} and finished SHIP`
+      : `factory: PR #${prNumber} for #${issueNum} finished SHIP on ${branch} without a CI rework round`,
+  );
+}
+
 export async function resumeFromCiRework(issueNum: number, rt: CiReworkEntryRuntime): Promise<void> {
-  const verdict = await decideCiRework(issueNum, rt);
-  if (verdict.kind === 'refused') throw new CliExitError(`factory: ${verdict.reason}`, CAP_REACHED_EXIT);
-  rt.log(`factory: ${verdict.reason}`);
-  if (verdict.kind === 'would-rework') process.exitCode = WOULD_REWORK_EXIT;
+  const repoRoot = await rt.getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  requireFactoryInitialized(paths.root);
+  const scope = { kind: 'issue' as const, key: workKeyFromIssue(issueNum) };
+  await withRepoRunLock(
+    paths,
+    'factory resume',
+    async () => {
+      const verdict = await decideCiRework(issueNum, paths.runs, rt);
+      if (verdict.kind === 'refused') throw new CliExitError(`factory: ${verdict.reason}`, CAP_REACHED_EXIT);
+      rt.log(`factory: ${verdict.reason}`);
+      if (verdict.kind === 'accepted') await runOneRound(issueNum, verdict, { repoRoot, runsDir: paths.runs }, rt);
+    },
+    { scope },
+  );
 }
