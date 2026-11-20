@@ -5,6 +5,7 @@ import { workKeyFromIssue } from '../work/work-key.js';
 import type { readReworkDiff, readWorktreeHead } from './ci-suppression-guard.js';
 import { scanReworkDiff } from './ci-suppression-guard.js';
 import type { CiReworkLoopContext } from './ci-rework-loop.js';
+import { recordCiReworkRound } from './ci-rework-rounds.js';
 import { reworkRouteFor, type BuildRoute, type RunOutcome } from './outcome.js';
 
 type ReworkInput = Parameters<typeof reworkWorkerDefault>[0];
@@ -53,6 +54,7 @@ export async function runCiReworkRound(
   const { ctx } = ports;
   const { request } = ctx;
   const worktree = ctx.ports.workspace.path;
+  await recordCiReworkRound(ctx.ports, plan);
   let before: string;
   try {
     before = await ports.readHead(worktree);

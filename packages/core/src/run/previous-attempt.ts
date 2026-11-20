@@ -1,5 +1,6 @@
 import type { IssueRunState } from '../types/index.js';
 import { UNTRUSTED_CHECKER_OUTPUT_NOTICE, wrapUntrustedCheckerOutput } from '../utils/untrusted-input.js';
+import { ciReworkRoundsFor } from './ci-rework-rounds.js';
 
 export const PREVIOUS_ATTEMPT_MAX_CHARS = 2000;
 const DETAILS_MAX_CHARS = 400;
@@ -15,8 +16,15 @@ const MID_PHASE: Readonly<Record<string, string>> = {
   shipping: 'SHIP',
 };
 
+function ciReworkText(prior: IssueRunState): string {
+  if (prior.prNumber === undefined) return '';
+  const { used, cap } = ciReworkRoundsFor(prior, prior.prNumber);
+  return used > 0 ? `, CI rework rounds on PR #${prior.prNumber}: ${used}/${cap}` : '';
+}
+
 function runLine(prior: IssueRunState): string {
-  return `(attempts: ${prior.attempts}, route: ${prior.route}, model: ${prior.model || 'unknown'})`;
+  const model = prior.model || 'unknown';
+  return `(attempts: ${prior.attempts}, route: ${prior.route}, model: ${model}${ciReworkText(prior)})`;
 }
 
 function failureBlock(checker: string, result: string, details: string): string {
