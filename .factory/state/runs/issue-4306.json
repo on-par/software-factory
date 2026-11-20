@@ -1,0 +1,22 @@
+{
+  "key": "4306",
+  "issue": 4306,
+  "lane": "",
+  "worktree": "/home/factory/work/repo",
+  "specPath": "/home/factory/work/repo/.factory/state/plans/issue-4306.md",
+  "startedAt": "2026-11-20T11:03:45.198Z",
+  "branch": "factory/4306-factory-land-reports-a-structure",
+  "status": "parked",
+  "route": "claude",
+  "model": "claude-sonnet-5-5",
+  "attempts": 2,
+  "updatedAt": "2026-11-20T11:21:00.100Z",
+  "failures": [
+    {
+      "checker": "tests",
+      "result": "FAIL",
+      "details": "affected failed: ❯ scripts/gen-cli-json-schemas.test.ts (5 tests | 1 failed) 2553ms\n   ❯ CLI JSON Schema generator (5)\n     × writes exactly the fourteen schema artifacts deterministically, in-process and through the CLI 1050ms\n     ✓ rejects missing, empty, surplus, and unwritable output arguments 2ms\n     ✓ passes when the reference directory matches generated output 763ms\n     ✓ names a modified, a missing and an obsolete reference schema and exits nonzero without rewriting them 720ms\n     ✓ rejects empty, no\nfull output: /home/factory/work/repo/.factory/state/logs/issue-4306/check-r1/tests-affected.log"
+    }
+  ],
+  "repo": "on-par/software-factory"
+}
