@@ -1,5 +1,6 @@
 // packages/cli/src/cli/ship-run-state.ts — RunPorts.recordRunState for shipIssue (#3194); keeps steers appended mid-run (#3401)
 import {
+  mergeCiReworkRounds,
   nextIssueRunState,
   readIssueRunState,
   runStateFile,
@@ -27,6 +28,8 @@ export function runStateRecorder(runsDir: string, base: IssueRunStateBase): (upd
     // `factory steer` appends to the file while the run is in flight (#3401); keep those steers.
     if (onDisk?.startedAt === base.startedAt && onDisk.steers !== undefined)
       current = { ...current, steers: onDisk.steers };
+    const ciReworkRounds = mergeCiReworkRounds(onDisk?.ciReworkRounds, current.ciReworkRounds);
+    if (ciReworkRounds !== undefined) current = { ...current, ciReworkRounds };
     await writeIssueRunState(file, current);
   };
 }

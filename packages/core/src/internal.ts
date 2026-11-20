@@ -355,6 +355,7 @@ export {
   type RunStateUpdate,
   type IssueRunStateBase,
 } from './run/state.js';
+export { ciReworkBudget, mergeCiReworkRounds, readCiReworkBudget, type CiReworkBudget } from './run/ci-rework-state.js';
 export {
   appendSteerEvent,
   SteerEventError,

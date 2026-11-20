@@ -57,6 +57,7 @@ import {
 import type { BuildRoute, ParkReason, RunOutcome } from './outcome.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
 import type { RunPolicy } from './policy.js';
+import { safeRecordRunState } from './run-state-record.js';
 import { shipParkReason } from './ship-park.js';
 
 export interface CiReworkPorts {
@@ -435,6 +436,11 @@ export async function shipWithCiRework(
         extraInstructions: attributable.length > 0 ? CI_REWORK_INSTRUCTIONS : CI_CHECK_REWORK_INSTRUCTIONS,
       };
     }
+    await safeRecordRunState(ports.recordRunState, ports.events('ship'), {
+      status: 'shipping',
+      branch: request.branch,
+      ciRework: { prNumber: plan.reentry.prNumber, used: plan.round },
+    });
     const step = await runCiReworkRound(roundPorts, plan);
     if (step.kind === 'suppressed') return suppressionPark(step.findings);
     if (step.kind === 'ended') return { ship, outcome: step.outcome };

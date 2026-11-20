@@ -233,6 +233,19 @@ describe('run/state', () => {
       const plain = nextIssueRunState(undefined, base, { status: 'building' }, 't1');
       expect(Object.keys(nextIssueRunState(plain, base, { status: 'checking' }, 't2'))).not.toContain('steers');
     });
+
+    it('nextIssueRunState records ciRework rounds keyed by PR and carries them across updates', () => {
+      const a = nextIssueRunState(undefined, base, { status: 'shipping', ciRework: { prNumber: 7, used: 1 } }, 't1');
+      const b = nextIssueRunState(a, base, { status: 'shipping', ciRework: { prNumber: 7, used: 2 } }, 't2');
+      const c = nextIssueRunState(b, base, { status: 'checking' }, 't3');
+      const d = nextIssueRunState(c, base, { status: 'shipping', ciRework: { prNumber: 9, used: 1 } }, 't4');
+      expect(d.ciReworkRounds).toEqual({ '7': 2, '9': 1 });
+      const lower = nextIssueRunState(d, base, { status: 'shipping', ciRework: { prNumber: 7, used: 1 } }, 't5');
+      expect(lower.ciReworkRounds).toEqual({ '7': 2, '9': 1 });
+      expect(
+        Object.keys(nextIssueRunState(undefined, base, { status: 'building' }, 't')).includes('ciReworkRounds'),
+      ).toBe(false);
+    });
   });
 });
 

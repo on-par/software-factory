@@ -243,6 +243,21 @@ describe('shipWithCiRework — attributable non-CodeQL checks (#3537)', () => {
     );
   });
 
+  it('records each CI rework round count in run state before the rework re-ship', async () => {
+    const trace: string[] = [];
+    shipPhase.mockImplementation(async () => {
+      trace.push('ship');
+      return TEST_FAIL;
+    });
+    const recordRunState = (update: { ciRework?: { prNumber: number; used: number } }): void => {
+      if (update.ciRework) trace.push(`record ${update.ciRework.prNumber}:${update.ciRework.used}`);
+    };
+    const log = vi.fn<Log>();
+    const outcome = await runIssue(request, policy, { ...ports(log), recordRunState });
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'ci-failed' });
+    expect(trace).toEqual(['ship', 'record 9:1', 'ship', 'record 9:2', 'ship']);
+  });
+
   it('FACTORY_MAX_CI_REWORK_ROUNDS=0 runs no non-CodeQL rework round and no base merge', async () => {
     vi.stubEnv('FACTORY_MAX_CI_REWORK_ROUNDS', '0');
     shipPhase.mockResolvedValue(TEST_FAIL);

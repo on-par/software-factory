@@ -98,3 +98,10 @@ Status: Resolved. `actor` is free text, stored as given and never normalised (se
 `github-comment` and `bot` sources (a bot uses its GitHub app/bot login or a stable agent id such
 as `beckett-bot`), and git `user.name` then `$USER` for `cli`. Free text keeps stored events valid
 if the format is refined later, with no migration.
+
+## CI rework rounds in the run file
+
+The same run file records `ciReworkRounds`, a map from PR number to the CI rework rounds used for that
+PR. `shipWithCiRework` writes the count before each round's rework push, and a value only grows, so a
+fresh process can tell how much of the budget is spent. The cap comes from
+`FACTORY_MAX_CI_REWORK_ROUNDS` (default 2).

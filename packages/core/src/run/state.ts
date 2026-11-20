@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { resolveRepoSlug } from '../logger/repo-slug.js';
 import type { CheckerOutput, FailurePhase, IssueRunState, RunStatus } from '../types/index.js';
 import { isNumericWorkKey, issueNumberOf, toWorkKey, workKeyFromIssue, type WorkKey } from '../work/work-key.js';
+import { mergeCiReworkRounds } from './ci-rework-state.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
 
 export function runStateFile(runsDir: string, key: WorkKey): string {
@@ -118,6 +119,7 @@ export interface RunStateUpdate {
   prNumber?: number;
   failures?: CheckerOutput[];
   draftReason?: 'ci-pending' | 'requested';
+  ciRework?: { prNumber: number; used: number };
 }
 
 export interface IssueRunStateBase {
@@ -163,6 +165,10 @@ export function nextIssueRunState(
   now: string,
 ): IssueRunState {
   const prNumber = update.prNumber ?? prev?.prNumber;
+  const ciReworkRounds = mergeCiReworkRounds(
+    prev?.ciReworkRounds,
+    update.ciRework ? { [String(update.ciRework.prNumber)]: update.ciRework.used } : undefined,
+  );
   return {
     ...base,
     branch: update.branch ?? prev?.branch ?? base.branch,
@@ -176,5 +182,6 @@ export function nextIssueRunState(
     ...(update.failures !== undefined && update.failures.length > 0 ? { failures: update.failures } : {}),
     ...(prev?.remoteBranch === undefined ? {} : { remoteBranch: prev.remoteBranch }),
     ...(prev?.steers === undefined ? {} : { steers: prev.steers }),
+    ...(ciReworkRounds === undefined ? {} : { ciReworkRounds }),
   };
 }

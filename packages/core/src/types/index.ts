@@ -474,6 +474,7 @@ export interface IssueRunState {
   /** Pre-existing origin/<branch> found at worktree creation (#1868). */
   remoteBranch?: RemoteBranchRecord;
   failures?: CheckerOutput[];
+  ciReworkRounds?: Readonly<Record<string, number>>;
   steers?: readonly SteerEvent[]; // Human steers, oldest first. Append-only (#3400); see run/steer.ts.
 }
 // ---------- Design artifact (#422; moved to @on-par/contracts in #466; deepened in #480) ----------

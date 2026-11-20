@@ -1,8 +1,15 @@
 // packages/cli/src/cli/ship-run-state.test.ts — shipIssue persists IssueRunState as the run progresses (#3194)
 import { workKeyFromIssue } from '@on-par/factory-core';
-import { appendSteerEvent, readIssueRunState, runStateFile, writeIssueRunState } from '@on-par/factory-core/internal';
+import {
+  appendSteerEvent,
+  readCiReworkBudget,
+  readIssueRunState,
+  runStateFile,
+  writeIssueRunState,
+} from '@on-par/factory-core/internal';
 import { describe, expect, it } from 'vitest';
 
+import { runStateRecorder } from './ship-run-state.js';
 import { LaneParkError } from './index.js';
 import { buildRunDiffstatJson } from './runs-diffstat.js';
 import { buildRunsJson } from './runs.js';
@@ -122,6 +129,29 @@ describe('shipIssue run state (#3194)', () => {
 
     const final = await readIssueRunState(runStateFile(paths().runs, workKeyFromIssue(42)));
     expect(final?.steers).toEqual([event]);
+  });
+
+  it('keeps CI rework rounds from the run file when a fresh recorder writes', async () => {
+    const runs = paths().runs;
+    const mk = (startedAt: string) => ({
+      issue: 42,
+      lane: 'bugfix',
+      branch: 'b',
+      worktree: '/w',
+      specPath: '/s.md',
+      startedAt,
+    });
+    await runStateRecorder(
+      runs,
+      mk('2026-01-01T00:00:00.000Z'),
+    )({
+      status: 'shipping',
+      ciRework: { prNumber: 7, used: 1 },
+    });
+    await runStateRecorder(runs, mk('2026-01-02T00:00:00.000Z'))({ status: 'planning' });
+    const file = runStateFile(runs, workKeyFromIssue(42));
+    expect((await readIssueRunState(file))?.ciReworkRounds).toEqual({ '7': 1 });
+    expect(await readCiReworkBudget(runs, workKeyFromIssue(42), 7, {})).toEqual({ used: 1, cap: 2 });
   });
 });
 
