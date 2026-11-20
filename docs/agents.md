@@ -191,6 +191,8 @@ A repo that opts in with `tests.affected` iterates on a focused path. BUILD and 
 
 When a repo sets `tests.affected.buildVerify: focused` explicitly, the BUILD prompt also says the focused commands satisfy a generic "run the full verify before every commit" rule in the repo's `CLAUDE.md` or `AGENTS.md`, so BUILD does not run the full gate once per commit. A frozen spec that demands full BUILD verification still wins, and CHECK still runs one full gate before SHIP. When `buildVerify` is unset, the BUILD wording does not change.
 
+`tests.affected.fullGate: ci` moves the full gate off CHECK and onto the PR's required checks. CHECK runs only the focused set (affected tests, the focused typecheck, lint on the changed files) in round 0 and every rework round, logs `full gate: ci (required checks)` in `verify_scope`, and skips the full gate before SHIP; a failing required check goes through the existing CI rework loop. A trigger file or an unknown change set still runs the full suite in CHECK. When the base-health lookup finds no code-health checks on the base branch (no required checks, no `baseHealth.checks`, no push CI workflow) or cannot run, CHECK logs `fullGate ci refused: no required checks on the base branch; running the full gate in CHECK` once and behaves as `check`, the default.
+
 ## Repairing a red base
 
 No base-health check runs before PLAN. Every run enters PLAN, and CHECK runs the full verify once and is the only test gate. A failing test, including one already red on `main`, goes back to BUILD until CHECK is green; it is never waived against a base baseline.

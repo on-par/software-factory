@@ -14,6 +14,25 @@ section to `## X.Y.Z - date`. See
 - A webm or mp4 visual-proof clip renders as a `![clip](./<clip>)` embed alone in its own paragraph, which `gh pr edit --attach` turns into a bare asset URL that GitHub plays in a native video player. The `[▶ clip (<format>)](...)` link is gone; gif clips stay inline images (#4286).
 - Breaking: the `visualProof.evidenceBranch` config option is removed, together with the Git Data API writer that committed proof images to a side branch. A config that still sets the key fails to load with `visualProof.evidenceBranch was removed: ... delete the key`. Delete the key; an existing proof branch is no longer written and can be deleted by hand. The README "UI visual proof gate" section now describes PR attachments, the gh 2.103.0 minimum and gh's token and host limits (#4287).
 
+## 0.9.40 - 2026-11-19
+
+CHECK can leave the full suite to the PR's required CI when a repo sets `tests.affected.fullGate: ci` (#4293), and the per-package line budget is gone (#4124, #4282). PLAN repairs a missing design block instead of re-planning the whole spec (#4289), and CHECK also skips the flaky re-run when only a format, lint or typecheck step failed (#4290).
+All seven published `@on-par` packages move to 0.9.40 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Added
+
+- Opt-in `tests.affected.fullGate: ci`: CHECK runs only the focused set (affected tests, focused typecheck, lint on changed files) in round 0 and every rework round and never runs the full gate; the PR's required checks are the full gate, and a failing one goes through the existing CI rework loop. `verify_scope` says `full gate: ci (required checks)`. A trigger file still runs the full suite in CHECK. Without code-health checks on the base branch CHECK logs `fullGate ci refused: …` and runs the full gate as with `check`, the default (#4293).
+
+### Changed
+
+- PLAN repairs a missing or invalid `design:` block by asking the planner for only that block and merging it into the kept spec, instead of archiving the spec and re-planning from scratch. Run logs show `design artifact repaired` (#4289).
+- CHECK now also skips the flaky re-run when the tests checker failed only on a format (Prettier `--check`), lint (oxlint/ESLint errors, or warnings under `--deny-warnings` / `--max-warnings 0`) or typecheck (`error TS<n>:`) step, with no failing test. The skip logs `flaky re-run: skipped — deterministic gate failed (<gate>)` and the rework details list the matched lines (#4290).
+
+### Removed
+
+- The per-package line budget is gone: `loc-budget.json`, `npm run loc-budget` and its verify and CI `static` steps are removed, and CHECK no longer classifies a LOC budget failure as a deterministic gate. The per-file `max-lines` limit and its baseline guard are unchanged (#4124, #4282).
+
 ## 0.9.39 - 2026-11-17
 
 Runs spend less time re-verifying: scoped checks stay focused through BUILD in a repo that set `buildVerify: focused`, even when its agent instruction files say to verify before every commit (#4272), CHECK skips the flaky re-run after a deterministic gate miss (#4263) and parks `time-budget` instead of starting a re-run or rework that cannot finish before the run deadline (#4264). A run stopped by its time budget or SIGTERM hands back a structured remaining-work handoff (#4269), `run-issue --continue-from <branch>` picks it up without re-planning (#4271), and `run-issue` parks on an open `Depends on:` prerequisite and lists it in `--json` (#4270).

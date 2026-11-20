@@ -63,9 +63,12 @@ import { createDefaultWorkSourceRegistry, type WorkRequestSourceKind, type WorkS
 
 import {
   buildDesignArtifactRetryPrompt,
+  buildDesignBlockRepairPrompt,
   designArtifactInvalidMessage,
+  extractDesignBlock,
   MAX_DESIGN_ARTIFACT_RETRIES,
 } from './plan-design-retry.js';
+import { specHasImplementation } from './plan-spec-validity.js';
 import {
   type BuildRouteName,
   CLI_BUILD_ROUTES,
@@ -655,10 +658,13 @@ async function planPhaseImpl(opts: {
     let result: Awaited<ReturnType<ModelRouter['run']>>;
     let parsed: Awaited<ReturnType<typeof readSpec>>;
     let designParse: ReturnType<typeof parseDesignArtifact>;
+    let repairOf: { body: string; data: Record<string, unknown> } | null = null;
     while (true) {
-      const archived = await archiveSpec(specPath);
-      if (archived.length > 0) {
-        log('plan', `Archived existing spec before planning: ${archived.join(', ')}`);
+      if (repairOf === null) {
+        const archived = await archiveSpec(specPath);
+        if (archived.length > 0) {
+          log('plan', `Archived existing spec before planning: ${archived.join(', ')}`);
+        }
       }
 
       result = await router.run('plan', prompt, {
@@ -701,11 +707,22 @@ async function planPhaseImpl(opts: {
         };
       }
 
-      if (!existsSync(specPath)) {
-        await writeSpec(specPath, { body: result.output });
+      if (repairOf === null) {
+        if (!existsSync(specPath)) {
+          await writeSpec(specPath, { body: result.output });
+        }
+        parsed = await readSpec(specPath);
+      } else {
+        let design = extractDesignBlock(result.output);
+        if (design === undefined && existsSync(specPath)) {
+          design = (await readSpec(specPath)).data.design;
+        }
+        const data = { ...repairOf.data };
+        delete data.design;
+        if (design !== undefined) data.design = design;
+        await writeSpec(specPath, { body: repairOf.body, data });
+        parsed = await readSpec(specPath);
       }
-
-      parsed = await readSpec(specPath);
       designParse = parseDesignArtifact(parsed.data);
       if (
         !designParse.artifact &&
@@ -713,14 +730,27 @@ async function planPhaseImpl(opts: {
         designRetries < MAX_DESIGN_ARTIFACT_RETRIES
       ) {
         designRetries++;
-        log(
-          'plan',
-          `design artifact invalid — re-prompting planner with ${designParse.errors.length} validation error(s) (retry ${designRetries}/${MAX_DESIGN_ARTIFACT_RETRIES}): ${designParse.errors.join('; ')}`,
-        );
-        prompt = buildDesignArtifactRetryPrompt(basePrompt, designParse.errors);
+        if (specHasImplementation(parsed.body)) {
+          repairOf ??= { body: parsed.body, data: parsed.data };
+          log(
+            'plan',
+            `design artifact invalid — repairing the design block only with ${designParse.errors.length} validation error(s) (repair ${designRetries}/${MAX_DESIGN_ARTIFACT_RETRIES}): ${designParse.errors.join('; ')}`,
+          );
+          prompt = buildDesignBlockRepairPrompt(basePrompt, designParse.errors);
+        } else {
+          log(
+            'plan',
+            `design artifact invalid — re-prompting planner with ${designParse.errors.length} validation error(s) (retry ${designRetries}/${MAX_DESIGN_ARTIFACT_RETRIES}): ${designParse.errors.join('; ')}`,
+          );
+          prompt = buildDesignArtifactRetryPrompt(basePrompt, designParse.errors);
+          repairOf = null;
+        }
         continue;
       }
       break;
+    }
+    if (repairOf !== null && designParse.artifact) {
+      log('plan', `design artifact repaired after ${designRetries} repair attempt(s) — spec body kept`);
     }
     const runnableNow = runnableBuildRoutes(router);
     const route = await settlePlanRoute({

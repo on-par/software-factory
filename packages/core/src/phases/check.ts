@@ -277,7 +277,6 @@ async function checkPhaseImpl(opts: {
     log,
     autoRework = true,
     maxReworkRounds = MAX_REWORK_ROUNDS,
-    buildTimeoutSeconds,
     checkTimeoutSeconds,
     testsTimeoutSeconds,
     sandbox,
@@ -285,13 +284,10 @@ async function checkPhaseImpl(opts: {
     appPort,
     appBaseUrl,
     onPgid,
-    budgetGuard,
     processGroupTracker,
     priorFailureSignature,
     diffBase,
     parentBaseRef,
-    reworkRoute,
-    reworkModel,
     runId,
     onActivity,
     logsDir,
@@ -314,7 +310,9 @@ async function checkPhaseImpl(opts: {
   const roundLogDir = (round: number): string | undefined =>
     logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, `check-r${round}`);
   const checkBaseDir = logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, 'check-base');
-  const selectAffected = createAffectedSelector({ worktree, diffBase, constitution, config: opts.testsAffected, log });
+  const requiredChecks = async (): Promise<boolean> =>
+    !!diffBase && !!requiredChecksVerdict && !(await requiredChecksVerdict(diffBase)).noCodeHealthChecks;
+  const selectAffected = createAffectedSelector({ ...opts, config: opts.testsAffected, requiredChecks });
   const checkTriageDir = logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, 'check-triage');
   const logFailures = (s: CheckSummary): void => {
     for (const f of s.results.filter((r) => r.result === 'FAIL')) {
@@ -365,7 +363,8 @@ async function checkPhaseImpl(opts: {
 
   const hermeticGitNote = `hermetic git: ${hermeticGit ? 'on (GIT_CONFIG_GLOBAL=/dev/null, GIT_CONFIG_NOSYSTEM=1)' : 'off (check.hermeticGit false)'}`;
   log('check', hermeticGitNote);
-  await logVerifyScope(undefined, ctx, 0, log);
+  ctx.affectedTests = await selectAffected(0);
+  await logVerifyScope(ctx.affectedTests, ctx, 0, log);
   const firstVerifyStartedAt = now();
   let summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
   timeBudget.recordVerify(now() - firstVerifyStartedAt);
@@ -540,24 +539,9 @@ async function checkPhaseImpl(opts: {
 
     const verifyInstruction = await affectedVerifyInstruction(await selectAffected(reworkRounds), ctx);
     const { failovers, modelCompleted, failureReason, budgetStopped } = await reworkWorker({
-      issue,
-      worktree,
-      specPath,
+      ...opts,
       summary: target,
-      constitution,
-      router,
-      log,
-      buildTimeoutSeconds,
-      sandbox,
       steering,
-      appPort,
-      appBaseUrl,
-      onPgid,
-      budgetGuard,
-      reworkRoute,
-      reworkModel,
-      runId,
-      onWorkerResult: opts.onWorkerResult,
       verifyInstruction,
     });
 
