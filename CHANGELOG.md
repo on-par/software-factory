@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.41 - 2026-11-19
+
+SHIP now publishes UI visual proof as PR attachments through `gh pr edit --attach` (gh 2.103.0 or newer) instead of committing images to a side branch (#4284), fails the proof on a partial attach (#4285) and renders webm/mp4 clips as native video embeds (#4286). Breaking: the `visualProof.evidenceBranch` config option is removed; delete the key (#4287).
+All seven published `@on-par` packages move to 0.9.41 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Changed
 
 - SHIP publishes UI visual proof as PR attachments: it writes the PR body with the marked proof block and `./<file>` references into the capture directory and runs `gh pr edit --body-file <file> --attach` with each after and before screenshot and clip, so GitHub hosts the images and no proof is committed to a side branch. This needs gh 2.103.0 or newer; a missing or older gh, or a failed `gh pr edit`, fails the proof with the reason in the PR body and the `factory/visual-proof` status. A proof file name with a character other than letters, digits, `.`, `_`, `-` and a `/` between directories fails the proof before gh runs, so a name like `before (1).png` cannot break the proof block's markdown or leave uploads outside it (#4284).
