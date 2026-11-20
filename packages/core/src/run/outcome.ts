@@ -55,6 +55,7 @@ export type RunOutcome =
       prNumber?: number;
       draft?: boolean;
       ciPending?: boolean;
+      ciWatched?: false;
       draftReason?: ShipDraftReason;
       slice?: { index: number; count: number };
       attribution?: RunAttribution;

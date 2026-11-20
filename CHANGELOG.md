@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- ship: `ship.watchCi: false` makes SHIP open or update the PR and return without watching CI (the run result says CI was not watched), while `factory land` still requires green CI; `ci.skip` is unchanged (#4304)
+
 ## 0.9.42 - 2026-11-20
 
 Visual proof no longer treats changed test files as UI files, so a run that edits a component spec no longer fails SHIP as uncovered (#4300).

@@ -187,7 +187,11 @@ export const FactoryConfigSchema = z.object({
     })
     .default({ skip: dCi.skip, comment: defaultSchemaFields.ciComment }),
   ship: z
-    .object({ ciWatchMinutes: z.number().optional().catch(undefined), comment: z.string().optional() })
+    .object({
+      ciWatchMinutes: z.number().optional().catch(undefined),
+      watchCi: z.boolean().optional().catch(undefined),
+      comment: z.string().optional(),
+    })
     .default({}),
   sweep: z
     .object({
@@ -564,6 +568,10 @@ function resolveEnabledFlag(env: NodeJS.ProcessEnv, envVar: string, fallback: bo
 
 export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveEnabledFlag(env, 'FACTORY_SKIP_CI', config.ci?.skip ?? dCi.skip);
+}
+
+export function resolveShipWatchCi(config: { ship?: { watchCi?: boolean } }): boolean {
+  return config.ship?.watchCi !== false;
 }
 
 /** SHIP's CI watch deadline (#3569, #3932): ship.ciWatchMinutes, then ci.watchMinutes, as ms; unset, non-finite or <= 0 → DEFAULT_CI_DEADLINE_MS. */

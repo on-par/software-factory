@@ -14,7 +14,7 @@
 import { z } from 'zod';
 
 import { isPlainObject, loadFactoryConfig, loadModelsConfig, type FactoryConfig } from './index.js';
-import { CHECK_TIME_BUDGET_EXAMPLE, githubExampleNode, trackerExampleNode } from './example-nodes.js';
+import { CHECK_TIME_BUDGET_EXAMPLE, githubExampleNode, shipExampleNodes, trackerExampleNode } from './example-nodes.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import {
   DEFAULT_T1_SAMPLE_RATE,
@@ -338,13 +338,7 @@ function runtimeNamespace(): Node[] {
     });
 
   const ship = section('ship');
-  if (ship.kind === 'object')
-    ship.children.push({
-      kind: 'unset',
-      key: 'ciWatchMinutes',
-      doc: 'Minutes SHIP waits for CI before leaving the PR as a draft (CI pending); the between-issue sweep lands it once CI passes. Overrides ci.watchMinutes. Unset: 10.',
-      example: '10',
-    });
+  if (ship.kind === 'object') ship.children.push(...shipExampleNodes);
 
   const sizeGate = section('sizeGate');
   if (sizeGate.kind === 'object')

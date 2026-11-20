@@ -15,3 +15,18 @@ export const githubExampleNode: Node = {
 };
 
 export const CHECK_TIME_BUDGET_EXAMPLE = '{ verifyMinutes: 10, reworkBuildMinutes: 10, safetyMarginMinutes: 2 }';
+
+export const shipExampleNodes: Node[] = [
+  {
+    kind: 'unset',
+    key: 'ciWatchMinutes',
+    doc: 'Minutes SHIP waits for CI before leaving the PR as a draft (CI pending); the between-issue sweep lands it once CI passes. Overrides ci.watchMinutes. Unset: 10.',
+    example: '10',
+  },
+  {
+    kind: 'unset',
+    key: 'watchCi',
+    doc: 'false: SHIP opens or updates the PR and returns without watching CI; the run result says CI was not watched. factory land still waits for and requires green CI. Unlike ci.skip, which skips both the SHIP watch and the land CI gate. Unset: true.',
+    example: 'false',
+  },
+];
