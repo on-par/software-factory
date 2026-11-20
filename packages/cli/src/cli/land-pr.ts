@@ -3,7 +3,7 @@
 import { existsSync } from 'node:fs';
 
 import type { Octokit } from '@octokit/rest';
-import type { EventKind, FactoryEvent, ParkReason } from '@on-par/factory-core';
+import type { EventKind, FactoryEvent } from '@on-par/factory-core';
 import type { CiOutcome, InfraRerunOutcome, WatchChecksOptions } from '@on-par/factory-core/internal';
 import {
   assertVisualProofForHead,
@@ -16,12 +16,20 @@ import {
 } from '@on-par/factory-core/internal';
 import { DEFAULT_MAX_CONFLICT_ROUNDS, MAX_LAND_SYNC_ROUNDS, probeHeadBehindBase } from './land-behind.js';
 import { landRuntime } from './land-runtime.js';
-import { CiFailedError, CiInfraError, CiUnverifiedError, LandDeferredError } from './land-errors.js';
+import {
+  AwaitingCiError,
+  CiFailedError,
+  CiInfraError,
+  CiUnverifiedError,
+  LandConflictError,
+  LandDeferredError,
+} from './land-errors.js';
+import { refuseNoWaitSync, verifyHeadOnce } from './land-pr-no-wait.js';
 import { BaseCiPendingError } from './merge-base-gate.js';
 
 export { defaultListIssueLabels, squashMergeAndDelete } from './land-merge.js';
 export type { CommandRunner } from './land-merge.js';
-export { CiFailedError, CiInfraError, CiUnverifiedError, LandDeferredError } from './land-errors.js';
+export * from './land-errors.js';
 import { squashMergeAndDelete, type CommandRunner } from './land-merge.js';
 
 export class MergeGatedError extends Error {
@@ -36,39 +44,12 @@ export class MergeGatedError extends Error {
   }
 }
 
-/** What the lane needs to rebuild a PR whose merge with origin/main conflicted (#3325). */
-export type LandRebuild = { prNumber: number; branch: string; paths: string[]; mergeStateStatus: string };
-
-export class LandConflictError extends Error {
-  readonly parkReason: ParkReason = 'conflict';
-
-  /** `rebuild` is set when land handed the conflict back for a rebuild instead of parking (#3325). */
-  constructor(
-    message: string,
-    readonly rebuild?: LandRebuild,
-  ) {
-    super(message);
-  }
-}
-
 export class AwaitingReviewError extends Error {
   constructor(
     message: string,
     readonly prNumber: number,
     /** Which gate held the PR: the risk tier at land, or a pending human review (#3905). */
     readonly gate: 'risk' | 'review' = 'review',
-  ) {
-    super(message);
-  }
-}
-
-/** Thrown when the CI deadline passed with no check run and no commit status on the PR head (#3208). Not a
- *  CiFailedError: the PR stays open, nothing parks, and the runner re-checks it with backoff. */
-export class AwaitingCiError extends Error {
-  constructor(
-    message: string,
-    readonly prNumber: number,
-    readonly headSha: string,
   ) {
     super(message);
   }
@@ -237,6 +218,8 @@ export async function landOpenPullRequest(opts: {
   baseGate?: { check: (wait?: boolean) => Promise<void>; record: () => Promise<void> };
   /** #1887: max DIRTY merge-main rounds per land before it parks as conflict. Default 2. */
   maxConflictRounds?: number;
+  noWait?: boolean;
+  waitForCi?: boolean;
 }): Promise<void> {
   const {
     octokit,
@@ -262,6 +245,7 @@ export async function landOpenPullRequest(opts: {
     behindProbe = (sha: string, base: string) => probeHeadBehindBase(octokit, owner, repoName, base, sha),
   } = opts;
   const { errorDetail } = landRuntime();
+  const noWait = opts.noWait ?? opts.waitForCi === false;
 
   /** Watches CI on the PR's current head commit and returns that SHA once it is green, so the
    *  merge can be pinned to exactly the commit CI verified. */
@@ -361,6 +345,7 @@ export async function landOpenPullRequest(opts: {
 
   /** Merges main into the branch, bounded to MAX_LAND_SYNC_ROUNDS. Call under the land lock. */
   const syncNow = async (reason: string): Promise<void> => {
+    if (noWait) throw refuseNoWaitSync(reason, { issue, prNumber, branch, log });
     let round: string;
     if (reason === 'dirty') {
       if (conflictRounds >= maxConflictRounds) {
@@ -399,7 +384,7 @@ export async function landOpenPullRequest(opts: {
       return true;
     });
 
-  if (syncMain || needsSync(state) || (await headIsBehind())) await syncIfStillBehind(syncMain);
+  if (!noWait && (syncMain || needsSync(state) || (await headIsBehind()))) await syncIfStillBehind(syncMain);
 
   let verifiedSha: string | undefined;
 
@@ -477,8 +462,11 @@ export async function landOpenPullRequest(opts: {
   // The CI watch is a 10-20 minute wait, not a mutation: it must never run under the land
   // locks, or every other lane's setupWorktree serializes behind it (#645). Main may move while
   // CI runs: a head found behind under the merge lock is synced, then watched again.
+  const verifyCi = noWait
+    ? () => verifyHeadOnce({ octokit, owner, repo: repoName, issue, prNumber, branch, log, behindProbe })
+    : watchCi;
   for (;;) {
-    verifiedSha = skipCI ? undefined : await watchCi();
+    verifiedSha = skipCI ? undefined : await verifyCi();
     if (await mergeVerifiedHead()) return;
   }
 }

@@ -40,3 +40,26 @@ export class LandDeferredError extends CiUnverifiedError {
     super(message, prNumber);
   }
 }
+
+export type LandRebuild = { prNumber: number; branch: string; paths: string[]; mergeStateStatus: string };
+
+export class LandConflictError extends Error {
+  readonly parkReason: ParkReason = 'conflict';
+
+  constructor(
+    message: string,
+    readonly rebuild?: LandRebuild,
+  ) {
+    super(message);
+  }
+}
+
+export class AwaitingCiError extends Error {
+  constructor(
+    message: string,
+    readonly prNumber: number,
+    readonly headSha: string,
+  ) {
+    super(message);
+  }
+}

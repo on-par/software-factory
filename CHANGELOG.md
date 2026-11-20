@@ -10,6 +10,7 @@ section to `## X.Y.Z - date`. See
 ### Added
 
 - resume: when `factory resume <issue> --from ci-rework` accepts a failing PR with rounds left, it runs exactly one CI rework round on the PR branch, records the round in run state, pushes the branch and hands back to SHIP; PLAN, BUILD and the first CHECK are skipped, a failed round or SHIP exits 1, and a later resume reads the recorded count from disk so the cap still holds across processes (#4313)
+- land: the PR-land path has a no-wait mode, selected by a no-wait option or by `land.waitForCi: false` (the option wins when both are set): it reads the PR and its required checks once, using the same required-check selection as the CI watch, and merges only a mergeable head whose required checks are all green, pinned to the head SHA it read; pending or unreported checks, unknown mergeability or a head that needs a sync with main leave the PR open as `checks_pending` without pushing, syncing or rerunning, a failed required check is `checks_failed` and a conflict stays a conflict; the default still waits on CI as before, and the `factory land --no-wait` flag itself is not wired yet (#4307)
 
 ## 0.9.44 - 2026-11-20
 
