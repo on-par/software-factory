@@ -189,12 +189,16 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
   program
     .command('land <issue>')
     .description(
-      "Squash-merge the issue's open PR once CI is green, then remove its worktree (left open if CI fails or review is pending)",
+      "Squash-merge the issue's open PR once CI is green, then remove its worktree (left open if CI fails or review is pending); exits 75 when checks are still pending",
     )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .option(
       '--allow-gated',
       'Merge even when the issue or PR carries the no-auto-merge gate label (human override; writes an AUDIT line and a merge-gated-override event)',
+    )
+    .option(
+      '--json',
+      'Print a final JSON result line (merged, checks_pending, checks_failed, conflicting, closed); see docs/cli-json-schemas.md',
     )
     .action(async (issueNum, opts) => {
       await handlers.cmdLand(handlers.parseIssueArg(issueNum), opts);

@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- `factory land` exits 75 when checks are still pending and gains `--json`, a final result line (`merged`, `checks_pending`, `checks_failed`, `conflicting`, `closed`) (#4306)
+
 ## 0.9.43 - 2026-11-20
 
 SHIP can now open or update the PR and return without watching CI (`ship.watchCi: false`), while `factory land` still requires green CI (#4304).

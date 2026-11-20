@@ -1,8 +1,8 @@
 # CLI JSON Schemas
 
-The CLI publishes JSON Schemas for sixteen `--json` output contracts: fifteen versioned envelopes and one legacy unversioned log record. The schemas use JSON Schema draft 2020-12, which is the default output of [Zod's JSON Schema conversion](https://zod.dev/json-schema). Validate them with a draft 2020-12 implementation such as Ajv's [`Ajv2020` class](https://ajv.js.org/json-schema.html#draft-2020-12).
+The CLI publishes JSON Schemas for seventeen `--json` output contracts: sixteen versioned envelopes and one legacy unversioned log record. The schemas use JSON Schema draft 2020-12, which is the default output of [Zod's JSON Schema conversion](https://zod.dev/json-schema). Validate them with a draft 2020-12 implementation such as Ajv's [`Ajv2020` class](https://ajv.js.org/json-schema.html#draft-2020-12).
 
-Each schema is generated from the corresponding named Zod export in `packages/cli/src/cli/json-contract.ts`. The canonical fixtures live in [`packages/cli/src/cli/__fixtures__/json/`](../packages/cli/src/cli/__fixtures__/json/), except queue add, whose fixture remains at [`packages/cli/src/cli/__fixtures__/queue-add.json`](../packages/cli/src/cli/__fixtures__/queue-add.json).
+Each schema is generated from the corresponding named Zod export in `packages/cli/src/cli/json-contract.ts` (land: `land-result-contract.ts`). The canonical fixtures live in [`packages/cli/src/cli/__fixtures__/json/`](../packages/cli/src/cli/__fixtures__/json/), except queue add, whose fixture remains at [`packages/cli/src/cli/__fixtures__/queue-add.json`](../packages/cli/src/cli/__fixtures__/queue-add.json).
 
 | Command                                   | Schema                                                                           | Fixture                                                                              | Version                                                                                                                                                                                                                                                                                |
 | ----------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -22,8 +22,23 @@ Each schema is generated from the corresponding named Zod export in `packages/cl
 | `factory check --json`                    | [`check.schema.json`](../packages/cli/schemas/check.schema.json)                 | [`check.json`](../packages/cli/src/cli/__fixtures__/json/check.json)                 | `schemaVersion` is `1`; `verdict` is null with `--no-judge`                                                                                                                                                                                                                            |
 | `factory draft --json`                    | [`draft.schema.json`](../packages/cli/schemas/draft.schema.json)                 | [`draft.json`](../packages/cli/src/cli/__fixtures__/json/draft.json)                 | `schemaVersion` is `1`; `exit` is 0, 1 or 3; `cost` is null when unpriced                                                                                                                                                                                                              |
 | `factory job` (final stdout line)         | [`job-status.schema.json`](../packages/cli/schemas/job-status.schema.json)       | [`job-status.json`](../packages/cli/src/cli/__fixtures__/json/job-status.json)       | `schemaVersion` is `2`; `kind` is `factory-job`; `exitCode` mirrors the process exit code (#3902); `outcome` may be `budget_exhausted` (#4269)                                                                                                                                         |
+| `factory land --json` (final stdout line) | [`land-result.schema.json`](../packages/cli/schemas/land-result.schema.json)     | [`land-result.json`](../packages/cli/src/cli/__fixtures__/json/land-result.json)     | `schemaVersion` is `1`; `result` is `merged`, `checks_pending`, `checks_failed`, `conflicting` or `closed`; `failed` replaces `pending` for `checks_failed`; `headSha` is null when unreadable; `mergeable` is `MERGEABLE`, `CONFLICTING` or `UNKNOWN`                                 |
 
-The fifteen versioned envelopes generate a `schemaVersion` constant of `1`. Logs output is one NDJSON record per line and deliberately remains unversioned. Its optional event payloads permit arbitrary object keys as defined by the existing CLI contract. Future JSON support for `land` (#2279), `metrics` (#3130), and `requeue` (#2278) must add a schema and golden fixture.
+The sixteen versioned envelopes generate a `schemaVersion` constant of `1`. Logs output is one NDJSON record per line and deliberately remains unversioned. Its optional event payloads permit arbitrary object keys as defined by the existing CLI contract. Future JSON support for `resume-approved` (#2279), `metrics` (#3130), and `requeue` (#2278) must add a schema and golden fixture.
+
+## factory land results
+
+`factory land <issue> --json` prints one JSON line last on stdout. Without `--json`, output is unchanged.
+
+| `result`         | Exit code |
+| ---------------- | --------- |
+| `merged`         | 0         |
+| `checks_pending` | 75        |
+| `checks_failed`  | 0         |
+| `conflicting`    | 3         |
+| `closed`         | 1         |
+
+Exit 75 (`EX_TEMPFAIL`) means checks never reached a green verdict and the PR was left open; retry later. Awaiting review, merge-gated (exit 4), lookup failures and other failures print no JSON line and keep their current exit codes.
 
 Regenerate schemas from the repository root with:
 

@@ -33,6 +33,7 @@ import {
   AwaitingReviewError,
   LandConflictError,
   LandFailureError,
+  LandNoOpenPrError,
   MergeGatedError,
   defaultListIssueLabels,
   isLandLeftOpen,
@@ -73,6 +74,7 @@ export async function landIssue(
     mergeOverrides?: MergePolicyOverrides;
     /** #3905: a brief PR with no issue; lands by `branch` and reads only PR labels. */
     issueless?: boolean;
+    onPrResolved?: (pr: { prNumber: number; branch: string }) => void;
   } = {},
 ): Promise<{ branch: string; prNumber: number }> {
   const { configLoaders, gitOps, errorDetail, worktreePathFor } = landRuntime();
@@ -130,10 +132,11 @@ export async function landIssue(
   }
   if (lookup.status !== 'found') {
     log('fail', `no open PR for ${guessedBranch}`);
-    throw new LandFailureError(`no open PR for issue #${issueNum} (${guessedBranch})`, 1);
+    throw new LandNoOpenPrError(`no open PR for issue #${issueNum} (${guessedBranch})`, guesses);
   }
   const branch = lookup.branch;
   const prNumber = lookup.prNumber;
+  opts.onPrResolved?.({ prNumber, branch });
 
   const landFactoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
   // Every merge path honors the no-auto-merge gate on the issue and on the PR; unreadable labels fail closed (#1720).

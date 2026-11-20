@@ -1,3 +1,4 @@
+import { landResultJsonSchema } from './land-result-contract.js';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -97,6 +98,7 @@ const generatedContracts = [
   ['draft.schema.json', 'draft.json', draftJsonSchema],
   ['run-result.schema.json', 'run-result.json', runResultJsonSchema],
   ['job-status.schema.json', 'job-status.json', jobStatusJsonSchema],
+  ['land-result.schema.json', 'land-result.json', landResultJsonSchema],
 ] as const;
 
 const queueLabels = (position: number): string[] => ['factory:queued', 'factory:lane:ops', `factory:order:${position}`];

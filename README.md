@@ -150,7 +150,7 @@ factory run-issue 42 --stack        Build open same-repo prerequisites in order 
 factory run --issue <N>            Carry one issue to merged, closed, parked or awaiting-review (--wait stay|exit, --max-wait; exits 0, 1, 15, 16)
 factory run                         Claim queued issues and ship them, lanes in parallel; merges only when auto-merge is on
 factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
-factory land <N>                    Squash-merge the issue's open PR once CI is green, then remove its worktree
+factory land <N> [--json]           Squash-merge the issue's open PR once CI is green, then remove its worktree; exits 75 while checks are pending
 factory stop / factory resume       Halt lanes after their current issue / clear the stop
 factory resume N --from check       Re-run CHECK on a kept build; refuses if the base moved
 factory stop|resume --json         One JSON object: action, repo, stopFlag {before, after}; idempotent

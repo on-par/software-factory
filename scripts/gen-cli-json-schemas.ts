@@ -22,12 +22,14 @@ import {
   stopJsonSchema,
   unparkJsonSchema,
 } from '../packages/cli/src/cli/json-contract.js';
+import { landResultJsonSchema } from '../packages/cli/src/cli/land-result-contract.js';
 import { jobStatusJsonSchema } from '../packages/cli/src/cli/job-status-contract.js';
 
 const schemas = [
   ['status.schema.json', statusJsonSchema],
   ['kpis.schema.json', kpisJsonSchema],
   ['logs-line.schema.json', logsLineJsonSchema],
+  ['land-result.schema.json', landResultJsonSchema],
   ['daemon-status.schema.json', daemonStatusJsonSchema],
   ['queue-list.schema.json', queueListJsonSchema],
   ['usage.schema.json', usageJsonSchema],

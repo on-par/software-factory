@@ -262,13 +262,17 @@ import {
 import { buildSteerabilityReport } from './steerability-report.js';
 import { runHarnessCheckCommand } from './harness-check.js';
 import { landIssue } from './land.js';
+import { latestPrForBranch } from './land-merged.js';
+import { LAND_EXIT_CHECKS_PENDING, type LandResultKind, emitLandResult } from './land-result.js';
 import { STOP_SET_MESSAGE } from './stop-sentinel.js';
 import {
+  AwaitingCiError,
   AwaitingReviewError,
   CiFailedError,
   isCiNotGreen,
   LandConflictError,
   LandFailureError,
+  LandNoOpenPrError,
   MergeGatedError,
 } from './land-pr.js';
 import { setLandRuntime } from './land-runtime.js';
@@ -2800,7 +2804,7 @@ export async function cmdReset(
 /** deps overrides the config loaders, git ops, internal ops and octokit for this call, like shipIssue. */
 export async function cmdLand(
   issueNum: number,
-  opts: { branchPrefix?: string; allowGated?: boolean } = {},
+  opts: { branchPrefix?: string; allowGated?: boolean; json?: boolean } = {},
   deps: Pick<CliDeps, ConfigLoaderKey | GitOpKey | InternalOpKey | ShellOpKey | 'octokit'> = {},
 ) {
   const previousLoaders = configLoaders;
@@ -2822,11 +2826,21 @@ export async function cmdLand(
     const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
     const skipCI = configLoaders.resolveSkipCI(factoryConfig);
 
+    const [owner, repoName] = ghRepo.split('/');
+    let pr: { prNumber: number; branch: string } | undefined;
+    const emit = async (result: LandResultKind, prNumber: number, fallbackHeadSha?: string) => {
+      if (opts.json) await emitLandResult(octokit, owner, repoName, result, prNumber, fallbackHeadSha);
+    };
+
     try {
       const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {
         allowGated: opts.allowGated === true,
+        onPrResolved: (p) => {
+          pr = p;
+        },
       });
       console.log(styleText('green', `✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
+      await emit('merged', result.prNumber);
     } catch (err: any) {
       if (err instanceof AwaitingReviewError) {
         console.log(
@@ -2841,7 +2855,8 @@ export async function cmdLand(
             `⏸ PR #${err.prNumber} for issue #${issueNum} — CI never reached a green verdict — left open, not merged`,
           ),
         );
-        return;
+        await emit('checks_pending', err.prNumber, err instanceof AwaitingCiError ? err.headSha : undefined);
+        throw new CliExitError('', LAND_EXIT_CHECKS_PENDING);
       }
       if (err instanceof CiFailedError) {
         console.log(
@@ -2850,13 +2865,25 @@ export async function cmdLand(
             `⏸ PR #${err.prNumber} for issue #${issueNum} has a failing CI check — left open, not merged`,
           ),
         );
+        await emit('checks_failed', err.prNumber);
         return;
       }
       if (err instanceof MergeGatedError) {
         throw new CliExitError(`factory: ${err.message}`, 4);
       }
       if (err instanceof LandConflictError) {
+        const n = err.rebuild?.prNumber ?? pr?.prNumber;
+        if (n !== undefined) await emit('conflicting', n);
         throw new CliExitError(`factory: ${err.message}`, 3);
+      }
+      if (err instanceof LandNoOpenPrError && opts.json) {
+        for (const b of err.branches) {
+          const found = await latestPrForBranch(octokit, owner, repoName, b).catch(() => null);
+          if (!found) continue;
+          await emit('closed', found.number);
+          break;
+        }
+        throw new CliExitError(`factory: ${err.message}`, 1);
       }
       if (err instanceof LandFailureError) {
         throw new CliExitError(`factory: ${err.message}`, err.code);
@@ -4409,7 +4436,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     await program.parseAsync(argv);
   } catch (err) {
     if (err instanceof CliExitError) {
-      console.error(styleText('red', err.message));
+      if (err.message !== '') console.error(styleText('red', err.message));
       process.exitCode = err.code;
       return;
     }

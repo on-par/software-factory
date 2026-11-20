@@ -99,6 +99,7 @@ exit 0, so an Actions run-issue or ship is ship then land:
 - A PR left as draft is not landed. "Left as draft (CI pending)" still fails the job with exit 1.
 - When land fails, the job fails with land's exit code and an `::error::` line, also written to the
   step summary.
+- A land whose CI never reaches green exits 75 (`checks_pending`), so the job fails with land's exit code instead of passing with the PR open.
 - `FACTORY_MERGE` unset, or any value other than `1`, skips land. `doctor` never lands.
 - `land` is not a `command` input. The workflow still rejects it.
 

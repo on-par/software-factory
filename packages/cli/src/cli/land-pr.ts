@@ -95,6 +95,15 @@ export class LandFailureError extends Error {
   }
 }
 
+export class LandNoOpenPrError extends LandFailureError {
+  constructor(
+    message: string,
+    readonly branches: string[],
+  ) {
+    super(message, 1);
+  }
+}
+
 /** True for the errors that leave the PR open and unmerged without a land failure: awaiting review, CI red or unverified, or CI not started. */
 export function isLandLeftOpen(err: unknown): boolean {
   return (
