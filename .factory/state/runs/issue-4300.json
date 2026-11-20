@@ -1,0 +1,15 @@
+{
+  "key": "4300",
+  "issue": 4300,
+  "lane": "",
+  "worktree": "/home/factory/work/repo",
+  "specPath": "/home/factory/work/repo/.factory/state/plans/issue-4300.md",
+  "startedAt": "2026-11-20T08:23:18.733Z",
+  "branch": "factory/4300-visual-proof-treats-changed-test",
+  "status": "shipping",
+  "route": "claude",
+  "model": "claude-sonnet-5-5",
+  "attempts": 1,
+  "updatedAt": "2026-11-20T08:35:00.337Z",
+  "repo": "on-par/software-factory"
+}
