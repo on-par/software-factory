@@ -1,0 +1,27 @@
+{
+  "key": "4311",
+  "issue": 4311,
+  "lane": "",
+  "worktree": "/home/factory/work/repo",
+  "specPath": "/home/factory/work/repo/.factory/state/plans/issue-4311.md",
+  "startedAt": "2026-11-20T12:20:44.790Z",
+  "branch": "factory/4311-record-ci-rework-rounds-in-run-s",
+  "status": "parked",
+  "route": "claude",
+  "model": "claude-sonnet-5-5",
+  "attempts": 2,
+  "updatedAt": "2026-11-20T12:39:04.352Z",
+  "failures": [
+    {
+      "checker": "tests",
+      "result": "FAIL",
+      "details": "affected failed: ❯ packages/core/src/public-api.test.ts (8 tests | 1 failed) 23ms\n   ❯ public API surface (ADR-0004) (8)\n     ✓ root export exposes exactly the documented public API 3ms\n     ✓ deprecated root exports are still exported until removal 0ms\n     ✓ deprecated root exports equal the baselined index.ts knip findings 1ms\n     ✓ SIZE_GATE_MODES lists exactly off and stack (#3835) 0ms\n     ✓ root export has no internal or testing symbols 2ms\n     × ./internal and ./testing expose exactly the documented AP\nfull output: /home/factory/work/repo/.factory/state/logs/issue-4311/check-r1/tests-affected.log"
+    },
+    {
+      "checker": "design_smells",
+      "result": "FAIL",
+      "details": "1 program-design smell(s): [cast-to-pass] packages/core/src/run/ci-rework-state.test.ts:26 — The `write` helper takes `extra: Record<string, unknown>`, spreads it into the state object, and then casts the result with `as never` so `writeIssueRunState` accepts it. `IssueRunState` already declares `ciReworkRounds`, so the cast only h… → suggested: Type the parameter as `extra: Partial<IssueRunState>` (import the type from `../types/index.js`). The spread then type-checks and the `as never` can be removed."
+    }
+  ],
+  "repo": "on-par/software-factory"
+}
