@@ -164,6 +164,10 @@ export function nextIssueRunState(
   now: string,
 ): IssueRunState {
   const prNumber = update.prNumber ?? prev?.prNumber;
+  const round = update.ciReworkRound;
+  const ciReworkRounds = round
+    ? { ...prev?.ciReworkRounds, [String(round.prNumber)]: round.round }
+    : prev?.ciReworkRounds;
   return {
     ...base,
     branch: update.branch ?? prev?.branch ?? base.branch,
@@ -177,5 +181,6 @@ export function nextIssueRunState(
     ...(update.failures !== undefined && update.failures.length > 0 ? { failures: update.failures } : {}),
     ...(prev?.remoteBranch === undefined ? {} : { remoteBranch: prev.remoteBranch }),
     ...(prev?.steers === undefined ? {} : { steers: prev.steers }),
+    ...(ciReworkRounds === undefined ? {} : { ciReworkRounds }),
   };
 }

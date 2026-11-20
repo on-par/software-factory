@@ -1,5 +1,7 @@
 import type { IssueRunState } from '../types/index.js';
+import { resolveMaxCiReworkRounds } from './ci-rework.js';
 import type { RunPorts } from './run-issue.js';
+import { safeRecordRunState } from './run-state-record.js';
 
 export interface CiReworkRoundsUsage {
   used: number;
@@ -7,14 +9,23 @@ export interface CiReworkRoundsUsage {
 }
 
 export async function recordCiReworkRound(
-  _ports: Pick<RunPorts, 'recordRunState' | 'events'>,
-  _plan: { round: number; reentry: { prNumber: number } },
-): Promise<void> {}
+  ports: Pick<RunPorts, 'recordRunState' | 'events'>,
+  plan: { round: number; reentry: { prNumber: number } },
+): Promise<void> {
+  await safeRecordRunState(ports.recordRunState, ports.events(), {
+    status: 'shipping',
+    ciReworkRound: { prNumber: plan.reentry.prNumber, round: plan.round },
+  });
+}
 
 export function ciReworkRoundsFor(
-  _state: Pick<IssueRunState, 'ciReworkRounds'> | null | undefined,
-  _prNumber: number,
-  _env: NodeJS.ProcessEnv = process.env,
+  state: Pick<IssueRunState, 'ciReworkRounds'> | null | undefined,
+  prNumber: number,
+  env: NodeJS.ProcessEnv = process.env,
 ): CiReworkRoundsUsage {
-  return { used: -1, cap: -1 };
+  const used = state?.ciReworkRounds?.[String(prNumber)];
+  return {
+    used: typeof used === 'number' && Number.isSafeInteger(used) && used >= 0 ? used : 0,
+    cap: resolveMaxCiReworkRounds(env),
+  };
 }
