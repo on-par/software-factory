@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.40 - 2026-11-19
+
+CHECK can leave the full suite to the PR's required CI when a repo sets `tests.affected.fullGate: ci` (#4293), and the per-package line budget is gone (#4124, #4282). PLAN repairs a missing design block instead of re-planning the whole spec (#4289), and CHECK also skips the flaky re-run when only a format, lint or typecheck step failed (#4290).
+All seven published `@on-par` packages move to 0.9.40 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - Opt-in `tests.affected.fullGate: ci`: CHECK runs only the focused set (affected tests, focused typecheck, lint on changed files) in round 0 and every rework round and never runs the full gate; the PR's required checks are the full gate, and a failing one goes through the existing CI rework loop. `verify_scope` says `full gate: ci (required checks)`. A trigger file still runs the full suite in CHECK. Without code-health checks on the base branch CHECK logs `fullGate ci refused: …` and runs the full gate as with `check`, the default (#4293).
