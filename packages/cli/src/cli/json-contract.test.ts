@@ -37,6 +37,7 @@ import {
   usageJsonSchema,
 } from './json-contract.js';
 import { jobStatusJsonSchema } from './job-status-contract.js';
+import { landResultJsonSchema } from './land-result-contract.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { format, resolveConfig } from 'prettier';
@@ -97,6 +98,7 @@ const generatedContracts = [
   ['draft.schema.json', 'draft.json', draftJsonSchema],
   ['run-result.schema.json', 'run-result.json', runResultJsonSchema],
   ['job-status.schema.json', 'job-status.json', jobStatusJsonSchema],
+  ['land-result.schema.json', 'land-result.json', landResultJsonSchema],
 ] as const;
 
 const queueLabels = (position: number): string[] => ['factory:queued', 'factory:lane:ops', `factory:order:${position}`];

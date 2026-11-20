@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- land: `factory land --json` prints a final result line (`merged`, `checks_pending`, `checks_failed`, `conflicting`, `closed`), and checks still pending now exit 75 (`EX_TEMPFAIL`) instead of 0 (#4306)
 - ship: `ship.watchCi: false` makes SHIP open or update the PR and return without watching CI (the run result says CI was not watched), while `factory land` still requires green CI; `ci.skip` is unchanged (#4304)
 
 ## 0.9.42 - 2026-11-20

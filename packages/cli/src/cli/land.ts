@@ -46,6 +46,7 @@ import { allowScopedMerge } from '@on-par/factory-core/internal';
 import { isPrMerged, latestPrForBranch } from './land-merged.js';
 import { cleanupMergedLane, releaseLandedClaim } from './land-merged-cleanup.js';
 import { landRuntime } from './land-runtime.js';
+import { LandNoOpenPrError } from './land-result.js';
 
 export { isPrMerged, latestPrForBranch };
 export { findOpenPRForIssue } from './land-find-pr.js';
@@ -62,6 +63,7 @@ export async function landIssue(
   branchPrefix?: string,
   opts: {
     allowGated?: boolean;
+    onPrResolved?: (pr: { prNumber: number; branch: string }) => void;
     branch?: string;
     enforceRisk?: boolean;
     syncMain?: boolean;
@@ -130,10 +132,11 @@ export async function landIssue(
   }
   if (lookup.status !== 'found') {
     log('fail', `no open PR for ${guessedBranch}`);
-    throw new LandFailureError(`no open PR for issue #${issueNum} (${guessedBranch})`, 1);
+    throw new LandNoOpenPrError(`no open PR for issue #${issueNum} (${guessedBranch})`, guesses);
   }
   const branch = lookup.branch;
   const prNumber = lookup.prNumber;
+  opts.onPrResolved?.({ prNumber, branch });
 
   const landFactoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
   // Every merge path honors the no-auto-merge gate on the issue and on the PR; unreadable labels fail closed (#1720).

@@ -271,6 +271,7 @@ import {
   LandFailureError,
   MergeGatedError,
 } from './land-pr.js';
+import { LAND_CHECKS_PENDING_EXIT_CODE, printLandResult } from './land-result.js';
 import { setLandRuntime } from './land-runtime.js';
 import { recordKpiTierDemotions, runAckTierDemotion } from './tier-demotion.js';
 import { cmdRun, type RunOptions } from './run.js';
@@ -2800,7 +2801,7 @@ export async function cmdReset(
 /** deps overrides the config loaders, git ops, internal ops and octokit for this call, like shipIssue. */
 export async function cmdLand(
   issueNum: number,
-  opts: { branchPrefix?: string; allowGated?: boolean } = {},
+  opts: { branchPrefix?: string; allowGated?: boolean; json?: boolean } = {},
   deps: Pick<CliDeps, ConfigLoaderKey | GitOpKey | InternalOpKey | ShellOpKey | 'octokit'> = {},
 ) {
   const previousLoaders = configLoaders;
@@ -2822,11 +2823,17 @@ export async function cmdLand(
     const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
     const skipCI = configLoaders.resolveSkipCI(factoryConfig);
 
+    let prNumber: number | undefined;
+    const report = (error?: unknown) => printLandResult({ json: opts.json === true, octokit, ghRepo, prNumber, error });
     try {
       const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {
         allowGated: opts.allowGated === true,
+        onPrResolved: (p) => {
+          prNumber = p.prNumber;
+        },
       });
       console.log(styleText('green', `✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
+      await report();
     } catch (err: any) {
       if (err instanceof AwaitingReviewError) {
         console.log(
@@ -2841,7 +2848,8 @@ export async function cmdLand(
             `⏸ PR #${err.prNumber} for issue #${issueNum} — CI never reached a green verdict — left open, not merged`,
           ),
         );
-        return;
+        await report(err);
+        throw new CliExitError('', LAND_CHECKS_PENDING_EXIT_CODE);
       }
       if (err instanceof CiFailedError) {
         console.log(
@@ -2850,15 +2858,18 @@ export async function cmdLand(
             `⏸ PR #${err.prNumber} for issue #${issueNum} has a failing CI check — left open, not merged`,
           ),
         );
+        await report(err);
         return;
       }
       if (err instanceof MergeGatedError) {
         throw new CliExitError(`factory: ${err.message}`, 4);
       }
       if (err instanceof LandConflictError) {
+        await report(err);
         throw new CliExitError(`factory: ${err.message}`, 3);
       }
       if (err instanceof LandFailureError) {
+        await report(err);
         throw new CliExitError(`factory: ${err.message}`, err.code);
       }
       throw new CliExitError(`factory: merge failed for issue #${issueNum}: ${err.message}`, 5);
@@ -4409,7 +4420,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     await program.parseAsync(argv);
   } catch (err) {
     if (err instanceof CliExitError) {
-      console.error(styleText('red', err.message));
+      if (err.message) console.error(styleText('red', err.message));
       process.exitCode = err.code;
       return;
     }

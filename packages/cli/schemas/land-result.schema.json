@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "pr": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "headSha": {
+          "type": ["string", "null"]
+        },
+        "mergeable": {
+          "type": "string",
+          "enum": ["MERGEABLE", "CONFLICTING", "UNKNOWN"]
+        },
+        "result": {
+          "type": "string",
+          "const": "checks_pending"
+        },
+        "pending": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["schemaVersion", "pr", "headSha", "mergeable", "result", "pending"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "pr": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "headSha": {
+          "type": ["string", "null"]
+        },
+        "mergeable": {
+          "type": "string",
+          "enum": ["MERGEABLE", "CONFLICTING", "UNKNOWN"]
+        },
+        "result": {
+          "type": "string",
+          "const": "checks_failed"
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["schemaVersion", "pr", "headSha", "mergeable", "result", "failed"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "pr": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "headSha": {
+          "type": ["string", "null"]
+        },
+        "mergeable": {
+          "type": "string",
+          "enum": ["MERGEABLE", "CONFLICTING", "UNKNOWN"]
+        },
+        "result": {
+          "type": "string",
+          "enum": ["merged", "conflicting", "closed"]
+        }
+      },
+      "required": ["schemaVersion", "pr", "headSha", "mergeable", "result"],
+      "additionalProperties": false
+    }
+  ]
+}

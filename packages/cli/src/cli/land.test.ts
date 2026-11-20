@@ -467,10 +467,10 @@ describe('cmdLand (direct invocation)', () => {
     expect(events.some((e) => e.type === 'ci-failed')).toBe(true);
   });
 
-  it('cmdLand(5) resolves cleanly and leaves the PR open when CI never reaches a green verdict (timeout)', async () => {
+  it('cmdLand(5) exits 75 and leaves the PR open when CI never reaches a green verdict (timeout)', async () => {
     ops.watchChecks.mockResolvedValueOnce('timeout');
 
-    await expect(cmdLand(5)).resolves.toBeUndefined();
+    await expect(cmdLand(5)).rejects.toMatchObject({ code: 75 });
 
     expect(logged()).toContain('left open, not merged');
     expect(of('merge')).toEqual([]);
