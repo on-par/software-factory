@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- run state: each CI rework round records its count per PR in the run state file (`ciReworkRounds`) before it pushes, so a later process can read the rounds used against the cap; the previous-attempt note shows it (#4311)
+
 ## 0.9.43 - 2026-11-20
 
 SHIP can now open or update the PR and return without watching CI (`ship.watchCi: false`), while `factory land` still requires green CI (#4304).

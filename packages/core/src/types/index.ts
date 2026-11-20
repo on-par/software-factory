@@ -475,6 +475,7 @@ export interface IssueRunState {
   remoteBranch?: RemoteBranchRecord;
   failures?: CheckerOutput[];
   steers?: readonly SteerEvent[]; // Human steers, oldest first. Append-only (#3400); see run/steer.ts.
+  ciReworkRounds?: Readonly<Record<string, number>>;
 }
 // ---------- Design artifact (#422; moved to @on-par/contracts in #466; deepened in #480) ----------
 export type {
