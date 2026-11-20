@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.42 - 2026-11-20
+
+Visual proof no longer treats changed test files as UI files, so a run that edits a component spec no longer fails SHIP as uncovered (#4300).
+All seven published `@on-par` packages move to 0.9.42 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Fixed
 
 - Visual proof no longer counts changed test files (`*.spec.*`, `*.test.*`, `__tests__/`) as UI, so a component spec no longer fails SHIP as uncovered; `visualProof.excludePaths` adds more exclusions (#4300).
