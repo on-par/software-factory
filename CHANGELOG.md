@@ -7,11 +7,18 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.45 - 2026-11-20
+
+`factory land --no-wait` and `land.waitForCi: false` now read the PR and its checks once instead of waiting on CI (#4307, #4308). `factory resume --from ci-rework` can start one CI rework round on a failing PR, with the cap held across processes (#4312, #4313).
+All seven published `@on-par` packages move to 0.9.45 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - resume: when `factory resume <issue> --from ci-rework` accepts a failing PR with rounds left, it runs exactly one CI rework round on the PR branch, records the round in run state, pushes the branch and hands back to SHIP; PLAN, BUILD and the first CHECK are skipped, a failed round or SHIP exits 1, and a later resume reads the recorded count from disk so the cap still holds across processes (#4313)
 - land: the PR-land path has a no-wait mode, selected by a no-wait option or by `land.waitForCi: false` (the option wins when both are set): it reads the PR and its required checks once, using the same required-check selection as the CI watch, and merges only a mergeable head whose required checks are all green, pinned to the head SHA it read; pending or unreported checks, unknown mergeability or a head that needs a sync with main leave the PR open as `checks_pending` without pushing, syncing or rerunning, a failed required check is `checks_failed` and a conflict stays a conflict; the default still waits on CI as before, and the `factory land --no-wait` flag itself is not wired yet (#4307)
 - land: `factory land <issue> --no-wait` and the `land.waitForCi: false` config key read the PR and its checks once instead of waiting on CI: a green, mergeable head merges (exit 0), pending checks leave the PR open as `checks_pending` (exit 75), a failed check keeps today's left-open line and exit 0, and the final JSON line is always printed in this mode; the flag wins over `land.waitForCi: true`, and with neither set `factory land` still waits on CI (#4308)
+- resume: `factory resume <issue> --from ci-rework` checks the issue's open PR and says whether a CI rework round may start: a green PR, a PR with only pending checks, or no open PR exits 0 with no change; a PR that already used the CI rework cap (`FACTORY_MAX_CI_REWORK_ROUNDS`, default 2) is refused with exit 1 (#4312)
 
 ## 0.9.44 - 2026-11-20
 
@@ -23,7 +30,6 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 - `factory land --json` prints a final JSON result line (`checks_pending`, `merged`, `checks_failed`, `conflicting` or `closed`) with the PR, head SHA, pending or failed checks and mergeable state, and `factory land` exits `75` when CI never reached a green verdict and the PR was left open; other exit codes and human output are unchanged (#4306)
 - run state: each CI rework round records its count per PR in the run state file (`ciReworkRounds`) before it pushes, so a later process can read the rounds used against the cap; the previous-attempt note shows it (#4311)
-- resume: `factory resume <issue> --from ci-rework` checks the issue's open PR and says whether a CI rework round may start: a green PR, a PR with only pending checks, or no open PR exits 0 with no change; a PR that already used the CI rework cap (`FACTORY_MAX_CI_REWORK_ROUNDS`, default 2) is refused with exit 1 (#4312)
 
 ## 0.9.43 - 2026-11-20
 
