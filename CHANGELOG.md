@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.44 - 2026-11-20
+
+`factory land --json` now prints a final JSON result and exits 75 when CI never went green (#4306). Run state now records CI rework rounds so a later process can read them against the cap (#4311).
+All seven published `@on-par` packages move to 0.9.44 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - `factory land --json` prints a final JSON result line (`checks_pending`, `merged`, `checks_failed`, `conflicting` or `closed`) with the PR, head SHA, pending or failed checks and mergeable state, and `factory land` exits `75` when CI never reached a green verdict and the PR was left open; other exit codes and human output are unchanged (#4306)
