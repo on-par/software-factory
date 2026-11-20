@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "result": "checks_pending",
+  "pr": 7,
+  "headSha": "2222222222222222222222222222222222222222",
+  "pending": ["ci"],
+  "mergeable": "MERGEABLE"
+}

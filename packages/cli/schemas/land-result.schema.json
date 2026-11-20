@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "string",
+          "const": "checks_failed"
+        },
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "pr": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "headSha": {
+          "type": ["string", "null"]
+        },
+        "mergeable": {
+          "type": "string",
+          "enum": ["MERGEABLE", "CONFLICTING", "UNKNOWN"]
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["result", "schemaVersion", "pr", "headSha", "mergeable", "failed"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "string",
+          "enum": ["merged", "checks_pending", "conflicting", "closed"]
+        },
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "pr": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "headSha": {
+          "type": ["string", "null"]
+        },
+        "mergeable": {
+          "type": "string",
+          "enum": ["MERGEABLE", "CONFLICTING", "UNKNOWN"]
+        },
+        "pending": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["result", "schemaVersion", "pr", "headSha", "mergeable", "pending"],
+      "additionalProperties": false
+    }
+  ]
+}
