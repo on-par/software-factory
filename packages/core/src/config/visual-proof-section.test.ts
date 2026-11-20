@@ -49,6 +49,15 @@ describe('VisualProofConfigSchema (#2232)', () => {
   });
 });
 
+describe('VisualProofConfigSchema excludePaths (#4300)', () => {
+  it('is optional, accepts a string array and rejects bad values', () => {
+    expect(VisualProofConfigSchema.parse(base)).not.toHaveProperty('excludePaths');
+    expect(VisualProofConfigSchema.parse({ ...base, excludePaths: ['a/**'] }).excludePaths).toEqual(['a/**']);
+    expect(VisualProofConfigSchema.safeParse({ ...base, excludePaths: [''] }).success).toBe(false);
+    expect(VisualProofConfigSchema.safeParse({ ...base, excludePaths: 'a/**' }).success).toBe(false);
+  });
+});
+
 describe('VisualProofConfigSchema steps (#4054)', () => {
   const stateful = {
     ...route,

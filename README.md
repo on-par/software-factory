@@ -279,6 +279,7 @@ qa:
 visualProof:
   mode: required # required (default) | advisory | off
   uiPaths: ['src/ui/**', 'web/**/*.css'] # changed files matching these make proof required
+  excludePaths: ['src/ui/**/*.stories.tsx'] # optional; added to the default test-file exclusions
   routes: # 1-10 routes
     - route: /settings
       state: default # default: default
@@ -300,6 +301,8 @@ visualProof:
   timeoutSeconds: 300
   captureAttempts: 3 # 1-5; attempts per SHIP before a capture failure is final
 ```
+
+Changed files matching `**/*.{spec,test}.{ts,tsx,js,jsx,mts,cts}` or `**/__tests__/**` never count as UI, even when `uiPaths` matches them; they select no route and are never reported as uncovered. `visualProof.excludePaths` adds more globs.
 
 The command runs once the app answers `qa.readyPath` with a status below 500. It gets the checker environment (no `GITHUB_TOKEN` or other host secrets) plus:
 

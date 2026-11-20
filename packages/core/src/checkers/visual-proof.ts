@@ -72,6 +72,12 @@ const globToRegExp = (glob: string): RegExp =>
 
 const matchesAny = (globs: readonly string[], file: string): boolean => globs.some((g) => globToRegExp(g).test(file));
 
+const TEST_EXTENSIONS = ['ts', 'tsx', 'js', 'jsx', 'mts', 'cts'] as const;
+export const DEFAULT_VISUAL_PROOF_EXCLUDE_PATHS: readonly string[] = [
+  ...TEST_EXTENSIONS.flatMap((ext) => [`**/*.spec.${ext}`, `**/*.test.${ext}`]),
+  '**/__tests__/**',
+];
+
 export function classifyVisualProof(input: {
   changedFiles: readonly string[];
   config: VisualProofConfig | undefined;
@@ -86,7 +92,8 @@ export function classifyVisualProof(input: {
       diagnostic: `visual proof required by the plan's screenshot entries (${planRoutes.join(', ')}) but .factory config has no visualProof section — add visualProof.uiPaths, routes and command`,
     };
   }
-  const uiFiles = changedFiles.filter((f) => matchesAny(config.uiPaths, f));
+  const excluded = [...DEFAULT_VISUAL_PROOF_EXCLUDE_PATHS, ...(config.excludePaths ?? [])];
+  const uiFiles = changedFiles.filter((f) => matchesAny(config.uiPaths, f) && !matchesAny(excluded, f));
   if (uiFiles.length === 0 && planRoutes.length === 0) return { required: false };
 
   const diagnostics: string[] = [];
