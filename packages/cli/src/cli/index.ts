@@ -263,14 +263,7 @@ import { buildSteerabilityReport } from './steerability-report.js';
 import { runHarnessCheckCommand } from './harness-check.js';
 import { landIssue } from './land.js';
 import { STOP_SET_MESSAGE } from './stop-sentinel.js';
-import {
-  AwaitingReviewError,
-  CiFailedError,
-  isCiNotGreen,
-  LandConflictError,
-  LandFailureError,
-  MergeGatedError,
-} from './land-pr.js';
+import { landReporter } from './land-result.js';
 import { setLandRuntime } from './land-runtime.js';
 import { recordKpiTierDemotions, runAckTierDemotion } from './tier-demotion.js';
 import { cmdRun, type RunOptions } from './run.js';
@@ -2801,7 +2794,7 @@ export async function cmdReset(
 /** deps overrides the config loaders, git ops, internal ops and octokit for this call, like shipIssue. */
 export async function cmdLand(
   issueNum: number,
-  opts: { branchPrefix?: string; allowGated?: boolean } = {},
+  opts: { branchPrefix?: string; allowGated?: boolean; json?: boolean } = {},
   deps: Pick<CliDeps, ConfigLoaderKey | GitOpKey | InternalOpKey | ShellOpKey | 'octokit'> = {},
 ) {
   const previousLoaders = configLoaders;
@@ -2823,47 +2816,12 @@ export async function cmdLand(
     const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
     const skipCI = configLoaders.resolveSkipCI(factoryConfig);
 
-    try {
-      const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {
-        allowGated: opts.allowGated === true,
-      });
-      console.log(styleText('green', `✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
-    } catch (err: any) {
-      if (err instanceof AwaitingReviewError) {
-        console.log(
-          styleText('yellow', `⏸ PR #${err.prNumber} for issue #${issueNum} awaiting human review — left open`),
-        );
-        return;
-      }
-      if (isCiNotGreen(err)) {
-        console.log(
-          styleText(
-            'yellow',
-            `⏸ PR #${err.prNumber} for issue #${issueNum} — CI never reached a green verdict — left open, not merged`,
-          ),
-        );
-        return;
-      }
-      if (err instanceof CiFailedError) {
-        console.log(
-          styleText(
-            'yellow',
-            `⏸ PR #${err.prNumber} for issue #${issueNum} has a failing CI check — left open, not merged`,
-          ),
-        );
-        return;
-      }
-      if (err instanceof MergeGatedError) {
-        throw new CliExitError(`factory: ${err.message}`, 4);
-      }
-      if (err instanceof LandConflictError) {
-        throw new CliExitError(`factory: ${err.message}`, 3);
-      }
-      if (err instanceof LandFailureError) {
-        throw new CliExitError(`factory: ${err.message}`, err.code);
-      }
-      throw new CliExitError(`factory: merge failed for issue #${issueNum}: ${err.message}`, 5);
-    }
+    const report = landReporter({ octokit, ghRepo, issue: issueNum, json: opts.json === true });
+    const landed = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {
+      allowGated: opts.allowGated === true,
+      onPr: report.onPr,
+    }).catch(report.failed);
+    if (landed) await report.landed(landed.prNumber);
   } finally {
     configLoaders = previousLoaders;
     gitOps = previousGitOps;

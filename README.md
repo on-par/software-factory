@@ -83,7 +83,7 @@ While SHIP waits for CI, a PR with no checks reported yet counts as pending. If 
 You can also run one factory command (`run-issue <n>`, `ship <n>` or `doctor`) on a GitHub-hosted runner. Call the reusable workflow from your own repo, pinned to a release tag, and pass your own secrets (`FACTORY_GITHUB_TOKEN` plus the selected provider's key):
 
 ```yaml
-uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.43
+uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.44
 ```
 
 The full caller, inputs, providers and secrets are in [docs/runbooks/github-actions-run.md](docs/runbooks/github-actions-run.md).
@@ -127,7 +127,7 @@ factory self-update --to <version>          # install that exact stable version 
 
 To run one issue in a disposable container (Foreman on Cloudflare Containers, CI jobs), use the published `ghcr.io/on-par/factory-job` image and `factory job`; see [docs/ops/factory-job-image.md](docs/ops/factory-job-image.md).
 
-The `version` fields in this repo's `package.json` files stay at the last committed version (0.9.43). The publish job writes the release or prerelease version at build time and never commits it, so use `factory --version` or `npm view @on-par/factory-cli dist-tags` to see real versions.
+The `version` fields in this repo's `package.json` files stay at the last committed version (0.9.44). The publish job writes the release or prerelease version at build time and never commits it, so use `factory --version` or `npm view @on-par/factory-cli dist-tags` to see real versions.
 
 ## CLI commands
 
@@ -151,6 +151,7 @@ factory run --issue <N>            Carry one issue to merged, closed, parked or 
 factory run                         Claim queued issues and ship them, lanes in parallel; merges only when auto-merge is on
 factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
 factory land <N>                    Squash-merge the issue's open PR once CI is green, then remove its worktree
+factory land <N> --json             Print a final JSON result line (merged, checks_pending, ...); exits 75 while checks are pending
 factory stop / factory resume       Halt lanes after their current issue / clear the stop
 factory resume N --from check       Re-run CHECK on a kept build; refuses if the base moved
 factory resume N --from ci-rework   Run one CI rework round on the failing PR, push it and SHIP (exits 0 no-op or done, 1 cap reached or failed)

@@ -1,6 +1,6 @@
 # CLI JSON Schemas
 
-The CLI publishes JSON Schemas for sixteen `--json` output contracts: fifteen versioned envelopes and one legacy unversioned log record. The schemas use JSON Schema draft 2020-12, which is the default output of [Zod's JSON Schema conversion](https://zod.dev/json-schema). Validate them with a draft 2020-12 implementation such as Ajv's [`Ajv2020` class](https://ajv.js.org/json-schema.html#draft-2020-12).
+The CLI publishes JSON Schemas for seventeen `--json` output contracts: sixteen versioned envelopes and one legacy unversioned log record. The schemas use JSON Schema draft 2020-12, which is the default output of [Zod's JSON Schema conversion](https://zod.dev/json-schema). Validate them with a draft 2020-12 implementation such as Ajv's [`Ajv2020` class](https://ajv.js.org/json-schema.html#draft-2020-12).
 
 Each schema is generated from the corresponding named Zod export in `packages/cli/src/cli/json-contract.ts`. The canonical fixtures live in [`packages/cli/src/cli/__fixtures__/json/`](../packages/cli/src/cli/__fixtures__/json/), except queue add, whose fixture remains at [`packages/cli/src/cli/__fixtures__/queue-add.json`](../packages/cli/src/cli/__fixtures__/queue-add.json).
 
@@ -17,13 +17,14 @@ Each schema is generated from the corresponding named Zod export in `packages/cl
 | `factory runs --diffstat --json`          | [`runs-diffstat.schema.json`](../packages/cli/schemas/runs-diffstat.schema.json) | [`runs-diffstat.json`](../packages/cli/src/cli/__fixtures__/json/runs-diffstat.json) | `schemaVersion` is `1`                                                                                                                                                                                                                                                                 |
 | `factory queue add --json`                | [`queue-add.schema.json`](../packages/cli/schemas/queue-add.schema.json)         | [`queue-add.json`](../packages/cli/src/cli/__fixtures__/queue-add.json)              | `schemaVersion` is `1`                                                                                                                                                                                                                                                                 |
 | `factory stop --json`                     | [`stop.schema.json`](../packages/cli/schemas/stop.schema.json)                   | [`stop.json`](../packages/cli/src/cli/__fixtures__/json/stop.json)                   | `schemaVersion` is `1`                                                                                                                                                                                                                                                                 |
+| `factory land --json` (final stdout line) | [`land.schema.json`](../packages/cli/schemas/land.schema.json)                   | [`land.json`](../packages/cli/src/cli/__fixtures__/json/land.json)                   | `schemaVersion` is `1`                                                                                                                                                                                                                                                                 |
 | `factory resume --json`                   | [`resume.schema.json`](../packages/cli/schemas/resume.schema.json)               | [`resume.json`](../packages/cli/src/cli/__fixtures__/json/resume.json)               | `schemaVersion` is `1`                                                                                                                                                                                                                                                                 |
 | `factory unpark --json`                   | [`unpark.schema.json`](../packages/cli/schemas/unpark.schema.json)               | [`unpark.json`](../packages/cli/src/cli/__fixtures__/json/unpark.json)               | `schemaVersion` is `1`                                                                                                                                                                                                                                                                 |
 | `factory check --json`                    | [`check.schema.json`](../packages/cli/schemas/check.schema.json)                 | [`check.json`](../packages/cli/src/cli/__fixtures__/json/check.json)                 | `schemaVersion` is `1`; `verdict` is null with `--no-judge`                                                                                                                                                                                                                            |
 | `factory draft --json`                    | [`draft.schema.json`](../packages/cli/schemas/draft.schema.json)                 | [`draft.json`](../packages/cli/src/cli/__fixtures__/json/draft.json)                 | `schemaVersion` is `1`; `exit` is 0, 1 or 3; `cost` is null when unpriced                                                                                                                                                                                                              |
 | `factory job` (final stdout line)         | [`job-status.schema.json`](../packages/cli/schemas/job-status.schema.json)       | [`job-status.json`](../packages/cli/src/cli/__fixtures__/json/job-status.json)       | `schemaVersion` is `2`; `kind` is `factory-job`; `exitCode` mirrors the process exit code (#3902); `outcome` may be `budget_exhausted` (#4269)                                                                                                                                         |
 
-The fifteen versioned envelopes generate a `schemaVersion` constant of `1`. Logs output is one NDJSON record per line and deliberately remains unversioned. Its optional event payloads permit arbitrary object keys as defined by the existing CLI contract. Future JSON support for `land` (#2279), `metrics` (#3130), and `requeue` (#2278) must add a schema and golden fixture.
+The versioned envelopes generate a `schemaVersion` constant: `2` for `factory job`, `1` for the rest. Logs output is one NDJSON record per line and deliberately remains unversioned. Its optional event payloads permit arbitrary object keys as defined by the existing CLI contract. Future JSON support for `metrics` (#3130) and `requeue` (#2278) must add a schema and golden fixture.
 
 Regenerate schemas from the repository root with:
 
@@ -38,3 +39,21 @@ bash scripts/check-cli-json-schemas.sh
 ```
 
 The CLI npm package includes these files under its installed `schemas/` directory (for example, `node_modules/@on-par/factory-cli/schemas/status.schema.json`).
+
+## Land results
+
+`factory land <N> --json` prints its normal output, then one JSON line as the last line on stdout (#4306):
+
+```text
+{"result":"checks_pending","pr":77,"headSha":"abc123","pending":["e2e"],"mergeable":"MERGEABLE","schemaVersion":1}
+```
+
+The line is defined by `landJsonSchema` in `packages/cli/src/cli/land-contract.ts`. `pending` lists the checks on the PR head that have not finished. A `checks_failed` line has `failed`, the head checks that finished without passing, instead of `pending`. `headSha` is null when the PR cannot be read. `mergeable` is `MERGEABLE`, `CONFLICTING` or `UNKNOWN`.
+
+- `merged`: the PR was squash-merged. Exit code `0`.
+- `checks_pending`: CI never reached a green verdict, for example the CI watch timed out or no check ever reported. The PR is left open. Exit code `75` (`EX_TEMPFAIL`), with or without `--json`.
+- `checks_failed`: a check failed and the PR is left open. Exit code `0`, as before.
+- `conflicting`: the PR conflicts with its base and land could not sync it. Exit code `3`, as before.
+- `closed`: the PR is already closed, or was closed during the land. The exit code is unchanged: `1` when there is no open PR, `5` when the merge failed.
+
+Other outcomes print no JSON line and keep their exit codes: awaiting review (`0`), the no-auto-merge gate (`4`), and other failures. Without `--json`, the output is unchanged; only the `checks_pending` exit code is new. The CI watch, its timing and `ci.skip` are unchanged.

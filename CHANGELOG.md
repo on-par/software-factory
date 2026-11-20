@@ -9,9 +9,19 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- resume: when `factory resume <issue> --from ci-rework` accepts a failing PR with rounds left, it runs exactly one CI rework round on the PR branch, records the round in run state, pushes the branch and hands back to SHIP; PLAN, BUILD and the first CHECK are skipped, a failed round or SHIP exits 1, and a later resume reads the recorded count from disk so the cap still holds across processes (#4313)
+
+## 0.9.44 - 2026-11-20
+
+`factory land --json` now prints a final JSON result and exits 75 when CI never went green (#4306). Run state now records CI rework rounds so a later process can read them against the cap (#4311).
+All seven published `@on-par` packages move to 0.9.44 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Added
+
+- `factory land --json` prints a final JSON result line (`checks_pending`, `merged`, `checks_failed`, `conflicting` or `closed`) with the PR, head SHA, pending or failed checks and mergeable state, and `factory land` exits `75` when CI never reached a green verdict and the PR was left open; other exit codes and human output are unchanged (#4306)
 - run state: each CI rework round records its count per PR in the run state file (`ciReworkRounds`) before it pushes, so a later process can read the rounds used against the cap; the previous-attempt note shows it (#4311)
 - resume: `factory resume <issue> --from ci-rework` checks the issue's open PR and says whether a CI rework round may start: a green PR, a PR with only pending checks, or no open PR exits 0 with no change; a PR that already used the CI rework cap (`FACTORY_MAX_CI_REWORK_ROUNDS`, default 2) is refused with exit 1 (#4312)
-- resume: when `factory resume <issue> --from ci-rework` accepts a failing PR with rounds left, it runs exactly one CI rework round on the PR branch, records the round in run state, pushes the branch and hands back to SHIP; PLAN, BUILD and the first CHECK are skipped, a failed round or SHIP exits 1, and a later resume reads the recorded count from disk so the cap still holds across processes (#4313)
 
 ## 0.9.43 - 2026-11-20
 

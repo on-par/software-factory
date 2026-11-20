@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": ["checks_pending", "merged", "checks_failed", "conflicting", "closed"]
+    },
+    "pr": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "headSha": {
+      "type": ["string", "null"]
+    },
+    "pending": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "mergeable": {
+      "type": "string",
+      "enum": ["MERGEABLE", "CONFLICTING", "UNKNOWN"]
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    }
+  },
+  "required": ["result", "pr", "headSha", "mergeable", "schemaVersion"],
+  "additionalProperties": false
+}

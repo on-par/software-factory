@@ -18,7 +18,7 @@ on:
         required: true
 jobs:
   factory:
-    uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.43
+    uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.44
     permissions: { contents: write, pull-requests: write, issues: write }
     with:
       command: run-issue
@@ -99,6 +99,8 @@ exit 0, so an Actions run-issue or ship is ship then land:
 - A PR left as draft is not landed. "Left as draft (CI pending)" still fails the job with exit 1.
 - When land fails, the job fails with land's exit code and an `::error::` line, also written to the
   step summary.
+- When CI has not reached a green verdict by the end of land's CI watch, land leaves the PR open and
+  exits 75 (`checks_pending`), so the job fails with 75. Re-run land later to merge it (#4306).
 - `FACTORY_MERGE` unset, or any value other than `1`, skips land. `doctor` never lands.
 - `land` is not a `command` input. The workflow still rejects it.
 

@@ -46,6 +46,7 @@ import { allowScopedMerge } from '@on-par/factory-core/internal';
 import { isPrMerged, latestPrForBranch } from './land-merged.js';
 import { cleanupMergedLane, releaseLandedClaim } from './land-merged-cleanup.js';
 import { landRuntime } from './land-runtime.js';
+import { NoOpenPrError } from './land-result.js';
 
 export { isPrMerged, latestPrForBranch };
 export { findOpenPRForIssue } from './land-find-pr.js';
@@ -73,6 +74,7 @@ export async function landIssue(
     mergeOverrides?: MergePolicyOverrides;
     /** #3905: a brief PR with no issue; lands by `branch` and reads only PR labels. */
     issueless?: boolean;
+    onPr?: (prNumber: number) => void;
   } = {},
 ): Promise<{ branch: string; prNumber: number }> {
   const { configLoaders, gitOps, errorDetail, worktreePathFor } = landRuntime();
@@ -130,10 +132,11 @@ export async function landIssue(
   }
   if (lookup.status !== 'found') {
     log('fail', `no open PR for ${guessedBranch}`);
-    throw new LandFailureError(`no open PR for issue #${issueNum} (${guessedBranch})`, 1);
+    throw new NoOpenPrError(issueNum, guessedBranch);
   }
   const branch = lookup.branch;
   const prNumber = lookup.prNumber;
+  opts.onPr?.(prNumber);
 
   const landFactoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
   // Every merge path honors the no-auto-merge gate on the issue and on the PR; unreadable labels fail closed (#1720).

@@ -196,6 +196,10 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
       '--allow-gated',
       'Merge even when the issue or PR carries the no-auto-merge gate label (human override; writes an AUDIT line and a merge-gated-override event)',
     )
+    .option(
+      '--json',
+      'Print the land result as a final JSON line: checks_pending (exit 75), merged, checks_failed, conflicting or closed',
+    )
     .action(async (issueNum, opts) => {
       await handlers.cmdLand(handlers.parseIssueArg(issueNum), opts);
     });
