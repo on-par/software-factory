@@ -45,19 +45,18 @@ function setup(body: string, statusesBySha: Record<string, unknown[]>) {
 }
 
 describe('landOpenPullRequest: UI visual proof (#2232)', () => {
-  it('leaves the PR open when visual proof is for an older head', async () => {
-    const { land, merges, logs } = setup(MARKED, { oldhead: [status(77)] });
+  it.each([
+    ['leaves the PR open when visual proof is for an older head', { oldhead: [status(77)] }],
+    ['leaves the PR open when the status was not created by the factory', { newhead: [status(1)] }],
+    ['leaves the PR open after a failed attach in required mode', { newhead: [status(77, 'failure')] }],
+  ])('%s', async (_title, statuses: Record<string, unknown[]>) => {
+    const { land, merges, logs } = setup(MARKED, statuses);
     const err = await land().catch((e: unknown) => e);
     expect(isLandLeftOpen(err)).toBe(true);
     expect(err).toMatchObject({ name: 'VisualProofMissingError', prNumber: 2 });
     expect(merges()).toEqual([]);
-    expect(logs).toContainEqual(['land', expect.stringContaining('re-run SHIP (factory resume --from ship)')]);
-  });
-
-  it('leaves the PR open when the status was not created by the factory', async () => {
-    const { land, merges } = setup(MARKED, { newhead: [status(1)] });
-    expect(isLandLeftOpen(await land().catch((e: unknown) => e))).toBe(true);
-    expect(merges()).toEqual([]);
+    const remedy = 're-run SHIP (factory resume --from ship) to capture proof for newhead';
+    expect(logs).toContainEqual(['land', expect.stringContaining(remedy)]);
   });
 
   it('merges when the verified head has a factory-created visual proof status', async () => {

@@ -72,8 +72,11 @@ export const VisualProofModeSchema = z
   );
 export type VisualProofMode = z.infer<typeof VisualProofModeSchema>;
 
-export const VisualProofConfigSchema = z
-  .object({
+const EVIDENCE_BRANCH_REMOVED =
+  'visualProof.evidenceBranch was removed: visual proof now uploads as PR attachments with gh pr edit --attach; delete the key';
+
+export const VisualProofConfigSchema = z.strictObject(
+  {
     mode: VisualProofModeSchema,
     uiPaths: z.array(z.string().min(1)).min(1).describe('Globs over repo-relative paths that make up user-visible UI'),
     routes: z.array(VisualProofRouteSchema).min(1).max(10),
@@ -90,14 +93,12 @@ export const VisualProofConfigSchema = z
       .max(5)
       .default(3)
       .describe('Attempts per SHIP before a capture failure is final; each failed attempt is logged with its reason'),
-    evidenceBranch: z
-      .string()
-      .regex(/^[A-Za-z0-9._/-]+$/)
-      .refine((name) => !name.startsWith('factory/'), 'evidenceBranch must not start with factory/')
-      .default('factory-evidence')
-      .describe('Branch the proof images are committed to through the Git Data API'),
-  })
-  .strict();
+  },
+  {
+    error: (iss) =>
+      iss.code === 'unrecognized_keys' && iss.keys.includes('evidenceBranch') ? EVIDENCE_BRANCH_REMOVED : undefined,
+  },
+);
 export type VisualProofConfig = z.infer<typeof VisualProofConfigSchema>;
 
 export const VisualProofConfigSections = {

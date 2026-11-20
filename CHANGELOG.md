@@ -7,6 +7,13 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- SHIP publishes UI visual proof as PR attachments: it writes the PR body with the marked proof block and `./<file>` references into the capture directory and runs `gh pr edit --body-file <file> --attach` with each after and before screenshot and clip, so GitHub hosts the images and no proof is committed to a side branch. This needs gh 2.103.0 or newer; a missing or older gh, or a failed `gh pr edit`, fails the proof with the reason in the PR body and the `factory/visual-proof` status. A proof file name with a character other than letters, digits, `.`, `_`, `-` and a `/` between directories fails the proof before gh runs, so a name like `before (1).png` cannot break the proof block's markdown or leave uploads outside it (#4284).
+- A partial visual-proof attach (gh uploaded some files, failed on others and still updated the PR) now fails the proof: SHIP rewrites the proof block to `Visual proof unavailable: partial attach: ...` with gh's error and no image references, and in `required` mode the `failure` status keeps land from merging the head. `advisory` mode still stamps an `advisory:` success, and `off` mode never runs gh (#4285).
+- A webm or mp4 visual-proof clip renders as a `![clip](./<clip>)` embed alone in its own paragraph, which `gh pr edit --attach` turns into a bare asset URL that GitHub plays in a native video player. The `[▶ clip (<format>)](...)` link is gone; gif clips stay inline images (#4286).
+- Breaking: the `visualProof.evidenceBranch` config option is removed, together with the Git Data API writer that committed proof images to a side branch. A config that still sets the key fails to load with `visualProof.evidenceBranch was removed: ... delete the key`. Delete the key; an existing proof branch is no longer written and can be deleted by hand. The README "UI visual proof gate" section now describes PR attachments, the gh 2.103.0 minimum and gh's token and host limits (#4287).
+
 ## 0.9.40 - 2026-11-19
 
 CHECK can leave the full suite to the PR's required CI when a repo sets `tests.affected.fullGate: ci` (#4293), and the per-package line budget is gone (#4124, #4282). PLAN repairs a missing design block instead of re-planning the whole spec (#4289), and CHECK also skips the flaky re-run when only a format, lint or typecheck step failed (#4290).
