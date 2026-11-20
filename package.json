@@ -42,7 +42,7 @@
   "license": "MIT",
   "devDependencies": {
     "@octokit/graphql-schema": "15.26.1",
-    "@oxlint/plugins": "1.93.0",
+    "@oxlint/plugins": "1.94.0",
     "@stryker-mutator/core": "^10.1.1",
     "@stryker-mutator/vitest-runner": "^10.1.1",
     "@types/node": "^26.6.6",
@@ -52,7 +52,7 @@
     "jsdom": "^31.0.1",
     "knip": "^6.45.1",
     "lefthook": "2.2.2",
-    "oxlint": "^1.93.0",
+    "oxlint": "^1.94.0",
     "oxlint-tsgolint": "^7.0.2007",
     "prettier": "3.10.1",
     "tsx": "^4.23.15",
