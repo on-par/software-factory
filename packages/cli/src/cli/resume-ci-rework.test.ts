@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { workKeyFromIssue, type RunPorts } from '@on-par/factory-core';
@@ -301,6 +301,34 @@ describe('factory resume <issue> --from ci-rework runs one round and returns to 
     expect(await resume(String(ISSUE), '--from', 'ci-rework')).toEqual({ exited: true, code: 1 });
     expect(errored()).toContain('already used 2 of 2 CI rework rounds');
     expect(ran).toEqual(shipped);
+  });
+});
+
+describe('factory resume <issue> --from ci-rework in a repo without .factory/', () => {
+  const NOT_INITIALIZED = 'factory not initialized — run `factory init` first';
+
+  beforeEach(() => {
+    forbidWrites();
+    h.octokit.rest.pulls.get = async () => ({ data: { head: { sha: 'head5' }, base: { ref: 'main' } } });
+    openPr(true);
+    checks(['ci', 'completed', 'failure']);
+    rmSync(paths().root, { recursive: true, force: true });
+  });
+
+  it('refuses up front with exit 2 and the not-initialized message, touching nothing', async () => {
+    expect(await resume(String(ISSUE), '--from', 'ci-rework')).toEqual({ exited: true, code: 2 });
+    expect(errored()).toContain(`factory: ${NOT_INITIALIZED}`);
+    expect(logged()).not.toContain('CI rework round');
+    expect(ran).toEqual([]);
+    expect(writes).toEqual([]);
+    expect(existsSync(paths().root)).toBe(false);
+  });
+
+  it('matches --from check, which refuses the same repo the same way', async () => {
+    expect(await resume(String(ISSUE), '--from', 'check')).toEqual({ exited: true, code: 2 });
+    expect(errored()).toContain(`factory: ${NOT_INITIALIZED}`);
+    expect(ran).toEqual([]);
+    expect(existsSync(paths().root)).toBe(false);
   });
 });
 
