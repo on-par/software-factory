@@ -1,0 +1,15 @@
+{
+  "key": "4304",
+  "issue": 4304,
+  "lane": "",
+  "worktree": "/home/factory/work/repo",
+  "specPath": "/home/factory/work/repo/.factory/state/plans/issue-4304.md",
+  "startedAt": "2026-11-20T10:04:17.614Z",
+  "branch": "factory/4304-let-ship-skip-its-ci-watch-witho",
+  "status": "shipping",
+  "route": "claude",
+  "model": "claude-sonnet-5-5",
+  "attempts": 2,
+  "updatedAt": "2026-11-20T10:55:34.575Z",
+  "repo": "on-par/software-factory"
+}
