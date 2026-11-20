@@ -57,6 +57,12 @@ describe('docs/config.example.yaml', () => {
     ).toBe(renderConfigExample());
   });
 
+  it('documents ship.watchCi and how it differs from ci.skip', () => {
+    const text = renderConfigExample();
+    expect(text).toContain('watchCi: false');
+    expect(text).toContain('ci.skip');
+  });
+
   it('documents models.registry with a commented example that is valid when uncommented', () => {
     const text = renderConfigExample();
     expect(text).toMatch(/^\s*# registry:$/m);

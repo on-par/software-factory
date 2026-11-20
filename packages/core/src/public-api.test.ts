@@ -40,6 +40,7 @@ const PUBLIC_API_KEYS = [
   'resolveProcessGroupGraceMs',
   'resolveCiWatchDeadlineMs',
   'resolveSkipCI',
+  'resolveShipWatchCi',
   'resolveTimeouts',
   // Repo config (.factory/config.json)
   'applyRepoConfig',

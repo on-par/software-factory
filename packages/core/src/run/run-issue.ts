@@ -160,6 +160,7 @@ export interface RunRequest extends ReworkRequestFields {
   modelPins: EffectiveModelPins;
   codexDisabled: boolean;
   skipCI: boolean;
+  shipWatchCi?: boolean;
   ciDeadlineMs?: number;
   failover: AutoFailoverSettings;
   efficiency: { maxReworkRounds: number; fastPath: boolean };
@@ -1129,10 +1130,13 @@ async function runIssueOnce(
 
     if (request.skipCI) {
       log('skip-ci', `skipping CI watch (FACTORY_SKIP_CI=1) — merging on local verify`);
+    } else if (request.shipWatchCi === false) {
+      log('skip-ci', 'not watching CI (ship.watchCi: false); factory land still waits for and requires green CI');
     }
+    const ciNotWatched = !request.skipCI && request.shipWatchCi === false;
     const readyMsg = ship.alreadyDelivered
       ? `already delivered${ship.prNumber !== undefined ? ` by merged PR #${ship.prNumber}` : ' — branch already landed on main'}`
-      : `PR #${ship.prNumber} ${ship.draft ? 'left as draft' : 'ready for review'}${ship.ciPending ? ' (CI pending)' : ''}`;
+      : `PR #${ship.prNumber} ${ship.draft ? 'left as draft' : 'ready for review'}${ship.ciPending ? ' (CI pending)' : ''}${ciNotWatched ? ' (CI not watched)' : ''}`;
     log('ready', pinNote ? `${readyMsg} (${pinNote})` : readyMsg);
     await ports.writeLocalRunReport?.({ outcome: 'ready', route, branch: request.branch, reworkRounds });
     return {
@@ -1142,6 +1146,7 @@ async function runIssueOnce(
       reworkRounds,
       prNumber: ship.prNumber,
       ...readyDraftFields(ship),
+      ...(ciNotWatched ? { ciWatched: false as const } : {}),
       ...(planSlice ? { slice: { index: planSlice.index, count: planSlice.plan.slices.length } } : {}),
     };
   } catch (err) {

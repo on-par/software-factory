@@ -292,3 +292,40 @@ it('buildRunRequest passes providerOrder through when given and omits it otherwi
   expect(buildRunRequest({ ...input, providerOrder }).providerOrder).toEqual(providerOrder);
   expect('providerOrder' in buildRunRequest(input)).toBe(false);
 });
+
+it('buildRunRequest sets shipWatchCi false only when ship.watchCi is false', () => {
+  const repoRoot = '/tmp/primary';
+  const paths = getFactoryPaths(repoRoot, '/tmp/relocated-factory');
+  const input = {
+    issueNum: 4304,
+    ghRepo: 'on-par/software-factory',
+    repoRoot,
+    branch: 'issue-4304',
+    specPath: `${paths.plans}/issue-4304.md`,
+    work: { id: 'x', kind: 'github-issue', title: 'T', brief: 'T', acceptanceCriteria: [] },
+    product: undefined,
+    runStartedAt: '2026-10-19T00:00:00Z',
+    lane: undefined,
+    opts: {},
+    autoRework: false,
+    planApprovalEnabled: false,
+    factoryConfig: { sandbox: {} } as FactoryConfig,
+    repoConfig: { version: 2 },
+    classifierPolicy: { enabled: false },
+    loaders: { resolveSkipCI: () => false },
+    efficiency: { maxReworkRounds: 0, fastPath: false } as RunRequestInput['efficiency'],
+    sizeGateMode: undefined,
+    maxSlices: undefined,
+    timeouts: { plan: 1, build: 1, check: 1, approval: 1, tests: 1 },
+    modelPins: { sources: {} },
+    codexOff: false,
+    failoverSettings: { enabled: false, cooldownMs: 1, fallbackModel: '' },
+    activeSandboxPolicy: undefined,
+    processGroupGraceMs: 1,
+    paths,
+  } satisfies RunRequestInput;
+  expect(buildRunRequest(input)).not.toHaveProperty('shipWatchCi');
+  const off = buildRunRequest({ ...input, factoryConfig: { sandbox: {}, ship: { watchCi: false } } as FactoryConfig });
+  expect(off.shipWatchCi).toBe(false);
+  expect(off.skipCI).toBe(false);
+});

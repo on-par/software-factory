@@ -43,6 +43,7 @@ export {
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
   resolveCiWatchDeadlineMs,
+  resolveShipWatchCi,
   resolveSkipCI,
   resolveTimeouts,
 } from './config/index.js';

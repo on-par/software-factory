@@ -82,7 +82,7 @@ The workflow's caller-repo checkout uses this token too, so `git push` from `run
 made with the Actions token leave follow-up `pull_request` workflows at `action_required` with no jobs,
 so the required `ci` check never reports. A ship that ends "left as draft (CI pending)" fails the
 run (exit 1) and is not a land.
-A local `factory run` with auto-merge lands such a CI-pending draft in the same lane (base sync, ready flip, CI verification, merge) and adopts it after a restart without rebuilding (`ship.ciWatchMinutes` sets the watch window). With auto-merge off, the between-issue sweep marks it ready for a human. The one-shot Actions job still exits 1.
+A local `factory run` with auto-merge lands such a CI-pending draft in the same lane (base sync, ready flip, CI verification, merge) and adopts it after a restart without rebuilding (`ship.ciWatchMinutes` sets the watch window). `ship.watchCi: false` makes SHIP return without watching CI, while `factory land` still requires green CI; this differs from `ci.skip`, which removes both. With auto-merge off, the between-issue sweep marks it ready for a human. The one-shot Actions job still exits 1.
 A factory draft with no recorded reason, from a killed SHIP or after `factory unpark` of a `ci-failed` park, is adopted on the next claim when CI is green or pending, or queued for CI rework when red. Requested drafts and draft-PR mode are left alone.
 
 ## Merging

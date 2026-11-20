@@ -29,6 +29,7 @@ import {
   resolveDesignRegressionBlock,
   resolveReadinessUpdateIssueBody,
   resolveCiWatchDeadlineMs,
+  resolveShipWatchCi,
   resolveSizeGateBudget,
   worktreeWorkspace,
 } from '@on-par/factory-core';
@@ -422,6 +423,7 @@ export function buildRunRequest({
     codexDisabled: codexOff,
     skipCI: loaders.resolveSkipCI(factoryConfig),
     ciDeadlineMs: resolveCiWatchDeadlineMs(factoryConfig),
+    ...(resolveShipWatchCi(factoryConfig) ? {} : { shipWatchCi: false }),
     failover: failoverSettings,
     efficiency: { maxReworkRounds: efficiency.maxReworkRounds, fastPath: efficiency.fastPath },
     sandboxPolicy: activeSandboxPolicy,
