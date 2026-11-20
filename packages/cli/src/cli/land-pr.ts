@@ -237,6 +237,8 @@ export async function landOpenPullRequest(opts: {
   baseGate?: { check: (wait?: boolean) => Promise<void>; record: () => Promise<void> };
   /** #1887: max DIRTY merge-main rounds per land before it parks as conflict. Default 2. */
   maxConflictRounds?: number;
+  noWait?: boolean;
+  waitForCi?: boolean;
 }): Promise<void> {
   const {
     octokit,
