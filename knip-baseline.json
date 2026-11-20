@@ -3,7 +3,6 @@
   "production": [
     "production|exports|packages/cli/src/cli/base-health-ci.ts|resetBasePushWorkflowReports",
     "production|exports|packages/cli/src/cli/json-contract.ts|draftJsonSchema",
-    "production|exports|packages/cli/src/cli/land-pr.ts|CiInfraError",
     "production|exports|packages/core/src/blockers/file-blocker.ts|fileBlocker",
     "production|exports|packages/core/src/checkers/internal-exports.ts|runVerificationCommand",
     "production|exports|packages/core/src/checkers/internal-exports.ts|withCommandOutputExport",

@@ -116,7 +116,7 @@
   "packages/cli/src/cli/land-pr.behind.test.ts": 3,
   "packages/cli/src/cli/land-pr.conflict-rounds.test.ts": 2,
   "packages/cli/src/cli/land-pr.dirty-before-watch.test.ts": 2,
-  "packages/cli/src/cli/land-pr.ts": 33,
+  "packages/cli/src/cli/land-pr.ts": 30,
   "packages/cli/src/cli/land-rebuild.test.ts": 6,
   "packages/cli/src/cli/land-rebuild.ts": 7,
   "packages/cli/src/cli/land-risk.test.ts": 1,
