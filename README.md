@@ -153,7 +153,7 @@ factory supervise [--now]           Unattended loop: wait for usage headroom, ru
 factory land <N>                    Squash-merge the issue's open PR once CI is green, then remove its worktree
 factory stop / factory resume       Halt lanes after their current issue / clear the stop
 factory resume N --from check       Re-run CHECK on a kept build; refuses if the base moved
-factory resume N --from ci-rework   Decide if the PR may start a CI rework round (exits 0 no-op, 1 cap reached, 3 would rework)
+factory resume N --from ci-rework   Run one CI rework round on the failing PR, push it and SHIP (exits 0 no-op or done, 1 cap reached or failed)
 factory stop|resume --json         One JSON object: action, repo, stopFlag {before, after}; idempotent
 
 # Setup

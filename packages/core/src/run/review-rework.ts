@@ -138,11 +138,14 @@ export function reviewReworkSummary(feedback: ReviewFeedback): CheckSummary {
 }
 
 export function reviewReworkResume(
-  request: Pick<RunRequest, 'reviewRework' | 'iterate' | 'feedbackRound' | 'preferredRoute' | 'modelPins'>,
+  request: Pick<
+    RunRequest,
+    'reviewRework' | 'iterate' | 'feedbackRound' | 'ciReworkResume' | 'preferredRoute' | 'modelPins'
+  >,
   feedbackPlan?: Pick<FeedbackRoundPlan, 'replan'>,
 ): NonNullable<RunRequest['resumeFrom']> | undefined {
   if (feedbackPlan?.replan) return undefined;
-  if (!request.reviewRework && !request.iterate && !request.feedbackRound) return undefined;
+  if (!request.reviewRework && !request.iterate && !request.feedbackRound && !request.ciReworkResume) return undefined;
   return {
     phase: 'check',
     route: request.preferredRoute ?? 'claude',

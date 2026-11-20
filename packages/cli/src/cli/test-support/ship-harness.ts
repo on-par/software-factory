@@ -240,6 +240,7 @@ function makeCoreFakes() {
           getHarnessDeclaration: () => undefined,
           isAgenticHarnessId: () => true,
           ridesCommandRoute: () => false,
+          getEffort: () => undefined,
         },
         setCostSink: vi.fn((sink: (entry: any) => void) => {
           h.costSinkCallback = sink;

@@ -10,7 +10,8 @@ section to `## X.Y.Z - date`. See
 ### Added
 
 - run state: each CI rework round records its count per PR in the run state file (`ciReworkRounds`) before it pushes, so a later process can read the rounds used against the cap; the previous-attempt note shows it (#4311)
-- resume: `factory resume <issue> --from ci-rework` checks the issue's open PR and says whether a CI rework round may start: a green PR, a PR with only pending checks, or no open PR exits 0 with no change; a PR that already used the CI rework cap (`FACTORY_MAX_CI_REWORK_ROUNDS`, default 2) is refused with exit 1; a failing PR with rounds left prints a "would rework" line and exits 3 without starting the round, pushing or running SHIP (#4312)
+- resume: `factory resume <issue> --from ci-rework` checks the issue's open PR and says whether a CI rework round may start: a green PR, a PR with only pending checks, or no open PR exits 0 with no change; a PR that already used the CI rework cap (`FACTORY_MAX_CI_REWORK_ROUNDS`, default 2) is refused with exit 1 (#4312)
+- resume: when `factory resume <issue> --from ci-rework` accepts a failing PR with rounds left, it runs exactly one CI rework round on the PR branch, records the round in run state, pushes the branch and hands back to SHIP; PLAN, BUILD and the first CHECK are skipped, a failed round or SHIP exits 1, and a later resume reads the recorded count from disk so the cap still holds across processes (#4313)
 
 ## 0.9.43 - 2026-11-20
 

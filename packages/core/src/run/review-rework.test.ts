@@ -358,6 +358,9 @@ describe('feedback round rework (#3910)', () => {
     expect(reviewReworkResume(feedbackRequest, { replan: false })).toMatchObject({ phase: 'check' });
     expect(reviewReworkResume(feedbackRequest, { replan: true })).toBeUndefined();
     expect(reviewReworkResume(request, { replan: false })).toBeUndefined();
+    expect(reviewReworkResume({ ...request, ciReworkResume: { prNumber: 7, used: 0 } })).toMatchObject({
+      phase: 'check',
+    });
   });
 
   it('reworks with the plan summary after the open-PR guard', async () => {

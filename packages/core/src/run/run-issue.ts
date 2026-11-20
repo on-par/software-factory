@@ -111,6 +111,7 @@ import { runParkSteward } from './park-steward.js';
 import * as feedbackRound from './feedback-round-hooks.js';
 import { reviewReworkResume, runRequestedReviewRework, type ReworkRequestFields } from './review-rework.js';
 import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
+import { enterCiReworkResume, type CiReworkResume } from './ci-rework-resume.js';
 import { parkLogExtra } from './ship-park.js';
 import { budgetGuardFor, enforceIssueBudget } from './budget.js';
 import type { IssueRunState } from '../types/index.js';
@@ -173,6 +174,7 @@ export interface RunRequest extends ReworkRequestFields {
   prerequisiteStack?: PrerequisiteStackTarget;
   continuation?: RemainingWorkHandoff;
   resumeFrom?: { phase: 'check'; diffBase?: string; route: BuildRoute; model: string; buildMinutes: number };
+  ciReworkResume?: CiReworkResume;
   eventsFile?: string;
   logsDir?: string;
   baselineCachePath?: string;
@@ -875,15 +877,17 @@ async function runIssueOnce(
     };
     capGate.watchCheck(builtRoute, builtModel);
     await runRequestedReviewRework(request, ports, checkOpts, feedbackPlan);
-    const check = await (request.providerOrder
-      ? runCheckStage(
-          runStage,
-          { ...gateDeps, order: request.providerOrder },
-          checkPhase,
-          checkOpts,
-          await worktreeRestorer(gitExec, ports.workspace.path, ports.events('check')),
-        )
-      : checkPhase(checkOpts));
+    const check = await (request.ciReworkResume
+      ? enterCiReworkResume(request.ciReworkResume, request.branch, ports)
+      : request.providerOrder
+        ? runCheckStage(
+            runStage,
+            { ...gateDeps, order: request.providerOrder },
+            checkPhase,
+            checkOpts,
+            await worktreeRestorer(gitExec, ports.workspace.path, ports.events('check')),
+          )
+        : checkPhase(checkOpts));
     checkSummary = check.summary;
     observed.checkSummary = check.summary;
     reworkRounds = check.reworkRounds;
@@ -1101,7 +1105,7 @@ async function runIssueOnce(
         runId,
         onRecheck,
       },
-      { builtRoute, builtModel, reviewRouting, pinNote, planSlice, pr: policy.pr },
+      { builtRoute, builtModel, reviewRouting, pinNote, planSlice, pr: policy.pr, resume: request.ciReworkResume },
     );
     runPrNumber = shipped.ship.prNumber;
     shippedGreen = shipped.ship.ok && !shipped.ship.alreadyDelivered && shipped.ship.ciOutcome === 'success';

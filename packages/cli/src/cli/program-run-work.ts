@@ -325,7 +325,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
   program
     .command('resume [issue]')
     .description(
-      'Clear a stop so lanes pick up new issues again; with <issue> --from check, re-run CHECK on a build kept after an environment failure; with <issue> --from ci-rework, decide whether the PR may start a CI rework round',
+      'Clear a stop so lanes pick up new issues again; with <issue> --from check, re-run CHECK on a build kept after an environment failure; with <issue> --from ci-rework, run one CI rework round on the failing PR and hand back to SHIP',
     )
     .option('--json', 'Print one JSON object (schemaVersion 1): action, repo, stopFlag before/after')
     .option('--from <phase>', 'Resume an issue at this phase (check or ci-rework)')
