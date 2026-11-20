@@ -25,7 +25,7 @@ Run work:
   run [options]                          Claim queued issues (factory:queued labels) and ship them, lanes in parallel; merges only when auto-merge is on
   job [options]                          Container entrypoint: clone <owner/name>, apply the injected config, run one issue in place (run-issue --in-place --json) and print a final JSON status line; exits with the run's code, 2 on setup errors
   supervise [options]                    Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
-  land [options] <issue>                 Squash-merge the issue's open PR once CI is green, then remove its worktree (left open if CI fails or review is pending)
+  land [options] <issue>                 Squash-merge the issue's open PR once CI is green, then remove its worktree (left open if CI fails or review is pending); exits 75 when checks are still pending
   resume-approved [options]              Land open factory PRs (factory/* or the configured prefix) whose review is now approved; skip the rest
   stop [options]                         Tell running lanes to halt after their current issue
   resume [options] [issue]               Clear a stop so lanes pick up new issues again; with <issue> --from check, re-run CHECK on a build kept after an environment failure
