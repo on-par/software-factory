@@ -17,6 +17,7 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 - `factory land --json` prints a final JSON result line (`checks_pending`, `merged`, `checks_failed`, `conflicting` or `closed`) with the PR, head SHA, pending or failed checks and mergeable state, and `factory land` exits `75` when CI never reached a green verdict and the PR was left open; other exit codes and human output are unchanged (#4306)
 - run state: each CI rework round records its count per PR in the run state file (`ciReworkRounds`) before it pushes, so a later process can read the rounds used against the cap; the previous-attempt note shows it (#4311)
+- resume: `factory resume <issue> --from ci-rework` checks the issue's open PR and says whether a CI rework round may start: a green PR, a PR with only pending checks, or no open PR exits 0 with no change; a PR that already used the CI rework cap (`FACTORY_MAX_CI_REWORK_ROUNDS`, default 2) is refused with exit 1; a failing PR with rounds left prints a "would rework" line and exits 3 without starting the round, pushing or running SHIP (#4312)
 
 ## 0.9.43 - 2026-11-20
 

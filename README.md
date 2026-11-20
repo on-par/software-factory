@@ -154,6 +154,7 @@ factory land <N>                    Squash-merge the issue's open PR once CI is 
 factory land <N> --json             Print a final JSON result line (merged, checks_pending, ...); exits 75 while checks are pending
 factory stop / factory resume       Halt lanes after their current issue / clear the stop
 factory resume N --from check       Re-run CHECK on a kept build; refuses if the base moved
+factory resume N --from ci-rework   Decide if the PR may start a CI rework round (exits 0 no-op, 1 cap reached, 3 would rework)
 factory stop|resume --json         One JSON object: action, repo, stopFlag {before, after}; idempotent
 
 # Setup

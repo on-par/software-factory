@@ -329,10 +329,10 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
   program
     .command('resume [issue]')
     .description(
-      'Clear a stop so lanes pick up new issues again; with <issue> --from check, re-run CHECK on a build kept after an environment failure',
+      'Clear a stop so lanes pick up new issues again; with <issue> --from check, re-run CHECK on a build kept after an environment failure; with <issue> --from ci-rework, decide whether the PR may start a CI rework round',
     )
     .option('--json', 'Print one JSON object (schemaVersion 1): action, repo, stopFlag before/after')
-    .option('--from <phase>', 'Resume a kept build at this phase (only: check)')
+    .option('--from <phase>', 'Resume an issue at this phase (check or ci-rework)')
     .action((issue: string | undefined, opts: { json?: boolean; from?: string }) => handlers.cmdResume(issue, opts));
 
   program
