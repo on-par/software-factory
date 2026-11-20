@@ -301,6 +301,7 @@ import {
   writeUpdateState,
 } from './update-state.js';
 import { buildStopResumeJson } from './stop-resume-json.js';
+import { resumeFromCiRework, resumePhase } from './resume-ci-rework.js';
 import { collectUsageJson } from './usage-json.js';
 import { parseResetIssues, runReset } from './reset.js';
 import {
@@ -4115,9 +4116,8 @@ export async function cmdResume(issue?: string, opts: { json?: boolean; from?: s
     throw new CliExitError('factory: resume --from needs an issue number: factory resume <issue> --from check', 2);
   }
   if (issue !== undefined) {
-    if (opts.from !== 'check') {
-      throw new CliExitError('factory: resume <issue> only supports --from check (BUILD resume is #2320)', 2);
-    }
+    const rt = { getRepoRoot, getGitHubRepo, getOctokit, log: console.log };
+    if (resumePhase(opts.from) === 'ci-rework') return resumeFromCiRework(parseIssueArg(issue), rt);
     await resumeFromCheck(parseIssueArg(issue));
     return;
   }

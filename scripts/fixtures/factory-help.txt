@@ -28,7 +28,7 @@ Run work:
   land [options] <issue>                 Squash-merge the issue's open PR once CI is green, then remove its worktree (left open if CI fails or review is pending)
   resume-approved [options]              Land open factory PRs (factory/* or the configured prefix) whose review is now approved; skip the rest
   stop [options]                         Tell running lanes to halt after their current issue
-  resume [options] [issue]               Clear a stop so lanes pick up new issues again; with <issue> --from check, re-run CHECK on a build kept after an environment failure
+  resume [options] [issue]               Clear a stop so lanes pick up new issues again; with <issue> --from check, re-run CHECK on a build kept after an environment failure; with <issue> --from ci-rework, decide whether the PR may start a CI rework round
   steer [options] <ref>                  Record a human or bot steer on the run for an issue or PR (appended to state/runs/issue-<n>.json)
 
 Setup:

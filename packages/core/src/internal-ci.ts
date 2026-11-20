@@ -13,3 +13,4 @@ export {
 export { hasAnyCiSignal, listAllCheckRuns, watchChecks, watchChecksWithInfraRerun } from './utils/ci-watch.js';
 export type { RequiredChecksState } from './utils/required-checks.js';
 export { classifyHeadChecks, fetchRequiredContexts, warnNoBranchProtectionOnce } from './utils/required-checks.js';
+export { ciReworkRoundsFor } from './run/ci-rework-rounds.js';

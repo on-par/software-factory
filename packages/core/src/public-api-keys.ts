@@ -69,6 +69,7 @@ export const ITERATE_INTERNAL_KEYS = [
   'classifyHeadChecks',
   'fetchRequiredContexts',
   'warnNoBranchProtectionOnce',
+  'ciReworkRoundsFor',
 ];
 
 /** ./internal names added by the land-deferred retry queue (#3957). */
