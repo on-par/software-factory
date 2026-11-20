@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { defaultOctokit } from './__fixtures__/land-octokit.js';
 import { openPrFixture } from './__fixtures__/open-pr.js';
-import { type CliDeps, cmdLand as cliCmdLand, main } from './index.js';
+import { defaultOctokit } from './__fixtures__/land-octokit.js';
+import { type CliDeps, main, cmdLand as cliCmdLand } from './index.js';
 import { landResultJsonSchema } from './land-result-contract.js';
 
 const h = { repoRoot: '', ghRepo: 'on-par/software-factory', octokit: {} as any, factoryConfig: {} as any };
@@ -15,19 +15,17 @@ let logs: string[] = [];
 let errs: string[] = [];
 let logSpy: any, errSpy: any;
 
-const loaders = {
-  loadModelsConfig: () => ({ models: {}, tiers: {} }) as never,
-  loadRoutesConfig: () => ({}) as never,
+const stubs = {
+  loadModelsConfig: () => ({ models: {}, tiers: {} }),
+  loadRoutesConfig: () => ({}),
   loadFactoryConfigForRepo: () => h.factoryConfig,
-  resolveTimeouts: () => ({ plan: 1, build: 1, check: 1, approval: 1, tests: 1, compile: 1 }),
+  resolveTimeouts: () => ({ plan: 1 }),
   resolveSkipCI: () => false,
-  getConstitutionsDir: vi.fn(() => ''),
-  resolveEffectiveModelPins: vi.fn(() => ({ sources: {} })) as never,
-};
-const gitOps = {
-  setupWorktree: vi.fn(async () => undefined as never),
-  cleanupWorktree: vi.fn(async () => undefined as never),
-  gitFetch: vi.fn(async () => undefined),
+  getConstitutionsDir: () => '',
+  resolveEffectiveModelPins: () => ({ sources: {} }),
+  setupWorktree: async () => undefined,
+  cleanupWorktree: async () => undefined,
+  gitFetch: async () => undefined,
 };
 let watchChecks = vi.fn(async () => 'success') as any;
 const internal = () => ({
@@ -41,7 +39,7 @@ const internal = () => ({
   }),
   octokit: () => h.octokit,
 });
-const deps = (): Partial<CliDeps> => ({ ...loaders, ...gitOps, ...internal() }) as never;
+const deps = (): Partial<CliDeps> => ({ ...stubs, ...internal() }) as never;
 const land = (json?: boolean) => cliCmdLand(5, { json }, deps());
 const lastLine = () => logs[logs.length - 1] as string;
 const parsed = () => landResultJsonSchema.parse(JSON.parse(lastLine()));
@@ -54,11 +52,7 @@ beforeEach(() => {
   h.factoryConfig = {
     merge: { auto: false, comment: '' },
     worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: false },
-    sandbox: {
-      enabled: true,
-      network: { allow: ['api.anthropic.com', 'github.com'] },
-      resources: { cpuMs: 300_000, memMb: 4096 },
-    },
+    sandbox: { enabled: true, network: { allow: [] }, resources: { cpuMs: 1, memMb: 1 } },
     sweep: { loopIntervalSeconds: 300, staleThresholdMultiplier: 2 },
     filing: { selfFixLabel: 'no-auto-merge', enabled: false },
   };
@@ -79,11 +73,8 @@ afterEach(async () => {
 });
 
 const conflict = () => {
-  h.octokit.graphql = vi.fn(async (query: string) =>
-    query.trimStart().startsWith('query')
-      ? { repository: { pullRequest: { id: 'PR_ID', isDraft: false, mergeStateStatus: 'DIRTY' } } }
-      : {},
-  );
+  const pullRequest = { id: 'PR_ID', isDraft: false, mergeStateStatus: 'DIRTY' };
+  h.octokit.graphql = vi.fn(async (q: string) => (q.includes('mutation') ? {} : { repository: { pullRequest } }));
 };
 
 describe('factory land --json', () => {
