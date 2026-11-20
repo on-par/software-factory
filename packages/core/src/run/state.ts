@@ -118,6 +118,7 @@ export interface RunStateUpdate {
   prNumber?: number;
   failures?: CheckerOutput[];
   draftReason?: 'ci-pending' | 'requested';
+  ciReworkRound?: { prNumber: number; round: number };
 }
 
 export interface IssueRunStateBase {
