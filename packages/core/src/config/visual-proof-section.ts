@@ -79,6 +79,12 @@ export const VisualProofConfigSchema = z.strictObject(
   {
     mode: VisualProofModeSchema,
     uiPaths: z.array(z.string().min(1)).min(1).describe('Globs over repo-relative paths that make up user-visible UI'),
+    excludePaths: z
+      .array(z.string().min(1))
+      .optional()
+      .describe(
+        'Extra globs excluded from uiPaths, added to the default test-file exclusions (**/*.{spec,test}.{ts,tsx,js,jsx,mts,cts}, **/__tests__/**)',
+      ),
     routes: z.array(VisualProofRouteSchema).min(1).max(10),
     command: z
       .array(z.string().min(1))

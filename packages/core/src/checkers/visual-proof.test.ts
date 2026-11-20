@@ -93,6 +93,52 @@ describe('classifyVisualProof', () => {
   });
 });
 
+describe('classifyVisualProof test-file exclusion (#4300)', () => {
+  const raw = {
+    uiPaths: ['src/ui/**/*.tsx'],
+    routes: [{ route: '/items', assert: 'Items', paths: ['src/ui/items/**/item-*.tsx'] }],
+    command: ['node', 'capture.mjs'],
+  };
+  const config = VisualProofConfigSchema.parse(raw);
+
+  it('does not require proof when the only UI-path changes are test files (#4300)', () => {
+    const changedFiles = ['src/ui/items/item-row.spec.tsx', 'src/ui/other/x.test.tsx', 'src/ui/__tests__/y.tsx'];
+    expect(classifyVisualProof({ changedFiles, config, planRoutes: [] })).toEqual({ required: false });
+  });
+
+  it('selects routes from the component alone and never reports its spec as uncovered (#4300)', () => {
+    const changedFiles = ['src/ui/items/item-row.tsx', 'src/ui/items/item-row.spec.tsx'];
+    const result = classifyVisualProof({ changedFiles, config, planRoutes: [] });
+    expect(result.required).toBe(true);
+    if (result.required) expect(result.routes.map((r) => r.route)).toEqual(['/items']);
+    expect(result).not.toHaveProperty('uncovered');
+  });
+
+  it('still reports an uncovered non-test UI file next to excluded test files (#4300)', () => {
+    const changedFiles = ['src/ui/other/panel.tsx', 'src/ui/other/panel.test.tsx'];
+    const result = classifyVisualProof({ changedFiles, config, planRoutes: [] });
+    expect(result).toMatchObject({ required: true, uncovered: ['src/ui/other/panel.tsx'] });
+  });
+
+  it('visualProof.excludePaths extends the default exclusions (#4300)', () => {
+    const changedFiles = ['src/ui/other/a.stories.tsx', 'src/ui/other/a.spec.tsx'];
+    const extended = VisualProofConfigSchema.parse({ ...raw, excludePaths: ['src/ui/**/*.stories.tsx'] });
+    expect(classifyVisualProof({ changedFiles, config: extended, planRoutes: [] })).toEqual({ required: false });
+    expect(classifyVisualProof({ changedFiles, config, planRoutes: [] })).toMatchObject({
+      uncovered: ['src/ui/other/a.stories.tsx'],
+    });
+  });
+
+  it('still requires proof for a plan route when every changed file is excluded (#4300)', () => {
+    const result = classifyVisualProof({
+      changedFiles: ['src/ui/items/item-row.spec.tsx'],
+      config,
+      planRoutes: ['/items'],
+    });
+    expect(result.required).toBe(true);
+  });
+});
+
 describe('validateVisualProofManifest', () => {
   const outDir = resolve('/tmp/out');
   const png = (size = 4096): Buffer => {

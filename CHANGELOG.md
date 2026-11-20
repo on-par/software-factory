@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Fixed
+
+- Visual proof no longer counts changed test files (`*.spec.*`, `*.test.*`, `__tests__/`) as UI, so a component spec no longer fails SHIP as uncovered; `visualProof.excludePaths` adds more exclusions (#4300).
+
 ## 0.9.41 - 2026-11-19
 
 SHIP now publishes UI visual proof as PR attachments through `gh pr edit --attach` (gh 2.103.0 or newer) instead of committing images to a side branch (#4284), fails the proof on a partial attach (#4285) and renders webm/mp4 clips as native video embeds (#4286). Breaking: the `visualProof.evidenceBranch` config option is removed; delete the key (#4287).
