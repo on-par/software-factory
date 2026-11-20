@@ -152,6 +152,7 @@ factory run                         Claim queued issues and ship them, lanes in 
 factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
 factory land <N>                    Squash-merge the issue's open PR once CI is green, then remove its worktree
 factory land <N> --json             Print a final JSON result line (merged, checks_pending, ...); exits 75 while checks are pending
+factory land <N> --no-wait          Read the PR and checks once: merge if green, else exit 75 with the JSON line (land.waitForCi: false)
 factory stop / factory resume       Halt lanes after their current issue / clear the stop
 factory resume N --from check       Re-run CHECK on a kept build; refuses if the base moved
 factory resume N --from ci-rework   Run one CI rework round on the failing PR, push it and SHIP (exits 0 no-op or done, 1 cap reached or failed)

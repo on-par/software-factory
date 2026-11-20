@@ -57,3 +57,5 @@ The line is defined by `landJsonSchema` in `packages/cli/src/cli/land-contract.t
 - `closed`: the PR is already closed, or was closed during the land. The exit code is unchanged: `1` when there is no open PR, `5` when the merge failed.
 
 Other outcomes print no JSON line and keep their exit codes: awaiting review (`0`), the no-auto-merge gate (`4`), and other failures. Without `--json`, the output is unchanged; only the `checks_pending` exit code is new. The CI watch, its timing and `ci.skip` are unchanged.
+
+`factory land <N> --no-wait`, or `land.waitForCi: false` in the factory config, reads the PR and its checks once instead of watching CI (#4308). A green, mergeable head is merged (`merged`, exit `0`). Pending checks leave the PR open (`checks_pending`, exit `75`). In this mode the final JSON line is printed even without `--json`. The flag wins over `land.waitForCi: true`. With neither set, land waits on CI as described above.

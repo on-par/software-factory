@@ -14,7 +14,13 @@
 import { z } from 'zod';
 
 import { isPlainObject, loadFactoryConfig, loadModelsConfig, type FactoryConfig } from './index.js';
-import { CHECK_TIME_BUDGET_EXAMPLE, githubExampleNode, shipExampleNodes, trackerExampleNode } from './example-nodes.js';
+import {
+  CHECK_TIME_BUDGET_EXAMPLE,
+  githubExampleNode,
+  landExampleNode,
+  shipExampleNodes,
+  trackerExampleNode,
+} from './example-nodes.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import {
   DEFAULT_T1_SAMPLE_RATE,
@@ -419,6 +425,7 @@ function runtimeNamespace(): Node[] {
     sizeGate,
     ci,
     ship,
+    landExampleNode,
     section('worktree'),
     section('workspace'),
     trackerExampleNode,
