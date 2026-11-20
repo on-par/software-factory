@@ -5,6 +5,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'merge',
   'run',
   'pr',
+  'land',
   'worktree',
   'byok',
   'notifications',

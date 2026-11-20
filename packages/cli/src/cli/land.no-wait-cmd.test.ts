@@ -3,11 +3,11 @@ import { join } from 'node:path';
 
 import { loadFactoryConfig } from '@on-par/factory-core';
 import { createTempDirs } from '@on-par/factory-core/testing';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { defaultOctokit } from './__fixtures__/land-octokit.js';
 import { main } from './index.js';
 import { landJsonSchema } from './land-contract.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const HEAD = 'abc123';
 const SETTLE_MS = 2_000;
@@ -186,14 +186,25 @@ const pendingLine = {
 
 const mergedLine = { result: 'merged', pr: 77, headSha: HEAD, pending: [], mergeable: 'MERGEABLE', schemaVersion: 1 };
 
+function expectPending(outcome: Outcome) {
+  expect(outcome.settled).toBe(true);
+  expect(outcome.code).toBe(75);
+  expect(outcome.merges).toEqual([]);
+  expect(outcome.watched).toEqual([]);
+  expect(finalJson(outcome)).toEqual(pendingLine);
+}
+
+function expectMergedHead(outcome: Outcome, watched: string[]) {
+  expect(outcome.settled).toBe(true);
+  expect(outcome.code).toBe(0);
+  expect(outcome.merges).toEqual([HEAD]);
+  expect(outcome.watched).toEqual(watched);
+}
+
 describe('factory land <issue> --no-wait (#4308)', () => {
   it('returns within seconds on pending checks, exits 75, prints checks_pending and leaves the PR unmerged', async () => {
     const outcome = await land({ runs: [runningCi] }, ['--no-wait']);
-    expect(outcome.settled).toBe(true);
-    expect(outcome.code).toBe(75);
-    expect(finalJson(outcome)).toEqual(pendingLine);
-    expect(outcome.merges).toEqual([]);
-    expect(outcome.watched).toEqual([]);
+    expectPending(outcome);
   });
 
   it('prints exactly one checks_pending JSON line with --json as well', async () => {
@@ -206,10 +217,7 @@ describe('factory land <issue> --no-wait (#4308)', () => {
 
   it('merges the verified head on green and mergeable, exits 0 and prints merged without --json', async () => {
     const outcome = await land({ runs: [greenCi] }, ['--no-wait']);
-    expect(outcome.settled).toBe(true);
-    expect(outcome.code).toBe(0);
-    expect(outcome.merges).toEqual([HEAD]);
-    expect(outcome.watched).toEqual([]);
+    expectMergedHead(outcome, []);
     expect(outcome.lines.some((line) => line.includes('Landed PR #77 for issue #5'))).toBe(true);
     expect(finalJson(outcome)).toEqual(mergedLine);
   });
@@ -226,11 +234,7 @@ describe('factory land <issue> --no-wait (#4308)', () => {
 
   it('wins over land.waitForCi: true in the factory config', async () => {
     const outcome = await land({ runs: [runningCi], waitForCi: true }, ['--no-wait']);
-    expect(outcome.settled).toBe(true);
-    expect(outcome.code).toBe(75);
-    expect(outcome.merges).toEqual([]);
-    expect(outcome.watched).toEqual([]);
-    expect(finalJson(outcome)).toEqual(pendingLine);
+    expectPending(outcome);
   });
 
   it('is described in the land help text', async () => {
@@ -243,19 +247,12 @@ describe('factory land <issue> --no-wait (#4308)', () => {
 describe('land.waitForCi: false in the factory config (#4308)', () => {
   it('returns within seconds on pending checks with exit 75 and a checks_pending line, without the flag', async () => {
     const outcome = await land({ runs: [runningCi], waitForCi: false });
-    expect(outcome.settled).toBe(true);
-    expect(outcome.code).toBe(75);
-    expect(outcome.merges).toEqual([]);
-    expect(outcome.watched).toEqual([]);
-    expect(finalJson(outcome)).toEqual(pendingLine);
+    expectPending(outcome);
   });
 
   it('merges a green, mergeable head once and prints merged without --json', async () => {
     const outcome = await land({ runs: [greenCi], waitForCi: false });
-    expect(outcome.settled).toBe(true);
-    expect(outcome.code).toBe(0);
-    expect(outcome.merges).toEqual([HEAD]);
-    expect(outcome.watched).toEqual([]);
+    expectMergedHead(outcome, []);
     expect(finalJson(outcome)).toEqual(mergedLine);
   });
 });
@@ -270,18 +267,12 @@ describe('factory land <issue> without --no-wait keeps waiting on CI (#4308)', (
 
   it('watches CI, then merges the watched head and prints no JSON line without --json', async () => {
     const outcome = await land({ runs: [greenCi], watch: 'success' });
-    expect(outcome.settled).toBe(true);
-    expect(outcome.code).toBe(0);
-    expect(outcome.watched).toEqual([HEAD]);
-    expect(outcome.merges).toEqual([HEAD]);
+    expectMergedHead(outcome, [HEAD]);
     expect(jsonLines(outcome)).toEqual([]);
   });
 
   it('keeps waiting when land.waitForCi is true', async () => {
     const outcome = await land({ runs: [greenCi], watch: 'success', waitForCi: true });
-    expect(outcome.settled).toBe(true);
-    expect(outcome.code).toBe(0);
-    expect(outcome.watched).toEqual([HEAD]);
-    expect(outcome.merges).toEqual([HEAD]);
+    expectMergedHead(outcome, [HEAD]);
   });
 });

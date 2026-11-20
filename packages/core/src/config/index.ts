@@ -28,6 +28,7 @@ import { runConfigSource } from './run-config-env.js';
 import { RunConfigSectionSchema } from './run-section.js';
 export { resolveBranchPrefix, type BranchPrefixConfig } from './run-section.js';
 import { PrConfigSections } from './pr-section.js';
+import { LandConfigSections } from './land-section.js';
 import { DiskConfigSchema } from './disk-policy.js';
 import { FACTORY_RUNTIME_CONFIG_KEYS } from './runtime-config-keys.js';
 
@@ -166,6 +167,7 @@ export const FactoryConfigSchema = z.object({
    *  and is distinguishable from an explicit `false`. */
   run: RunConfigSectionSchema,
   ...PrConfigSections,
+  ...LandConfigSections,
   worktree: z.object({
     parent: z.string(),
     comment: z.string(),

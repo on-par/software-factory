@@ -200,6 +200,10 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
       '--json',
       'Print the land result as a final JSON line: checks_pending (exit 75), merged, checks_failed, conflicting or closed',
     )
+    .option(
+      '--no-wait',
+      'Read the PR and its checks once: merge a green, mergeable head, else exit 75 (checks_pending) without waiting for CI; always prints the final JSON line; beats land.waitForCi',
+    )
     .action(async (issueNum, opts) => {
       await handlers.cmdLand(handlers.parseIssueArg(issueNum), opts);
     });

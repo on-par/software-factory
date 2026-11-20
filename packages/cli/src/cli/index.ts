@@ -2795,7 +2795,7 @@ export async function cmdReset(
 /** deps overrides the config loaders, git ops, internal ops and octokit for this call, like shipIssue. */
 export async function cmdLand(
   issueNum: number,
-  opts: { branchPrefix?: string; allowGated?: boolean; json?: boolean } = {},
+  opts: { branchPrefix?: string; allowGated?: boolean; json?: boolean; wait?: boolean } = {},
   deps: Pick<CliDeps, ConfigLoaderKey | GitOpKey | InternalOpKey | ShellOpKey | 'octokit'> = {},
 ) {
   const previousLoaders = configLoaders;
@@ -2817,9 +2817,13 @@ export async function cmdLand(
     const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
     const skipCI = configLoaders.resolveSkipCI(factoryConfig);
 
-    const report = landReporter({ octokit, ghRepo, issue: issueNum, json: opts.json === true });
+    const noWaitFlag = opts.wait === false || undefined;
+    const noWait = noWaitFlag ?? factoryConfig.land?.waitForCi === false;
+    const report = landReporter({ octokit, ghRepo, issue: issueNum, json: opts.json === true || noWait });
     const landed = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {
       allowGated: opts.allowGated === true,
+      noWait: noWaitFlag,
+      waitForCi: factoryConfig.land?.waitForCi,
       onPr: report.onPr,
     }).catch(report.failed);
     if (landed) await report.landed(landed.prNumber);

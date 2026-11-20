@@ -75,6 +75,8 @@ export async function landIssue(
     /** #3905: a brief PR with no issue; lands by `branch` and reads only PR labels. */
     issueless?: boolean;
     onPr?: (prNumber: number) => void;
+    noWait?: true;
+    waitForCi?: boolean;
   } = {},
 ): Promise<{ branch: string; prNumber: number }> {
   const { configLoaders, gitOps, errorDetail, worktreePathFor } = landRuntime();
@@ -238,6 +240,8 @@ export async function landIssue(
         syncMain: opts.syncMain,
         rebuildOnConflict: opts.rebuildOnConflict,
         maxConflictRounds: landFactoryConfig.merge.maxConflictRounds,
+        noWait: opts.noWait,
+        waitForCi: opts.waitForCi,
         signal: opts.signal,
         adminMerge: resolveMergePolicy(landFactoryConfig, process.env, opts.mergeOverrides).admin,
         withLock: withLandLock,
