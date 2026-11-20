@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- `factory land --json` prints a final JSON result line (`checks_pending`, `merged`, `checks_failed`, `conflicting` or `closed`) with the PR, head SHA, pending or failed checks and mergeable state, and `factory land` exits `75` when CI never reached a green verdict and the PR was left open; other exit codes and human output are unchanged (#4306)
+
 ## 0.9.43 - 2026-11-20
 
 SHIP can now open or update the PR and return without watching CI (`ship.watchCi: false`), while `factory land` still requires green CI (#4304).

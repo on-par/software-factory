@@ -27,6 +27,7 @@ const expectedFiles = [
   'resume.schema.json',
   'run-result.schema.json',
   'job-status.schema.json',
+  'land.schema.json',
   'status.schema.json',
   'stop.schema.json',
   'unpark.schema.json',
