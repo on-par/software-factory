@@ -17,13 +17,18 @@ export function withoutGitHubCredentials<V>(env: Record<string, V>): Record<stri
   return out;
 }
 
+export const COPILOT_TOKEN_ENV = 'COPILOT_GITHUB_TOKEN';
+
 export function childProcessEnv<V extends string | undefined>(
   parent: Record<string, string | undefined>,
   overrides: Record<string, V> | undefined,
-  options: { githubAuth?: boolean } = {},
+  options: { githubAuth?: boolean; copilotAuth?: boolean } = {},
 ): Record<string, string | V | undefined> {
   const merged = { ...parent, ...overrides };
-  return options.githubAuth ? merged : withoutGitHubCredentials(merged);
+  if (options.githubAuth) return merged;
+  const stripped: Record<string, string | V | undefined> = withoutGitHubCredentials(merged);
+  const copilotToken = parent[COPILOT_TOKEN_ENV];
+  return options.copilotAuth && copilotToken ? { ...stripped, [COPILOT_TOKEN_ENV]: copilotToken } : stripped;
 }
 
 const GITHUB_TOKEN_PATTERN = /\b(?:gh[pousr]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+)/g;

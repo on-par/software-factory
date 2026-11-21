@@ -71,6 +71,32 @@ describe('childProcessEnv', () => {
     expect(childProcessEnv(parent, undefined, { githubAuth: true })).toEqual(parent);
   });
 
+  it('copilotAuth keeps only COPILOT_GITHUB_TOKEN from the parent and strips every other GitHub credential', () => {
+    const withCopilot = { ...parent, GH_TOKEN: 'gh', GITHUB_PAT: 'pat', COPILOT_GITHUB_TOKEN: 'github_pat_copilot' };
+    expect(childProcessEnv(withCopilot, { PORT: '3142' }, { copilotAuth: true })).toEqual({
+      PATH: '/bin',
+      FACTORY_HEADLESS: '0',
+      PORT: '3142',
+      COPILOT_GITHUB_TOKEN: 'github_pat_copilot',
+    });
+  });
+
+  it('copilotAuth ignores a COPILOT_GITHUB_TOKEN or GITHUB_TOKEN smuggled in through the overrides', () => {
+    const env = childProcessEnv(
+      parent,
+      { COPILOT_GITHUB_TOKEN: 'smuggled', GITHUB_TOKEN: 'smuggled' },
+      { copilotAuth: true },
+    );
+    expect(env).toEqual({ PATH: '/bin', FACTORY_HEADLESS: '0' });
+  });
+
+  it('strips COPILOT_GITHUB_TOKEN when copilotAuth is not set', () => {
+    expect(childProcessEnv({ ...parent, COPILOT_GITHUB_TOKEN: 'github_pat_copilot' }, undefined)).toEqual({
+      PATH: '/bin',
+      FACTORY_HEADLESS: '0',
+    });
+  });
+
   it('preserves explicit undefined overrides (deletions) for the spawner', () => {
     const env = childProcessEnv(parent, { FACTORY_HEADLESS: undefined });
     expect('FACTORY_HEADLESS' in env).toBe(true);
@@ -95,6 +121,13 @@ describe('redactGitHubCredentials', () => {
     ).toBe(
       'https://x-access-token:[redacted]@github.com/o/r.git [redacted] [redacted] [redacted] [redacted] [redacted]',
     );
+  });
+
+  it('masks an opaque COPILOT_GITHUB_TOKEN value from env, in text and in an exec error', () => {
+    const env = { COPILOT_GITHUB_TOKEN: 'opaque-copilot-value' };
+    expect(redactGitHubCredentials('copilot used opaque-copilot-value', env)).toBe('copilot used [redacted]');
+    const err = redactExecError({ message: 'failed opaque-copilot-value', stderr: 'opaque-copilot-value' }, env);
+    expect(err).toEqual({ message: 'failed [redacted]', stderr: '[redacted]' });
   });
 
   it('ignores empty, undefined and very short credential values', () => {

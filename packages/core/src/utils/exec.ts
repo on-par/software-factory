@@ -21,6 +21,7 @@ export type ExecFn = (
     onStdout?: (chunk: string) => void;
     killGraceMs?: number;
     githubAuth?: boolean;
+    copilotAuth?: boolean;
   },
 ) => Promise<{ stdout: string; stderr: string }>;
 
@@ -146,7 +147,7 @@ export function createDefaultExecFn(deps: ExecDeps = {}): ExecFn {
   const spawnFn = deps.spawn ?? spawn;
   const killGroup = deps.killProcessGroup ?? killProcessGroup;
   return async (cmd, opts) => {
-    const env = childProcessEnv(process.env, opts.env, { githubAuth: opts.githubAuth });
+    const env = childProcessEnv(process.env, opts.env, { githubAuth: opts.githubAuth, copilotAuth: opts.copilotAuth });
     if (!opts.onPgid && !opts.onStdout) {
       try {
         return await exec(cmd, {
