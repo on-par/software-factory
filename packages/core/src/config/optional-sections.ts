@@ -1,5 +1,6 @@
 // src/config/optional-sections.ts — opt-in top-level sections of the v2 repo config
 
+import { CheckersConfigSections } from './checkers-section.js';
 import { PreviewConfigSections } from './preview-section.js';
 import { QaConfigSections } from './qa-section.js';
 import { RiskConfigSections } from './risk-section.js';
@@ -12,4 +13,5 @@ export const OptionalConfigSections = {
   ...PreviewConfigSections,
   ...TestsConfigSections,
   ...VisualProofConfigSections,
+  ...CheckersConfigSections,
 };

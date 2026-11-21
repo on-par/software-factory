@@ -11,6 +11,8 @@ import { type CommandResult, type RunCommandOptions } from '../utils/command-run
 import { runVerificationCommand as runCommand } from './run-command.js';
 import type { QaConfig } from '../config/qa-section.js';
 import type { ChecksConfig } from '../config/checks-section.js';
+import { resolveHtmlIgnore, type CheckersConfig } from '../config/checkers-section.js';
+import { loadRepoConfig } from '../config/repo.js';
 import {
   describeChecksProbe,
   resolveCompileCommand,
@@ -53,7 +55,15 @@ import {
   workerOutputChecker,
   WORKER_OUTPUT_CHECKER,
 } from './design-smells.js';
-import { countPlaceholderLinks, fileExists, findHtmlFiles, probeWorktree, type WorktreeProbe } from './probe.js';
+import {
+  countPlaceholderLinks,
+  fileExists,
+  findHtmlFiles,
+  type HtmlFileSelection,
+  partitionHtmlFiles,
+  probeWorktree,
+  type WorktreeProbe,
+} from './probe.js';
 
 export type { WorktreeProbe } from './probe.js';
 export {
@@ -74,6 +84,7 @@ export interface CheckerContext {
   specPath: string;
   qa?: QaConfig | null;
   checks?: ChecksConfig | null;
+  checkersConfig?: CheckersConfig | null;
   diffBase?: string;
   parentBaseRef?: string;
   reviewFloorRules?: ReviewFloorRuleSet;
@@ -407,8 +418,14 @@ export const lintChecker: CheckerFn = async (ctx) => {
   return { checker: 'lint', result, details: details.join('; ') };
 };
 
+async function selectHtmlFiles(ctx: CheckerContext): Promise<HtmlFileSelection> {
+  const all = ctx.probe?.htmlFiles ?? (await findHtmlFiles(ctx.worktree));
+  const checkers = ctx.checkersConfig !== undefined ? ctx.checkersConfig : loadRepoConfig(ctx.worktree)?.checkers;
+  return partitionHtmlFiles(all, resolveHtmlIgnore(checkers));
+}
+
 export const linksChecker: CheckerFn = async (ctx) => {
-  const files = ctx.probe?.htmlFiles ?? (await findHtmlFiles(ctx.worktree));
+  const { scanned: files } = await selectHtmlFiles(ctx);
 
   if (files.length === 0) {
     return { checker: 'links', result: 'PASS', details: 'no HTML files — skipped' };
@@ -443,7 +460,7 @@ export const linksChecker: CheckerFn = async (ctx) => {
 const MAX_ACCESSIBILITY_FILES = 20;
 
 export const accessibilityChecker: CheckerFn = async (ctx) => {
-  const allFiles = ctx.probe?.htmlFiles ?? (await findHtmlFiles(ctx.worktree));
+  const { scanned: allFiles } = await selectHtmlFiles(ctx);
 
   if (allFiles.length === 0) {
     return { checker: 'accessibility', result: 'PASS', details: 'no HTML files — skipped' };

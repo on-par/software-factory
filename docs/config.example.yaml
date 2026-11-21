@@ -118,6 +118,8 @@ version: 2
 # checks: { build: "dotnet build", test: "dotnet test", lint: "dotnet format --verify-no-changes" }
 # App smoke commands for the opt-in app_smoke checker.
 # qa: { start: ["npm", "start"], smoke: ["npm", "run", "smoke"] }
+# Settings for the built-in links and accessibility checkers.
+# checkers: { html: { ignore: ["docs/**"] } }
 # Opt-in preview-environment gate run in SHIP after CI is green (#3880).
 # preview: { source: { kind: "deployment", environment: "preview/pr-*" }, command: ["npm", "run", "smoke:preview"] }
 # Opt-in UI visual proof gate run in SHIP (#2232).

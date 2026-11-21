@@ -220,6 +220,15 @@ export async function findHtmlFiles(worktree: string): Promise<string[]> {
   return results;
 }
 
+export interface HtmlFileSelection {
+  scanned: string[];
+  ignored: string[];
+}
+
+export function partitionHtmlFiles(files: readonly string[], _ignore: readonly string[]): HtmlFileSelection {
+  return { scanned: [...files], ignored: [] };
+}
+
 export async function fileExists(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isFile();

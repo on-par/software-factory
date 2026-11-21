@@ -13,6 +13,7 @@ import {
   findHtmlFiles,
   type LintConfigProbe,
   type PackageJsonProbe,
+  partitionHtmlFiles,
   probeWorktree,
   type PythonTestSurface,
   type PythonTestSurfaceSource,
@@ -239,6 +240,34 @@ describe('findHtmlFiles', () => {
     const worktree = await makeWorktree({ 'index.ts': 'export {};' });
 
     expect(await findHtmlFiles(worktree)).toEqual([]);
+  });
+});
+
+describe('partitionHtmlFiles', () => {
+  const files = ['design/a.html', 'designer/b.html', 'docs/a.html', 'docs/x/b.html', 'index.html', 'src/docs/c.html'];
+
+  it('splits files matched by a ** glob from the ones still scanned, keeping order', () => {
+    expect(partitionHtmlFiles(files, ['docs/**'])).toEqual({
+      scanned: ['design/a.html', 'designer/b.html', 'index.html', 'src/docs/c.html'],
+      ignored: ['docs/a.html', 'docs/x/b.html'],
+    });
+  });
+
+  it('treats a pattern without glob characters as a directory prefix, not a string prefix', () => {
+    for (const prefix of ['design', 'design/']) {
+      expect(partitionHtmlFiles(files, [prefix]).ignored).toEqual(['design/a.html']);
+    }
+  });
+
+  it('matches a leading **/ glob at any depth', () => {
+    expect(partitionHtmlFiles(['a/b/mock.html', 'mock.html', 'mockup.html'], ['**/mock.html']).ignored).toEqual([
+      'a/b/mock.html',
+      'mock.html',
+    ]);
+  });
+
+  it('ignores nothing for an empty list', () => {
+    expect(partitionHtmlFiles(files, [])).toEqual({ scanned: files, ignored: [] });
   });
 });
 

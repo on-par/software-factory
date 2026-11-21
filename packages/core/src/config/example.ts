@@ -257,6 +257,7 @@ function modelNamespace(): Node[] {
       '{ build: "dotnet build", test: "dotnet test", lint: "dotnet format --verify-no-changes" }',
     ),
     unset('qa', doc('qa'), '{ start: ["npm", "start"], smoke: ["npm", "run", "smoke"] }'),
+    unset('checkers', doc('checkers'), '{ html: { ignore: ["docs/**"] } }'),
     unset(
       'preview',
       doc('preview'),
