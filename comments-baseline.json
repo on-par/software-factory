@@ -486,7 +486,6 @@
   "packages/core/src/environment/sandbox-env.ts": 6,
   "packages/core/src/eval/judge.ts": 1,
   "packages/core/src/eval/readiness.ts": 1,
-  "packages/core/src/eval/score.ts": 1,
   "packages/core/src/eval/types.ts": 2,
   "packages/core/src/events/command-output-traits.ts": 4,
   "packages/core/src/events/config-traits.ts": 5,

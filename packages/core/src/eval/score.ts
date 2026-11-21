@@ -30,7 +30,6 @@ export function scoreSpec(
 
   const { data, route: parsedRoute } = parseSpec(specContent);
   const frontmatterPass = Object.keys(data).length > 0;
-  // PLAN cannot choose the pin-only command and copilot routes, so a spec naming one scores as unparseable.
   const pinOnly = parsedRoute === 'command' || parsedRoute === 'copilot';
   const route: ScoredRoute = parsedRoute === null || pinOnly ? 'unparseable' : parsedRoute;
   const routeCorrect = expected === 'any' || route === expected;
