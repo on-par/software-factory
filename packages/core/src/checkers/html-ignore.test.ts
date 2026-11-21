@@ -19,6 +19,21 @@ function makeContext(worktree: string): CheckerContext {
   };
 }
 
+async function expectOnlyScanned(worktree: string, scanned: string, skipped: string): Promise<void> {
+  const links = await linksChecker(makeContext(worktree));
+  const accessibility = await accessibilityChecker(makeContext(worktree));
+
+  expect(links.result).toBe('FAIL');
+  expect(links.broken).toBe(1);
+  expect(links.details).toContain(scanned);
+  expect(links.details).not.toContain(skipped);
+  expect(links.details).toContain('1 HTML file ignored');
+  expect(accessibility.result).toBe('FAIL');
+  expect(accessibility.details).toContain(`${scanned}: 1 placeholder links`);
+  expect(accessibility.details).not.toContain(skipped);
+  expect(accessibility.details).toContain('1 HTML file ignored');
+}
+
 describe('links and accessibility checkers honour checkers.html.ignore', () => {
   const placeholderPage = '<html><body><a href="#">todo</a></body></html>';
   const htmlIgnoreConfig = (ignore: string[]) => ({
@@ -56,18 +71,7 @@ describe('links and accessibility checkers honour checkers.html.ignore', () => {
   it('still fails a placeholder link outside docs/ with the default ignore list', async () => {
     const worktree = await makeWorktree({ 'docs/mock.html': placeholderPage, 'src/page.html': placeholderPage });
 
-    const links = await linksChecker(makeContext(worktree));
-    const accessibility = await accessibilityChecker(makeContext(worktree));
-
-    expect(links.result).toBe('FAIL');
-    expect(links.broken).toBe(1);
-    expect(links.details).toContain('src/page.html');
-    expect(links.details).not.toContain('docs/mock.html');
-    expect(links.details).toContain('1 HTML file ignored');
-    expect(accessibility.result).toBe('FAIL');
-    expect(accessibility.details).toContain('src/page.html: 1 placeholder links');
-    expect(accessibility.details).not.toContain('docs/mock.html');
-    expect(accessibility.details).toContain('1 HTML file ignored');
+    await expectOnlyScanned(worktree, 'src/page.html', 'docs/mock.html');
   });
 
   it('replaces the default with an explicit list, so design/** is skipped and docs/ is scanned', async () => {
@@ -77,18 +81,7 @@ describe('links and accessibility checkers honour checkers.html.ignore', () => {
       ...htmlIgnoreConfig(['design/**']),
     });
 
-    const links = await linksChecker(makeContext(worktree));
-    const accessibility = await accessibilityChecker(makeContext(worktree));
-
-    expect(links.result).toBe('FAIL');
-    expect(links.broken).toBe(1);
-    expect(links.details).toContain('docs/b.html');
-    expect(links.details).not.toContain('design/a.html');
-    expect(links.details).toContain('1 HTML file ignored');
-    expect(accessibility.result).toBe('FAIL');
-    expect(accessibility.details).toContain('docs/b.html: 1 placeholder links');
-    expect(accessibility.details).not.toContain('design/a.html');
-    expect(accessibility.details).toContain('1 HTML file ignored');
+    await expectOnlyScanned(worktree, 'docs/b.html', 'design/a.html');
   });
 
   it('takes the ignore list passed to CHECK over the repo config file', async () => {

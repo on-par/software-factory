@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- checkers: the links and accessibility checkers skip HTML files under `docs/` by default and say how many files they ignored; the new `checkers.html.ignore` repo config key takes a list of path prefixes or globs that replaces the `docs/**` default, and `checkers.html.ignore: []` scans every HTML file again
+
 ## 0.9.45 - 2026-11-20
 
 `factory land --no-wait` and `land.waitForCi: false` now read the PR and its checks once instead of waiting on CI (#4307, #4308). `factory resume --from ci-rework` can start one CI rework round on a failing PR, with the cap held across processes (#4312, #4313).

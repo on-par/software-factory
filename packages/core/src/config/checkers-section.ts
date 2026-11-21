@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const DEFAULT_HTML_IGNORE: readonly string[] = [];
+export const DEFAULT_HTML_IGNORE: readonly string[] = ['docs/**'];
 
 const CheckersConfigSchema = z
   .object({

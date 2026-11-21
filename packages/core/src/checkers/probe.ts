@@ -1,6 +1,8 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
+import { globToRegExp } from '../review/floor.js';
+
 export interface PackageJson {
   scripts?: Record<string, string>;
   [k: string]: unknown;
@@ -225,8 +227,22 @@ export interface HtmlFileSelection {
   ignored: string[];
 }
 
-export function partitionHtmlFiles(files: readonly string[], _ignore: readonly string[]): HtmlFileSelection {
-  return { scanned: [...files], ignored: [] };
+function htmlIgnoreMatcher(pattern: string): (file: string) => boolean {
+  if (/[*?]/.test(pattern)) {
+    const regex = globToRegExp(pattern);
+    return (file) => regex.test(file);
+  }
+  const dir = pattern.replace(/\/+$/, '');
+  return (file) => file === dir || file.startsWith(`${dir}/`);
+}
+
+export function partitionHtmlFiles(files: readonly string[], ignore: readonly string[]): HtmlFileSelection {
+  const matchers = ignore.map(htmlIgnoreMatcher);
+  const selection: HtmlFileSelection = { scanned: [], ignored: [] };
+  for (const file of files) {
+    (matchers.some((matches) => matches(file)) ? selection.ignored : selection.scanned).push(file);
+  }
+  return selection;
 }
 
 export async function fileExists(path: string): Promise<boolean> {
