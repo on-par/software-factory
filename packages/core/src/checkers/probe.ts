@@ -232,7 +232,9 @@ function htmlIgnoreMatcher(pattern: string): (file: string) => boolean {
     const regex = globToRegExp(pattern);
     return (file) => regex.test(file);
   }
-  const dir = pattern.replace(/\/+$/, '');
+  let end = pattern.length;
+  while (end > 0 && pattern[end - 1] === '/') end -= 1;
+  const dir = pattern.slice(0, end);
   return (file) => file === dir || file.startsWith(`${dir}/`);
 }
 
