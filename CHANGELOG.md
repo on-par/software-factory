@@ -10,6 +10,7 @@ section to `## X.Y.Z - date`. See
 ### Changed
 
 - checkers: the links and accessibility checkers skip HTML files under `docs/` by default and say how many files they ignored; the new `checkers.html.ignore` repo config key takes a list of path prefixes or globs that replaces the `docs/**` default, and `checkers.html.ignore: []` scans every HTML file again (#4324)
+- checkers: **heads-up:** a repo that publishes its site from `docs/` no longer has that HTML checked by the links and accessibility checkers; set `checkers.html.ignore: []` to keep checking it (#4324)
 
 ## 0.9.45 - 2026-11-20
 

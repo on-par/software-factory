@@ -10,7 +10,7 @@ const CheckersConfigSchema = z
           .array(z.string().min(1))
           .default(() => [...DEFAULT_HTML_IGNORE])
           .describe(
-            'Path prefixes or globs, relative to the repo root, whose HTML files the links and accessibility checkers skip. Replaces the default. Unset: ["docs/**"]; [] scans every HTML file.',
+            'Path prefixes or globs, relative to the repo root, whose HTML files the links and accessibility checkers skip. Unset: ["docs/**"], so HTML under docs/ is not checked. [] skips nothing and scans every HTML file. An explicit list replaces the default and is not merged with it: add "docs/**" to the list to keep skipping docs/.',
           ),
       })
       .strict()
