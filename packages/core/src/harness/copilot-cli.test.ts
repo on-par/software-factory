@@ -165,16 +165,24 @@ describe('CopilotCliHarness.run', () => {
     }
   });
 
-  it('removes the allow-all and assisted-approval variables a lane env carries', async () => {
+  it('removes the allow-all, assisted-approval and prompt-mode extensions variables a lane env carries', async () => {
     const exec = recordingExec(SUCCESS);
     await new CopilotCliHarness(exec, quiet).run(
-      request({ env: { COPILOT_ALLOW_ALL: 'true', COPILOT_ASSISTED_APPROVAL: 'true' } }),
+      request({
+        env: {
+          COPILOT_ALLOW_ALL: 'true',
+          COPILOT_ASSISTED_APPROVAL: 'true',
+          GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS: 'true',
+        },
+      }),
     );
     const env = exec.calls[0]?.opts.env ?? {};
     expect(Object.hasOwn(env, 'COPILOT_ALLOW_ALL')).toBe(true);
     expect(env.COPILOT_ALLOW_ALL).toBeUndefined();
     expect(Object.hasOwn(env, 'COPILOT_ASSISTED_APPROVAL')).toBe(true);
     expect(env.COPILOT_ASSISTED_APPROVAL).toBeUndefined();
+    expect(Object.hasOwn(env, 'GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS')).toBe(true);
+    expect(env.GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS).toBeUndefined();
   });
 
   it('passes --allow-all with an effective sandbox and with the opt-in, and logs the decision once per task', async () => {

@@ -221,9 +221,10 @@ route: copilot
 The factory runs `copilot --output-format json --stream off --no-ask-user --no-auto-update
 --disable-builtin-mcps --secret-env-vars=COPILOT_GITHUB_TOKEN` in the worktree, with the prompt on
 stdin from a temporary file. The prompt never appears in the command line. It removes
-`COPILOT_ALLOW_ALL`, `COPILOT_ASSISTED_APPROVAL`, `GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS` and
-`GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP` from the child environment, so no environment variable can
-grant tool approval. The factory does not override Copilot's own configuration, so approvals you saved
+`COPILOT_ALLOW_ALL`, `COPILOT_ASSISTED_APPROVAL`, `GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS`,
+`GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP` and `GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS` from the child
+environment, so a repository's hooks, workspace MCP servers and extensions do not load and no
+environment variable can grant tool approval. The factory does not override Copilot's own configuration, so approvals you saved
 (`~/.copilot/permissions-config.json`, `allowedUrls` in `settings.json`), user-level hooks, trusted
 folders and a `COPILOT_HOME` that points at them still apply; start an isolated runtime from a fresh
 Copilot home.
