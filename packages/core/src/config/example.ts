@@ -16,10 +16,12 @@ import { z } from 'zod';
 import { isPlainObject, loadFactoryConfig, loadModelsConfig, type FactoryConfig } from './index.js';
 import {
   CHECK_TIME_BUDGET_EXAMPLE,
+  checkersExampleNode,
   githubExampleNode,
   landExampleNode,
   shipExampleNodes,
   trackerExampleNode,
+  VISUAL_PROOF_HINT,
 } from './example-nodes.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import {
@@ -49,8 +51,6 @@ export type Node =
   | { kind: 'unset'; key: string; doc?: string; example: string };
 
 const WRAP = 100;
-const VISUAL_PROOF_HINT =
-  '{ uiPaths: ["src/ui/**"], routes: [{ route: "/items", state: "item-created", assert: "#item-1", paths: ["src/ui/items/**"], steps: [{ click: "#new" }, { fill: "#name", value: "Demo" }, { press: "Enter" }, { waitFor: "#item-1" }], record: "gif" }], command: ["<capture>"] }';
 
 /** Docs for runtime-policy sections whose packaged defaults carry no `comment`. */
 const RUNTIME_NOTES: Record<string, string> = {
@@ -257,6 +257,7 @@ function modelNamespace(): Node[] {
       '{ build: "dotnet build", test: "dotnet test", lint: "dotnet format --verify-no-changes" }',
     ),
     unset('qa', doc('qa'), '{ start: ["npm", "start"], smoke: ["npm", "run", "smoke"] }'),
+    checkersExampleNode(doc),
     unset(
       'preview',
       doc('preview'),

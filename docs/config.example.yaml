@@ -118,6 +118,15 @@ version: 2
 # checks: { build: "dotnet build", test: "dotnet test", lint: "dotnet format --verify-no-changes" }
 # App smoke commands for the opt-in app_smoke checker.
 # qa: { start: ["npm", "start"], smoke: ["npm", "run", "smoke"] }
+# Settings for the built-in links and accessibility checkers.
+# checkers:
+  # HTML discovery for the links and accessibility checkers.
+  # html:
+    # Path prefixes or globs, relative to the repo root, whose HTML files the links and
+    # accessibility checkers skip. Unset: ["docs/**"], so HTML under docs/ is not checked. [] skips
+    # nothing and scans every HTML file. An explicit list replaces the default and is not merged
+    # with it: add "docs/**" to the list to keep skipping docs/.
+    # ignore: ["docs/**"]
 # Opt-in preview-environment gate run in SHIP after CI is green (#3880).
 # preview: { source: { kind: "deployment", environment: "preview/pr-*" }, command: ["npm", "run", "smoke:preview"] }
 # Opt-in UI visual proof gate run in SHIP (#2232).

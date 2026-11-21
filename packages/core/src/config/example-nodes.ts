@@ -1,3 +1,4 @@
+import { DEFAULT_HTML_IGNORE } from './checkers-section.js';
 import type { Node } from './example.js';
 import { LandConfigSections } from './land-section.js';
 
@@ -29,6 +30,9 @@ export const githubExampleNode: Node = {
   example: '{ credentials: { app: { appId: 123456, installationId: 7890123 }, allowAmbientToken: false } }',
 };
 
+export const VISUAL_PROOF_HINT =
+  '{ uiPaths: ["src/ui/**"], routes: [{ route: "/items", state: "item-created", assert: "#item-1", paths: ["src/ui/items/**"], steps: [{ click: "#new" }, { fill: "#name", value: "Demo" }, { press: "Enter" }, { waitFor: "#item-1" }], record: "gif" }], command: ["<capture>"] }';
+
 export const CHECK_TIME_BUDGET_EXAMPLE = '{ verifyMinutes: 10, reworkBuildMinutes: 10, safetyMarginMinutes: 2 }';
 
 export const shipExampleNodes: Node[] = [
@@ -45,3 +49,24 @@ export const shipExampleNodes: Node[] = [
     example: 'false',
   },
 ];
+
+export const checkersExampleNode = (doc: (...path: string[]) => string | undefined): Node => ({
+  kind: 'object',
+  key: 'checkers',
+  doc: doc('checkers'),
+  children: [
+    {
+      kind: 'object',
+      key: 'html',
+      doc: doc('checkers', 'html'),
+      children: [
+        {
+          kind: 'unset',
+          key: 'ignore',
+          doc: doc('checkers', 'html', 'ignore'),
+          example: `[${DEFAULT_HTML_IGNORE.map((pattern) => JSON.stringify(pattern)).join(', ')}]`,
+        },
+      ],
+    },
+  ],
+});

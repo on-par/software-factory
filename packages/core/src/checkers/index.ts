@@ -11,6 +11,8 @@ import { type CommandResult, type RunCommandOptions } from '../utils/command-run
 import { runVerificationCommand as runCommand } from './run-command.js';
 import type { QaConfig } from '../config/qa-section.js';
 import type { ChecksConfig } from '../config/checks-section.js';
+import { resolveHtmlIgnore, type CheckersConfig } from '../config/checkers-section.js';
+import { loadRepoConfig } from '../config/repo.js';
 import {
   describeChecksProbe,
   resolveCompileCommand,
@@ -53,7 +55,15 @@ import {
   workerOutputChecker,
   WORKER_OUTPUT_CHECKER,
 } from './design-smells.js';
-import { countPlaceholderLinks, fileExists, findHtmlFiles, probeWorktree, type WorktreeProbe } from './probe.js';
+import {
+  countPlaceholderLinks,
+  fileExists,
+  findHtmlFiles,
+  type HtmlFileSelection,
+  partitionHtmlFiles,
+  probeWorktree,
+  type WorktreeProbe,
+} from './probe.js';
 
 export type { WorktreeProbe } from './probe.js';
 export {
@@ -74,6 +84,7 @@ export interface CheckerContext {
   specPath: string;
   qa?: QaConfig | null;
   checks?: ChecksConfig | null;
+  checkersConfig?: CheckersConfig | null;
   diffBase?: string;
   parentBaseRef?: string;
   reviewFloorRules?: ReviewFloorRuleSet;
@@ -407,14 +418,25 @@ export const lintChecker: CheckerFn = async (ctx) => {
   return { checker: 'lint', result, details: details.join('; ') };
 };
 
+async function selectHtmlFiles(ctx: CheckerContext): Promise<HtmlFileSelection> {
+  const all = ctx.probe?.htmlFiles ?? (await findHtmlFiles(ctx.worktree));
+  const checkers = ctx.checkersConfig !== undefined ? ctx.checkersConfig : loadRepoConfig(ctx.worktree)?.checkers;
+  return partitionHtmlFiles(all, resolveHtmlIgnore(checkers));
+}
+
+const ignoredNote = ({ length: n }: readonly string[]): string =>
+  n === 0 ? '' : `; ${n} HTML file${n === 1 ? '' : 's'} ignored (checkers.html.ignore)`;
+
 export const linksChecker: CheckerFn = async (ctx) => {
-  const files = ctx.probe?.htmlFiles ?? (await findHtmlFiles(ctx.worktree));
+  const { scanned: files, ignored } = await selectHtmlFiles(ctx);
+  const note = ignoredNote(ignored);
 
   if (files.length === 0) {
-    return { checker: 'links', result: 'PASS', details: 'no HTML files — skipped' };
+    return { checker: 'links', result: 'PASS', details: `no HTML files — skipped${note}` };
   }
 
   const urls = new Set<string>();
+  const brokenFiles: string[] = [];
   let broken = 0;
 
   for (const rel of files) {
@@ -426,15 +448,18 @@ export const linksChecker: CheckerFn = async (ctx) => {
       urls.add(url);
     }
 
-    broken += countPlaceholderLinks(html);
+    const placeholders = countPlaceholderLinks(html);
+    broken += placeholders;
+    if (placeholders > 0) brokenFiles.push(rel);
   }
 
   const checked = urls.size;
+  const found = `${broken} placeholder href="#" links found in ${brokenFiles.join(', ')}`;
 
   return {
     checker: 'links',
     result: broken > 0 ? 'FAIL' : 'PASS',
-    details: broken > 0 ? `${broken} placeholder href="#" links found` : `checked ${checked} links, all OK`,
+    details: (broken > 0 ? found : `checked ${checked} links, all OK`) + note,
     linksChecked: checked,
     broken,
   };
@@ -443,10 +468,11 @@ export const linksChecker: CheckerFn = async (ctx) => {
 const MAX_ACCESSIBILITY_FILES = 20;
 
 export const accessibilityChecker: CheckerFn = async (ctx) => {
-  const allFiles = ctx.probe?.htmlFiles ?? (await findHtmlFiles(ctx.worktree));
+  const { scanned: allFiles, ignored } = await selectHtmlFiles(ctx);
+  const note = ignoredNote(ignored);
 
   if (allFiles.length === 0) {
-    return { checker: 'accessibility', result: 'PASS', details: 'no HTML files — skipped' };
+    return { checker: 'accessibility', result: 'PASS', details: `no HTML files — skipped${note}` };
   }
 
   const files = allFiles.slice(0, MAX_ACCESSIBILITY_FILES);
@@ -475,15 +501,12 @@ export const accessibilityChecker: CheckerFn = async (ctx) => {
     unscanned > 0
       ? `scanned first ${files.length} of ${allFiles.length} HTML files (${unscanned} not scanned)`
       : `scanned ${files.length} HTML files`;
+  const summary =
+    details.length > 0
+      ? `${coverage}; ${details.join('; ')} (note: browser-based axe-core recommended for full WCAG)`
+      : `basic checks passed (alt, placeholder links) — ${coverage}`;
 
-  return {
-    checker: 'accessibility',
-    result: issues > 0 ? 'FAIL' : 'PASS',
-    details:
-      details.length > 0
-        ? `${coverage}; ${details.join('; ')} (note: browser-based axe-core recommended for full WCAG)`
-        : `basic checks passed (alt, placeholder links) — ${coverage}`,
-  };
+  return { checker: 'accessibility', result: issues > 0 ? 'FAIL' : 'PASS', details: summary + note };
 };
 
 function isCustomCheckerVerdict(
