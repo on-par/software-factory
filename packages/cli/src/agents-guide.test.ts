@@ -7,8 +7,8 @@ import { describe, expect, it } from 'vitest';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const GUIDE = 'docs/agents.md';
-const PROVIDERS = ['Claude Code', 'Codex', 'OpenCode'] as const;
-const RECIPES = ['Claude-only', 'Codex-only', 'OpenCode Go-only', 'Local Ollama', 'Mixed'] as const;
+const PROVIDERS = ['Claude Code', 'Codex', 'OpenCode', 'GitHub Copilot CLI'] as const;
+const RECIPES = ['Claude-only', 'Codex-only', 'OpenCode Go-only', 'Local Ollama', 'Mixed', 'Copilot-only'] as const;
 const MATRIX_COLUMNS = [
   'Agent',
   'Harness id',
@@ -316,7 +316,7 @@ describe('docs/agents.md supported agents guide', () => {
     expect(problems).toEqual([]);
   });
 
-  it('has all five recipes, each with one yaml block and a Version tested line', () => {
+  it('has every recipe, each with one yaml block and a Version tested line', () => {
     expect(recipeProblems(guideText ?? '', label)).toEqual([]);
   });
 
@@ -347,6 +347,7 @@ describe('docs/agents.md supported agents guide', () => {
       ['Claude Code', ['Claude-only', 'Mixed']],
       ['Codex', ['Codex-only', 'Mixed']],
       ['OpenCode', ['OpenCode Go-only']],
+      ['GitHub Copilot CLI', ['Copilot-only']],
     ];
     for (const [provider, recipes] of expectations) {
       const version = versionTested(providerSection(lines, provider) ?? '');

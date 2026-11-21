@@ -54,7 +54,8 @@ export function parseSpec(content: string): FrozenSpec {
   }
 
   const t = typeof data.route === 'string' ? data.route.trim() : '';
-  const route: BuildRoutePin | null = t === 'codex' || t === 'claude' || t === 'opencode' || t === 'command' ? t : null;
+  const route: BuildRoutePin | null =
+    t === 'codex' || t === 'claude' || t === 'opencode' || t === 'copilot' || t === 'command' ? t : null;
   return { path: '', raw: content, body, data, route };
 }
 

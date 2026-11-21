@@ -13,6 +13,7 @@ export function filterModelsByRequires(
   if (requires === 'claude') return models.filter((model) => registry.getHarnessId(model) === 'claude-cli');
   // build_opencode runs through the opencode CLI harness (e.g. deepseek).
   if (requires === 'opencode') return models.filter((model) => registry.getHarnessId(model) === 'opencode');
+  if (requires === 'copilot') return models.filter((model) => registry.getHarnessId(model) === 'copilot-cli');
   // build_command runs a harness the repo declared under `harnesses` (byo, agentic only) or Pi (#2909).
   if (requires === 'command') {
     return models.filter((model) => {

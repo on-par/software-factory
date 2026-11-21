@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ExecFn } from '../utils/exec.js';
-import { agentEventStdout, claudeActivity, codexActivity, type AgentEvent } from './agent-events.js';
+import { agentEventStdout, claudeActivity, codexActivity, copilotActivity, type AgentEvent } from './agent-events.js';
 import { ClaudeCliHarness } from './claude-cli.js';
 import { CodexCliHarness } from './codex-cli.js';
 import { makeContractRequest } from './contract.js';
@@ -128,5 +128,52 @@ describe('harness agent events', () => {
     }).run(makeContractRequest({ onEvent: (e) => void events.push(e) }));
     expect((await run).output).toBe('done');
     expect(beforeExit).toEqual(['build tool_call', 'build result']);
+  });
+});
+
+describe('copilotActivity (documented session event shapes; unverified against a live transcript)', () => {
+  it('maps tool, MCP, message and result events and emits nothing for token deltas', () => {
+    const stdout = [
+      { type: 'assistant.message_delta', data: { deltaContent: 'Rea' } },
+      { type: 'tool.execution_start', data: { toolName: 'view', arguments: { path: 'src/a.ts' } } },
+      { type: 'tool.execution_complete', data: { success: true, result: { content: 'export const a = 1;' } } },
+      { type: 'tool.execution_start', data: { toolName: 'get_issue', mcpServerName: 'github', arguments: {} } },
+      { type: 'tool.execution_complete', data: { success: false, error: { message: 'not found' } } },
+      { type: 'tool.execution_start', data: { toolName: 'bash', arguments: 'raw args' } },
+      { type: 'tool.execution_complete', data: { success: false } },
+      { type: 'assistant.message', data: { content: 'Done.' } },
+      { type: 'assistant.message', data: { content: 'sub-agent note', parentToolCallId: 't1' } },
+      { type: 'session.error', data: { errorType: 'quota' } },
+      { type: 'result', exitCode: 0 },
+    ]
+      .map(line)
+      .join('');
+    expect(stream(copilotActivity, stdout).map((e) => [e.kind, e.name, e.summary])).toEqual([
+      ['tool_call', 'view', '<path>'],
+      ['tool_result', undefined, 'ok: export const a = 1;'],
+      ['mcp', 'github.get_issue', 'github.get_issue'],
+      ['tool_result', undefined, 'error: not found'],
+      ['tool_call', 'bash', 'raw args'],
+      ['tool_result', undefined, 'error'],
+      ['text', undefined, 'Done.'],
+      ['result', undefined, 'error: quota'],
+      ['result', undefined, 'exit 0'],
+    ]);
+  });
+
+  it('redacts and truncates summaries', () => {
+    const token = `github_pat_${'A'.repeat(40)}`;
+    const command = `echo ${token} ${'x'.repeat(300)}`;
+    const events = stream(
+      copilotActivity,
+      line({ type: 'tool.execution_start', data: { toolName: 'bash', arguments: { command } } }),
+    );
+    expect(events[0]?.summary).not.toContain(token);
+    expect(events[0]?.summary).toMatch(/…\[truncated \d+ chars\]$/);
+  });
+
+  it('skips bad and unknown lines', () => {
+    const bad = ['not json', '', '42', '[]', 'null', '{"type":"mystery"}', '{"type":"session.idle","data":{}}'];
+    expect(stream(copilotActivity, `${bad.join('\n')}\n`)).toEqual([]);
   });
 });

@@ -32,11 +32,20 @@ export function newRepoRouter(repoRoot: string, loaders: RepoRouterLoaders, Rout
     effective.allowExperimental,
     effective.localOnly,
   );
-  const sandbox = loaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox;
-  router.setCodexFullAccessTasks?.(sandbox.codexFullAccessTasks);
-  router.setCodexSandbox?.(sandbox.codexSandbox);
+  applyRouterSandbox(router, loaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox);
   router.setLocalAuthSink?.(recordLocalAuthFailure);
   return router;
+}
+
+export type RouterSandboxConfig = Pick<
+  ReturnType<typeof loadFactoryConfigForRepo>['sandbox'],
+  'codexFullAccessTasks' | 'codexSandbox' | 'copilotAllowAll'
+>;
+
+export function applyRouterSandbox(router: ModelRouter, sandbox: RouterSandboxConfig): void {
+  router.setCodexFullAccessTasks?.(sandbox.codexFullAccessTasks);
+  router.setCodexSandbox?.(sandbox.codexSandbox);
+  router.setCopilotAllowAll?.(sandbox.copilotAllowAll);
 }
 
 /** The router wiring every CLI model router shares: the local-auth sink and the metered failover guard (#3234). */

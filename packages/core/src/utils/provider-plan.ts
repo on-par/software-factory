@@ -40,6 +40,7 @@ export function providerPlan(
     if (harness === 'opencode') return detectProviderPlan(model?.providerModel ?? '', deps);
     if (harness === 'claude-cli') return model?.endpoint ? 'unknown' : detectProviderPlan('claude', deps);
     if (harness === 'codex-cli') return detectProviderPlan('codex', deps);
+    if (harness === 'copilot-cli') return 'subscription';
     return 'unknown';
   } catch {
     return 'unknown';

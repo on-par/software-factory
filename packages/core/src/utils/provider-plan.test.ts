@@ -78,6 +78,10 @@ describe('providerPlan', () => {
     expect(providerPlan('custom', { harness: 'opencode' })).toBe('unknown');
   });
 
+  it('treats copilot-cli as a subscription, so a Copilot pin is not reported as a metered primary route', () => {
+    expect(providerPlan('copilot', { harness: 'copilot-cli' })).toBe('subscription');
+  });
+
   it('is unknown for pi, ollama, command and undefined', () => {
     for (const harness of ['pi', 'ollama-http', 'command']) expect(providerPlan('custom', { harness })).toBe('unknown');
     expect(providerPlan(undefined, undefined)).toBe('unknown');

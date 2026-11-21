@@ -26,6 +26,11 @@ describe('resolveRunUsageHarness', () => {
   it.each([
     ['opencode route, non-Claude plan pin', {}, 'opencode'],
     ['codex route, non-Claude plan pin', { buildRoute: 'codex' as const }, 'codex-cli'],
+    [
+      'copilot route, copilot plan pin',
+      { buildRoute: 'copilot' as const, planHarnesses: ['copilot-cli'] },
+      'copilot-cli',
+    ],
     ['repo codex route with codexDisabled', { buildRoute: 'codex' as const, codexDisabled: true }, 'codex-cli'],
     ['claude route', { buildRoute: 'claude' as const }, undefined],
     ['undefined route', { buildRoute: undefined, buildRouteSource: 'plan' as const }, undefined],

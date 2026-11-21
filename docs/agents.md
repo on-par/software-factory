@@ -1,21 +1,22 @@
 # Coding agent setup
 
 This guide covers installing, signing in and configuring each supported coding agent CLI
-(Claude Code, Codex, OpenCode and Pi) for the factory. See [models.md](models.md) for model routing
+(Claude Code, Codex, OpenCode, Pi and GitHub Copilot CLI) for the factory. See [models.md](models.md) for model routing
 and [harness-contract.md](harness-contract.md) for the adapter contract. To bring your own CLI,
 see [Bring your own agent](#bring-your-own-agent).
 
 ## Harness matrix
 
-| Agent                   | Harness id       | Install and auth                                                                            | Phases                                                                                            | Sandbox                                                                                                                                                   | Usage and cost                                                                  | Rate-limit classification                                           | CI coverage                                                                  | Status         |
-| ----------------------- | ---------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------- |
-| Claude Code             | `claude-cli`     | `claude` on PATH; `/login` in `claude` or `ANTHROPIC_API_KEY`                               | PLAN, BUILD (`build_claude`), CHECK, review, triage                                               | Yes, the command is wrapped in the outer sandbox                                                                                                          | Tokens, cache tokens, turns, durations and cost from the JSON result envelope   | `classifyFailure`, plus `unavailable` for a zero-token error result | Contract tests in the required `ci` check; nightly evals install Claude Code | `supported`    |
-| Codex                   | `codex-cli`      | `codex` on PATH; `codex login`, `codex login --with-api-key` or `codex login --device-auth` | PLAN, BUILD (`build_codex`), CHECK, review, triage                                                | Outer OS sandbox where available; Codex's own sandbox is off by default (`--sandbox danger-full-access`), `sandbox.codexSandbox: workspace-write` opts in | Tokens from `turn.completed` events; no cost field, so cost uses registry price | `classifyFailure`                                                   | Contract tests in the required `ci` check                                    | `supported`    |
-| OpenCode                | `opencode`       | `opencode` on PATH; `opencode auth login`, `OPENCODE_API_KEY` optional                      | PLAN, BUILD (`build_opencode`), CHECK, review, triage when pinned; needs `FACTORY_EXPERIMENTAL=1` | No, the adapter does not take the sandbox request                                                                                                         | Tokens and cost summed from `step_finish` events                                | `classifyFailure`                                                   | Contract tests in the required `ci` check                                    | `experimental` |
-| Pi                      | `pi`             | `pi` on PATH; provider keys such as `OPENROUTER_API_KEY` in the environment                 | PLAN, BUILD (`build_command`, commit-only), CHECK, review, triage when pinned                     | Yes, the command is wrapped in the outer sandbox                                                                                                          | Tokens and cost summed from assistant `message_end` events                      | Every non-clean finish is `error` for now                           | Contract tests in the required `ci` check                                    | `experimental` |
-| Ollama (prompt-only)    | `ollama-http`    | Ollama server running locally, no login                                                     | PLAN, CHECK, review, triage; not BUILD (not agentic)                                              | No, it makes no file edits                                                                                                                                | Not reported                                                                    | `classifyFailure` on the HTTP status and body                       | Contract tests in the required `ci` check                                    | `experimental` |
-| Ollama (agentic)        | `ollama-agentic` | Ollama server running locally, no login                                                     | BUILD plus the other phases (agentic)                                                             | No                                                                                                                                                        | Not reported                                                                    | `classifyFailure`                                                   | Contract tests in the required `ci` check                                    | `experimental` |
-| Declared custom harness | `command`        | Your CLI on PATH, declared under `harnesses:` with an optional `probe`                      | PLAN, CHECK, review, triage; BUILD (`build_command`) only when declared `agentic: true`           | Yes, the command is wrapped in the outer sandbox                                                                                                          | `usage: jsonl` or none                                                          | Declared `errorPatterns`, then `classifyFailure`                    | Contract tests in the required `ci` check                                    | `supported`    |
+| Agent                   | Harness id       | Install and auth                                                                                                | Phases                                                                                                        | Sandbox                                                                                                                                                   | Usage and cost                                                                  | Rate-limit classification                                           | CI coverage                                                                  | Status         |
+| ----------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------- |
+| Claude Code             | `claude-cli`     | `claude` on PATH; `/login` in `claude` or `ANTHROPIC_API_KEY`                                                   | PLAN, BUILD (`build_claude`), CHECK, review, triage                                                           | Yes, the command is wrapped in the outer sandbox                                                                                                          | Tokens, cache tokens, turns, durations and cost from the JSON result envelope   | `classifyFailure`, plus `unavailable` for a zero-token error result | Contract tests in the required `ci` check; nightly evals install Claude Code | `supported`    |
+| Codex                   | `codex-cli`      | `codex` on PATH; `codex login`, `codex login --with-api-key` or `codex login --device-auth`                     | PLAN, BUILD (`build_codex`), CHECK, review, triage                                                            | Outer OS sandbox where available; Codex's own sandbox is off by default (`--sandbox danger-full-access`), `sandbox.codexSandbox: workspace-write` opts in | Tokens from `turn.completed` events; no cost field, so cost uses registry price | `classifyFailure`                                                   | Contract tests in the required `ci` check                                    | `supported`    |
+| OpenCode                | `opencode`       | `opencode` on PATH; `opencode auth login`, `OPENCODE_API_KEY` optional                                          | PLAN, BUILD (`build_opencode`), CHECK, review, triage when pinned; needs `FACTORY_EXPERIMENTAL=1`             | No, the adapter does not take the sandbox request                                                                                                         | Tokens and cost summed from `step_finish` events                                | `classifyFailure`                                                   | Contract tests in the required `ci` check                                    | `experimental` |
+| Pi                      | `pi`             | `pi` on PATH; provider keys such as `OPENROUTER_API_KEY` in the environment                                     | PLAN, BUILD (`build_command`, commit-only), CHECK, review, triage when pinned                                 | Yes, the command is wrapped in the outer sandbox                                                                                                          | Tokens and cost summed from assistant `message_end` events                      | Every non-clean finish is `error` for now                           | Contract tests in the required `ci` check                                    | `experimental` |
+| GitHub Copilot CLI      | `copilot-cli`    | `copilot` on PATH; `COPILOT_GITHUB_TOKEN` (fine-grained `github_pat_` with Copilot Requests) or `copilot login` | PLAN, BUILD (`build_copilot`, commit-only), CHECK, review, triage when pinned; needs `FACTORY_EXPERIMENTAL=1` | Yes, the command is wrapped in the outer sandbox; `--allow-all` only under `sandbox-exec` or `firejail`, or with `sandbox.copilotAllowAll: true`          | Tokens when the CLI reports them; zero registry price, so no USD cost           | Copilot sign-in errors, then `classifyFailure`                      | Contract tests in the required `ci` check                                    | `experimental` |
+| Ollama (prompt-only)    | `ollama-http`    | Ollama server running locally, no login                                                                         | PLAN, CHECK, review, triage; not BUILD (not agentic)                                                          | No, it makes no file edits                                                                                                                                | Not reported                                                                    | `classifyFailure` on the HTTP status and body                       | Contract tests in the required `ci` check                                    | `experimental` |
+| Ollama (agentic)        | `ollama-agentic` | Ollama server running locally, no login                                                                         | BUILD plus the other phases (agentic)                                                                         | No                                                                                                                                                        | Not reported                                                                    | `classifyFailure`                                                   | Contract tests in the required `ci` check                                    | `experimental` |
+| Declared custom harness | `command`        | Your CLI on PATH, declared under `harnesses:` with an optional `probe`                                          | PLAN, CHECK, review, triage; BUILD (`build_command`) only when declared `agentic: true`                       | Yes, the command is wrapped in the outer sandbox                                                                                                          | `usage: jsonl` or none                                                          | Declared `errorPatterns`, then `classifyFailure`                    | Contract tests in the required `ci` check                                    | `supported`    |
 
 `ollama-command-agent` is a retired alias. Models that name it, or set `codex: true` with `provider: ollama` and no `harness`, run on `ollama-agentic`, and the router logs a one-time warning (#3445).
 
@@ -180,6 +181,88 @@ Run `factory doctor` in the repo. The `coding agent` line lists `pi`, and the Pi
 `AZURE_OPENAI_API_KEY` in the environment. `factory models --doctor` runs
 `pi auth check --model <providerModel> --no-refresh` for each pinned Pi model (exit 0 is ready, 1 is
 not ready, 2 is invalid).
+
+## GitHub Copilot CLI
+
+### Install and log in
+
+Install the CLI with `npm install -g @github/copilot`. You need a GitHub Copilot plan that allows
+Copilot CLI. Create a fine-grained personal access token (`github_pat_`) that your personal account
+owns, give it the **Copilot Requests** permission, and export it as `COPILOT_GITHUB_TOKEN` in the
+factory's environment. Copilot CLI does not accept classic tokens (`ghp_`). On a workstation, a
+stored `copilot login` also works, but `factory doctor` cannot check it. Copilot models are
+experimental, so set `FACTORY_EXPERIMENTAL=1` in the factory's environment.
+
+The factory passes exactly one GitHub credential to the Copilot child process:
+`COPILOT_GITHUB_TOKEN`, read from the factory's own environment. It removes `GITHUB_TOKEN`,
+`GH_TOKEN` and every other GitHub credential from that child, and it ignores a
+`COPILOT_GITHUB_TOKEN` set in a lane's environment. Claude Code, Codex, OpenCode and Pi never receive
+`COPILOT_GITHUB_TOKEN`. The factory also passes `--secret-env-vars=COPILOT_GITHUB_TOKEN`, so Copilot
+removes the value from its shell and MCP environments and masks it in some of its output.
+
+### Minimal `.factory/config.yaml`
+
+```yaml
+version: 2
+models:
+  pins:
+    plan: copilot-default
+    build: copilot-default
+    checker: copilot-default
+    triage: copilot-default
+route: copilot
+```
+
+`copilot-default` sends no `--model`, so Copilot CLI uses its own default model. See
+[models.md](models.md#github-copilot-cli-model).
+
+### Tool approval and containment
+
+The factory runs `copilot --output-format json --stream off --no-ask-user --no-auto-update
+--disable-builtin-mcps --secret-env-vars=COPILOT_GITHUB_TOKEN` in the worktree, with the prompt on
+stdin from a temporary file. The prompt never appears in the command line. It removes
+`COPILOT_ALLOW_ALL`, `COPILOT_ASSISTED_APPROVAL`, `GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS`,
+`GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP` and `GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS` from the child
+environment, so a repository's hooks, workspace MCP servers and extensions do not load and no
+environment variable can grant tool approval. The factory does not override Copilot's own configuration, so approvals you saved
+(`~/.copilot/permissions-config.json`, `allowedUrls` in `settings.json`), user-level hooks, trusted
+folders and a `COPILOT_HOME` that points at them still apply; start an isolated runtime from a fresh
+Copilot home.
+
+`--allow-all` gives Copilot every tool, path and URL permission. The factory passes it only when one
+of these is true:
+
+- The `sandbox-exec` (macOS) or `firejail` (Linux) OS sandbox wraps the run. `docker-sandbox` and
+  `none` do not count, because neither wraps the command.
+- The repo config sets `sandbox.copilotAllowAll: true`. This grants all tool permissions, so set it
+  only inside an isolated runtime such as a disposable one-job container. No environment variable can
+  grant it.
+
+Otherwise Copilot runs without `--allow-all`. Tool calls that need approval are then denied, because
+nobody can answer an approval prompt in a non-interactive run, so BUILD usually cannot edit files. The
+run logs the decision and its reason once per task, for example
+`copilot: no --allow-all for task build_copilot (the OS sandbox is off); tool calls that need approval are denied`.
+When a denied tool call ends the run, the failure is `permission_denied` and its message names the
+containment that was missing.
+
+Under the OS sandbox, `~/.copilot` is writable. With `sandbox.network.mode: enforce`, add the Copilot
+API hosts your plan uses to `sandbox.network.allow`.
+
+### Verify with `factory doctor`
+
+Run `factory doctor` in the repo. The `coding agent` line lists `copilot`, and the GitHub Copilot CLI
+section shows `copilot installed` (with the CLI version) and `copilot signed in`. Sign-in evidence is
+`COPILOT_GITHUB_TOKEN` in the environment. Doctor makes no model call.
+
+### Known gaps
+
+- The JSON event mapping follows Copilot CLI's documented session events (`assistant.message`,
+  `assistant.usage`, `tool.execution_start`, `tool.execution_complete`, `session.error` and the final
+  `result` record). It has not yet been checked against a recorded transcript.
+- Effort is not passed. Session resume and sign-in helpers are not supported.
+- Copilot is not in any default tier. Pin it, as in [Recipe: Copilot-only](#recipe-copilot-only).
+
+Version tested: none yet (flags checked against GitHub Copilot CLI 1.0.114 help)
 
 ## Running in the current checkout
 
@@ -348,6 +431,29 @@ route: codex
 ```
 
 Version tested: 2.1.296 (Claude Code), codex-cli 0.155.1, ollama (version not recorded, see the local Ollama recipe)
+
+### Recipe: Copilot-only
+
+Use this when GitHub Copilot CLI is the only agent you have. Set `COPILOT_GITHUB_TOKEN` and
+`FACTORY_EXPERIMENTAL=1`. The pins cover PLAN, BUILD, the checkers and triage (including the
+readiness judge). The `boss` and `worker` tier overrides cover the roles that read those tiers, such
+as the stuck-run steward.
+
+```yaml
+version: 2
+models:
+  pins:
+    plan: copilot-default
+    build: copilot-default
+    checker: copilot-default
+    triage: copilot-default
+tiers:
+  boss: [copilot-default]
+  worker: [copilot-default]
+route: copilot
+```
+
+Version tested: none yet (flags checked against GitHub Copilot CLI 1.0.114 help)
 
 ## Bring your own agent
 

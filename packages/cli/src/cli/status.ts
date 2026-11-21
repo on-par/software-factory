@@ -47,6 +47,7 @@ import type { DiskGuard, OpenFactoryDrafts, QueueOrderConflict } from '@on-par/f
 
 import { formatBaseHoldStatus, readBaseHold } from './base-hold.js';
 import { notInitializedMessage } from './first-run.js';
+import { applyRouterSandbox } from './repo-router.js';
 import { selectQueueBackend } from './queue-backend-select.js';
 import type { CliDeps, CliExitError, readActiveProduct } from './index.js';
 import { formatLaneSlotsSection, readLaneSlots } from './lane-slots.js';
@@ -247,8 +248,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     effective.localOnly,
   );
   const sandbox = rt.configLoaders.loadFactoryConfigForRepo(paths.config).sandbox;
-  router.setCodexFullAccessTasks?.(sandbox.codexFullAccessTasks);
-  router.setCodexSandbox?.(sandbox.codexSandbox);
+  applyRouterSandbox(router, sandbox);
   router.setLocalAuthSink?.(recordLocalAuthFailure);
   const product = rt.readActiveProduct(paths.product) ?? '(none)';
 

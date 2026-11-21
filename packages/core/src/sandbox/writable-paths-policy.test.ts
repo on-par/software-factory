@@ -41,6 +41,7 @@ describe('sandbox.writablePaths (#3454)', () => {
       '/tmp',
       '/home/factory/.claude',
       '/home/factory/.codex',
+      '/home/factory/.copilot',
       '/home/factory/.openclaw',
       '/home/factory/.npm',
       '/home/factory/.cache',

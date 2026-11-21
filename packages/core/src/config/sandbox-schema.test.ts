@@ -102,3 +102,16 @@ describe('sandbox.codexSandbox config (#3829)', () => {
     expect(issue?.fix).toContain('docs/config.example.yaml');
   });
 });
+
+describe('sandbox.copilotAllowAll config', () => {
+  it('is unset by default, so Copilot gets no blanket tool approval without containment', () => {
+    expect(loadFactoryConfig().sandbox.copilotAllowAll).toBeUndefined();
+    expect(SandboxConfigSchema.parse({}).copilotAllowAll).toBeUndefined();
+  });
+
+  it('accepts true and false and rejects a non-boolean', () => {
+    expect(SandboxConfigSchema.parse({ copilotAllowAll: true }).copilotAllowAll).toBe(true);
+    expect(SandboxConfigSchema.parse({ copilotAllowAll: false }).copilotAllowAll).toBe(false);
+    expect(() => SandboxConfigSchema.parse({ copilotAllowAll: 'yes' })).toThrow();
+  });
+});

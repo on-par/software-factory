@@ -70,6 +70,11 @@ describe('scoreSpec', () => {
     expect(result.checks.find((check) => check.name === 'route-parseable')?.pass).toBe(false);
   });
 
+  it.each(['command', 'copilot'])('scores the pin-only %s route as unparseable', (route) => {
+    const spec = goodSpec.replace('route: codex', `route: ${route}`);
+    expect(scoreSpec(spec, spec, 'codex').route).toBe('unparseable');
+  });
+
   it('fails an unparseable route', () => {
     const spec = goodSpec.replace('route: codex', 'route: gpt-5');
     const result = scoreSpec(spec, spec, 'codex');

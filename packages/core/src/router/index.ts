@@ -9,6 +9,7 @@ import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
 import { DEFAULT_CODEX_CONTEXT_CEILING } from '../harness/codex-context-ceiling.js';
 import { CommandHarness } from '../harness/command.js';
+import { CopilotCliHarness } from '../harness/copilot-cli.js';
 import type { AgentEvent } from '../harness/agent-events.js';
 import type { CodingHarness, HarnessFailureReason, HarnessLiveUsage, HarnessUsage } from '../harness/index.js';
 import { taskRequiresAgenticHarness } from '../harness/index.js';
@@ -130,6 +131,7 @@ export interface ModelExecutorContext {
   primaryRepoRoot?: string;
   codexFullAccessTasks?: readonly string[];
   codexSandbox?: CodexSandboxMode;
+  copilotAllowAll?: boolean;
   /** Codex auto-compact limit for agentic build tasks, from build.contextCeiling (#3327). */
   contextCeiling?: number;
   /** Extra child-env vars (e.g. the lane's PORT lease) merged over the parent env. */
@@ -162,6 +164,7 @@ export class CliModelExecutor implements ModelExecutor {
   private ollamaHarness: OllamaHttpHarness;
   private opencodeHarness: OpenCodeHarness;
   private piHarness: PiHarness;
+  private copilotHarness: CopilotCliHarness;
   private ollamaAgenticHarness: OllamaAgenticHarness;
   private harnesses: Record<string, HarnessFactory>;
 
@@ -175,6 +178,7 @@ export class CliModelExecutor implements ModelExecutor {
     this.ollamaHarness = new OllamaHttpHarness(fetchFn);
     this.opencodeHarness = new OpenCodeHarness(execFn);
     this.piHarness = new PiHarness(execFn);
+    this.copilotHarness = new CopilotCliHarness(execFn);
     this.ollamaAgenticHarness = new OllamaAgenticHarness(fetchFn, execFn);
     this.harnesses = {
       'claude-cli': () => this.claudeHarness,
@@ -182,6 +186,7 @@ export class CliModelExecutor implements ModelExecutor {
       'ollama-http': () => this.ollamaHarness,
       opencode: () => this.opencodeHarness,
       pi: () => this.piHarness,
+      'copilot-cli': () => this.copilotHarness,
       'ollama-agentic': () => this.ollamaAgenticHarness,
       command: (harnessId, ctx, model) => {
         const declaration = ctx.registry.getHarnessDeclaration(harnessId);
@@ -248,6 +253,7 @@ export class CliModelExecutor implements ModelExecutor {
       | 'primaryRepoRoot'
       | 'codexFullAccessTasks'
       | 'codexSandbox'
+      | 'copilotAllowAll'
       | 'contextCeiling'
       | 'env'
       | 'onPgid'
@@ -268,6 +274,7 @@ export class CliModelExecutor implements ModelExecutor {
       primaryRepoRoot: ctx.primaryRepoRoot,
       codexFullAccessTasks: ctx.codexFullAccessTasks,
       codexSandbox: ctx.codexSandbox,
+      copilotAllowAll: ctx.copilotAllowAll,
       contextCeiling: ctx.contextCeiling,
       env: ctx.env,
       onPgid: ctx.onPgid,
@@ -303,6 +310,7 @@ export class ModelRouter {
   private agentEventSink?: (event: AgentEvent) => void;
   private codexFullAccessTasks: readonly string[] = [];
   private codexSandbox?: CodexSandboxMode;
+  private copilotAllowAll = false;
   private contextCeilings: Readonly<Record<string, number>> = { 'codex-cli': DEFAULT_CODEX_CONTEXT_CEILING };
   private stageSkipProviders?: ReadonlySet<string>;
   private codexWorkspacePaths?: { primaryRepoRoot: string; writableRoots: readonly string[] };
@@ -332,6 +340,10 @@ export class ModelRouter {
   /** Resolved sandbox.codexSandbox (#3830); undefined (unset or ignored unknown value) means no Codex sandbox (#3824). */
   setCodexSandbox(mode: CodexSandboxMode | undefined): void {
     this.codexSandbox = mode;
+  }
+
+  setCopilotAllowAll(allowAll: boolean | undefined): void {
+    this.copilotAllowAll = allowAll === true;
   }
 
   /** Per-harness context ceilings from build.contextCeiling; undefined restores the packaged default (#3327). */
@@ -667,6 +679,7 @@ export class ModelRouter {
             ...this.codexWorkspacePaths,
             codexFullAccessTasks: this.codexFullAccessTasks,
             codexSandbox: this.codexSandbox,
+            copilotAllowAll: this.copilotAllowAll,
             contextCeiling: contextCeilingFor(task, harnessId, this.contextCeilings),
             env,
             onPgid,

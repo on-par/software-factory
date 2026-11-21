@@ -2,7 +2,7 @@ import type { ModelRegistry } from '../models/index.js';
 import type { EffectiveModelPins, RepoFactoryConfig } from './repo.js';
 
 /** Same literal union as run/outcome.ts's BuildRoute; kept local so config/ never imports run/. */
-export type BuildRoutePin = 'codex' | 'claude' | 'opencode' | 'command';
+export type BuildRoutePin = 'codex' | 'claude' | 'opencode' | 'copilot' | 'command';
 
 /** The build route a pinned build model implies, read from its harness: declared agentic harness or Pi →
  *  command (wins over `codex: true`), codex-harness → codex, opencode → opencode, claude-cli → claude.
@@ -13,6 +13,7 @@ export function routeForBuildModel(registry: ModelRegistry, modelId: string | un
   if (harness && registry.ridesCommandRoute(harness)) return 'command';
   if (registry.isCodexModel(modelId)) return 'codex';
   if (harness === 'opencode') return 'opencode';
+  if (harness === 'copilot-cli') return 'copilot';
   return harness === 'claude-cli' ? 'claude' : undefined;
 }
 

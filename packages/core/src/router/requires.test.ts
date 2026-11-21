@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { loadModelsConfig, type ModelsConfig, type RoutesConfig } from '../config/index.js';
+import { ModelRegistry } from '../models/index.js';
 import { ModelRouter } from './index.js';
+import { filterModelsByRequires } from './requires.js';
 import { StubModelExecutor } from './stub.js';
+
+describe('filterModelsByRequires copilot', () => {
+  it('keeps only copilot-cli models for requires copilot', () => {
+    const registry = new ModelRegistry(loadModelsConfig());
+    const candidates = ['claude-sonnet-5', 'gpt-5.6-terra-medium', 'copilot-default', 'opencode-deepseek-v4-flash'];
+    expect(filterModelsByRequires(registry, candidates, 'copilot')).toEqual(['copilot-default']);
+  });
+});
 
 describe('ModelRouter.resolveAll requires command', () => {
   it('build_command keeps only models on declared agentic harnesses', () => {

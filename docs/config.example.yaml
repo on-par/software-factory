@@ -97,9 +97,9 @@ version: 2
   # An explicit value beats the FACTORY_CODEX=0 kill-switch.
   # openai: true
   # ollama: true
-# Build route for every issue: "codex", "claude", "opencode", or "command" (a declared agentic
-# harness under `harnesses`). Unset: derived from the build pin's harness, else PLAN decides per
-# issue.
+# Build route for every issue: "codex", "claude", "opencode", "copilot", or "command" (a declared
+# agentic harness under `harnesses`). Unset: derived from the build pin's harness, else PLAN decides
+# per issue.
 # route: "<route>"
 # Named evidence commands for design-artifact evidence plans (not the CHECK build/test/lint
 # commands; see `checks`). Shell-free argv; config overrides scripts.
@@ -349,6 +349,10 @@ workspace:
 # (#3824); workspace-write restores Codex's workspace-write sandbox with the network allowlist and
 # writable roots, and sandbox.codexFullAccessTasks then grants listed tasks full access; any other
 # value is ignored with a warning and will be an error in a later release (#3829).
+# sandbox.copilotAllowAll (default false) passes --allow-all to GitHub Copilot CLI even when no OS
+# sandbox (sandbox-exec or firejail) contains the run; it grants all tool permissions, so set it
+# only inside an isolated runtime such as a disposable one-job container. No environment variable
+# can grant it.
 sandbox:
   enabled: true
   runtime: "auto"

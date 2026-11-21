@@ -45,6 +45,12 @@ const CATALOG_ENTRIES: HarnessCatalogEntry[] = [
     probe: { kind: 'command', command: 'opencode', okLabel: 'opencode CLI', auth: 'cli' },
   },
   {
+    id: 'copilot-cli',
+    agentic: true,
+    autoLoads: ['AGENTS.md'],
+    probe: { kind: 'command', command: 'copilot', okLabel: 'copilot CLI', auth: 'cli' },
+  },
+  {
     id: 'pi',
     agentic: true,
     genericBuildRoute: true,

@@ -219,6 +219,7 @@ export function resolveSandboxPolicy(
     resolve(home, '.claude'),
     ...(claudeProfileDir ? [resolve(claudeProfileDir)] : []),
     resolve(home, '.codex'),
+    resolve(home, '.copilot'),
     resolve(home, '.openclaw'),
     resolve(home, '.npm'),
     resolve(home, '.cache'),

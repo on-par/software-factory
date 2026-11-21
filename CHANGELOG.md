@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- agents: GitHub Copilot CLI is a built-in, experimental `copilot-cli` harness for PLAN, BUILD (`route: copilot`, `build_copilot`), CHECK, review and triage when pinned to `copilot-default`. It streams live activity events and returns typed failures for a missing, rejected or classic token, a plan or policy denial, a used-up allowance and a denied tool call. It records token usage when the CLI reports it, at a zero registry price. The Copilot child receives only `COPILOT_GITHUB_TOKEN`, no other agent receives that token, and `--allow-all` is passed only under the `sandbox-exec` or `firejail` OS sandbox or with the new config-only `sandbox.copilotAllowAll: true`. `factory doctor` gains a GitHub Copilot CLI section, and `docs/agents.md` gains a Copilot-only recipe (#4330)
+
 ## 0.9.46 - 2026-11-21
 
 The links and accessibility checkers skip HTML files under `docs/` by default, and `checkers.html.ignore` replaces that default when set (#4324, #4325).
