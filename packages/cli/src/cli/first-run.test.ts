@@ -95,6 +95,13 @@ describe('missingAgentCliMessage', () => {
   it('says OpenCode models need FACTORY_EXPERIMENTAL=1', () => {
     expect(missingAgentCliMessage()).toContain('FACTORY_EXPERIMENTAL=1');
   });
+
+  it('gives GitHub Copilot CLI install and its token sign-in', () => {
+    const msg = missingAgentCliMessage();
+    expect(msg).toContain('npm install -g @github/copilot');
+    expect(msg).toContain('COPILOT_GITHUB_TOKEN');
+    expect(msg).toContain('pi or copilot');
+  });
 });
 
 describe('availableAgentClis', () => {
@@ -105,6 +112,10 @@ describe('availableAgentClis', () => {
 
   it('pi alone is enough (#2903)', () => {
     expect(availableAgentClis((c) => c === 'pi')).toEqual(['pi']);
+  });
+
+  it('copilot alone is enough', () => {
+    expect(availableAgentClis((c) => c === 'copilot')).toEqual(['copilot']);
   });
 });
 

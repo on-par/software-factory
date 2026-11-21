@@ -15,6 +15,7 @@ export const SandboxConfigSchema = z
     runtime: z.enum(['auto', 'sandbox-exec', 'firejail', 'docker-sandbox', 'none']).default('auto'),
     codexFullAccessTasks: z.array(z.string()).optional(),
     codexSandbox: z.enum(CODEX_SANDBOX_MODES).optional().catch(undefined),
+    copilotAllowAll: z.boolean().optional(),
     writablePaths: z
       .array(
         z.string().superRefine((entry, ctx) => {

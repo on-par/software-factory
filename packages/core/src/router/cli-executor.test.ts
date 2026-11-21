@@ -680,7 +680,8 @@ describe('CliModelExecutor', () => {
     const ids = new CliModelExecutor(recordingExec().fn).supportedHarnessIds();
     expect(ids).not.toContain(LEGACY_CODEX_OLLAMA_HARNESS);
     // Each id below is built from a CodingHarness class with codingHarnessContractCases coverage.
-    const contractVerified = ['claude-cli', 'codex-cli', 'ollama-http', 'opencode', 'pi', 'ollama-agentic', 'command'];
+    const agentClis = ['claude-cli', 'codex-cli', 'opencode', 'pi', 'copilot-cli'];
+    const contractVerified = [...agentClis, 'ollama-http', 'ollama-agentic', 'command'];
     expect([...ids].sort()).toEqual([...contractVerified].sort());
   });
 });

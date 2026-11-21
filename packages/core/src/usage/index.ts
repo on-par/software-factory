@@ -217,7 +217,7 @@ export function resolveRunUsageHarness(input: RunUsageHarnessInput): string | un
   if (planHarnesses.length === 0 || planHarnesses.some((h) => h === undefined || h === 'claude-cli')) {
     return undefined;
   }
-  return buildRoute === 'codex' ? 'codex-cli' : 'opencode';
+  return { codex: 'codex-cli', opencode: 'opencode', copilot: 'copilot-cli' }[buildRoute];
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

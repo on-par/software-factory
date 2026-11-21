@@ -93,6 +93,40 @@ export function codexActivity(parsed: Json): Activity[] {
   }
 }
 
+function copilotToolStart(data: Json): Activity {
+  const tool = str(data.toolName) || 'tool';
+  const server = str(data.mcpServerName);
+  const args = isPlainObject(data.arguments) ? data.arguments : {};
+  const main = MAIN_INPUT_KEYS.map((key) => str(args[key])).find(Boolean) || str(data.arguments);
+  if (server) return { kind: 'mcp', name: `${server}.${tool}`, summary: main || `${server}.${tool}` };
+  return { kind: 'tool_call', name: tool, summary: main || tool };
+}
+
+function copilotToolEnd(data: Json): Activity {
+  const ok = data.success === true;
+  const text = ok ? str(field(data.result, 'content')) : str(field(data.error, 'message')) || str(data.error);
+  const status = ok ? 'ok' : 'error';
+  return { kind: 'tool_result', summary: text.trim() ? `${status}: ${text}` : status };
+}
+
+export function copilotActivity(parsed: Json): Activity[] {
+  const data = isPlainObject(parsed.data) ? parsed.data : {};
+  switch (str(parsed.type)) {
+    case 'tool.execution_start':
+      return [copilotToolStart(data)];
+    case 'tool.execution_complete':
+      return [copilotToolEnd(data)];
+    case 'assistant.message':
+      return str(data.parentToolCallId) ? [] : [{ kind: 'text', summary: str(data.content) }];
+    case 'session.error':
+      return [{ kind: 'result', summary: `error: ${str(data.message) || str(data.errorType) || 'session error'}` }];
+    case 'result':
+      return [{ kind: 'result', summary: `exit ${String(parsed.exitCode ?? '?')}` }];
+    default:
+      return [];
+  }
+}
+
 export function agentEventStdout(
   request: Pick<HarnessRequest, 'task' | 'onEvent'>,
   activity: (parsed: Json) => Activity[],

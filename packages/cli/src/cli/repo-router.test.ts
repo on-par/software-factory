@@ -14,7 +14,7 @@ import {
 import { recordLocalAuthFailure } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
 
-import { newRepoRouter, type RepoRouterLoaders } from './repo-router.js';
+import { applyRouterSandbox, newRepoRouter, type RepoRouterLoaders } from './repo-router.js';
 
 const dirs = createTempDirs();
 
@@ -112,5 +112,26 @@ describe('newRepoRouter', () => {
     };
     newRepoRouter(root, loaders, RecordingRouter);
     expect(sandboxes).toEqual([undefined]);
+  });
+});
+
+describe('applyRouterSandbox', () => {
+  it('reads sandbox.copilotAllowAll from a repo config file onto the router', () => {
+    const seen: unknown[] = [];
+    class CopilotRecordingRouter extends ModelRouter {
+      override setCopilotAllowAll(...a: Parameters<ModelRouter['setCopilotAllowAll']>) {
+        seen.push(a[0]);
+        super.setCopilotAllowAll(...a);
+      }
+    }
+    for (const yaml of ['sandbox:\n  copilotAllowAll: true\n', 'sandbox:\n  runtime: none\n']) {
+      const root = dirs.makeSync('repo-router-copilot-');
+      const configPath = getFactoryPaths(root).config;
+      mkdirSync(dirname(configPath), { recursive: true });
+      writeFileSync(configPath, yaml);
+      const router = new CopilotRecordingRouter(loadModelsConfig(), loadRoutesConfig());
+      applyRouterSandbox(router, loadFactoryConfigForRepo(configPath).sandbox);
+    }
+    expect(seen).toEqual([true, undefined]);
   });
 });

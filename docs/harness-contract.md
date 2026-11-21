@@ -1,6 +1,6 @@
 # Harness adapter contract
 
-A **harness** is the provider adapter that runs a model: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`, `command` (runs a harness declared under `harnesses:`), plus `stub` in tests. This page specifies what the factory sends a harness, what it must return, how failures are classified, and what each phase expects. It describes current behavior only.
+A **harness** is the provider adapter that runs a model: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`, `pi`, `copilot-cli`, `command` (runs a harness declared under `harnesses:`), plus `stub` in tests. This page specifies what the factory sends a harness, what it must return, how failures are classified, and what each phase expects. It describes current behavior only.
 
 The source of truth is [`packages/core/src/harness/index.ts`](../packages/core/src/harness/index.ts). Failure classification lives in [`harness/classify.ts`](../packages/core/src/harness/classify.ts). The executable conformance kit is [`harness/contract.ts`](../packages/core/src/harness/contract.ts) (`codingHarnessContractCases`). Routing, effort and failover configuration are in [models.md](./models.md).
 
@@ -9,7 +9,7 @@ The source of truth is [`packages/core/src/harness/index.ts`](../packages/core/s
 A `CodingHarness` has three members:
 
 - `id`: a stable string such as `claude-cli`.
-- `agentic`: `true` when the harness can edit files in the worktree. Build tasks (`AGENTIC_BUILD_TASKS`: `build_codex`, `build_claude`, `build_opencode`) require an agentic harness; see `taskRequiresAgenticHarness`. Prompt-only harnesses such as `ollama-http` are rejected for builds.
+- `agentic`: `true` when the harness can edit files in the worktree. Build tasks (`AGENTIC_BUILD_TASKS`: `build_codex`, `build_claude`, `build_opencode`, `build_copilot`, `build_command`) require an agentic harness; see `taskRequiresAgenticHarness`. Prompt-only harnesses such as `ollama-http` are rejected for builds.
 - `run(request): Promise<HarnessResult>`.
 
 ## Inputs (`HarnessRequest`)
@@ -25,7 +25,7 @@ A `CodingHarness` has three members:
 | `env`            | Optional extra child environment variables (for example the lane's `PORT` lease), merged over the parent env.                                                                                                                                                                                                                                                       |
 | `sandbox`        | Optional `SandboxPolicy` ([`sandbox/index.ts`](../packages/core/src/sandbox/index.ts)): `runtime` (`sandbox-exec`, `firejail`, `docker-sandbox`, `none`), `worktree`, `writablePaths`, `writableFilePrefixes`, optional `deniedReadPaths`, `allowHosts`, optional `proxyUrl`, `cpuMs`, `memMb`. When set, the harness wraps its CLI invocation in that containment. |
 | `onPgid`         | Optional callback. When set, the child is spawned detached in its own process group and its pid is reported so the lane can kill the whole group later.                                                                                                                                                                                                             |
-| `onEvent`        | Optional callback. When set, the harness calls it with a short, redacted `AgentEvent` (tool call, tool result, skill, MCP call, text or result) for each stdout line as it arrives. Only the Claude Code and Codex harnesses emit events. A throwing callback is ignored.                                                                                           |
+| `onEvent`        | Optional callback. When set, the harness calls it with a short, redacted `AgentEvent` (tool call, tool result, skill, MCP call, text or result) for each stdout line as it arrives. Only the Claude Code, Codex and Copilot CLI harnesses emit events. A throwing callback is ignored.                                                                              |
 
 ## Outputs (`HarnessResult`)
 
@@ -57,6 +57,8 @@ Every failure must reject with `HarnessError(message, reason, details)`. The mes
 
 The `opencode` harness first maps the typed `error.type` of the first error event on both the non-zero-exit and exit-0 error paths: `provider.rate-limit` → `rate_limit`, `provider.quota` → `usage_cap`, `provider.auth` → `local_auth`, `provider.timeout` → `timeout`, `provider.connect` / `provider.no-route` → `unavailable`. Any other or missing type falls back to `classifyFailure`, and a killed process is always `timeout`.
 
+The `copilot-cli` harness matches Copilot CLI's documented sign-in errors before `classifyFailure`: "No authentication information found" → `local_auth`; "Authentication failed", "Classic Personal Access Tokens (ghp\_) are not supported" and "Access denied by policy settings" → `local_auth` with kind `auth`. "Permission denied and could not request permission" → `permission_denied`, with a message that names the missing containment. "Quota exceeded" → `usage_cap` is not yet confirmed against a live run. An empty final message is `empty_response` on exit 0 and on a non-zero exit with no other error, and a killed process is `timeout`.
+
 ### How the factory reacts
 
 The router's failover reads `err.reason`. The configured failover triggers (table in [models.md](./models.md)) default to `rate_limit`, `usage_cap`, `timeout`, `error` and `empty_response`. `rate_limit`, `usage_cap`, `timeout`, `unavailable` and `local_auth` are treated as provider or external faults: BUILD may switch from the claude route to a codex worker (`phases/build.ts`), and CHECK classifies them as external through the `EXTERNAL_REASONS` set in `phases/check.ts`.
@@ -65,7 +67,7 @@ The router's failover reads `err.reason`. The configured failover triggers (tabl
 
 ### PLAN
 
-The harness runs in the lane worktree and must write exactly one spec file at the path named in the prompt. The file has YAML frontmatter with `route:` (`codex`, `claude` or `opencode`) and a machine-validated `design:` block whose keys must match the template in the prompt. PLAN does not implement anything. If the repo pins a build worker, its harness overrides the route after PLAN (`packages/core/src/phases/plan.ts`).
+The harness runs in the lane worktree and must write exactly one spec file at the path named in the prompt. The file has YAML frontmatter with `route:` (`codex`, `claude`, `opencode`, or `copilot` when a Copilot build model is runnable) and a machine-validated `design:` block whose keys must match the template in the prompt. PLAN does not implement anything. If the repo pins a build worker, its harness overrides the route after PLAN (`packages/core/src/phases/plan.ts`).
 
 ### BUILD
 
@@ -81,7 +83,7 @@ Review calls such as the PR classifier ([`review/classifier.ts`](../packages/cor
 
 ## Usage watchdog
 
-Only `claude-cli` has a usage signal (the Anthropic subscription window, or the opt-in transcript estimator). `factory run` decides which harness the run uses: when the effective build route is `codex` or `opencode` and the plan pin (plus `planFallback`) is a non-Claude model, the run's harness is `codex-cli` or `opencode`. The watchdog then logs one `usage-unavailable` event, "usage watchdog not available for this agent (<harness>)", and does not gate the run on Claude usage.
+Only `claude-cli` has a usage signal (the Anthropic subscription window, or the opt-in transcript estimator). `factory run` decides which harness the run uses: when the effective build route is `codex`, `opencode` or `copilot` and the plan pin (plus `planFallback`) is a non-Claude model, the run's harness is `codex-cli`, `opencode` or `copilot-cli`. The watchdog then logs one `usage-unavailable` event, "usage watchdog not available for this agent (<harness>)", and does not gate the run on Claude usage.
 
 Every other case keeps Claude gating, including an unpinned plan, a Claude plan pin, an unknown route and local-only runs. Auxiliary Claude calls (checker, triage) in a non-Claude run are not gated by the watchdog.
 

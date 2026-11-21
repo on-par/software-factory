@@ -88,7 +88,7 @@ export const RepoFactoryConfigV1Schema = z
       })
       .strict()
       .optional(),
-    route: z.enum(['codex', 'claude', 'opencode', 'command']).optional(),
+    route: z.enum(['codex', 'claude', 'opencode', 'copilot', 'command']).optional(),
     commands: z.record(z.string(), z.string()).optional().describe(EVIDENCE_COMMANDS_DESCRIPTION),
     ...ChecksConfigSections,
     ...PrConfigSections,
@@ -256,10 +256,10 @@ export const RepoFactoryConfigV2Schema = z
      *  phase still writes the spec, but the pinned route wins over the model's
      *  route choice so deepseek workers are actually used when pinned. */
     route: z
-      .enum(['codex', 'claude', 'opencode', 'command'])
+      .enum(['codex', 'claude', 'opencode', 'copilot', 'command'])
       .optional()
       .describe(
-        'Build route for every issue: "codex", "claude", "opencode", or "command" (a declared agentic harness under `harnesses`). ' +
+        'Build route for every issue: "codex", "claude", "opencode", "copilot", or "command" (a declared agentic harness under `harnesses`). ' +
           "Unset: derived from the build pin's harness, else PLAN decides per issue.",
       ),
     commands: z.record(z.string(), z.string()).optional().describe(EVIDENCE_COMMANDS_DESCRIPTION),

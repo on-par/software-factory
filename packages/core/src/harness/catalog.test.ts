@@ -117,9 +117,18 @@ describe('retired harness aliases', () => {
 });
 
 describe('harnessAutoLoads (#1600)', () => {
-  it('lists AGENTS.md for codex-cli and opencode', () => {
+  it('lists AGENTS.md for codex-cli, opencode and copilot-cli', () => {
     expect(harnessAutoLoads('codex-cli')).toEqual(['AGENTS.md']);
     expect(harnessAutoLoads('opencode')).toEqual(['AGENTS.md']);
+    expect(harnessAutoLoads('copilot-cli')).toEqual(['AGENTS.md']);
+  });
+
+  it('probes copilot-cli as an agentic command harness whose CLI carries its own auth', () => {
+    expect(HARNESS_CATALOG['copilot-cli']).toMatchObject({
+      agentic: true,
+      probe: { kind: 'command', command: 'copilot', auth: 'cli' },
+    });
+    expect(harnessCliCommand('copilot-cli')).toBe('copilot');
   });
 
   it('is empty for other, unknown and undefined harnesses', () => {
