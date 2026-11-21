@@ -165,6 +165,18 @@ describe('CopilotCliHarness.run', () => {
     }
   });
 
+  it('removes the allow-all and assisted-approval variables a lane env carries', async () => {
+    const exec = recordingExec(SUCCESS);
+    await new CopilotCliHarness(exec, quiet).run(
+      request({ env: { COPILOT_ALLOW_ALL: 'true', COPILOT_ASSISTED_APPROVAL: 'true' } }),
+    );
+    const env = exec.calls[0]?.opts.env ?? {};
+    expect(Object.hasOwn(env, 'COPILOT_ALLOW_ALL')).toBe(true);
+    expect(env.COPILOT_ALLOW_ALL).toBeUndefined();
+    expect(Object.hasOwn(env, 'COPILOT_ASSISTED_APPROVAL')).toBe(true);
+    expect(env.COPILOT_ASSISTED_APPROVAL).toBeUndefined();
+  });
+
   it('passes --allow-all with an effective sandbox and with the opt-in, and logs the decision once per task', async () => {
     const lines: string[] = [];
     const exec = recordingExec(SUCCESS);

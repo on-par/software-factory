@@ -198,7 +198,7 @@ The factory passes exactly one GitHub credential to the Copilot child process:
 `GH_TOKEN` and every other GitHub credential from that child, and it ignores a
 `COPILOT_GITHUB_TOKEN` set in a lane's environment. Claude Code, Codex, OpenCode and Pi never receive
 `COPILOT_GITHUB_TOKEN`. The factory also passes `--secret-env-vars=COPILOT_GITHUB_TOKEN`, so Copilot
-removes the value from its shell and MCP environments and redacts it from its output.
+removes the value from its shell and MCP environments and masks it in some of its output.
 
 ### Minimal `.factory/config.yaml`
 
@@ -221,9 +221,12 @@ route: copilot
 The factory runs `copilot --output-format json --stream off --no-ask-user --no-auto-update
 --disable-builtin-mcps --secret-env-vars=COPILOT_GITHUB_TOKEN` in the worktree, with the prompt on
 stdin from a temporary file. The prompt never appears in the command line. It removes
-`COPILOT_ALLOW_ALL`, `GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS` and
-`GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP` from the child environment, so the factory alone decides
-tool approval.
+`COPILOT_ALLOW_ALL`, `COPILOT_ASSISTED_APPROVAL`, `GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS` and
+`GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP` from the child environment, so no environment variable can
+grant tool approval. The factory does not override Copilot's own configuration, so approvals you saved
+(`~/.copilot/permissions-config.json`, `allowedUrls` in `settings.json`), user-level hooks, trusted
+folders and a `COPILOT_HOME` that points at them still apply; start an isolated runtime from a fresh
+Copilot home.
 
 `--allow-all` gives Copilot every tool, path and URL permission. The factory passes it only when one
 of these is true:
@@ -258,7 +261,7 @@ section shows `copilot installed` (with the CLI version) and `copilot signed in`
 - Effort is not passed. Session resume and sign-in helpers are not supported.
 - Copilot is not in any default tier. Pin it, as in [Recipe: Copilot-only](#recipe-copilot-only).
 
-Version tested: none yet (flags checked against GitHub Copilot CLI 1.0.18 help)
+Version tested: none yet (flags checked against GitHub Copilot CLI 1.0.114 help)
 
 ## Running in the current checkout
 
@@ -449,7 +452,7 @@ tiers:
 route: copilot
 ```
 
-Version tested: none yet (flags checked against GitHub Copilot CLI 1.0.18 help)
+Version tested: none yet (flags checked against GitHub Copilot CLI 1.0.114 help)
 
 ## Bring your own agent
 

@@ -129,6 +129,7 @@ export function buildCopilotCommand(opts: { providerModel?: string; allowAll: bo
 
 export const COPILOT_CHILD_ENV_REMOVALS = [
   'COPILOT_ALLOW_ALL',
+  'COPILOT_ASSISTED_APPROVAL',
   'GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS',
   'GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP',
 ] as const;
