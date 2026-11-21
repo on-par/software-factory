@@ -72,6 +72,12 @@ export const defaultRoutesConfig: RoutesDefaults = {
         'OpenCode CLI implementation from frozen spec - requires the opencode harness (e.g. opencode-deepseek-v4-flash)',
       requires: 'opencode',
     },
+    build_copilot: {
+      tier: 'worker',
+      description:
+        'GitHub Copilot CLI implementation from frozen spec - requires the copilot-cli harness (e.g. copilot-default; commit-only; SHIP publishes after CHECK)',
+      requires: 'copilot',
+    },
     build_command: {
       tier: 'worker',
       description:

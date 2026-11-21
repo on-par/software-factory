@@ -21,7 +21,7 @@ Fixes land on `main`. Only the latest `main` is supported.
 
 ## Elevated agent permissions
 
-To run unattended, the factory invokes agent CLIs with permission checks disabled, for example `claude -p ... --permission-mode bypassPermissions` (the same mode as `--dangerously-skip-permissions`) and `codex exec ... -c approval_policy=never`, with `--sandbox danger-full-access` by default (inside an OS sandbox where available) or `--sandbox workspace-write` when `sandbox.codexSandbox: workspace-write` is set. Other harnesses also run unattended.
+To run unattended, the factory invokes agent CLIs with permission checks disabled, for example `claude -p ... --permission-mode bypassPermissions` (the same mode as `--dangerously-skip-permissions`) and `codex exec ... -c approval_policy=never`, with `--sandbox danger-full-access` by default (inside an OS sandbox where available) or `--sandbox workspace-write` when `sandbox.codexSandbox: workspace-write` is set. Other harnesses also run unattended. GitHub Copilot CLI is the exception to blanket approval: it gets `--allow-all` only when the `sandbox-exec` or `firejail` OS sandbox wraps the run, or when the repo config sets `sandbox.copilotAllowAll: true`, which you should set only inside an isolated runtime such as a disposable one-job container. No environment variable can grant it. The Copilot child process receives `COPILOT_GITHUB_TOKEN` and no other GitHub credential, and no other agent receives `COPILOT_GITHUB_TOKEN`.
 
 Every build runs inside an isolated git worktree, never in your main checkout. Agent-authored code (tests, dependency installs, scripts) still executes there with your user's privileges and whatever credentials are in the environment, such as `GITHUB_TOKEN`.
 

@@ -19,6 +19,7 @@ const TASK_PHASE: Record<string, string> = {
   security_review: 'ship',
   classify_pr: 'ship',
   build_opencode: 'build',
+  build_copilot: 'build',
   build_command: 'build',
   readiness_enrich: 'plan',
   readiness_judge: 'plan',

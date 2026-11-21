@@ -9,6 +9,7 @@ export const AGENTIC_BUILD_TASKS = [
   'build_codex',
   'build_claude',
   'build_opencode',
+  'build_copilot',
   'build_command',
 ] as const satisfies readonly TaskType[];
 
@@ -41,6 +42,7 @@ export interface HarnessRequest {
   primaryRepoRoot?: string;
   codexFullAccessTasks?: readonly string[];
   codexSandbox?: CodexSandboxMode;
+  copilotAllowAll?: boolean;
   env?: Record<string, string>;
   onPgid?: (pgid: number) => void;
   onEvent?: (event: AgentEvent) => void;

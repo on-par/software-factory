@@ -66,6 +66,7 @@ import { shipGitHubScope } from './ship-github-scope.js';
 import { restoredLoggingBreaker } from './provider-restored-log.js';
 import type { CliDeps, ConfigLoaderKey, CoreOpKey, GitOpKey, ShellOpKey } from './index.js';
 import { resolveRunBranch } from './run-branch.js';
+import { applyRouterSandbox } from './repo-router.js';
 import { shipRuntime } from './ship-runtime.js';
 import { phaseRecorder } from './ship-run-state.js';
 import { maybeWriteBenchmarkArtifacts, maybeWriteLocalRunReport } from './ship-reports.js';
@@ -210,8 +211,7 @@ async function shipIssueFrom(
     policy.effective.allowExperimental,
     policy.effective.localOnly,
   );
-  router.setCodexFullAccessTasks?.(policy.sandbox.codexFullAccessTasks);
-  router.setCodexSandbox?.(policy.sandbox.codexSandbox);
+  applyRouterSandbox(router, policy.sandbox);
   router.setContextCeilings?.(factoryConfig.build.contextCeiling);
   router.setLocalAuthSink?.(recordLocalAuthFailure);
   router.setProviderHold?.((p) => breaker.isHeldUntilCredentialsChange(p));

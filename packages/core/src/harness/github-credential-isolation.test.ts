@@ -7,15 +7,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeCliHarness } from './claude-cli.js';
 import { CodexCliHarness } from './codex-cli.js';
 import { makeContractRequest } from './contract.js';
+import { CopilotCliHarness } from './copilot-cli.js';
 import { OpenCodeHarness } from './opencode.js';
 
 const LEAKED =
-  'leaked=$(env | cut -d= -f1 | grep -E "^(GITHUB_TOKEN|GH_TOKEN|GITHUB_PAT|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN)$" | sort | tr "\\n" ",")';
+  'leaked=$(env | cut -d= -f1 | grep -E "^(GITHUB_TOKEN|GH_TOKEN|GITHUB_PAT|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN|COPILOT_GITHUB_TOKEN)$" | sort | tr "\\n" ",")';
 
 const FAKE_BINARIES: Record<string, string> = {
   claude: `${LEAKED}\nprintf '{"type":"result","result":"leaked=%s"}\\n' "$leaked"\n`,
   codex: `${LEAKED}\nwhile [ $# -gt 0 ]; do if [ "$1" = "-o" ]; then out="$2"; fi; shift; done\nprintf 'leaked=%s' "$leaked" > "$out"\n`,
   opencode: `${LEAKED}\nprintf 'leaked=%s' "$leaked"\n`,
+  copilot: `${LEAKED}\nprintf '{"type":"assistant.message","data":{"content":"leaked=%s value=%s"}}\\n' "$leaked" "$COPILOT_GITHUB_TOKEN"\n`,
 };
 
 describe.skipIf(process.platform === 'win32')('agent CLI harnesses never receive GitHub credentials', () => {
@@ -34,6 +36,7 @@ describe.skipIf(process.platform === 'win32')('agent CLI harnesses never receive
     vi.stubEnv('GITHUB_PAT', 'github-pat-opaque-value');
     vi.stubEnv('GH_ENTERPRISE_TOKEN', 'gh-enterprise-opaque');
     vi.stubEnv('GITHUB_ENTERPRISE_TOKEN', 'github-enterprise-opaque');
+    vi.stubEnv('COPILOT_GITHUB_TOKEN', 'copilot-opaque-value');
   });
 
   afterEach(async () => {
@@ -59,11 +62,27 @@ describe.skipIf(process.platform === 'win32')('agent CLI harnesses never receive
     });
   }
 
+  it('copilot: the child sees only COPILOT_GITHUB_TOKEN, with or without a smuggled lane env', async () => {
+    const harness = new CopilotCliHarness(undefined, { log: () => {} });
+    const bare = await harness.run(makeContractRequest({ worktree: dir }));
+    const withLaneEnv = await harness.run(
+      makeContractRequest({
+        worktree: dir,
+        env: { PORT: '3142', GITHUB_TOKEN: 'smuggled-in-lane-env', COPILOT_GITHUB_TOKEN: 'smuggled-copilot' },
+      }),
+    );
+
+    expect(bare.output).toBe('leaked=COPILOT_GITHUB_TOKEN, value=copilot-opaque-value');
+    expect(withLaneEnv.output).toBe('leaked=COPILOT_GITHUB_TOKEN, value=copilot-opaque-value');
+  });
+
   it('the stand-ins do see the credentials when explicitly allowed (sanity check of the probe)', async () => {
     const { defaultExecFn } = await import('../utils/exec.js');
 
     const { stdout } = await defaultExecFn('opencode', { cwd: dir, githubAuth: true });
 
-    expect(stdout).toBe('leaked=GH_ENTERPRISE_TOKEN,GH_TOKEN,GITHUB_ENTERPRISE_TOKEN,GITHUB_PAT,GITHUB_TOKEN,');
+    expect(stdout).toBe(
+      'leaked=COPILOT_GITHUB_TOKEN,GH_ENTERPRISE_TOKEN,GH_TOKEN,GITHUB_ENTERPRISE_TOKEN,GITHUB_PAT,GITHUB_TOKEN,',
+    );
   });
 });

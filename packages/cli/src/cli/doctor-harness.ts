@@ -3,7 +3,7 @@
 import { openCodeVersion } from '@on-par/factory-core/internal';
 
 import type { DoctorCheck } from './doctor.js';
-import { PI_INSTALL } from './first-run.js';
+import { COPILOT_INSTALL, PI_INSTALL } from './first-run.js';
 
 export interface HarnessSetup {
   section: string;
@@ -17,6 +17,7 @@ export interface HarnessSetup {
   next?: string;
   /** Env vars that count as sign-in evidence (#2556). */
   envKeys: readonly string[];
+  signInEvidence?: string;
   /** Judges the first `--version` line for the installed row (#2880); harnesses without one just print it. */
   checkVersion?: (versionLine: string | undefined) => Pick<DoctorCheck, 'ok' | 'detail' | 'fix'>;
 }
@@ -84,6 +85,16 @@ export const HARNESS_SETUP: readonly HarnessSetup[] = [
     login: 'run `pi` then `/login <provider>`, or export the provider key',
     next: 'pi',
     envKeys: ['OPENROUTER_API_KEY', 'OPENCODE_API_KEY', 'AZURE_OPENAI_API_KEY'],
+  },
+  {
+    section: 'GitHub Copilot CLI',
+    harnessId: 'copilot-cli',
+    cli: 'copilot',
+    install: COPILOT_INSTALL,
+    login: 'export COPILOT_GITHUB_TOKEN (a fine-grained github_pat_ token with the Copilot Requests permission)',
+    next: 'copilot login',
+    envKeys: ['COPILOT_GITHUB_TOKEN'],
+    signInEvidence: 'no COPILOT_GITHUB_TOKEN set; a stored `copilot login` is not checked',
   },
 ];
 

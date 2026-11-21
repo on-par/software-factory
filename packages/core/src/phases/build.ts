@@ -238,7 +238,7 @@ async function buildPhaseImpl(opts: {
         })
       : buildCommitOnlyPrompt(promptOptsFor('claude'));
   let prompt: string;
-  let taskType: 'build_codex' | 'build_claude' | 'build_opencode' | 'build_command';
+  let taskType: 'build_codex' | 'build_claude' | 'build_opencode' | 'build_copilot' | 'build_command';
 
   const modelOverride = modelOverrideOpt;
   if (route === 'codex') {
@@ -249,9 +249,9 @@ async function buildPhaseImpl(opts: {
   } else if (route === 'opencode') {
     taskType = 'build_opencode';
     prompt = buildOpencodePrompt(promptOptsFor('opencode', modelOverride));
-  } else if (route === 'command') {
-    taskType = 'build_command';
-    prompt = buildCommitOnlyPrompt(promptOptsFor('command', modelOverride));
+  } else if (route === 'command' || route === 'copilot') {
+    taskType = route === 'copilot' ? 'build_copilot' : 'build_command';
+    prompt = buildCommitOnlyPrompt(promptOptsFor(route, modelOverride));
   } else {
     taskType = 'build_claude';
     prompt = claudeRoutePrompt();

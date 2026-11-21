@@ -334,7 +334,7 @@ import { cmdRisk } from './risk.js';
 import { buildFeedbackDeps, type FeedbackDeps, resolveFeedbackRepo, runFeedback } from './feedback.js';
 import { healFactoryExclude, writeSampleQueue } from './init-files.js';
 import { detectChecksForInit } from './detect-checks.js';
-import { applyRouterGuards, newRepoRouter } from './repo-router.js';
+import { applyRouterGuards, applyRouterSandbox, newRepoRouter } from './repo-router.js';
 import { cmdLogs } from './logs.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { selectOctokit } from './github-stub.js';
@@ -1626,9 +1626,7 @@ async function cmdClassifierBacktestEntry(opts: ClassifierBacktestOptions) {
     effective.allowExperimental,
     effective.localOnly,
   );
-  const sandbox = configLoaders.loadFactoryConfigForRepo(paths.config).sandbox;
-  router.setCodexFullAccessTasks?.(sandbox.codexFullAccessTasks);
-  router.setCodexSandbox?.(sandbox.codexSandbox);
+  applyRouterSandbox(router, configLoaders.loadFactoryConfigForRepo(paths.config).sandbox);
   applyRouterGuards(router);
   try {
     await cmdClassifierBacktest(
@@ -1953,9 +1951,7 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
     effective.allowExperimental,
     effective.localOnly,
   );
-  const sandbox = configLoaders.loadFactoryConfigForRepo(paths.config).sandbox;
-  router.setCodexFullAccessTasks?.(sandbox.codexFullAccessTasks);
-  router.setCodexSandbox?.(sandbox.codexSandbox);
+  applyRouterSandbox(router, configLoaders.loadFactoryConfigForRepo(paths.config).sandbox);
   applyRouterGuards(router);
   const effectiveConfigLines = describeEffectiveConfig({
     router,
@@ -2857,9 +2853,7 @@ async function cmdTriage(opts: { product?: string; model?: string }) {
     effective.allowExperimental,
     effective.localOnly,
   );
-  const sandbox = configLoaders.loadFactoryConfigForRepo(paths.config).sandbox;
-  router.setCodexFullAccessTasks?.(sandbox.codexFullAccessTasks);
-  router.setCodexSandbox?.(sandbox.codexSandbox);
+  applyRouterSandbox(router, configLoaders.loadFactoryConfigForRepo(paths.config).sandbox);
   applyRouterGuards(router);
   router.skipMissingHarnessClis(coreOps.isCommandAvailable);
   router.setCostSink((entry) => logCost(paths.costs, { ...entry, issue: '-' }));

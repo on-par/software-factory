@@ -322,7 +322,7 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   const { commandAvailable, envPresent, tryExec } = probes;
   const found = availableAgentClis(commandAvailable);
   return HARNESS_SETUP.filter(({ harnessId }) => isHarnessCliPresent(harnessId, commandAvailable)).map(
-    ({ section, cli, login, next, envKeys }): DoctorCheck => {
+    ({ section, cli, login, next, envKeys, signInEvidence }): DoctorCheck => {
       const name = `${cli} signed in`;
       const fix = `sign in to ${section}: ${login}`;
       if (cli === 'claude' || cli === 'codex' || cli === 'opencode') {
@@ -409,7 +409,7 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
         ok: false,
         // Required only when this is the sole agent: then nothing else can run.
         optional: found.length > 1,
-        detail: `unverified: no sign-in evidence (${SIGN_IN_EVIDENCE[cli]})`,
+        detail: `unverified: no sign-in evidence (${signInEvidence ?? SIGN_IN_EVIDENCE[cli]})`,
         fix,
         next: next ?? login,
       };

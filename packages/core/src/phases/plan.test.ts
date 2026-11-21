@@ -2206,7 +2206,7 @@ npm run test`;
         new StubModelExecutor({ scripts: { plan: [{ output: '---\nroute: claude\n---\n# Spec\n' }] } }),
       );
       vi.spyOn(router, 'resolveAll').mockImplementation((task: string) =>
-        task === 'build_claude' || task === 'build_opencode' || task === 'build_command' ? [] : ['stub-model'],
+        task === 'build_codex' || !task.startsWith('build_') ? ['stub-model'] : [],
       );
       const octokit = fakeOctokit({
         'issues.get': async () => ({ data: { title: 'Codex only', body: 'Do it.' } }),

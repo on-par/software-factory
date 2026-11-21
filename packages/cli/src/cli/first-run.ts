@@ -34,9 +34,10 @@ Docs:                   ${DOCS_URL}
 export const CODEX_CLI_URL = 'https://developers.openai.com/codex/cli';
 export const OPENCODE_URL = 'https://opencode.ai';
 export const PI_INSTALL = 'npm install -g @earendil-works/pi-coding-agent';
+export const COPILOT_INSTALL = 'npm install -g @github/copilot';
 
 /** Coding agent CLIs the factory can drive for PLAN and BUILD. Any one of them is enough. */
-export const AGENT_CLIS = ['claude', 'codex', 'opencode', 'pi'] as const;
+export const AGENT_CLIS = ['claude', 'codex', 'opencode', 'pi', 'copilot'] as const;
 
 /** Agent CLIs from AGENT_CLIS found on PATH. */
 export function availableAgentClis(commandAvailable: (cmd: string) => boolean): string[] {
@@ -44,7 +45,7 @@ export function availableAgentClis(commandAvailable: (cmd: string) => boolean): 
 }
 
 export function missingAgentCliMessage(): string {
-  return `no coding agent CLI found on PATH (claude, codex, opencode or pi). Install one: Claude Code (${CLAUDE_CODE_URL}), the Codex CLI (${CODEX_CLI_URL}) or OpenCode (${OPENCODE_URL}; \`${openCodeVersion.OPENCODE_PINNED_INSTALL}\`) or Pi (\`${PI_INSTALL}\`), then sign in with \`claude /login\`, \`codex login\`, \`opencode auth login\` or \`pi\` then \`/login <provider>\`. OpenCode models are experimental: set FACTORY_EXPERIMENTAL=1 to use them`;
+  return `no coding agent CLI found on PATH (claude, codex, opencode, pi or copilot). Install one: Claude Code (${CLAUDE_CODE_URL}), the Codex CLI (${CODEX_CLI_URL}) or OpenCode (${OPENCODE_URL}; \`${openCodeVersion.OPENCODE_PINNED_INSTALL}\`) or Pi (\`${PI_INSTALL}\`) or GitHub Copilot CLI (\`${COPILOT_INSTALL}\`), then sign in with \`claude /login\`, \`codex login\`, \`opencode auth login\`, \`pi\` then \`/login <provider>\`, or COPILOT_GITHUB_TOKEN. OpenCode and Copilot models are experimental: set FACTORY_EXPERIMENTAL=1 to use them`;
 }
 
 export function missingTokenMessage(): string {

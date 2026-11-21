@@ -47,7 +47,7 @@ export { HarnessDeclarationSchema, type HarnessDeclaration } from './harness-dec
 // ---------- Schemas ----------
 
 export const ModelDefSchema = z.object({
-  provider: z.enum(['anthropic', 'openai', 'ollama', 'deepseek', 'custom']),
+  provider: z.enum(['anthropic', 'openai', 'ollama', 'deepseek', 'copilot', 'custom']),
   tier: z.union([z.string(), z.array(z.string())]),
   costPerMtokInput: z.number(),
   costPerMtokOutput: z.number(),

@@ -4,14 +4,13 @@
 // routes.json / factory.json (#716): tsc used to emit a second copy of those
 // into dist/, and the two load paths could disagree about which was
 // authoritative. Do not add JSON back to this package.
-//
 // Declares its own structural interfaces rather than importing zod or
 // @on-par/factory-core: this package is zero-dependency and config <- core
 // is the dependency direction (AGENTS.md), so the zod schemas in
 // packages/core/src/config/index.ts stay the single runtime shape authority.
 
 export interface ModelDefaults {
-  provider: 'anthropic' | 'openai' | 'ollama' | 'deepseek' | 'custom';
+  provider: 'anthropic' | 'openai' | 'ollama' | 'deepseek' | 'copilot' | 'custom';
   tier: string | string[];
   costPerMtokInput: number;
   costPerMtokOutput: number;
@@ -43,6 +42,7 @@ export interface ModelsDefaults {
   routingRules: Record<string, unknown>;
 }
 
+import { copilotModels } from './defaults-copilot.js';
 export type { RouteDefaults, RoutesDefaults } from './defaults-routes.js';
 export { defaultRoutesConfig } from './defaults-routes.js';
 export { defaultBudget, defaultSchemaFields } from './defaults-runtime.js';
@@ -88,7 +88,6 @@ export interface FactoryDefaults {
     enabled: boolean;
     runtime: 'auto' | 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
     codexFullAccessTasks?: string[];
-    /** Codex sandbox mode (#3829); unset = today's behavior. Not read yet. */
     codexSandbox?: 'danger-full-access' | 'workspace-write';
     /** Extra directories the sandbox may write (#3454): absolute or `~/…`; not `/`, `~`, or the repo. */
     writablePaths?: string[];
@@ -493,6 +492,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       endpoint: 'https://openrouter.ai/api',
       experimental: true,
     },
+    ...copilotModels,
   },
   tiers: {
     boss: [
@@ -698,7 +698,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
     resources: { cpuMs: 300000, memMb: 4096 },
     docker: { rolloutPercent: 0 },
     comment:
-      'Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open in report mode. Set sandbox.runtime (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime; auto probes the host. docker-sandbox is reserved for the microVM runtime and does not contain anything yet (#653). sandbox.docker.rolloutPercent (0-100) deterministically promotes that percentage of unpinned lanes into the docker-sandbox cohort for A/B evidence (#655). sandbox.network.blockTelemetry (default false) makes the egress proxy refuse known telemetry hosts (e.g. *.datadoghq.com) with 403, even if allowlisted; it only takes effect where the egress proxy runs (sandbox-exec with a non-empty allowlist) (#2667). sandbox.network.mode (report|enforce, default report; FACTORY_SANDBOX_NETWORK overrides) — enforce on sandbox-exec denies direct outbound connections and makes the egress proxy refuse hosts not on network.allow with 403 (#2215). sandbox.writablePaths (default []) adds directories BUILD/CHECK may write, e.g. ["~/.nuget"]; entries must be absolute or start with ~/, and may not be /, ~, the home dir, or a path equal to or containing the repo checkout (#3454). sandbox.codexSandbox (danger-full-access|workspace-write, default unset = danger-full-access) picks Codex\'s own sandbox; unset or danger-full-access runs codex with --sandbox danger-full-access like Claude (#3824); workspace-write restores Codex\'s workspace-write sandbox with the network allowlist and writable roots, and sandbox.codexFullAccessTasks then grants listed tasks full access; any other value is ignored with a warning and will be an error in a later release (#3829).',
+      'Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open in report mode. Set sandbox.runtime (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime; auto probes the host. docker-sandbox is reserved for the microVM runtime and does not contain anything yet (#653). sandbox.docker.rolloutPercent (0-100) deterministically promotes that percentage of unpinned lanes into the docker-sandbox cohort for A/B evidence (#655). sandbox.network.blockTelemetry (default false) makes the egress proxy refuse known telemetry hosts (e.g. *.datadoghq.com) with 403, even if allowlisted; it only takes effect where the egress proxy runs (sandbox-exec with a non-empty allowlist) (#2667). sandbox.network.mode (report|enforce, default report; FACTORY_SANDBOX_NETWORK overrides) — enforce on sandbox-exec denies direct outbound connections and makes the egress proxy refuse hosts not on network.allow with 403 (#2215). sandbox.writablePaths (default []) adds directories BUILD/CHECK may write, e.g. ["~/.nuget"]; entries must be absolute or start with ~/, and may not be /, ~, the home dir, or a path equal to or containing the repo checkout (#3454). sandbox.codexSandbox (danger-full-access|workspace-write, default unset = danger-full-access) picks Codex\'s own sandbox; unset or danger-full-access runs codex with --sandbox danger-full-access like Claude (#3824); workspace-write restores Codex\'s workspace-write sandbox with the network allowlist and writable roots, and sandbox.codexFullAccessTasks then grants listed tasks full access; any other value is ignored with a warning and will be an error in a later release (#3829). sandbox.copilotAllowAll (default false) passes --allow-all to GitHub Copilot CLI even when no OS sandbox (sandbox-exec or firejail) contains the run; it grants all tool permissions, so set it only inside an isolated runtime such as a disposable one-job container. No environment variable can grant it.',
   },
   discovery: {
     enabled: true,

@@ -47,14 +47,19 @@ Each `efforts` key is a registered model ID. A scalar applies to every task for 
 | OpenCode                               | `--variant`                               | Named effort levels listed for Codex above                          |
 | Pi                                     | `--thinking` (`none` is sent as `off`)    | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`          |
 | Ollama HTTP / agentic / command worker | `think`                                   | `true`, `false`, `low`, `medium`, `high`, `max`                     |
+| GitHub Copilot CLI                     | Not passed yet                            | None: any effort for a `copilot-cli` model fails before execution   |
 
 These are transport options, not a guarantee that every model supports every level. Use a level/variant supported by your selected model and installed CLI; the provider controls model-specific availability and may reject or normalize unsupported levels. Astra in the installed Codex catalog supports `low` through `ultra`; it does not support `none` or `minimal`. Claude's explicit factory effort also overrides inherited `CLAUDE_CODE_EFFORT_LEVEL`. Unknown model IDs, invalid values, and unsupported harness/value combinations fail before execution.
 
 Native references: [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference), [Claude effort](https://code.claude.com/docs/en/model-config#adjust-effort-level), [OpenCode variants](https://opencode.ai/docs/cli/#run), [Ollama thinking](https://docs.ollama.com/capabilities/thinking). Test the factory wiring without credentials or model calls with `npx vitest run packages/core/src/harness/effort.test.ts`.
 
-Every model declares a **harness** — the provider adapter that executes it: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`, or `pi`. Build tasks require an agentic (file-editing) harness; prompt-only harnesses like `ollama-http` are rejected for builds. A `pi` build pin runs BUILD through the generic commit-only `build_command` route. OpenCode models are reachable when the opencode CLI is logged in (`opencode auth login`); `OPENCODE_API_KEY` is an optional override. Per-task tokens and cost are logged to `.factory/state/costs.jsonl` (`factory cost` to inspect).
+Every model declares a **harness** — the provider adapter that executes it: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`, `pi`, or `copilot-cli`. Build tasks require an agentic (file-editing) harness; prompt-only harnesses like `ollama-http` are rejected for builds. A `pi` build pin runs BUILD through the generic commit-only `build_command` route. A `copilot-cli` build pin runs BUILD through the commit-only `build_copilot` route (`route: copilot`). OpenCode models are reachable when the opencode CLI is logged in (`opencode auth login`); `OPENCODE_API_KEY` is an optional override. Per-task tokens and cost are logged to `.factory/state/costs.jsonl` (`factory cost` to inspect).
 
 What a harness receives, must return and how its failures are classified is specified in [harness-contract.md](./harness-contract.md).
+
+## GitHub Copilot CLI model
+
+`copilot-default` is the packaged Copilot CLI model. It is experimental (set `FACTORY_EXPERIMENTAL=1`) and pin-only: it is in no tier, so the default tiers never pick it. It has no `providerModel`, so the factory sends no `--model` and Copilot CLI uses its own default model. Its registry price is zero: Copilot bills premium requests against your Copilot plan, and the factory records no USD cost for these calls. Token counts are recorded only when the CLI reports them. The `contextWindow` of 128000 is a conservative placeholder. Copilot CLI does not document a context window for its default model and manages its own context, so the factory uses the value only for informational notices. To use another Copilot model, add a registry model with `harness: copilot-cli` and `providerModel` set to the name `copilot help config` lists. See [Recipe: Copilot-only](agents.md#recipe-copilot-only).
 
 ## OpenCode-only profile
 

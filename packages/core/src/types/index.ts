@@ -23,7 +23,7 @@ import type { EvidencePlanResult } from '../checkers/evidence-plan.js';
 
 // ---------- Models ----------
 
-export type ModelProvider = 'anthropic' | 'openai' | 'ollama' | 'deepseek' | 'custom' | (string & {});
+export type ModelProvider = 'anthropic' | 'openai' | 'ollama' | 'deepseek' | 'copilot' | 'custom' | (string & {});
 export type ModelTier = string; // 'boss' | 'worker' | 'checker' | 'triage' | '*_fallback' — kept as string for extensibility
 export type ModelCapability = string; // kept as string for extensibility
 

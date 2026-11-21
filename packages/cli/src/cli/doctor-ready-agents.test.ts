@@ -47,7 +47,7 @@ describe('doctor-summary-ready-agents', () => {
 
   it('summary says ready: claude with a claude-only shim', () => {
     const checks = reconcileAgentAuthChecks(
-      runDoctorChecks(probes({ commandAvailable: without('codex', 'opencode', 'pi') })),
+      runDoctorChecks(probes({ commandAvailable: without('codex', 'opencode', 'pi', 'copilot') })),
     );
     expect(summaryLine(checks)).toMatch(/; ready: claude$/);
     expect(summaryLine(checks)).not.toContain('codex');
@@ -55,8 +55,33 @@ describe('doctor-summary-ready-agents', () => {
   });
 
   it('summary names claude and codex when both are signed in', () => {
-    const checks = reconcileAgentAuthChecks(runDoctorChecks(probes({ commandAvailable: without('opencode', 'pi') })));
+    const only = without('opencode', 'pi', 'copilot');
+    const checks = reconcileAgentAuthChecks(runDoctorChecks(probes({ commandAvailable: only })));
     expect(summaryLine(checks)).toMatch(/; ready: claude, codex$/);
+  });
+
+  it('summary names copilot when it is the only agent and COPILOT_GITHUB_TOKEN is set', () => {
+    const only = without('claude', 'codex', 'opencode', 'pi');
+    const checks = reconcileAgentAuthChecks(
+      runDoctorChecks(probes({ commandAvailable: only, envPresent: (key) => key === 'COPILOT_GITHUB_TOKEN' })),
+    );
+    expect(readyAgents(checks)).toEqual(['copilot']);
+    expect(checks.find((c) => c.name === 'copilot signed in')).toMatchObject({
+      ok: true,
+      section: 'GitHub Copilot CLI',
+      detail: 'signed in (COPILOT_GITHUB_TOKEN set)',
+    });
+  });
+
+  it('copilot without COPILOT_GITHUB_TOKEN is unverified and names the token as the next step', () => {
+    const only = without('claude', 'codex', 'opencode', 'pi');
+    const checks = runDoctorChecks(probes({ commandAvailable: only, envPresent: () => false }));
+    expect(checks.find((c) => c.name === 'copilot signed in')).toMatchObject({
+      ok: false,
+      optional: false,
+      detail: 'unverified: no sign-in evidence (no COPILOT_GITHUB_TOKEN set; a stored `copilot login` is not checked)',
+      next: 'copilot login',
+    });
   });
 
   it('omits ready when no agent is signed in', () => {

@@ -1,9 +1,9 @@
 import { type BuildRoutePin, routeForBuildModel } from '../config/repo.js';
 import type { ModelRouter } from '../router/index.js';
 
-export type BuildRouteName = 'codex' | 'claude' | 'opencode' | 'command';
+export type BuildRouteName = 'codex' | 'claude' | 'opencode' | 'copilot' | 'command';
 
-export const ROUTE_FALLBACK_ORDER: readonly BuildRouteName[] = ['claude', 'codex', 'opencode', 'command'];
+export const ROUTE_FALLBACK_ORDER: readonly BuildRouteName[] = ['claude', 'codex', 'opencode', 'copilot', 'command'];
 
 export const CLI_BUILD_ROUTES: readonly BuildRouteName[] = ['codex', 'claude', 'opencode'];
 
@@ -65,6 +65,8 @@ export const ROUTE_BULLETS: Record<BuildRouteName, string> = {
      pinned build worker is a claude-cli model (e.g. claude-sonnet-5 in .factory/config.json)`,
   opencode: `   - route: opencode — when the repo's pinned build worker is an opencode-harness model
      (e.g. opencode-deepseek-v4-flash in .factory/config.json); bounded mechanical work`,
+  copilot: `   - route: copilot — when the repo's pinned build worker is a copilot-cli model
+     (e.g. copilot-default in .factory/config.yaml); bounded mechanical work`,
   command: `   - route: command — when the repo's build worker is a declared agentic harness
      (harnesses: in .factory/config.yaml); bounded mechanical work`,
 };

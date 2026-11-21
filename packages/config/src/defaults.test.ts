@@ -74,9 +74,9 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.models[retired?.replacement ?? '']).toBeDefined();
   });
 
-  it('has 26 models with the expected harness-bearing spot checks', () => {
+  it('has 27 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
-    expect(modelIds).toHaveLength(26);
+    expect(modelIds).toHaveLength(27);
 
     for (const id of [
       'claude-opus-5',
@@ -295,9 +295,9 @@ describe('shipped defaults', () => {
     });
   });
 
-  it('has 25 routes, each pointing at a known tier', () => {
+  it('has 26 routes, each pointing at a known tier', () => {
     const routeIds = Object.keys(defaultRoutesConfig.routes);
-    expect(routeIds).toHaveLength(25);
+    expect(routeIds).toHaveLength(26);
 
     const tierIds = new Set(Object.keys(defaultModelsConfig.tiers));
     for (const [route, def] of Object.entries(defaultRoutesConfig.routes)) {

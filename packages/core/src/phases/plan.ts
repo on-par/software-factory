@@ -104,7 +104,7 @@ export function buildPlanPrompt(opts: PlanPromptOpts): string {
   const runnable = opts.runnableRoutes ?? [];
   const fallbackRoute = defaultBuildRoute(runnable);
   const offered = runnable.length > 0 ? runnable : CLI_BUILD_ROUTES;
-  const routeBullets = (['codex', 'claude', 'opencode', 'command'] as const)
+  const routeBullets = (['codex', 'claude', 'opencode', 'copilot', 'command'] as const)
     .filter((r) => offered.includes(r))
     .map((r) => ROUTE_BULLETS[r])
     .join('\n');
