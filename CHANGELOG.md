@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.46 - 2026-11-21
+
+The links and accessibility checkers skip HTML files under `docs/` by default, and `checkers.html.ignore` replaces that default when set (#4324, #4325).
+All seven published `@on-par` packages move to 0.9.46 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Changed
 
 - checkers: the links and accessibility checkers skip HTML files under `docs/` by default and say how many files they ignored; the new `checkers.html.ignore` repo config key takes a list of path prefixes or globs that replaces the `docs/**` default, and `checkers.html.ignore: []` scans every HTML file again (#4324)
