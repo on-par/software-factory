@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- agents: the experimental `copilot-cli` harness's JSON parser, activity events and error map now follow Copilot CLI 1.0.114's documented session events. They are tested against synthetic fixtures but not yet checked against a live run. A tool call denied without containment now goes back to the agent: a run that still ends with a non-empty final message and exit 0 keeps its result and logs the denial, and only an empty final message fails as `permission_denied`. The harness never passes `--trust-folder` (#4330)
+
 ## 0.9.47 - 2026-11-21
 
 ### Added
