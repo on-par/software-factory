@@ -131,43 +131,60 @@ describe('harness agent events', () => {
   });
 });
 
-describe('copilotActivity (documented session event shapes; unverified against a live transcript)', () => {
-  it('maps tool, MCP, message and result events and emits nothing for token deltas', () => {
-    const stdout = [
-      { type: 'assistant.message_delta', data: { deltaContent: 'Rea' } },
-      { type: 'tool.execution_start', data: { toolName: 'view', arguments: { path: 'src/a.ts' } } },
-      { type: 'tool.execution_complete', data: { success: true, result: { content: 'export const a = 1;' } } },
-      { type: 'tool.execution_start', data: { toolName: 'get_issue', mcpServerName: 'github', arguments: {} } },
-      { type: 'tool.execution_complete', data: { success: false, error: { message: 'not found' } } },
-      { type: 'tool.execution_start', data: { toolName: 'bash', arguments: 'raw args' } },
-      { type: 'tool.execution_complete', data: { success: false } },
-      { type: 'assistant.message', data: { content: 'Done.' } },
-      { type: 'assistant.message', data: { content: 'sub-agent note', parentToolCallId: 't1' } },
-      { type: 'session.error', data: { errorType: 'quota' } },
-      { type: 'result', exitCode: 0 },
-    ]
-      .map(line)
-      .join('');
-    expect(stream(copilotActivity, stdout).map((e) => [e.kind, e.name, e.summary])).toEqual([
-      ['tool_call', 'view', '<path>'],
-      ['tool_result', undefined, 'ok: export const a = 1;'],
-      ['mcp', 'github.get_issue', 'github.get_issue'],
-      ['tool_result', undefined, 'error: not found'],
-      ['tool_call', 'bash', 'raw args'],
-      ['tool_result', undefined, 'error'],
-      ['text', undefined, 'Done.'],
-      ['result', undefined, 'error: quota'],
+describe('copilotActivity', () => {
+  const fixture = (name: string) =>
+    readFileSync(join(__dirname, `../__fixtures__/copilot-cli/copilot-cli-synthetic-1.0.114.${name}.jsonl`), 'utf8');
+  const summaries = (stdout: string) => stream(copilotActivity, stdout).map((e) => [e.kind, e.name, e.summary]);
+
+  it('maps the success run to tool_call, tool_result, mcp, text and result events (synthetic 1.0.114 fixture)', () => {
+    expect(summaries(fixture('success'))).toEqual([
+      ['text', undefined, 'Reading the code first.'],
+      ['tool_call', 'bash', 'ls src'],
+      ['tool_result', undefined, 'ok: index.ts parser.ts'],
+      ['mcp', 'example-server.get_item', 'example-server.get_item'],
+      ['tool_result', undefined, 'error: item not found'],
+      ['tool_call', 'task', 'Review the parser'],
+      ['tool_result', undefined, 'ok: The parser handles CRLF.'],
+      ['text', undefined, 'Added a unit test for the parser and ran it.'],
       ['result', undefined, 'exit 0'],
     ]);
   });
 
-  it('redacts and truncates summaries', () => {
+  it('emits nothing for token deltas, sub-agent messages, usage, session.idle or the fixture note (synthetic 1.0.114 fixture)', () => {
+    const silent = /"type":"(fixture\.note|assistant\.message_delta|assistant\.usage|session\.idle)"|"agentId"/;
+    const quiet = fixture('success')
+      .split('\n')
+      .filter((l) => silent.test(l));
+    expect(quiet).toHaveLength(9);
+    expect(summaries(`${quiet.join('\n')}\n`)).toEqual([]);
+  });
+
+  it('maps session.error and a failed result record (synthetic 1.0.114 fixture)', () => {
+    expect(summaries(fixture('error-rate-limit'))).toEqual([
+      ['result', undefined, 'error: Request was throttled. Try again later.'],
+      ['result', undefined, 'exit 1'],
+    ]);
+  });
+
+  it.each([
+    [{ type: 'result', data: { exitCode: 2 } }, 'exit 2'],
+    [{ type: 'result' }, 'exit ?'],
+    [{ type: 'session.error', data: { errorType: 'quota' } }, 'error: quota'],
+    [{ type: 'tool.execution_complete', data: { success: false } }, 'error'],
+    [{ type: 'tool.execution_start', data: { toolName: 'bash', arguments: 'raw args' } }, 'raw args'],
+  ])('summarizes the copilot line %j', (value, summary) => {
+    expect(stream(copilotActivity, line(value)).map((e) => e.summary)).toEqual([summary]);
+  });
+
+  it('redacts and truncates a summary (synthetic 1.0.114 fixture shell call with a long, secret-bearing command)', () => {
     const token = `github_pat_${'A'.repeat(40)}`;
     const command = `echo ${token} ${'x'.repeat(300)}`;
-    const events = stream(
-      copilotActivity,
-      line({ type: 'tool.execution_start', data: { toolName: 'bash', arguments: { command } } }),
-    );
+    const start =
+      fixture('success')
+        .split('\n')
+        .find((l) => l.includes('"type":"tool.execution_start"')) ?? '';
+    const events = stream(copilotActivity, `${start.replace('ls src', command)}\n`);
+    expect(events.map((e) => e.name)).toEqual(['bash']);
     expect(events[0]?.summary).not.toContain(token);
     expect(events[0]?.summary).toMatch(/…\[truncated \d+ chars\]$/);
   });

@@ -1,0 +1,25 @@
+{"type":"fixture.note","data":{"note":"synthetic, built from documented Copilot CLI 1.0.114 output; unverified against a live run"}}
+{"id":"evt-0001","parentId":null,"timestamp":"2026-01-01T00:00:00.000Z","type":"user.message","data":{"content":"Synthetic prompt: add a unit test for the parser."}}
+{"id":"evt-0002","parentId":"evt-0001","timestamp":"2026-01-01T00:00:01.000Z","type":"assistant.turn_start","data":{"turnId":"1"}}
+{"id":"evt-0003","parentId":"evt-0002","timestamp":"2026-01-01T00:00:02.000Z","type":"assistant.message_delta","data":{"messageId":"msg-0001","deltaContent":"Reading "},"ephemeral":true}
+{"id":"evt-0004","parentId":"evt-0003","timestamp":"2026-01-01T00:00:03.000Z","type":"assistant.message_delta","data":{"messageId":"msg-0001","deltaContent":"the code first."},"ephemeral":true}
+{"id":"evt-0005","parentId":"evt-0004","timestamp":"2026-01-01T00:00:04.000Z","type":"assistant.message","data":{"messageId":"msg-0001","turnId":"1","content":"Reading the code first.","toolRequests":[{"toolCallId":"call-0001","name":"bash","arguments":{"command":"ls src"}},{"toolCallId":"call-0002","name":"example-server-get_item","mcpServerName":"example-server","mcpToolName":"get_item","arguments":{"id":"item-0001"}}]}}
+{"id":"evt-0006","parentId":"evt-0005","timestamp":"2026-01-01T00:00:05.000Z","type":"assistant.usage","data":{"model":"synthetic-model","inputTokens":1200,"outputTokens":80,"cacheReadTokens":400},"ephemeral":true}
+{"id":"evt-0007","parentId":"evt-0006","timestamp":"2026-01-01T00:00:06.000Z","type":"tool.execution_start","data":{"toolCallId":"call-0001","toolName":"bash","arguments":{"command":"ls src"},"turnId":"1"}}
+{"id":"evt-0008","parentId":"evt-0007","timestamp":"2026-01-01T00:00:07.000Z","type":"tool.execution_complete","data":{"toolCallId":"call-0001","success":true,"result":{"content":"index.ts\nparser.ts"},"turnId":"1"}}
+{"id":"evt-0009","parentId":"evt-0008","timestamp":"2026-01-01T00:00:08.000Z","type":"tool.execution_start","data":{"toolCallId":"call-0002","toolName":"example-server-get_item","mcpServerName":"example-server","mcpToolName":"get_item","arguments":{"id":"item-0001"},"turnId":"1"}}
+{"id":"evt-0010","parentId":"evt-0009","timestamp":"2026-01-01T00:00:09.000Z","type":"tool.execution_complete","data":{"toolCallId":"call-0002","success":false,"error":{"message":"item not found"},"turnId":"1"}}
+{"id":"evt-0011","parentId":"evt-0010","timestamp":"2026-01-01T00:00:10.000Z","type":"assistant.turn_start","data":{"turnId":"2"}}
+{"id":"evt-0012","parentId":"evt-0011","timestamp":"2026-01-01T00:00:11.000Z","type":"assistant.message","data":{"messageId":"msg-0002","turnId":"2","content":"","toolRequests":[{"toolCallId":"call-0003","name":"task","arguments":{"description":"Review the parser"}}]}}
+{"id":"evt-0013","parentId":"evt-0012","timestamp":"2026-01-01T00:00:12.000Z","type":"tool.execution_start","data":{"toolCallId":"call-0003","toolName":"task","arguments":{"description":"Review the parser"},"turnId":"2"}}
+{"id":"evt-0014","parentId":"evt-0013","timestamp":"2026-01-01T00:00:13.000Z","type":"subagent.started","data":{"toolCallId":"call-0003","agentName":"reviewer","agentDisplayName":"Reviewer","agentDescription":"Reviews code"}}
+{"id":"evt-0015","parentId":"evt-0014","timestamp":"2026-01-01T00:00:14.000Z","type":"assistant.turn_start","agentId":"agent-0001","data":{"turnId":"1","parentToolCallId":"call-0003"}}
+{"id":"evt-0016","parentId":"evt-0015","timestamp":"2026-01-01T00:00:15.000Z","type":"assistant.message","agentId":"agent-0001","data":{"messageId":"msg-0003","turnId":"1","content":"Sub-agent note: the parser handles CRLF.","toolRequests":[]}}
+{"id":"evt-0017","parentId":"evt-0016","timestamp":"2026-01-01T00:00:16.000Z","type":"assistant.usage","agentId":"agent-0001","data":{"model":"synthetic-model","inputTokens":300,"outputTokens":40},"ephemeral":true}
+{"id":"evt-0018","parentId":"evt-0017","timestamp":"2026-01-01T00:00:17.000Z","type":"subagent.completed","data":{"toolCallId":"call-0003","agentName":"reviewer","agentDisplayName":"Reviewer"}}
+{"id":"evt-0019","parentId":"evt-0018","timestamp":"2026-01-01T00:00:18.000Z","type":"tool.execution_complete","data":{"toolCallId":"call-0003","success":true,"result":{"content":"The parser handles CRLF."},"turnId":"2"}}
+{"id":"evt-0020","parentId":"evt-0019","timestamp":"2026-01-01T00:00:19.000Z","type":"assistant.turn_start","data":{"turnId":"3"}}
+{"id":"evt-0021","parentId":"evt-0020","timestamp":"2026-01-01T00:00:20.000Z","type":"assistant.message","data":{"messageId":"msg-0004","turnId":"3","content":"Added a unit test for the parser and ran it.","toolRequests":[]}}
+{"id":"evt-0022","parentId":"evt-0021","timestamp":"2026-01-01T00:00:21.000Z","type":"assistant.usage","data":{"model":"synthetic-model","inputTokens":1500,"outputTokens":120,"cacheReadTokens":1000},"ephemeral":true}
+{"id":"evt-0023","parentId":"evt-0022","timestamp":"2026-01-01T00:00:22.000Z","type":"session.idle","data":{},"ephemeral":true}
+{"type":"result","exitCode":0,"usage":{"premiumRequests":1,"totalApiDurationMs":4200,"sessionDurationMs":9000}}
