@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.49 - 2026-11-23
+
+Local model provider probing is now opt-in, so factory-cli no longer connects to a local Ollama port unless Ollama is configured (#4345). Releases stage on npm and move `latest` only after a clean-container install of factory-cli succeeds (#4344).
+All seven published `@on-par` packages move to 0.9.49 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Fixed
 
 - router: **heads-up:** factory-cli no longer probes a local model provider port without configuration. Ollama models are routed, and the Ollama endpoint is probed, only when Ollama is configured: `OLLAMA_BASE_URL` is set, local-only mode is on (`FACTORY_LOCAL_ONLY=1`), or the repo config sets `providers.ollama: true` or names an Ollama model in `tiers`, `models.pins` or `models.registry`. Otherwise Ollama models are skipped with no network attempt and routing moves to the next model, as when the probe reports Ollama unreachable. A local Ollama on the default port that relied on no configuration now needs `OLLAMA_BASE_URL=http://127.0.0.1:11434`
