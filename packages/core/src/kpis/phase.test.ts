@@ -13,11 +13,10 @@ describe('phase attribution (#3126)', () => {
     expect(phaseOfTask('readiness_judge')).toBe('plan');
   });
 
-  it('maps build_opencode, build_command, readiness_enrich, decompose and steward rows to their phase', () => {
+  it('maps build_opencode, build_command, decompose and steward rows to their phase', () => {
     expect(phaseOfCostEntry(cost('build_opencode'))).toBe('build');
     expect(phaseOfCostEntry(cost('build_copilot'))).toBe('build');
     expect(phaseOfCostEntry(cost('build_command'))).toBe('build');
-    expect(phaseOfCostEntry(cost('readiness_enrich'))).toBe('plan');
     expect(phaseOfCostEntry(cost('decompose'))).toBe('plan');
     expect(phaseOfCostEntry(cost('steward'))).toBe('ship');
   });
@@ -30,5 +29,6 @@ describe('phase attribution (#3126)', () => {
     expect(phaseOfTask('unknown')).toBeNull();
     expect(phaseOfTask('')).toBeNull();
     expect(phaseOfTask('constructor')).toBeNull();
+    expect(phaseOfTask('readiness_enrich')).toBeNull();
   });
 });

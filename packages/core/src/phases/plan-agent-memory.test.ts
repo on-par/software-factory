@@ -45,7 +45,6 @@ const routes: RoutesConfig = {
   version: 1,
   routes: {
     plan: { tier: 'boss', description: 'stub' },
-    readiness_enrich: { tier: 'boss', description: 'stub' },
     decompose: { tier: 'boss', description: 'stub' },
   },
 };

@@ -175,13 +175,15 @@ export function applyJudgeResult(
   result: JudgeReadinessResult,
   unpriced: boolean,
 ): IssueCheckReport {
-  if (result.kind === 'skipped') return { ...report, judgeSkipped: 'epic' };
+  const sizeReasons = report.size.reason ? [report.size.reason] : [];
+  const sizeExit = report.size.verdict === 'would-split' ? 3 : 0;
+  if (result.kind === 'skipped') return { ...report, judgeSkipped: 'epic', reasons: sizeReasons, exitCode: sizeExit };
   if (result.kind === 'error') throw new ReadinessJudgeError(result.errorKind, result.detail);
   const { verdict } = result;
   const fresh = unpriced && !result.cached;
   const reasons =
     verdict.verdict === 'not-ready' ? verdict.questions.map((q) => `question: [${q.aspect}] ${q.text}`) : [];
-  if (report.size.reason) reasons.push(report.size.reason);
+  reasons.push(...sizeReasons);
   return {
     ...report,
     verdict: verdict.verdict,
@@ -197,7 +199,7 @@ export function applyJudgeResult(
       bodyHash: result.bodyHash,
     },
     reasons,
-    exitCode: verdict.verdict === 'not-ready' ? 1 : report.size.verdict === 'would-split' ? 3 : 0,
+    exitCode: verdict.verdict === 'not-ready' ? 1 : sizeExit,
   };
 }
 

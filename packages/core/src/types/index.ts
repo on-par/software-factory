@@ -315,6 +315,15 @@ export interface ReadinessInfo {
   /** Why the size gate failed, e.g. 'too big: 7 in-scope items, 8 acceptance
    *  criteria'; absent when `sizeOk` is true. */
   sizeReason?: string;
+  judge?: {
+    verdict: 'ready' | 'ready-with-assumptions' | 'not-ready';
+    questions: { aspect: string; text: string }[];
+    assumptions: { aspect: string; text: string }[];
+    aspects: string[];
+    cached: boolean;
+    model: string;
+    promptVersion: string;
+  };
 }
 
 /** Structured payload carried on `queue_reprioritized` events (#869). */

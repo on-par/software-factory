@@ -78,6 +78,8 @@ factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue
 
 While SHIP waits for CI, a PR with no checks reported yet counts as pending. If the CI watch itself fails (for example a GitHub API error), CI counts as unknown: SHIP fails with `CI unknown`, never marks the PR ready, and the run parks `fail`. `factory ship` ends at a green, ready-for-review PR. Merging stays with you: merge it, or run `factory land <N>`. `factory run` processes the whole queue in parallel lanes.
 
+Before PLAN, a model judges whether the issue is clear enough to build; headings are not required, and the factory never edits the issue. `readiness.judge` picks the mode: `advisory` (default) logs the verdict and always proceeds, `enforce` parks an unclear issue as `not-ready` with the judge's questions in one issue comment, and `off` skips the judge. Answer the questions by editing the issue description, then run `factory unpark <N>`. Any assumptions the judge made are listed under `## Assumptions` in the PR body.
+
 ## GitHub Actions
 
 You can also run one factory command (`run-issue <n>`, `ship <n>` or `doctor`) on a GitHub-hosted runner. Call the reusable workflow from your own repo, pinned to a release tag, and pass your own secrets (`FACTORY_GITHUB_TOKEN` plus the selected provider's key):

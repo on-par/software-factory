@@ -405,6 +405,7 @@ export function buildRunRequest({
     runDeadlineAt: process.env[RUN_DEADLINE_ENV],
     checkTimeBudget: resolveCheckTimeBudget(repoConfig),
     readinessJudge: resolveReadinessJudgeMode(factoryConfig),
+    readinessCacheDir: paths.readinessCache,
     publishFromBuild: resolveBuildPublish(factoryConfig),
     sizeGateMode,
     parkOverBudget: opts.parkOverBudget,

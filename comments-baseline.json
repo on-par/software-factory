@@ -644,7 +644,6 @@
   "packages/core/src/readiness/decompose.ts": 51,
   "packages/core/src/readiness/duplicate-guard.test.ts": 1,
   "packages/core/src/readiness/duplicate-guard.ts": 6,
-  "packages/core/src/readiness/enrich.ts": 9,
   "packages/core/src/readiness/index.test.ts": 1,
   "packages/core/src/readiness/index.ts": 23,
   "packages/core/src/readiness/internal-exports.ts": 1,

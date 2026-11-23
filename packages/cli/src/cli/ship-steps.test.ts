@@ -64,6 +64,7 @@ it('passes the resolved factory state and primary git directory to Codex', () =>
   const handoff = { headSha: 'a'.repeat(40) } as NonNullable<typeof request.continuation>;
   expect(buildRunRequest({ ...input, ctx: { continueFrom: { handoff } } }).continuation).toBe(handoff);
   expect(request.readinessJudge).toBe('advisory');
+  expect(request.readinessCacheDir).toBe(paths.readinessCache);
   const enforce = { sandbox: {}, readiness: { judge: 'enforce' } } as FactoryConfig;
   expect(buildRunRequest({ ...input, factoryConfig: enforce }).readinessJudge).toBe('enforce');
 });

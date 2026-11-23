@@ -1015,7 +1015,7 @@ describe('cli commands (via main dispatch)', () => {
       expect(res.exited).toBe(false);
       const call = phases.planPhase.mock.calls.at(-1)?.[0] as any;
       expect(call.approvalGate).toBeUndefined();
-      expect(call.enforceReadiness).toBe(true);
+      expect(call.readinessJudge).toBe('advisory');
       expect(call?.enforceSizeGate).toBe(true);
       expect(call.drainSteering).toBeUndefined();
     });

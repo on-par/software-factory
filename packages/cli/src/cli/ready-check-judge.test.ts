@@ -127,11 +127,12 @@ describe('runIssueCheck readiness judge', () => {
     await expect(runIssueCheck(7, {}, d)).rejects.toBeInstanceOf(ReadinessJudgeError);
   });
 
-  it('epic is skipped with verdict null and heading exit code', async () => {
+  it('epic is skipped with verdict null, and its missing headings stay advisory like PLAN (ADR-0167)', async () => {
     const { lines, d } = deps('### Goal\n\nBig.\n', 'Epic: big');
     const runModel = unexpectedModel;
     const r = await runIssueCheck(7, {}, { ...d, runModel });
-    expect(r).toMatchObject({ verdict: null, judge: null, judgeSkipped: 'epic' });
+    expect(r).toMatchObject({ verdict: null, judge: null, judgeSkipped: 'epic', exitCode: 0, reasons: [] });
+    expect(r.fields.pass).toBe(false);
     expect(lines).toContain('judge - skipped (epic)');
   });
 

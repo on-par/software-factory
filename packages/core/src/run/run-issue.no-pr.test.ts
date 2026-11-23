@@ -143,14 +143,18 @@ describe('runIssue — --no-pr', () => {
     expect(shipPhase).toHaveBeenCalledTimes(1);
   });
 
-  it('never asks PLAN to write the issue body on a normal run (#3470)', async () => {
+  it("hands PLAN the run's readiness judge mode and cache directory (#3470)", async () => {
     const seen: unknown[] = [];
     planPhase.mockImplementation(async (opts) => {
-      seen.push(opts.updateIssueBodyOnEnrich);
+      seen.push([opts.readinessJudge, opts.readinessCacheDir]);
       return PLAN_OK;
     });
-    await runIssue(request, policy, ports(vi.fn<Log>()));
-    expect(seen).toEqual([false]);
+    await runIssue(
+      { ...request, readinessJudge: 'enforce', readinessCacheDir: '/s/readiness-cache' },
+      policy,
+      ports(vi.fn<Log>()),
+    );
+    expect(seen).toEqual([['enforce', '/s/readiness-cache']]);
   });
 
   it('keeps the worktree from GC with a keep record', async () => {
@@ -160,10 +164,10 @@ describe('runIssue — --no-pr', () => {
     ]);
   });
 
-  it('turns off BUILD publishing, the size gate, and the issue-body update without the routing and prompt switch of localOnly', async () => {
+  it('turns off BUILD publishing and the size gate without the routing and prompt switch of localOnly', async () => {
     await runIssue(noPr, policy, ports(vi.fn<Log>()));
     expect(buildPhase.mock.calls[0][0]).toMatchObject({ disablePublish: true });
-    expect(planPhase.mock.calls[0][0]).toMatchObject({ enforceSizeGate: false, updateIssueBodyOnEnrich: false });
+    expect(planPhase.mock.calls[0][0]).toMatchObject({ enforceSizeGate: false });
     expect(buildPhase.mock.calls[0][0].localOnly).toBeFalsy();
   });
 
