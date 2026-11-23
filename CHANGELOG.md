@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Fixed
+
+- release: a release no longer goes Latest before npm can install it. `publish.yml` publishes all seven packages under the `staging` dist-tag, with `@on-par/factory-core` first; the other six wait until it resolves on the registry, and it is republished up to 3 times if it does not. A new `promote` job installs `@on-par/factory-cli@<v>` in a clean `node:24-slim` container and checks `factory --version` before it moves `latest` or `next` for all seven. The GitHub release, the drift check and the factory-job image run only after that. The drift check covers every package and waits about 10 minutes. **Ops:** each package's npm trusted publisher must have **Allow npm dist-tag** turned on (docs/runbooks/npm-trusted-publishing.md).
+
 ## 0.9.48 - 2026-11-23
 
 PLAN's readiness gate is now the ADR-0167 judge verdict instead of template headings. A not-ready ticket parks with questions, and enrichment no longer rewrites the issue body (#3470).
