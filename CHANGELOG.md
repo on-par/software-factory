@@ -7,6 +7,17 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- kpis: `factory kpis --json` reports `readinessVerdicts` (`ready`, `withAssumptions`, `notReady` runs by latest judge verdict), `notReadyParkRate` (runs parked `not-ready` over all runs) and `lateNotReadyRuns` (runs judged ready that PLAN then escalated as `missing-info` or `contradiction`) (#3470)
+
+### Changed
+
+- config: new `readiness.judge: enforce | advisory | off` key (default `advisory`, `FACTORY_READINESS_JUDGE` beats it) for the PLAN readiness judge (ADR-0167, #3470)
+- config: **heads-up:** `readiness.updateIssueBody` and `FACTORY_READINESS_UPDATE_BODY` are deprecated and ignored, with one warning when the config loads; the factory no longer writes enriched sections back into the issue body (#3470)
+- plan: **heads-up:** PLAN's readiness gate is the model verdict from `readiness_judge`, for every work source, not the template headings. `ready` and `ready-with-assumptions` proceed, and the assumptions go to PLAN in an untrusted block and to the PR body. In `enforce` mode a `not-ready` ticket parks `not-ready` with its questions in the park comment and no PLAN call, and a judge failure escalates; `advisory` logs and proceeds; `off` makes no judge call. The fast path needs a `ready` verdict (the heading score only in `off` mode). The `readiness` event is logged right after the verdict, also on fast-path runs, and carries an optional `judge` object. Enrichment and the `readiness_enrich` route are removed (ADR-0167, #3470)
+- check: an epic, which the judge skips, no longer exits 1 for missing epic headings; the heading score stays advisory, as in PLAN (ADR-0167, #3470)
+
 ## 0.9.47 - 2026-11-21
 
 ### Added

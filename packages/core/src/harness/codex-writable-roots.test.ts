@@ -179,7 +179,6 @@ describe('Codex workspace-write policy', () => {
       'dispute_resolution',
       'triage',
       'eval_judge',
-      'readiness_enrich',
       'decompose',
     ];
     for (const task of tasks) {

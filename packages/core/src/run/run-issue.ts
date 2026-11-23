@@ -31,7 +31,12 @@ import { beginBuildRoute, compatibleBuildModel, laneRouteCapabilities } from './
 import { classifyCheckFailure } from './check-verdict.js';
 import { withSingleTerminalEvent } from './terminal-events.js';
 import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
-import { parkPayload, postEnvironmentReleaseComment, publishParkComment } from './park-comment.js';
+import {
+  type ParkCommentInput,
+  parkPayload,
+  postEnvironmentReleaseComment,
+  publishParkComment,
+} from './park-comment.js';
 import { createRunPhaseLogger } from './run-phase-log.js';
 import { providerFailureRecorder } from './provider-failure-recorder.js';
 import { gateBuildTarget, pickOrderedProvider, type ProviderPick } from './provider-breaker-gate.js';
@@ -72,6 +77,7 @@ import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings, SizeGateMode } from '../config/index.js';
 import { defaultExecFn, type ExecFn } from '../utils/exec.js';
 import type { ProviderOrder } from '../config/provider-order.js';
+import type { ReadinessJudgeMode } from '../config/readiness-mode.js';
 import { decideBuildRoute, type EffectiveModelPins } from '../config/repo.js';
 import type { RunStewardPorts } from '../steward/run.js';
 import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
@@ -148,7 +154,8 @@ export interface RunRequest extends ReworkRequestFields {
   noPr?: boolean;
   blockUnresolvedRegressions?: boolean;
   hermeticGit?: boolean;
-  readinessUpdateIssueBody?: boolean;
+  readinessJudge?: ReadinessJudgeMode;
+  readinessCacheDir?: string;
   publishFromBuild?: boolean;
   sizeGateMode?: SizeGateMode;
   parkOverBudget?: boolean;
@@ -381,8 +388,9 @@ async function runIssueOnce(
     checkFailure?: { failureSignature: string; failingChecks: string[] },
     ciFailure?: CiFailureEvidence,
     down?: StageGateVerdict['down'],
-    designSmell?: DesignSmellFinding,
+    extra: { designSmell?: DesignSmellFinding; questions?: ParkCommentInput['questions'] } = {},
   ): Promise<RunOutcome> => {
+    const { designSmell, questions } = extra;
     const terminalMessage = phaseLogger.parkMessage(message);
     const failure = reason === 'blocked' ? undefined : checkFailure;
     log(reason, terminalMessage, {
@@ -403,6 +411,7 @@ async function runIssueOnce(
         lane: request.lane,
         blockers: [],
         ...(designSmell ? { designSmell } : {}),
+        ...(questions ? { questions } : {}),
       };
       if (linear) await linear.park(parkInput);
       else if (request.work.kind !== LOCAL_BRIEF_SOURCE) {
@@ -628,7 +637,8 @@ async function runIssueOnce(
           localOnly: request.localOnly,
           laneId: request.lane,
           workSource: request.workSource,
-          enforceReadiness: true,
+          readinessJudge: request.readinessJudge,
+          readinessCacheDir: request.readinessCacheDir,
           fastPath: request.efficiency.fastPath,
           enforceSizeGate: !request.noPr && request.sizeGateMode !== 'off',
           sizeGateMode: request.sizeGateMode,
@@ -638,7 +648,6 @@ async function runIssueOnce(
           maxSlices: request.maxSlices,
           sizeBudget: request.sizeBudget,
           blockUnresolvedRegressions: request.blockUnresolvedRegressions,
-          updateIssueBodyOnEnrich: request.noPr ? false : request.readinessUpdateIssueBody,
           preferredRoute: pinnedRoute,
           onWorkerResult: phaseLogger.plan,
         });
@@ -654,6 +663,18 @@ async function runIssueOnce(
         }
         if (plan.parkReason === 'config') {
           return await terminalParked('config', planConfigParkMessage(plan, workKey));
+        }
+        if (plan.parkReason === 'not-ready') {
+          return await terminalParked(
+            'not-ready',
+            `plan parked: ${plan.escalate ?? 'ticket is not ready'}`,
+            undefined,
+            undefined,
+            undefined,
+            {
+              questions: plan.questions,
+            },
+          );
         }
         return await terminalEscalated(`plan escalated: ${plan.escalate ?? 'unknown'}`);
       }
@@ -1167,14 +1188,9 @@ async function runIssueOnce(
     const capped = await capGate.afterFailure(err, failurePhase, route);
     if (capped?.released) return capped.released;
     if (capped?.down) return await parkAllProvidersDown(capped.down);
-    return await terminalParked(
-      parkReasonFor(err),
-      errorMessage(err),
-      undefined,
-      undefined,
-      undefined,
-      designSmellFindingFor(err),
-    );
+    return await terminalParked(parkReasonFor(err), errorMessage(err), undefined, undefined, undefined, {
+      designSmell: designSmellFindingFor(err),
+    });
   } finally {
     runStop.dispose();
     await release();

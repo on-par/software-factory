@@ -1,5 +1,6 @@
 import type { Octokit } from '@octokit/rest';
 
+import type { SimRecordedCall } from '../fakes/octokit.js';
 import { fakeOctokit } from './index.js';
 
 export interface StoredComment {
@@ -8,9 +9,13 @@ export interface StoredComment {
   user: { id: number };
 }
 
-export function commentStoreOctokit(): { store: StoredComment[]; octokit: Octokit } {
+export function commentStoreOctokit(extra: Record<string, unknown> = {}): {
+  store: StoredComment[];
+  octokit: Octokit;
+  calls: SimRecordedCall[];
+} {
   const store: StoredComment[] = [];
-  const octokit = fakeOctokit({
+  const fake = fakeOctokit({
     'users.getAuthenticated': async () => ({ data: { id: 1 } }),
     'issues.listLabelsOnIssue': async () => ({ data: [] }),
     'issues.listComments': async () => ({ data: store }),
@@ -24,6 +29,7 @@ export function commentStoreOctokit(): { store: StoredComment[]; octokit: Octoki
       if (c) c.body = body;
       return { data: c };
     },
-  }).octokit as Octokit;
-  return { store, octokit };
+    ...extra,
+  });
+  return { store, octokit: fake.octokit as Octokit, calls: fake.calls };
 }

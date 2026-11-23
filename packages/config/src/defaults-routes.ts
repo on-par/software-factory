@@ -26,10 +26,6 @@ export const defaultRoutesConfig: RoutesDefaults = {
       tier: 'boss',
       description: 'Spec writing, architecture, route selection — needs judgment',
     },
-    readiness_enrich: {
-      tier: 'triage',
-      description: 'Create a complete factory-task issue body before PLAN',
-    },
     readiness_judge: {
       tier: 'triage_cheap',
       description:

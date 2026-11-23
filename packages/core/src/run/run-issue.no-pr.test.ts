@@ -60,7 +60,6 @@ const request: RunRequest = {
   failover: { enabled: false, cooldownMs: 60_000, fallbackModel: 'claude-sonnet-5' },
   efficiency: { maxReworkRounds: 1, fastPath: false },
   processGroupGraceMs: 50,
-  readinessUpdateIssueBody: true,
   sizeGateMode: 'stack',
   worktreeKeepsPath: keepsFile,
 };
@@ -144,6 +143,20 @@ describe('runIssue — --no-pr', () => {
     expect(shipPhase).toHaveBeenCalledTimes(1);
   });
 
+  it("hands PLAN the run's readiness judge mode and cache directory (#3470)", async () => {
+    const seen: unknown[] = [];
+    planPhase.mockImplementation(async (opts) => {
+      seen.push([opts.readinessJudge, opts.readinessCacheDir]);
+      return PLAN_OK;
+    });
+    await runIssue(
+      { ...request, readinessJudge: 'enforce', readinessCacheDir: '/s/readiness-cache' },
+      policy,
+      ports(vi.fn<Log>()),
+    );
+    expect(seen).toEqual([['enforce', '/s/readiness-cache']]);
+  });
+
   it('keeps the worktree from GC with a keep record', async () => {
     await runIssue(noPr, policy, ports(vi.fn<Log>()));
     expect(readWorktreeKeeps(keepsFile)).toEqual([
@@ -151,10 +164,10 @@ describe('runIssue — --no-pr', () => {
     ]);
   });
 
-  it('turns off BUILD publishing, the size gate, and the issue-body update without the routing and prompt switch of localOnly', async () => {
+  it('turns off BUILD publishing and the size gate without the routing and prompt switch of localOnly', async () => {
     await runIssue(noPr, policy, ports(vi.fn<Log>()));
     expect(buildPhase.mock.calls[0][0]).toMatchObject({ disablePublish: true });
-    expect(planPhase.mock.calls[0][0]).toMatchObject({ enforceSizeGate: false, updateIssueBodyOnEnrich: false });
+    expect(planPhase.mock.calls[0][0]).toMatchObject({ enforceSizeGate: false });
     expect(buildPhase.mock.calls[0][0].localOnly).toBeFalsy();
   });
 

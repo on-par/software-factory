@@ -20,6 +20,7 @@ const ALL: ParkReason[] = [
   'sandbox-env',
   'check-infra',
   'time-budget',
+  'not-ready',
 ];
 
 function fake(opts: { open?: boolean; draft?: boolean; updateError?: Error } = {}) {

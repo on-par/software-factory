@@ -35,6 +35,7 @@ const REASONS: ParkReason[] = [
   'blocked',
   'all_providers_down',
   'sandbox-env',
+  'not-ready',
 ];
 
 function input(overrides: Partial<ParkCommentInput> = {}): ParkCommentInput {
