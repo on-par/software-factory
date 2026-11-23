@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Fixed
 
+- router: **heads-up:** factory-cli no longer probes a local model provider port without configuration. Ollama models are routed, and the Ollama endpoint is probed, only when Ollama is configured: `OLLAMA_BASE_URL` is set, local-only mode is on (`FACTORY_LOCAL_ONLY=1`), or the repo config sets `providers.ollama: true` or names an Ollama model in `tiers`, `models.pins` or `models.registry`. Otherwise Ollama models are skipped with no network attempt and routing moves to the next model, as when the probe reports Ollama unreachable. A local Ollama on the default port that relied on no configuration now needs `OLLAMA_BASE_URL=http://127.0.0.1:11434`
 - release: a release no longer goes Latest before npm can install it. `publish.yml` publishes all seven packages under the `staging` dist-tag, with `@on-par/factory-core` first; the other six wait until it resolves on the registry, and it is republished up to 3 times if it does not. A new `promote` job installs `@on-par/factory-cli@<v>` in a clean `node:24-slim` container and checks `factory --version` before it moves `latest` or `next` for all seven. The GitHub release, the drift check and the factory-job image run only after that. The drift check covers every package and waits about 10 minutes. **Ops:** each package's npm trusted publisher must have **Allow npm dist-tag** turned on (docs/runbooks/npm-trusted-publishing.md).
 
 ## 0.9.48 - 2026-11-23

@@ -404,6 +404,15 @@ describe('applyRepoConfig', () => {
     expect(result.tiers.worker).toEqual(['gpt-model-a']);
   });
 
+  it('marks Ollama configured only when the repo explicitly names an ollama model or enables the provider', () => {
+    const configured = (repo: Parameters<typeof applyRepoConfig>[1]) => applyRepoConfig(models, repo).ollamaConfigured;
+    expect(configured({ version: 2, providers: { ollama: true } })).toBe(true);
+    expect(configured({ version: 2, tiers: { worker: ['ollama-model'] } })).toBe(true);
+    expect(configured({ version: 2, models: { pins: { checker: 'ollama-model' } } })).toBe(true);
+    expect(configured({ version: 2, models: { pins: { checker: 'checker-model' } } })).toBeUndefined();
+    expect(configured({ version: 2, tiers: { worker: ['gpt-model-a'] } })).toBeUndefined();
+  });
+
   it('rewrites the checker tier to a single pinned model', () => {
     const result = applyRepoConfig(models, { version: 2, models: { pins: { checker: 'checker-model' } } });
     expect(result.tiers.checker).toEqual(['checker-model']);

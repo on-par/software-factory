@@ -482,9 +482,17 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
   const providerOrder = orderOverride
     ? { ...(models.providerOrder ?? deriveProviderOrder(models.tiers, models.models)), ...orderOverride }
     : models.providerOrder;
+  const named = [
+    ...Object.values(repo.tiers ?? {}).flat(),
+    ...Object.values(repo.models?.pins ?? {}),
+    ...Object.keys(registry),
+  ];
+  const ollamaConfigured =
+    repo.providers?.ollama === true || named.some((id) => id !== undefined && mergedModels[id]?.provider === 'ollama');
 
   return {
     ...models,
+    ...(ollamaConfigured ? { ollamaConfigured } : {}),
     models: mergedModels,
     tiers,
     ...(providerOrder ? { providerOrder } : {}),

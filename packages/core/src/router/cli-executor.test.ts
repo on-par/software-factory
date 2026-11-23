@@ -704,6 +704,7 @@ describe('CliModelExecutor retired ollama-command-agent', () => {
         legacy: { ...modelsConfig.models['ollama-codex-model'], ...modelDef },
       } as ModelsConfig['models'],
       tiers: { boss: ['legacy'] },
+      ollamaConfigured: true,
     };
     const stub = new StubCodingHarness([], { id: 'ollama-agentic', defaultOutput: 'AGENTIC OUT' });
     const executor = new CliModelExecutor(recordingExec().fn, reachableFetch, { 'ollama-agentic': stub });
