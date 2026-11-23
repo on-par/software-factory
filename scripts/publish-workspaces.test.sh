@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Guard for scripts/publish-workspaces.txt (#1560): the list must match the non-private
 # workspaces, be in dependency order, be used by both consumers, and drive the publish loop.
-# #2244: the loop takes --tag next|latest, refuses the wrong channel for the version, and
-# skips packages already on the registry so a half-finished run can be retried.
+# #2244: the loop takes only --tag staging (promote-release.sh moves latest/next),
+# publishes factory-core first, and skips packages already on the registry so a
+# half-finished run can be retried.
 # #2627: every publish passes --provenance, and publish.yml grants id-token: write and is the
 # only publish workflow.
 # #2630: no workflow passes NPM_TOKEN / NODE_AUTH_TOKEN; npm authenticates via OIDC.
@@ -71,9 +72,9 @@ grep -qF -- "$OIDC_COMMENT" "$PUBLISH_YML" || fail "publish.yml lacks the #2630 
 token_refs="$(grep -rnE 'NPM_TOKEN|NODE_AUTH_TOKEN' "$ROOT/.github/workflows" | grep -vF -- "$OIDC_COMMENT" || true)"
 [ -z "$token_refs" ] || fail ".github/workflows references NPM_TOKEN or NODE_AUTH_TOKEN: $token_refs"
 [ "$(ls "$ROOT/.github/workflows" | grep -i publish)" = "publish.yml" ] || fail "publish workflow is not only publish.yml"
-grep -qE '^ *npm publish .*--provenance' "$ROOT/scripts/publish-workspaces.sh" || fail "publish-workspaces.sh does not pass --provenance"
-grep -qE '^bash scripts/publish-workspaces.sh --tag "\$channel" --dry-run ' "$ROOT/scripts/publish-release.sh" || fail "publish-release.sh lacks the dry-run"
-grep -qE '^bash scripts/publish-workspaces.sh --tag "\$channel" \|\|' "$ROOT/scripts/publish-release.sh" || fail "publish-release.sh does not run the publish loop"
+grep -qE 'npm publish --workspace .*--provenance' "$ROOT/scripts/publish-workspaces.sh" || fail "publish-workspaces.sh does not pass --provenance"
+grep -qE '^bash scripts/publish-workspaces.sh --tag staging --dry-run ' "$ROOT/scripts/publish-release.sh" || fail "publish-release.sh lacks the dry-run"
+grep -qE '^bash scripts/publish-workspaces.sh --tag staging \|\| rc=' "$ROOT/scripts/publish-release.sh" || fail "publish-release.sh does not run the publish loop"
 if grep -q -- '--workspace' "$PUBLISH_YML"; then fail "publish.yml hard-codes --workspace"; fi
 # publish.yml's Quickstart smoke step gets a GitHub token, like ci.yml's job does.
 smoke_step="$(awk '/- name: Quickstart smoke/{on=1;print;next} on&&/^      - /{on=0} on' "$PUBLISH_YML")"
@@ -95,9 +96,12 @@ done
 PUBLISH="$REPO/scripts/publish-workspaces.sh"
 
 # Stub npm: logs every call; `npm view <name>@<v> version` prints <v> when <name> is in
-# NPM_ON_REGISTRY (faked registry); NPM_FAIL_ON fails any call mentioning it.
+# NPM_ON_REGISTRY (faked registry) or was really published (not --dry-run) in this run;
+# NPM_FAIL_ON fails any call mentioning it.
 NPM_CALL_LOG="$BINDIR/npm-calls.log"
-export NPM_CALL_LOG
+NPM_PUBLISHED="$BINDIR/published"
+export NPM_CALL_LOG NPM_PUBLISHED
+mkdir -p "$NPM_PUBLISHED"
 cat >"$BINDIR/npm" <<'EOF2'
 #!/usr/bin/env bash
 echo "$@" >>"$NPM_CALL_LOG"
@@ -108,8 +112,12 @@ esac
 if [ "$1" = view ]; then
   name="${2%@*}"
   case " ${NPM_ON_REGISTRY:-} " in *" $name "*) echo "${2##*@}"; exit 0 ;; esac
+  [ ! -f "$NPM_PUBLISHED/${name//\//__}" ] || { echo "${2##*@}"; exit 0; }
   echo "npm error 404 Not Found - GET $name" >&2
   exit 1
+fi
+if [ "$1" = publish ]; then
+  case " $* " in *" --dry-run "*) ;; *) touch "$NPM_PUBLISHED/${3//\//__}" ;; esac
 fi
 exit 0
 EOF2
@@ -130,24 +138,32 @@ publish_calls() {
 expect_no_npm() {
   [ ! -s "$NPM_CALL_LOG" ] || fail "$1: npm was called: $(cat "$NPM_CALL_LOG")"
 }
+fresh_registry() {
+  : >"$NPM_CALL_LOG"
+  rm -f "$NPM_PUBLISHED"/*
+}
+CORE=@on-par/factory-core
+ORDER=("$CORE")
+for n in "${NAMES[@]}"; do [ "$n" = "$CORE" ] || ORDER+=("$n"); done
 
-# Stable version: --tag latest, one registry check then one publish per package.
-: >"$NPM_CALL_LOG"
-bash "$PUBLISH" --tag latest --dry-run >/dev/null
+# Stable dry run: factory-core first, then the list order, each one registry check then
+# one publish under --tag staging.
+fresh_registry
+bash "$PUBLISH" --tag staging --dry-run >/dev/null
 [ "$(wc -l <"$NPM_CALL_LOG" | tr -d ' ')" = "$((2 * ${#NAMES[@]}))" ] || fail "expected $((2 * ${#NAMES[@]})) npm calls"
 i=0
 while IFS= read -r call; do
-  name="${NAMES[$((i / 2))]}"
+  name="${ORDER[$((i / 2))]}"
   if [ $((i % 2)) -eq 0 ]; then
     [ "$call" = "view $name@$VERSION version" ] || fail "call $i was '$call'"
   else
-    [ "$call" = "publish --workspace $name --tag latest --provenance --dry-run" ] || fail "call $i was '$call'"
+    [ "$call" = "publish --workspace $name --tag staging --provenance --dry-run" ] || fail "call $i was '$call'"
   fi
   i=$((i + 1))
 done <"$NPM_CALL_LOG"
 
-# Wrong channel, missing or empty --tag: refused before any npm call.
-for args in "--tag next" "" "--tag beta" "--dry-run"; do
+# Final tags, missing or empty --tag: refused before any npm call.
+for args in "--tag latest" "--tag next" "" "--tag beta" "--dry-run"; do
   : >"$NPM_CALL_LOG"
   # shellcheck disable=SC2086
   if bash "$PUBLISH" $args >/dev/null 2>&1; then fail "stable $VERSION published with '$args'"; fi
@@ -161,42 +177,43 @@ set -e
 [ "$rc" = 2 ] && grep -q -- '--tag needs a value' "$BINDIR/err.txt" || fail "--tag without a value: rc=$rc"
 expect_no_npm "--tag without a value"
 
-# The first publish failure aborts.
-: >"$NPM_CALL_LOG"
-if NPM_FAIL_ON='publish --workspace @on-par/contracts' bash "$PUBLISH" --tag latest >/dev/null 2>&1; then
+# The first publish failure aborts: core, then the list up to the failing package.
+fresh_registry
+if NPM_FAIL_ON='publish --workspace @on-par/contracts' bash "$PUBLISH" --tag staging >/dev/null 2>&1; then
   fail "script should exit non-zero when npm publish fails"
 fi
-[ "$(publish_calls | wc -l | tr -d ' ')" = "2" ] || fail "script did not stop at the first failure"
+[ "$(publish_calls | wc -l | tr -d ' ')" = "3" ] || fail "script did not stop at the first failure: $(publish_calls)"
 
-# Retry: packages 1-3 already on the (faked) registry are skipped with a log line; 4-7 publish.
-: >"$NPM_CALL_LOG"
-out="$(NPM_ON_REGISTRY="${NAMES[0]} ${NAMES[1]} ${NAMES[2]}" bash "$PUBLISH" --tag latest)"
+# Retry: packages 1-3 already on the (faked) registry are skipped with a log line; core,
+# then 4, 6 and 7 publish.
+fresh_registry
+out="$(NPM_ON_REGISTRY="${NAMES[0]} ${NAMES[1]} ${NAMES[2]}" bash "$PUBLISH" --tag staging)"
 for n in 0 1 2; do
   grep -qx "skipping ${NAMES[$n]}@$VERSION: already on the registry" <<<"$out" || fail "no skip line for ${NAMES[$n]}"
 done
 want=""
-for n in 3 4 5 6; do want="${want}publish --workspace ${NAMES[$n]} --tag latest --provenance"$'\n'; done
+for n in "$CORE" "${NAMES[3]}" "${NAMES[5]}" "${NAMES[6]}"; do want="${want}publish --workspace $n --tag staging --provenance"$'\n'; done
 [ "$(publish_calls)" = "${want%$'\n'}" ] || fail "retry published: $(publish_calls)"
 
-# Pre-release: --tag next publishes with the exact version; --tag latest is refused.
+# Pre-release: --tag staging publishes with the exact version; a final tag is refused.
 bash "$REPO/scripts/set-release-version.sh" 0.9.0-next.3 >/dev/null
-: >"$NPM_CALL_LOG"
-if bash "$PUBLISH" --tag latest --dry-run >/dev/null 2>"$BINDIR/err.txt"; then fail "pre-release published to latest"; fi
-grep -q "0.9.0-next.3 must use --tag next" "$BINDIR/err.txt" || fail "wrong-channel message: $(cat "$BINDIR/err.txt")"
-expect_no_npm "pre-release with --tag latest"
-: >"$NPM_CALL_LOG"
-bash "$PUBLISH" --tag next --dry-run >/dev/null
-[ "$(publish_calls | grep -c -- '--tag next --provenance --dry-run$')" = "${#NAMES[@]}" ] || fail "pre-release did not use --tag next: $(publish_calls)"
+fresh_registry
+if bash "$PUBLISH" --tag next --dry-run >/dev/null 2>"$BINDIR/err.txt"; then fail "pre-release published to next"; fi
+grep -q "publish to --tag staging" "$BINDIR/err.txt" || fail "final-tag message: $(cat "$BINDIR/err.txt")"
+expect_no_npm "pre-release with --tag next"
+fresh_registry
+bash "$PUBLISH" --tag staging --dry-run >/dev/null
+[ "$(publish_calls | grep -c -- '--tag staging --provenance --dry-run$')" = "${#NAMES[@]}" ] || fail "pre-release did not use --tag staging: $(publish_calls)"
 [ "$(grep -c '^view .*@0.9.0-next.3 version$' "$NPM_CALL_LOG")" = "${#NAMES[@]}" ] || fail "pre-release registry checks: $(cat "$NPM_CALL_LOG")"
 
 # Lockstep drift: refused before any npm call.
 node -e 'const fs=require("fs");const f=process.argv[1];const j=JSON.parse(fs.readFileSync(f,"utf8"));j.version="0.9.1";fs.writeFileSync(f,JSON.stringify(j,null,2)+"\n")' "$REPO/packages/tui/package.json"
-: >"$NPM_CALL_LOG"
-if bash "$PUBLISH" --tag next --dry-run >/dev/null 2>&1; then fail "published packages out of lockstep"; fi
+fresh_registry
+if bash "$PUBLISH" --tag staging --dry-run >/dev/null 2>&1; then fail "published packages out of lockstep"; fi
 expect_no_npm "lockstep drift"
 
 # An empty list is an error.
 : >"$REPO/scripts/publish-workspaces.txt"
-if bash "$PUBLISH" --tag latest >/dev/null 2>&1; then fail "empty list should fail"; fi
+if bash "$PUBLISH" --tag staging >/dev/null 2>&1; then fail "empty list should fail"; fi
 
 echo "publish-workspaces test OK"

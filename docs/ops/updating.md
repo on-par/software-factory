@@ -140,9 +140,11 @@ git pull && npm ci && npm run build
 
 ## Release notes: CLI JSON contract
 
+`publish.yml` publishes all seven packages under the `staging` npm dist-tag. `@on-par/factory-core` goes first, and the other six publish only after `npm view @on-par/factory-core@<v> version` resolves (`scripts/publish-workspaces.sh`; `PUBLISH_CORE_TIMEOUT`, `PUBLISH_CORE_INTERVAL` and `PUBLISH_CORE_REPUBLISH` tune the wait). The `promote` job (`scripts/promote-release.sh`) then runs `npm install -g @on-par/factory-cli@<v>` and `factory --version` in a clean `node:24-slim` container. Only if that prints `<v>` does it move `latest` (for `vX.Y.Z`) or `next` (for `-next.N`) for all seven packages. The `release` and `image` jobs run only after `promote` succeeds. If a run stops before `promote`, users on `latest` or `next` keep the previous version.
+
 For every stable `vX.Y.Z` tag, the `release` job of `publish.yml` builds the GitHub release body automatically (`scripts/github-release.sh`): the `CHANGELOG.md` section, the client-facing contract notes from `scripts/cli-json-contract-notes.ts`, and a compare link. It marks the release Latest only for the highest stable version, and re-running for the same tag updates it. `-next.N` tags get no release.
 
-`scripts/release-drift-check.sh` fails when npm `latest` and the GitHub latest release differ. It runs at the end of the `release` job and in the nightly integration workflow.
+`scripts/release-drift-check.sh` fails when npm `latest` of any package in `scripts/publish-workspaces.txt` differs from the GitHub latest release. It retries for about 10 minutes (`DRIFT_ATTEMPTS`, `DRIFT_SLEEP`). It runs at the end of the `release` job and in the nightly integration workflow, which tries 3 times.
 
 To preview the contract section locally:
 
