@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
@@ -13,6 +13,7 @@ import { cleanupJudgedRunDirs, makeJudgedRunDir, runIssueWithJudge } from '../te
 import { WorkSourceRegistry } from '../work/index.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 import { planPhase } from './plan.js';
+import { writeReadinessNotes } from './plan-readiness.js';
 import { specWithDesign, StubModelExecutor } from './plan-test-helpers.js';
 import { readReadinessNotes } from './ship-spec.js';
 
@@ -359,5 +360,16 @@ describe('PLAN readiness gate (ADR-0167, #3470)', () => {
     });
     expect(result).toMatchObject({ ok: false, parkReason: 'not-ready', questions: QUESTIONS });
     expect(stub.calls.map((c) => c.task)).toEqual(['readiness_judge']);
+  });
+
+  it('writes the readiness notes owner-only', async () => {
+    const worktree = await setup.worktree('plan-readiness-');
+    await writeReadinessNotes(join(worktree, 'issue-3470.md'), {
+      verdict: 'ready',
+      summary: 'judged',
+      assumptions: [],
+      questions: [],
+    });
+    expect(statSync(join(worktree, 'issue-3470.readiness.json')).mode & 0o777).toBe(0o600);
   });
 });

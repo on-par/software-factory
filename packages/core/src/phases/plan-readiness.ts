@@ -106,5 +106,5 @@ export async function runReadinessGate(opts: {
 }
 
 export async function writeReadinessNotes(specPath: string, notes: ReadinessNotes | undefined): Promise<void> {
-  if (notes) await writeFile(specPaths(specPath).readiness, `${JSON.stringify(notes, null, 2)}\n`);
+  if (notes) await writeFile(specPaths(specPath).readiness, `${JSON.stringify(notes, null, 2)}\n`, { mode: 0o600 });
 }
