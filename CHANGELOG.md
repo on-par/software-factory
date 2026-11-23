@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.48 - 2026-11-23
+
+PLAN's readiness gate is now the ADR-0167 judge verdict instead of template headings. A not-ready ticket parks with questions, and enrichment no longer rewrites the issue body (#3470).
+All seven published `@on-par` packages move to 0.9.48 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - kpis: `factory kpis --json` reports `readinessVerdicts` (`ready`, `withAssumptions`, `notReady` runs by latest judge verdict), `notReadyParkRate` (runs parked `not-ready` over all runs) and `lateNotReadyRuns` (runs judged ready that PLAN then escalated as `missing-info` or `contradiction`) (#3470)
