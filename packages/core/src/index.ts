@@ -36,7 +36,6 @@ export {
   resolveSizeGateMaxSlices,
   SIZE_GATE_MODES,
   resolveDesignRegressionBlock,
-  resolveReadinessUpdateIssueBody,
   resolveEnvironmentProxy,
   resolveIngestConfig,
   resolveMergePolicy,
@@ -47,6 +46,7 @@ export {
   resolveSkipCI,
   resolveTimeouts,
 } from './config/index.js';
+export { resolveReadinessJudgeMode } from './config/readiness-mode.js';
 export type {
   BuildRoutePin,
   EffectiveBuildRoute,

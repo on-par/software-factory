@@ -60,7 +60,6 @@ const request: RunRequest = {
   failover: { enabled: false, cooldownMs: 60_000, fallbackModel: 'claude-sonnet-5' },
   efficiency: { maxReworkRounds: 1, fastPath: false },
   processGroupGraceMs: 50,
-  readinessUpdateIssueBody: true,
   sizeGateMode: 'stack',
   worktreeKeepsPath: keepsFile,
 };
@@ -142,6 +141,16 @@ describe('runIssue — --no-pr', () => {
   it('a normal run still ships (control)', async () => {
     await runIssue(request, policy, ports(vi.fn<Log>()));
     expect(shipPhase).toHaveBeenCalledTimes(1);
+  });
+
+  it('never asks PLAN to write the issue body on a normal run (#3470)', async () => {
+    const seen: unknown[] = [];
+    planPhase.mockImplementation(async (opts) => {
+      seen.push(opts.updateIssueBodyOnEnrich);
+      return PLAN_OK;
+    });
+    await runIssue(request, policy, ports(vi.fn<Log>()));
+    expect(seen).toEqual([false]);
   });
 
   it('keeps the worktree from GC with a keep record', async () => {

@@ -72,6 +72,7 @@ import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings, SizeGateMode } from '../config/index.js';
 import { defaultExecFn, type ExecFn } from '../utils/exec.js';
 import type { ProviderOrder } from '../config/provider-order.js';
+import type { ReadinessJudgeMode } from '../config/readiness-mode.js';
 import { decideBuildRoute, type EffectiveModelPins } from '../config/repo.js';
 import type { RunStewardPorts } from '../steward/run.js';
 import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
@@ -148,7 +149,7 @@ export interface RunRequest extends ReworkRequestFields {
   noPr?: boolean;
   blockUnresolvedRegressions?: boolean;
   hermeticGit?: boolean;
-  readinessUpdateIssueBody?: boolean;
+  readinessJudge?: ReadinessJudgeMode;
   publishFromBuild?: boolean;
   sizeGateMode?: SizeGateMode;
   parkOverBudget?: boolean;
@@ -638,7 +639,7 @@ async function runIssueOnce(
           maxSlices: request.maxSlices,
           sizeBudget: request.sizeBudget,
           blockUnresolvedRegressions: request.blockUnresolvedRegressions,
-          updateIssueBodyOnEnrich: request.noPr ? false : request.readinessUpdateIssueBody,
+          updateIssueBodyOnEnrich: false,
           preferredRoute: pinnedRoute,
           onWorkerResult: phaseLogger.plan,
         });

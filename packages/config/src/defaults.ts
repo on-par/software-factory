@@ -78,8 +78,7 @@ export interface FactoryDefaults {
   plan_approval: { enabled: boolean; comment?: string };
   /** PLAN design-artifact gates (#1819). */
   design: { blockUnresolvedRegressions: boolean };
-  /** PLAN readiness enrichment (#2385). updateIssueBody: false keeps enrichment in memory only. */
-  readiness: { updateIssueBody: boolean };
+  readiness: { judge: 'enforce' | 'advisory' | 'off' };
   /** BUILD policy (#1867). publishFromBuild: true lets the claude BUILD worker push and open a PR before CHECK; default false = commit-only, SHIP publishes. contextCeiling is the per-harness Codex auto-compact token limit for BUILD/rework, 0 = off (#3327). */
   build: { publishFromBuild: boolean; contextCeiling: Record<string, number> };
   /** Size gate policy (ADR-0147). mode unset runs as stack (ADR-0161), a stacked PR set; file and slice are deprecated aliases for stack (#3832); off: skip both gates. maxSlices (1-20): cap on a not-yet-started slice plan; over it the plan is recorded and the run parks. tokenBudget / maxFiles (#3350): the post-plan gate splits only when the plan's estimated tokens exceed tokenBudget or its changed files exceed maxFiles; a plan changing 3 files or fewer never splits. */
@@ -676,12 +675,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
    * FACTORY_DESIGN_BLOCK_REGRESSIONS=1/0 overrides.
    */
   design: { blockUnresolvedRegressions: false },
-  /**
-   * PLAN readiness enrichment (#2385). true writes the enriched sections back to the GitHub issue under a
-   * factory:enriched block below the original text; false keeps enrichment in memory only.
-   * FACTORY_READINESS_UPDATE_BODY=1/0 overrides.
-   */
-  readiness: { updateIssueBody: true },
+  readiness: { judge: 'advisory' },
   /**
    * BUILD policy (#1867). false keeps BUILD commit-only on every route (SHIP pushes and
    * opens the PR after CHECK); true lets the claude worker push and open a PR itself.

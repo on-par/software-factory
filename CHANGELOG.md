@@ -7,6 +7,11 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- config: new `readiness.judge: enforce | advisory | off` key (default `advisory`, `FACTORY_READINESS_JUDGE` beats it) for the PLAN readiness judge (ADR-0167, #3470)
+- config: **heads-up:** `readiness.updateIssueBody` and `FACTORY_READINESS_UPDATE_BODY` are deprecated and ignored, with one warning when the config loads; the factory no longer writes enriched sections back into the issue body (#3470)
+
 ## 0.9.47 - 2026-11-21
 
 ### Added

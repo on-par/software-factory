@@ -63,6 +63,9 @@ it('passes the resolved factory state and primary git directory to Codex', () =>
   expect(request.continuation).toBeUndefined();
   const handoff = { headSha: 'a'.repeat(40) } as NonNullable<typeof request.continuation>;
   expect(buildRunRequest({ ...input, ctx: { continueFrom: { handoff } } }).continuation).toBe(handoff);
+  expect(request.readinessJudge).toBe('advisory');
+  const enforce = { sandbox: {}, readiness: { judge: 'enforce' } } as FactoryConfig;
+  expect(buildRunRequest({ ...input, factoryConfig: enforce }).readinessJudge).toBe('enforce');
 });
 
 it('buildRunRequest adds sandbox.writablePaths to codex writable roots', () => {
