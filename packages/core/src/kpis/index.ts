@@ -6,6 +6,7 @@ import { median } from '../utils/median.js';
 import { isTicketKey } from '../work/work-key.js';
 import { computeParkKpis, type ParkKpis } from './park.js';
 import { phaseOfCostEntry } from './phase.js';
+import { computeReadinessVerdictKpis, type ReadinessVerdictKpis } from './readiness.js';
 
 export { phaseOfCostEntry } from './phase.js';
 
@@ -85,7 +86,7 @@ function formatDurationMs(ms: number): string {
   return `${s}s`;
 }
 
-export interface HealthKpis extends ParkKpis {
+export interface HealthKpis extends ParkKpis, ReadinessVerdictKpis {
   runs: number;
   merged: number;
   /** Runs that entered the rework loop at least once (breadth: run-level boolean —
@@ -588,6 +589,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     achievedConcurrency,
     parallelEfficiency,
     ...computeParkKpis(events),
+    ...computeReadinessVerdictKpis(events, runsByIssue),
   };
 }
 

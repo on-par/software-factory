@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- kpis: `factory kpis --json` reports `readinessVerdicts` (`ready`, `withAssumptions`, `notReady` runs by latest judge verdict), `notReadyParkRate` (runs parked `not-ready` over all runs) and `lateNotReadyRuns` (runs judged ready that PLAN then escalated as `missing-info` or `contradiction`) (#3470)
+
 ### Changed
 
 - config: new `readiness.judge: enforce | advisory | off` key (default `advisory`, `FACTORY_READINESS_JUDGE` beats it) for the PLAN readiness judge (ADR-0167, #3470)
