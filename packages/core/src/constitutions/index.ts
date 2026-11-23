@@ -6,7 +6,7 @@ import { basename, join, resolve } from 'node:path';
 import matter from 'gray-matter';
 
 import { getConstitutionsDir } from '../config/index.js';
-import { resolveConstitutionOverride } from '../config/run-config-ladder.js';
+import { resolveConstitutionOverride, resolveProjectConfigDir } from '../config/run-config-ladder.js';
 import type { Constitution } from '../types/index.js';
 
 /**
@@ -80,6 +80,7 @@ export class ConstitutionLoader {
         ? parsed
         : { ...parsed, repoInstance: { relPath: override.path, absPath: override.path } };
     }
+    if (resolveProjectConfigDir() !== undefined) return null;
     const path = resolve(repoDir, relPath);
     let raw: string;
     try {

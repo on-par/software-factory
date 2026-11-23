@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- config: the global flag `--project-config <dir>` (or `FACTORY_PROJECT_CONFIG_DIR`, flag wins) reads `config.yaml` and `constitution.md` from a directory outside the checkout at rank 3 of the per-run ladder, below `--config` / `FACTORY_CONFIG_*` and `--constitution` / `FACTORY_CONSTITUTION*`; the external config is strictly validated and a bad file fails before PLAN naming the directory and file (#4338)
+
 ## 0.9.47 - 2026-11-21
 
 ### Added

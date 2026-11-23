@@ -2,14 +2,14 @@
 
 A host, for example a disposable container, can control a run's config and constitution without writing into the checkout. The sources form one ladder, highest first:
 
-| Rank | Source                                                                    | What it is                                                 |
-| ---- | ------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| 1    | `FACTORY_CONFIG_OVERRIDES`                                                | A YAML fragment deep-merged over the winner of ranks 2-4   |
-| 2    | `--config <path>`, else `FACTORY_CONFIG_PATH`, else `FACTORY_CONFIG_YAML` | A whole-file override; it replaces the repo file wholesale |
-| 3    | `.factory/config.yaml` (or `.yml` / `.json`)                              | The repo's file                                            |
-| 4    | Packaged defaults                                                         | Used when none of the above exists                         |
+| Rank | Source                                                                                                         | What it is                                                                                      |
+| ---- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 1    | `FACTORY_CONFIG_OVERRIDES`                                                                                     | A YAML fragment deep-merged over the winner of ranks 2-4                                        |
+| 2    | `--config <path>`, else `FACTORY_CONFIG_PATH`, else `FACTORY_CONFIG_YAML`                                      | A whole-file override; it replaces the repo file wholesale                                      |
+| 3    | `--project-config <dir>`, else `FACTORY_PROJECT_CONFIG_DIR`, else `.factory/config.yaml` (or `.yml` / `.json`) | A set directory replaces the repo's file; a missing `config.yaml` there means packaged defaults |
+| 4    | Packaged defaults                                                                                              | Used when none of the above exists                                                              |
 
-Constitutions follow the same idea: `--constitution <path>`, else `FACTORY_CONSTITUTION_PATH`, else inline `FACTORY_CONSTITUTION`, each replacing the repo's `.factory/constitution.md`.
+Constitutions follow the same idea: `--constitution <path>`, else `FACTORY_CONSTITUTION_PATH`, else inline `FACTORY_CONSTITUTION`, each replacing the repo's `.factory/constitution.md`. The full order is `--constitution` > `FACTORY_CONSTITUTION_PATH` > `FACTORY_CONSTITUTION` > `<dir>/constitution.md` (from `--project-config` / `FACTORY_PROJECT_CONFIG_DIR`) > `.factory/constitution.md`. While a project-config directory is set the repo's `.factory/constitution.md` is not read, even when the directory has no `constitution.md`.
 
 The per-key environment variables that already exist still apply on top of the resolved config.
 
@@ -34,7 +34,7 @@ FACTORY_CONFIG_OVERRIDES=$'worktree:\n  retainMax: 3' factory run-issue 42
 
 ## Validation
 
-Every override is checked with the same strict schemas as the repo file. A bad override fails before PLAN and the error names the source, for example `Invalid FACTORY_CONFIG_OVERRIDES: bogusKey: Unrecognized key`. The fragment is checked on its own first, so an unknown key is blamed on the fragment, then the merged result is checked and blamed on the winning source.
+Every override is checked with the same strict schemas as the repo file. A bad override fails before PLAN and the error names the source, for example `Invalid FACTORY_CONFIG_OVERRIDES: bogusKey: Unrecognized key`. The fragment is checked on its own first, so an unknown key is blamed on the fragment, then the merged result is checked and blamed on the winning source. Errors for a file in a project-config directory name the directory and file, for example `Invalid FACTORY_PROJECT_CONFIG_DIR (/etc/factory/proj/config.yaml): bogusKey: Unrecognized key`.
 
 ## Reporting and redaction
 

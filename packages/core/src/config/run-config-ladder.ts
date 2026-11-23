@@ -1,18 +1,20 @@
 /** Per-run config ladder (#3906), highest first: FACTORY_CONFIG_OVERRIDES merged over the winner of
  *  --config / FACTORY_CONFIG_PATH / FACTORY_CONFIG_YAML / the repo file / packaged defaults. */
-import { existsSync, readFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 
 import { parse as parseYaml, YAMLParseError } from 'yaml';
 
 import { deepMergeConfig, factoryRuntimeConfigIssues, isPlainObject, type ConfigSchemaIssue } from './index.js';
-import { readRepoConfigFile } from './repo-config-file.js';
+import { readRepoConfigFile, resolveRepoConfigPath } from './repo-config-file.js';
 import { repoRoutingConfigIssues } from './repo.js';
 
 export type ConfigSourceLabel =
   | '--config'
   | 'FACTORY_CONFIG_PATH'
   | 'FACTORY_CONFIG_YAML'
+  | '--project-config'
+  | 'FACTORY_PROJECT_CONFIG_DIR'
   | 'repo'
   | 'packaged defaults'
   | '--constitution'
@@ -69,6 +71,29 @@ interface Winner {
   path?: string;
 }
 
+export function resolveProjectConfigDir(
+  env: NodeJS.ProcessEnv = process.env,
+): { dir: string; source: ConfigSourceLabel } | undefined {
+  const value = env.FACTORY_PROJECT_CONFIG_DIR;
+  if (blank(value)) return undefined;
+  const source =
+    env.FACTORY_PROJECT_CONFIG_DIR_SOURCE === '--project-config' ? '--project-config' : 'FACTORY_PROJECT_CONFIG_DIR';
+  const dir = resolve(value);
+  let isDir = false;
+  try {
+    isDir = statSync(dir).isDirectory();
+  } catch {
+    isDir = false;
+  }
+  if (!isDir) throw new Error(`${source}: no such directory: ${dir}`);
+  return { dir, source };
+}
+
+function named(winner: Winner): string {
+  const projectSource = winner.source === '--project-config' || winner.source === 'FACTORY_PROJECT_CONFIG_DIR';
+  return projectSource && winner.path !== undefined ? `${winner.source} (${winner.path})` : winner.source;
+}
+
 function pickWinner(configPath: string, env: NodeJS.ProcessEnv): Winner {
   const filePath = env.FACTORY_CONFIG_PATH;
   if (!blank(filePath)) {
@@ -80,6 +105,13 @@ function pickWinner(configPath: string, env: NodeJS.ProcessEnv): Winner {
   if (!blank(env.FACTORY_CONFIG_YAML)) {
     return { raw: parseInline(env.FACTORY_CONFIG_YAML, 'FACTORY_CONFIG_YAML'), source: 'FACTORY_CONFIG_YAML' };
   }
+  const project = resolveProjectConfigDir(env);
+  if (project) {
+    const projectPath = resolveRepoConfigPath(project.dir);
+    const raw = readRepoConfigFile(projectPath);
+    if (raw === undefined) return { raw: { version: 2 }, source: 'packaged defaults' };
+    return { raw, source: project.source, path: projectPath };
+  }
   const repo = readRepoConfigFile(configPath);
   if (repo !== undefined) return { raw: repo, source: 'repo', path: configPath };
   // Packaged defaults are the v2 shape. Without the stamp an overrides-only snapshot has no `version`, so every
@@ -89,7 +121,7 @@ function pickWinner(configPath: string, env: NodeJS.ProcessEnv): Winner {
 
 export function resolveRunConfigLadder(configPath: string, env: NodeJS.ProcessEnv = process.env): RunConfigLadder {
   const winner = pickWinner(configPath, env);
-  if (!isPlainObject(winner.raw)) throw new Error(`Invalid ${winner.source}: expected a mapping`);
+  if (!isPlainObject(winner.raw)) throw new Error(`Invalid ${named(winner)}: expected a mapping`);
   const base = winner.raw;
   const { source, path } = winner;
   let raw: Record<string, unknown> = base;
@@ -106,7 +138,7 @@ export function resolveRunConfigLadder(configPath: string, env: NodeJS.ProcessEn
 
   if (source !== 'repo' || overrideKeys.length > 0) {
     const issues = schemaIssues(raw, raw.version);
-    if (issues.length > 0) throw new Error(`Invalid ${source}: ${formatIssues(issues)}`);
+    if (issues.length > 0) throw new Error(`Invalid ${named(winner)}: ${formatIssues(issues)}`);
   }
 
   const empty = source === 'packaged defaults' && overrideKeys.length === 0;
@@ -132,6 +164,18 @@ export function resolveConstitutionOverride(
   }
   const inline = env.FACTORY_CONSTITUTION;
   if (!blank(inline)) return { text: inline, source: 'FACTORY_CONSTITUTION' };
+  const project = resolveProjectConfigDir(env);
+  if (project) {
+    const projectPath = join(project.dir, 'constitution.md');
+    if (!existsSync(projectPath)) return undefined;
+    let text: string;
+    try {
+      text = readFileSync(projectPath, 'utf-8');
+    } catch (err) {
+      throw new Error(`${project.source}: cannot read ${projectPath}: ${(err as Error).message}`, { cause: err });
+    }
+    return text.trim() ? { text, source: project.source, path: projectPath } : undefined;
+  }
   return undefined;
 }
 
