@@ -3,9 +3,11 @@
 `.github/workflows/publish.yml` publishes the packages listed in
 `scripts/publish-workspaces.txt` when a `v*` tag is pushed, and publishes the next
 `X.Y.Z-next.N` prerelease to the `next` dist-tag when CI passes on a push to `main` (see
-`scripts/publish-release.sh`). Authentication comes from npm trusted
-publishing (GitHub OIDC), so no long-lived npm token is involved. This
-replaces the `NPM_TOKEN` repo secret.
+`scripts/publish-release.sh`). Every package first goes out under the `staging`
+dist-tag. The `promote` job then moves `latest` or `next` with `npm dist-tag add`, after
+a clean-container install check (`scripts/promote-release.sh`). Both publish and
+dist-tag moves authenticate through npm trusted publishing (GitHub OIDC), so no
+long-lived npm token is involved. This replaces the `NPM_TOKEN` repo secret.
 
 ## Set up the trusted publisher
 
@@ -33,7 +35,11 @@ Steps:
    | Workflow filename    | `publish.yml` (filename only, no `.github/workflows/`) |
    | Environment name     | leave blank (the publish job uses no environment)      |
 
-4. Save. Optionally, under **Publishing access**, choose "Require two-factor
+4. Under **Allowed actions**, select both `npm publish` and **Allow npm dist-tag**.
+   Without the dist-tag permission the `promote` job fails and `latest` and `next`
+   stay where they were. Configurations created before May 20, 2026 allow only
+   `npm publish`, so turn on the dist-tag permission for those.
+5. Save. Optionally, under **Publishing access**, choose "Require two-factor
    authentication and disallow tokens", but only after the first OIDC publish
    has succeeded.
 
@@ -68,8 +74,13 @@ No classic token is needed or used.
 - **Runner.** It must run on GitHub-hosted runners. Self-hosted runners are
   not supported.
 - **Partial publish.** A failure partway through leaves earlier packages
-  already published. A rerun skips them, as `scripts/publish-release.sh`
-  notes.
+  already published under `staging`. A rerun skips them, as
+  `scripts/publish-release.sh` notes. `latest` and `next` do not move until the
+  `promote` job passes.
+- **Dist-tag move fails.** The `promote` job upgrades npm to 11.21.0 or later,
+  the first version that can run `npm dist-tag` over OIDC. If it fails with
+  ENEEDAUTH or 403, check that **Allow npm dist-tag** is on for that package.
+  Then re-run the failed `promote` job. `npm dist-tag add` is idempotent.
 - Don't fall back to pasting a token into the docs or the workflow.
 
 ## Retiring `NPM_TOKEN`

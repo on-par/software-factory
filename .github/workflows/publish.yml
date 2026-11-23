@@ -30,6 +30,7 @@ jobs:
     permissions: { contents: read, issues: read, id-token: write }
     outputs:
       published: '${{ steps.publish.outputs.published }}'
+      version: '${{ steps.publish.outputs.version }}'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -72,6 +73,8 @@ jobs:
       # #2630: no NODE_AUTH_TOKEN is passed, so npm must authenticate via OIDC.
       # #3676: a vX.Y.Z tag fails closed unless CHANGELOG.md has a `## X.Y.Z` section
       # (docs/ops/docs-and-changelog.md).
+      # Everything publishes under the `staging` dist-tag, factory-core first; the rest wait
+      # until factory-core resolves on the registry. The promote job moves latest/next.
       - name: Publish to npm
         id: publish
         env:
@@ -90,12 +93,35 @@ jobs:
           path: ${{ runner.temp }}/pkgs/*.tgz
           retention-days: 7
           if-no-files-found: error
-  # #4123: every stable tag gets its GitHub release (Latest only for the highest stable version) after npm
-  # published, then the drift check confirms npm latest equals the GitHub latest release. A -next.N tag makes
-  # no release but still runs the check, since a next publish does not move npm latest.
-  release:
+  # The staged release must install in a clean node container (`npm install -g` + `factory --version`)
+  # before latest (vX.Y.Z) or next (-next.N) moves for all seven packages. A failed check fails the run
+  # and leaves the final tag where it was; release and image wait on this job.
+  promote:
     needs: publish
-    if: startsWith(github.ref, 'refs/tags/v') && needs.publish.outputs.published == 'true'
+    if: needs.publish.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    permissions: { contents: read, id-token: write }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+      # npm dist-tag over trusted publishing (OIDC) needs npm >= 11.21.0.
+      - name: Upgrade npm
+        run: npm install -g npm@^11.21.0
+      - name: Install check, then move the final dist-tag
+        env:
+          PROMOTE_VERSION: '${{ needs.publish.outputs.version }}'
+        run: bash scripts/promote-release.sh
+  # #4123: every stable tag gets its GitHub release (Latest only for the highest stable version) after the
+  # promote job moved npm latest, then the drift check confirms every package's npm latest equals the GitHub
+  # latest release. A -next.N tag makes no release but still runs the check, since next does not move latest.
+  release:
+    needs: promote
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions: { contents: write }
     steps:
@@ -114,9 +140,10 @@ jobs:
           GH_TOKEN: '${{ github.token }}'
         run: bash scripts/release-drift-check.sh
   # #3902: the one-shot factory job image for disposable containers (Foreman / Cloudflare), built from the
-  # tarballs this tag just published. Release tags only; main prereleases do not publish an image.
+  # tarballs this tag just published, only after the promote job's install check passed. Release tags only;
+  # main prereleases do not publish an image.
   image:
-    needs: publish
+    needs: promote
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions: { contents: read, packages: write }

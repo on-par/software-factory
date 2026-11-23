@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests scripts/publish-release.sh (#2335, #2244): a skipped or failed publish can never
-# show green, the tag name picks the version and dist-tag, and a main push publishes the
-# next X.Y.Z-next.N prerelease. Each case runs the script in a fresh scratch copy of the
+# show green, the tag name picks the version, every publish goes to the staging dist-tag
+# with factory-core first, and a main push publishes the next X.Y.Z-next.N prerelease. Each case runs the script in a fresh scratch copy of the
 # repo's publish files with stub `npm` and `gh` on PATH, and checks the exit code, the
 # job-summary line, the `published=` step output and the npm calls. Together the cases
 # cover every branch of the script.
@@ -50,13 +50,24 @@ export NPM_REGISTRY="$WORK/registry"
 # Stub npm: logs calls; NPM_FAIL_ON fails a call containing it, NPM_FAIL_EXACT a call
 # equal to it. `npm view <pkg> dist-tags.latest` prints NPM_STUB_LATEST (404 when unset);
 # `npm view <pkg> versions --json` prints $NPM_REGISTRY/<pkg with / as __> (404 when
-# missing); any other `npm view` 404s (nothing on the registry).
+# missing); `npm view <pkg>@<v> version` prints <v> once <pkg> was really published (not
+# --dry-run) in this case; any other `npm view` 404s (nothing on the registry).
 cat >"$BINDIR/npm" <<'STUB'
 #!/usr/bin/env bash
 echo "$@" >>"$NPM_CALL_LOG"
 [ "$1" != --version ] || { [ "${NPM_VERSION_FAIL:-}" != 1 ] || exit 1; echo "${NPM_STUB_VERSION-11.5.1}"; exit 0; }
 [ -z "${NPM_FAIL_ON:-}" ] || case "$*" in *"$NPM_FAIL_ON"*) exit 1 ;; esac
 [ "$*" != "${NPM_FAIL_EXACT:-}" ] || exit 1
+mkdir -p "$NPM_REGISTRY/published"
+if [ "$1" = publish ]; then
+  case " $* " in *" --dry-run "*) ;; *) touch "$NPM_REGISTRY/published/${3//\//__}" ;; esac
+fi
+if [ "$1" = view ] && [ "$3" = version ]; then
+  name="${2%@*}"
+  [ -f "$NPM_REGISTRY/published/${name//\//__}" ] || exit 1
+  echo "${2##*@}"
+  exit 0
+fi
 if [ "$1" = view ] && [ "$3" = dist-tags.latest ]; then
   [ -n "${NPM_STUB_LATEST:-}" ] || exit 1
   echo "$NPM_STUB_LATEST"
@@ -118,8 +129,11 @@ run() {
 expect_summary() {
   [ "$(cat "$SUMMARY")" = "$1" ] || fail "${CASE}: summary was '$(cat "$SUMMARY")', want '$1'"
 }
+# expect_output <true|false> [version]: the step outputs, with version=<v> only when published.
 expect_output() {
-  [ "$(cat "$OUTPUT")" = "published=$1" ] || fail "${CASE}: output was '$(cat "$OUTPUT")', want 'published=$1'"
+  local want="published=$1"
+  [ -z "${2:-}" ] || want="$want"$'\n'"version=$2"
+  [ "$(cat "$OUTPUT")" = "$want" ] || fail "${CASE}: output was '$(cat "$OUTPUT")', want '$want'"
 }
 # expect_publishes <count> <suffix>: exactly <count> publish calls, each ending in <suffix>.
 expect_publishes() {
@@ -134,14 +148,14 @@ fresh_repo
 run 0 PUBLISH_DRY_RUN=true GITHUB_REF=refs/heads/main
 expect_summary "NOT PUBLISHED: dry-run, not published"
 expect_output false
-expect_publishes 7 "--tag latest --provenance --dry-run"
+expect_publishes 7 "--tag staging --provenance --dry-run"
 [ ! -s "$GH_CALL_LOG" ] || fail "$CASE: dry run checked the blockers"
 
 CASE="dry run on a next tag routes to next at the tag version"
 fresh_repo
 run 0 PUBLISH_DRY_RUN=true GITHUB_REF=refs/tags/v0.9.0-next.3
 expect_summary "NOT PUBLISHED: dry-run, not published"
-expect_publishes 7 "--tag next --provenance --dry-run"
+expect_publishes 7 "--tag staging --provenance --dry-run"
 [ "$(grep -c '^view @on-par/.*@0.9.0-next.3 version$' "$NPM_CALL_LOG")" = 7 ] || fail "$CASE: registry checks were not at 0.9.0-next.3"
 grep -q '"@on-par/factory-core": "0.9.0-next.3"' "$REPO/packages/cli/package.json" || fail "$CASE: cli's core pin is not exact"
 
@@ -227,20 +241,20 @@ for heading in '## 0.9.0' '## [0.9.0]' '## [0.9.0] - 2026-10-11' '## 0.9.0 - 202
   fresh_repo
   changelog $'# Changelog\n\n## Unreleased\n\n'"$heading"$'\n\n### Fixed\n\n- a fix'
   run 0 GITHUB_REF=refs/tags/v0.9.0
-  expect_summary "PUBLISHED$(published_list 0.9.0) (--tag latest)"
+  expect_summary "PUBLISHED$(published_list 0.9.0) (--tag staging)"
 done
 
 CASE="next tag needs no CHANGELOG section"
 fresh_repo
 rm "$REPO/CHANGELOG.md"
 run 0 GITHUB_REF=refs/tags/v0.9.0-next.3
-expect_summary "PUBLISHED$(published_list 0.9.0-next.3) (--tag next)"
+expect_summary "PUBLISHED$(published_list 0.9.0-next.3) (--tag staging)"
 
 CASE="main prerelease needs no CHANGELOG section"
 fresh_repo
 rm "$REPO/CHANGELOG.md"
 run 0 PUBLISH_PRERELEASE=true GITHUB_REF=refs/heads/main NPM_STUB_LATEST=0.9.4
-expect_summary "PUBLISHED$(published_list 0.9.5-next.1) (--tag next)"
+expect_summary "PUBLISHED$(published_list 0.9.5-next.1) (--tag staging)"
 
 CASE="blocker lookup fails"
 fresh_repo
@@ -265,27 +279,29 @@ expect_summary "NOT PUBLISHED: v1.0 blockers still open: #7 #8"
 
 CASE="publish fails"
 fresh_repo
-run 1 GITHUB_REF=refs/tags/v0.9.0 NPM_FAIL_EXACT="publish --workspace @on-par/factory-core --tag latest --provenance"
-expect_summary "NOT PUBLISHED: npm publish failed; packages before the failing one in scripts/publish-workspaces.txt may already be on the registry (a rerun skips them)"
+run 1 GITHUB_REF=refs/tags/v0.9.0 NPM_FAIL_EXACT="publish --workspace @on-par/factory-tui --tag staging --provenance"
+expect_summary "NOT PUBLISHED: npm publish failed; packages published before the failing one stay on the registry under staging (a rerun skips them)"
 expect_output false
 
-CASE="stable tag publishes all 7 to latest"
+CASE="stable tag publishes all 7 to staging, factory-core first"
 fresh_repo
 run 0 GITHUB_REF=refs/tags/v0.9.0
-expect_summary "PUBLISHED$(published_list 0.9.0) (--tag latest)"
-expect_output true
+expect_summary "PUBLISHED$(published_list 0.9.0) (--tag staging)"
+expect_output true 0.9.0
 calls="$(grep '^publish ' "$NPM_CALL_LOG")"
+order=(@on-par/factory-core)
+for n in "${NAMES[@]}"; do [ "$n" = @on-par/factory-core ] || order+=("$n"); done
 want=""
-for n in "${NAMES[@]}"; do want="${want}publish --workspace $n --tag latest --provenance --dry-run"$'\n'; done
-for n in "${NAMES[@]}"; do want="${want}publish --workspace $n --tag latest --provenance"$'\n'; done
+for n in "${order[@]}"; do want="${want}publish --workspace $n --tag staging --provenance --dry-run"$'\n'; done
+for n in "${order[@]}"; do want="${want}publish --workspace $n --tag staging --provenance"$'\n'; done
 [ "$calls" = "${want%$'\n'}" ] || fail "$CASE: publish calls were: $calls"
 
-CASE="next tag publishes all 7 to next at the tag version"
+CASE="next tag publishes all 7 to staging at the tag version"
 fresh_repo
 run 0 GITHUB_REF=refs/tags/v0.9.0-next.3
-expect_summary "PUBLISHED$(published_list 0.9.0-next.3) (--tag next)"
-expect_output true
-expect_publishes 14 "--tag next --provenance( --dry-run)?"
+expect_summary "PUBLISHED$(published_list 0.9.0-next.3) (--tag staging)"
+expect_output true 0.9.0-next.3
+expect_publishes 14 "--tag staging --provenance( --dry-run)?"
 
 for v in 11.5.0 10.9.2 11.5.1-pre.0; do
   CASE="npm $v is too old"
@@ -327,16 +343,16 @@ for v in 11.5.1 12.0.0 11.10.0 11.6.0-pre.0 $'11.5.1\r'; do
   CASE="npm ${v%$'\r'} passes"
   fresh_repo
   run 0 GITHUB_REF=refs/tags/v0.9.0 NPM_STUB_VERSION="$v"
-  expect_summary "PUBLISHED$(published_list 0.9.0) (--tag latest)"
-  expect_output true
-  expect_publishes 14 "--tag latest --provenance( --dry-run)?"
+  expect_summary "PUBLISHED$(published_list 0.9.0) (--tag staging)"
+  expect_output true 0.9.0
+  expect_publishes 14 "--tag staging --provenance( --dry-run)?"
 done
 
 CASE="gate removed (no blockers), list with CRLF and blank lines"
 fresh_repo
 { printf '\n'; for n in "${NAMES[@]}"; do printf '%s\r\n\n' "$n"; done; } >"$REPO/scripts/publish-workspaces.txt"
 run 0 GITHUB_REF=refs/tags/v$CURRENT PUBLISH_BLOCKERS=
-expect_summary "PUBLISHED$(published_list "$CURRENT") (--tag latest)"
+expect_summary "PUBLISHED$(published_list "$CURRENT") (--tag staging)"
 [ ! -s "$GH_CALL_LOG" ] || fail "$CASE: checked blockers"
 
 # registry <pkg> <json>: what `npm view <pkg> versions --json` prints.
@@ -347,9 +363,9 @@ registry() {
 CASE="main prerelease with none published yet starts at next.1 above latest"
 fresh_repo
 run 0 PUBLISH_PRERELEASE=true GITHUB_REF=refs/heads/main NPM_STUB_LATEST=0.9.4
-expect_summary "PUBLISHED$(published_list 0.9.5-next.1) (--tag next)"
-expect_output true
-expect_publishes 14 "--tag next --provenance( --dry-run)?"
+expect_summary "PUBLISHED$(published_list 0.9.5-next.1) (--tag staging)"
+expect_output true 0.9.5-next.1
+expect_publishes 14 "--tag staging --provenance( --dry-run)?"
 grep -q '"@on-par/factory-core": "0.9.5-next.1"' "$REPO/packages/cli/package.json" || fail "$CASE: cli's core pin is not exact"
 
 CASE="main prerelease takes the highest next.N across every package"
@@ -359,14 +375,14 @@ registry @on-par/adr-kit '["0.9.4","0.9.5-next.1","0.9.5-next.2","0.9.5-next.3"]
 registry @on-par/contracts '"0.9.4"'
 registry @on-par/factory-core '["0.9.4-next.9","0.9.6-next.7","0.9.5-next.x","0.9.5-next.04"]'
 run 0 PUBLISH_PRERELEASE=true GITHUB_REF=refs/heads/main NPM_STUB_LATEST=0.9.4
-expect_summary "PUBLISHED$(published_list 0.9.5-next.4) (--tag next)"
+expect_summary "PUBLISHED$(published_list 0.9.5-next.4) (--tag staging)"
 
 CASE="main prerelease dry run computes the version and publishes nothing"
 fresh_repo
 registry @on-par/factory-cli '["1.2.3","1.2.4-next.5"]'
 run 0 PUBLISH_DRY_RUN=true PUBLISH_PRERELEASE=true GITHUB_REF=refs/heads/main NPM_STUB_LATEST=1.2.3
 expect_summary "NOT PUBLISHED: dry-run, not published"
-expect_publishes 7 "--tag next --provenance --dry-run"
+expect_publishes 7 "--tag staging --provenance --dry-run"
 grep -q '"version": "1.2.4-next.6"' "$REPO/packages/cli/package.json" || fail "$CASE: cli is not at 1.2.4-next.6"
 
 CASE="prerelease off main"
@@ -408,7 +424,7 @@ fresh_repo
 : >"$OUTPUT"
 out="$(env -u GITHUB_OUTPUT -u GITHUB_STEP_SUMMARY -u PUBLISH_DRY_RUN -u PUBLISH_PRERELEASE -u PUBLISH_BLOCKERS -u NPM_FAIL_ON -u NPM_FAIL_EXACT -u GH_FAIL -u NPM_STUB_VERSION -u NPM_VERSION_FAIL \
   GITHUB_REF=refs/tags/v0.9.0 bash "$REPO/scripts/publish-release.sh")"
-[ "$(printf '%s\n' "$out" | tail -n 1)" = "PUBLISHED$(published_list 0.9.0) (--tag latest)" ] || fail "$CASE: stdout ended '$out'"
+[ "$(printf '%s\n' "$out" | tail -n 1)" = "PUBLISHED$(published_list 0.9.0) (--tag staging)" ] || fail "$CASE: stdout ended '$out'"
 [ ! -s "$SUMMARY" ] && [ ! -s "$OUTPUT" ] || fail "$CASE: wrote a file"
 
 echo "publish-release test OK"
