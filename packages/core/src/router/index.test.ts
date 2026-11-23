@@ -1323,7 +1323,11 @@ const okResponse = {
 };
 
 describe('Ollama reachability probe', () => {
-  beforeEach(resetOllamaProbeCache);
+  beforeEach(() => {
+    resetOllamaProbeCache();
+    vi.stubEnv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434');
+  });
+  afterEach(() => vi.unstubAllEnvs());
 
   const def = (provider: 'ollama' | 'anthropic'): ModelsConfig['models'][string] => ({
     provider,

@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Fixed
+
+- router: **heads-up:** factory-cli no longer probes a local model provider port without configuration. Ollama models are routed, and the Ollama endpoint is probed, only when Ollama is configured: `OLLAMA_BASE_URL` is set, local-only mode is on (`FACTORY_LOCAL_ONLY=1`), or the repo config sets `providers.ollama: true` or names an Ollama model in `tiers`, `models.pins` or `models.registry`. Otherwise Ollama models are skipped with no network attempt and routing moves to the next model, as when the probe reports Ollama unreachable. A local Ollama on the default port that relied on no configuration now needs `OLLAMA_BASE_URL=http://127.0.0.1:11434`
+
 ## 0.9.48 - 2026-11-23
 
 PLAN's readiness gate is now the ADR-0167 judge verdict instead of template headings. A not-ready ticket parks with questions, and enrichment no longer rewrites the issue body (#3470).

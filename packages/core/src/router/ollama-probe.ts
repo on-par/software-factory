@@ -12,6 +12,10 @@ export function ollamaEndpoint(env: NodeJS.ProcessEnv = process.env): string {
   return (env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 }
 
+export function ollamaNotConfigured(env: NodeJS.ProcessEnv = process.env): OllamaProbeResult {
+  return { reachable: false, endpoint: ollamaEndpoint(env), reason: 'not configured; set OLLAMA_BASE_URL to use it' };
+}
+
 async function runProbe(fetchFn: FetchFn, endpoint: string, timeoutMs: number): Promise<OllamaProbeResult> {
   try {
     const res = await fetchFn(`${endpoint}/api/version`, { method: 'GET', signal: AbortSignal.timeout(timeoutMs) });
