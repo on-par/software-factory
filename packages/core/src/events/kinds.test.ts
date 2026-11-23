@@ -104,6 +104,16 @@ describe('EVENT_TRAITS', () => {
     expect(isParkKind('time-budget')).toBe(true);
   });
 
+  it('classifies not-ready as a warn-level parked terminal event (#3470)', () => {
+    expect(EVENT_TRAITS['not-ready']).toEqual({
+      severity: 'warn',
+      isPark: true,
+      isTerminal: true,
+      laneStatus: 'parked',
+    });
+    expect(isParkKind('not-ready')).toBe(true);
+  });
+
   it('classifies flaky_tests as non-park evidence (#2302)', () => {
     expect(EVENT_TRAITS.flaky_tests).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });

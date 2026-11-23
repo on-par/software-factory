@@ -3,7 +3,7 @@ import type { WorkRequest } from '../work/index.js';
 import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 import { SHIP_BASE_BRANCH, type ShipPhaseOptions } from './ship-options.js';
 import { findOpenPR, isPullAlreadyExistsError } from './ship-pr-lookup.js';
-import { readRisk, readSpecBody } from './ship-spec.js';
+import { readReadinessNotes, readRisk, readSpecBody } from './ship-spec.js';
 import type { ShipResult } from './ship-types.js';
 import type { lazyWalkthrough } from './ship-walkthrough.js';
 import { prerequisiteStackOrder, renderStackOrderLine, type StackPosition } from './stack-order.js';
@@ -42,6 +42,7 @@ export async function openOrFindPr(ctx: {
       ? `${title} — slice ${slice.index}/${slice.count} (${ref})`
       : `${title} (${ref})`;
 
+  const readiness = await readReadinessNotes(opts.specPath);
   try {
     const { data: pr } = await octokit.rest.pulls.create({
       owner,
@@ -55,6 +56,8 @@ export async function openOrFindPr(ctx: {
         footer: opts.footer,
         stackOrder: stack ? renderStackOrderLine(stack) : prerequisiteStackOrder(opts.prerequisiteStack, issue, base),
         specBody: await readSpecBody(opts.specPath),
+        assumptions: readiness.assumptions,
+        advisoryQuestions: readiness.questions,
         checkSummary,
         reworkRounds: opts.reworkRounds,
         risk: await readRisk(opts.specPath),

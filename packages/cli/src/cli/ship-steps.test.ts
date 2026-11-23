@@ -8,8 +8,13 @@ import {
   findSliceIndex,
   finishOutcome,
   logSandboxPolicy,
+  TERMINAL_EVENT_KINDS,
   type RunRequestInput,
 } from './ship-steps.js';
+
+it('treats a not-ready park as a terminal event (#3470)', () => {
+  expect(TERMINAL_EVENT_KINDS.has('not-ready')).toBe(true);
+});
 
 it('passes the resolved factory state and primary git directory to Codex', () => {
   const repoRoot = '/tmp/primary';

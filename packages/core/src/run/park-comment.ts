@@ -3,7 +3,7 @@ import type { Octokit } from '@octokit/rest';
 import type { ParkPayload } from '../events/kinds.js';
 import type { EnvironmentFailure } from '../phases/check.js';
 import { renderEnvironmentReleaseComment } from '../phases/environment-release.js';
-import { fenceExcerpt, stripHiddenContent } from '../filing/sanitize.js';
+import { fenceExcerpt, inlineSafeText, stripHiddenContent } from '../filing/sanitize.js';
 import { readWorktreeHead } from './ci-suppression-guard.js';
 import { QUEUE_ORDER_LABEL_PREFIX } from '../queue/queue-order.js';
 import type { DesignSmellFinding, ParkReason } from './outcome.js';
@@ -25,6 +25,7 @@ export interface ParkCommentInput {
   status?: string;
   order?: number;
   designSmell?: DesignSmellFinding;
+  questions?: readonly { aspect: string; text: string }[];
 }
 
 export interface ParkState {
@@ -75,6 +76,8 @@ const PARK_HINTS: Record<ParkReason, string> = {
     'CHECK failed twice on infrastructure (network reset, registry fetch or missing tool), not the change. Fix the network or install the tool on the runner, then run `factory unpark <n>`.',
   'time-budget':
     'the run deadline (FACTORY_RUN_DEADLINE_AT) or SIGTERM stopped the run; the handoff comment lists what is left and the WIP branch keeps the work. Start a run with more time, then run `factory unpark <n>`.',
+  'not-ready':
+    'answer the questions above by editing the ticket description (comments are not read), then run `factory unpark <n>`.',
   'sandbox-env':
     'the BUILD sandbox denied a loopback bind (listen EPERM on 127.0.0.1 or a TMPDIR pipe). This is an environment limit, not a code failure. Run the build in a sandbox mode that allows loopback binds (see #3081), then run `factory unpark <n>`.',
 };
@@ -121,6 +124,16 @@ function designSmellLines(f: DesignSmellFinding): string[] {
   ];
 }
 
+function questionLines(questions: ParkCommentInput['questions']): string[] {
+  if (!questions || questions.length === 0) return [];
+  return [
+    '**Questions**',
+    '',
+    ...questions.map((q, i) => `${i + 1}. [${inlineSafeText(q.aspect)}] ${inlineSafeText(q.text)}`),
+    '',
+  ];
+}
+
 export function renderParkComment(input: ParkCommentInput): string {
   const blockers = input.blockers ?? [];
   const stateLines = [
@@ -148,6 +161,7 @@ export function renderParkComment(input: ParkCommentInput): string {
     '',
     fenceExcerpt(stripHiddenContent(input.message)),
     '',
+    ...questionLines(input.questions),
     ...(input.designSmell ? designSmellLines(input.designSmell) : []),
     `**What unblocks this:** ${parkUnblockHint(input.reason, input.issue)}`,
     '',

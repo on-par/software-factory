@@ -3,6 +3,7 @@ import { CONFIG_EVENT_TRAITS, type ConfigEventKind } from './config-traits.js';
 import { DECOMPOSE_EVENT_TRAITS } from './decompose-traits.js';
 import type { EventTraits, LaneStatus } from './event-traits.js';
 import { QUEUE_EVENT_TRAITS, type QueueEventKind } from './queue-traits.js';
+import { READINESS_EVENT_TRAITS, type ReadinessEventKind } from './readiness-traits.js';
 
 export type { EventTraits, LaneStatus };
 export type * from './payloads.js'; // every payload type; one line keeps this file under the max-lines ceiling
@@ -174,10 +175,7 @@ export type EventKind =
   | 'provider_failover'
   | 'provider_refused'
   | 'provider_restored'
-  | 'readiness'
-  | 'readiness_enrichment_failed'
-  | 'readiness_enrichment_started'
-  | 'readiness_enrichment_succeeded'
+  | ReadinessEventKind
   | 'ready'
   | 'recovered'
   | 'remote-branch-preexisting'
@@ -422,10 +420,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   provider_failover: { severity: 'warn', isPark: false, isTerminal: false },
   provider_refused: { severity: 'warn', isPark: false, isTerminal: false },
   provider_restored: { severity: 'info', isPark: false, isTerminal: false },
-  readiness: { severity: 'info', isPark: false, isTerminal: false },
-  readiness_enrichment_failed: { severity: 'info', isPark: false, isTerminal: false },
-  readiness_enrichment_started: { severity: 'info', isPark: false, isTerminal: false },
-  readiness_enrichment_succeeded: { severity: 'info', isPark: false, isTerminal: false },
+  ...READINESS_EVENT_TRAITS,
   ready: { severity: 'info', isPark: false, isTerminal: true, laneStatus: 'ready' },
   recovered: { severity: 'info', isPark: false, isTerminal: false },
   'remote-branch-preexisting': { severity: 'info', isPark: false, isTerminal: false },

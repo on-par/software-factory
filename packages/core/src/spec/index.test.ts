@@ -23,11 +23,12 @@ afterEach(async () => {
 });
 
 describe('specPaths', () => {
-  it('derives all three artifact paths from the spec path, including md identity', () => {
+  it('derives every artifact path from the spec path, including md identity and readiness notes', () => {
     expect(specPaths('/x/plans/issue-N.md')).toEqual({
       md: '/x/plans/issue-N.md',
       designJson: '/x/plans/issue-N.design.json',
       designMd: '/x/plans/issue-N.design.md',
+      readiness: '/x/plans/issue-N.readiness.json',
     });
   });
 });
@@ -173,6 +174,21 @@ describe('archiveSpec', () => {
     expect(archived).toHaveLength(1);
     expect(archived[0]).toContain('issue-5.design.json');
     expect(existsSync(specPath)).toBe(false);
+  });
+
+  it('archives the readiness notes with the spec (#3470)', async () => {
+    const dir = await tempDir();
+    const specPath = join(dir, 'issue-9.md');
+    await writeFile(specPath, '# Spec\n');
+    await writeFile(specPaths(specPath).readiness, '{}');
+
+    const archived = await archiveSpec(specPath);
+
+    expect(archived.map((p) => basename(p).split('-').slice(1).join('-')).sort()).toEqual([
+      'issue-9.md',
+      'issue-9.readiness.json',
+    ]);
+    expect(existsSync(specPaths(specPath).readiness)).toBe(false);
   });
 });
 

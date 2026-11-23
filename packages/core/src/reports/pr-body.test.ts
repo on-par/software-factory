@@ -314,3 +314,39 @@ describe('renderPrBody trailer (#3894)', () => {
     expect(body).not.toMatch(/\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b/i);
   });
 });
+
+describe('renderPrBody readiness sections (#3470)', () => {
+  const base = { summaryLine: 'Implements #42.', specBody: '## Goal\nDo a thing.\n', footer: '' };
+
+  it('lists the assumptions under ## Assumptions right after What changed', () => {
+    const body = renderPrBody({ ...base, assumptions: ['[scope] Only the v2 API.', '[acceptance] p95 under 200 ms.'] });
+    expect(body).toContain(
+      '## What changed\nDo a thing.\n\n## Assumptions\n- [scope] Only the v2 API.\n- [acceptance] p95 under 200 ms.\n\n## Proof',
+    );
+  });
+
+  it('caps the assumptions at five bullets', () => {
+    const body = renderPrBody({ ...base, assumptions: ['a1', 'a2', 'a3', 'a4', 'a5', 'a6'] });
+    const section = body.split('## Assumptions\n')[1].split('\n\n')[0];
+    expect(section.split('\n')).toEqual(['- a1', '- a2', '- a3', '- a4', '- a5']);
+  });
+
+  it('renders advisory questions under their own heading after the assumptions', () => {
+    const body = renderPrBody({ ...base, assumptions: ['a1'], advisoryQuestions: ['[decision] Keep the old flag?'] });
+    expect(body).toContain(
+      '## Assumptions\n- a1\n\n## Unanswered readiness questions (advisory)\n- [decision] Keep the old flag?\n\n## Proof',
+    );
+  });
+
+  it('puts mentions and URLs in inline code and keeps each bullet on one line', () => {
+    const body = renderPrBody({ ...base, assumptions: ['ask @octocat\nsee https://evil.example'] });
+    expect(body).toContain('- ask `@octocat` see `https://evil.example`');
+  });
+
+  it('omits both sections when the lists are absent or empty', () => {
+    const bare = renderPrBody(base);
+    expect(renderPrBody({ ...base, assumptions: [], advisoryQuestions: [] })).toBe(bare);
+    expect(bare).not.toContain('## Assumptions');
+    expect(bare).not.toContain('readiness questions');
+  });
+});

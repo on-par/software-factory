@@ -23,6 +23,7 @@ import { planPhase } from './plan.js';
 import { findOpenPR, shipPhase } from './ship.js';
 import { toWorkKey, workKeyFromIssue } from '../work/work-key.js';
 import { openOrFindPr } from './ship-open-pr.js';
+import { specPaths } from '../spec/index.js';
 import type { ShipPhaseOptions } from './ship-options.js';
 
 const exec = promisify(execCb);
@@ -185,6 +186,27 @@ describe('openOrFindPr trailers and references (#3894)', () => {
     expect(args.title).toBe('Add X (ON-12)');
     expect(args.body).toContain('Implements ON-12.');
     expect(reads).toEqual([]);
+  });
+
+  it('lists the readiness assumptions and advisory questions from the spec sidecar in the PR body (#3470)', async () => {
+    const specPath = await kit.makeSpecPath(123);
+    await writeFile(
+      specPaths(specPath).readiness,
+      JSON.stringify({
+        verdict: 'not-ready',
+        summary: 's',
+        assumptions: [{ aspect: 'scope', text: 'Only v2.' }],
+        questions: [{ aspect: 'decision', text: 'Keep the flag?' }],
+      }),
+    );
+    const { args } = await open({ specPath }, undefined);
+    expect(args.body).toContain('## Assumptions\n- [scope] Only v2.');
+    expect(args.body).toContain('## Unanswered readiness questions (advisory)\n- [decision] Keep the flag?');
+  });
+
+  it('a GitHub run without readiness notes has no Assumptions section', async () => {
+    const { args } = await open({}, undefined);
+    expect(args.body).not.toContain('## Assumptions');
   });
 
   it('a GitHub run keeps Closes #123 and the issue title', async () => {

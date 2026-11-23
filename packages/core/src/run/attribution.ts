@@ -62,6 +62,7 @@ const STAMPED: Record<ParkReason, true> = {
   'sandbox-env': true,
   'check-infra': true,
   'time-budget': true,
+  'not-ready': true,
 };
 
 type Slot = NonNullable<RunAttribution['plan']>;

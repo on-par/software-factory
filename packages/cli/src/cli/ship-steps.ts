@@ -79,6 +79,7 @@ export const TERMINAL_EVENT_KINDS = new Set<EventKind>([
   'sandbox-env',
   'check-infra',
   'time-budget',
+  'not-ready',
   'ci-failed',
   'ci-infra',
   'timeout',

@@ -18,6 +18,7 @@ export interface SpecPaths {
   designJson: string;
   /** <base>.design.md */
   designMd: string;
+  readiness: string;
 }
 
 export function specPaths(specPath: string): SpecPaths {
@@ -26,6 +27,7 @@ export function specPaths(specPath: string): SpecPaths {
     md: specPath,
     designJson: `${base}.design.json`,
     designMd: `${base}.design.md`,
+    readiness: `${base}.readiness.json`,
   };
 }
 

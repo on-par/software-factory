@@ -3,6 +3,7 @@
 // optional risk line, the Closes / Part of line, and a configurable footer. It never lists changed
 // files: the PR's own Files tab already shows them.
 
+import { inlineSafeText } from '../filing/sanitize.js';
 import { closesTrailer, type TicketTrackerKind } from '../work/ticket-writeback.js';
 import { type WorkKey } from '../work/work-key.js';
 import { defaultFactoryConfig } from '@on-par/factory-config';
@@ -12,6 +13,7 @@ import type { CheckSummary } from '../types/index.js';
 const SECTION_LIMIT = 4000;
 const WHAT_CHANGED_LIMIT = 600;
 const WHAT_CHANGED_SENTENCES = 3;
+const READINESS_BULLET_LIMIT = 5;
 
 /** Default last line of a PR body. */
 export const PR_BODY_FOOTER = defaultFactoryConfig.pr.footer;
@@ -39,6 +41,8 @@ export interface PrBodyInput {
   /** Large-PR walkthrough markdown (#3623), rendered as a Walkthrough section; omitted when undefined. */
   walkthrough?: string;
   typescriptLines?: { net: number; nonTest: number } | 'unavailable';
+  assumptions?: readonly string[];
+  advisoryQuestions?: readonly string[];
 }
 
 const KEY = String.raw`[A-Z][A-Z0-9]{1,9}-\d+`;
@@ -106,6 +110,8 @@ export function renderPrBody(input: PrBodyInput): string {
     section('Summary', input.summaryLine),
     input.stackOrder,
     whatChanged === undefined ? undefined : section('What changed', whatChanged),
+    bulletSection('Assumptions', input.assumptions),
+    bulletSection('Unanswered readiness questions (advisory)', input.advisoryQuestions),
     section('Proof', proof + lineCounts),
     risk ? `**Risk:** ${risk}` : undefined,
     input.walkthrough ? section('Walkthrough', input.walkthrough) : undefined,
@@ -194,4 +200,15 @@ function pick(sections: Array<{ heading: string; text: string }>, matches: (head
 
 function section(title: string, body: string): string {
   return `## ${title}\n${body}`;
+}
+
+function bulletSection(title: string, items: readonly string[] | undefined): string | undefined {
+  if (!items || items.length === 0) return undefined;
+  return section(
+    title,
+    items
+      .slice(0, READINESS_BULLET_LIMIT)
+      .map((item) => `- ${inlineSafeText(item)}`)
+      .join('\n'),
+  );
 }
