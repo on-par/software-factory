@@ -1,0 +1,15 @@
+{
+  "key": "4338",
+  "issue": 4338,
+  "lane": "",
+  "worktree": "/home/factory/work/repo",
+  "specPath": "/home/factory/work/repo/.factory/state/plans/issue-4338.md",
+  "startedAt": "2026-11-23T16:44:51.509Z",
+  "branch": "factory/4338-config-resolve-project-config-fa",
+  "status": "checking",
+  "route": "claude",
+  "model": "claude-sonnet-5-5",
+  "attempts": 1,
+  "updatedAt": "2026-11-23T16:53:00.617Z",
+  "repo": "on-par/software-factory"
+}
