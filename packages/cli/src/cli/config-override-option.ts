@@ -1,6 +1,6 @@
 // src/cli/config-override-option.ts — global --config / --constitution flags and the run's config-source report (#3906).
 
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import {
@@ -13,7 +13,7 @@ import {
 /** Resolve each set flag to an absolute path and hand it to every command, lane and CHECK
  *  subprocess through env. A missing file throws. */
 export function applyConfigOverrideOptions(
-  flags: { config?: string; constitution?: string },
+  flags: { config?: string; constitution?: string; projectConfig?: string },
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
 ): void {
@@ -26,6 +26,13 @@ export function applyConfigOverrideOptions(
   };
   apply('--config', flags.config, 'FACTORY_CONFIG_PATH');
   apply('--constitution', flags.constitution, 'FACTORY_CONSTITUTION_PATH');
+  if (flags.projectConfig !== undefined) {
+    const abs = resolve(cwd, flags.projectConfig);
+    if (!existsSync(abs) || !statSync(abs).isDirectory())
+      throw new Error(`--project-config: no such directory: ${abs}`);
+    env.FACTORY_PROJECT_CONFIG_DIR = abs;
+    env.FACTORY_PROJECT_CONFIG_DIR_SOURCE = '--project-config';
+  }
 }
 
 /** Label of the constitution source a run uses: an override, the committed instance, or repo files / bundled. */
