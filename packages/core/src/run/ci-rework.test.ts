@@ -339,8 +339,20 @@ describe('ciCheckReworkSummary (#3537)', () => {
     expect(result).toMatchObject({ checker: 'ci_checks', result: 'FAIL' });
     expect(result.details).toContain('- test (2/3) (failure) — 1 failed');
     expect(result.details).toContain('- static (failure)');
-    expect(result.details).toContain('--- test (2/3) log tail (job 7), truncated ---\nexpected 1 to be 78');
+    expect(result.details).toContain('--- test (2/3) log excerpt (job 7), truncated ---\nexpected 1 to be 78');
     expect(result.details).toContain('Log fetch errors: static: no job id');
+  });
+
+  it.each([
+    [{ failingStep: 'npm test' }, '--- unit log excerpt (job 3, failing step: npm test) ---\nboom'],
+    [{}, '--- unit log excerpt (job 3) ---\nboom'],
+  ])('shows the failing step only when present (%o)', (extra, header) => {
+    const summary = ciCheckReworkSummary(
+      [{ name: 'unit', conclusion: 'failure' }],
+      [{ name: 'unit', jobId: 3, excerpt: 'boom', truncated: false, ...extra }],
+      [],
+    );
+    expect(summary.results[0].details).toContain(header);
   });
 
   it('omits the error line when there are none', () => {

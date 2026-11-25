@@ -89,6 +89,92 @@ export async function collectCiFailureEvidence(opts: {
 
 const LOG_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z /;
 const ANSI_ESCAPE = new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g');
+const RUN_STEP = /^##\[group\]Run (.+)$/;
+const GROUP = /^##\[group\](.+)$/;
+const ERROR_LINE = /^##\[error\]/;
+const SUMMARY_MARKER =
+  /^\s*(?:(?:--- )?FAIL(?:ED)?\b|(?:Test Files|Test Suites|Tests):?\s+\d+ failed|\d+ failing\b)|Failed Tests\b/;
+const TEST_MARKER = /^\s*[✘✗×]\s/;
+const CONTEXT_BEFORE = 20;
+const CONTEXT_AFTER = 30;
+
+export interface SelectedLogExcerpt {
+  excerpt: string;
+  truncated: boolean;
+  failingStep?: string;
+}
+
+function stepHeaders(lines: readonly string[]): number[] {
+  let current = -1;
+  let sawRun = false;
+  return lines.map((line, i) => {
+    const isRun = RUN_STEP.test(line);
+    if (isRun || (!sawRun && GROUP.test(line))) current = i;
+    sawRun ||= isRun;
+    return current;
+  });
+}
+
+function keepWindows(total: number, anchors: readonly number[]): boolean[] {
+  const keep = Array.from({ length: total }, () => false);
+  let used = 0;
+  let segments = 0;
+  for (const anchor of anchors) {
+    for (let j = Math.max(0, anchor - CONTEXT_BEFORE); j <= Math.min(total - 1, anchor + CONTEXT_AFTER); j++) {
+      if (keep[j]) continue;
+      const [prev, next] = [j > 0 && keep[j - 1], j + 1 < total && keep[j + 1]];
+      const nextSegments = segments + (prev && next ? -1 : prev || next ? 0 : 1);
+      if (used + 1 + Math.max(nextSegments - 1, 0) > CI_EVIDENCE_LIMITS.maxLogLines) return keep;
+      keep[j] = true;
+      used++;
+      segments = nextSegments;
+    }
+  }
+  return keep;
+}
+
+function joinKept(lines: readonly string[], keep: readonly boolean[]): string {
+  const out: string[] = [];
+  let omitted = 0;
+  for (const [i, line] of lines.entries()) {
+    if (!keep[i]) {
+      omitted++;
+      continue;
+    }
+    if (omitted > 0 && out.length > 0) out.push(`… ${omitted} lines omitted …`);
+    omitted = 0;
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+export function selectLogExcerpt(lines: readonly string[]): SelectedLogExcerpt {
+  const { maxLogLines, maxLogChars } = CI_EVIDENCE_LIMITS;
+  const firstError = lines.findIndex((l) => ERROR_LINE.test(l));
+  const markers = lines.flatMap((l, i) =>
+    i === firstError || SUMMARY_MARKER.test(l) || TEST_MARKER.test(l) ? [i] : [],
+  );
+  if (markers.length === 0) {
+    const tail = lines.slice(-maxLogLines).join('\n');
+    const capped = tail.length > maxLogChars;
+    return { excerpt: capped ? tail.slice(-maxLogChars) : tail, truncated: capped || lines.length > maxLogLines };
+  }
+  const steps = stepHeaders(lines);
+  const failingHeader = steps[firstError >= 0 ? firstError : markers[0]];
+  const rank = (i: number): number => (steps[i] === failingHeader ? 0 : 2) + (SUMMARY_MARKER.test(lines[i]) ? 0 : 1);
+  const keep = keepWindows(
+    lines.length,
+    [...markers].sort((a, b) => rank(a) - rank(b)),
+  );
+  const joined = joinKept(lines, keep);
+  const capped = joined.length > maxLogChars;
+  const failingStep = failingHeader >= 0 ? lines[failingHeader].replace(/^##\[group\](?:Run )?/, '').trim() : '';
+  return {
+    excerpt: capped ? joined.slice(0, maxLogChars) : joined,
+    truncated: capped || keep.includes(false),
+    ...(failingStep ? { failingStep } : {}),
+  };
+}
 
 export async function collectFailingJobLogs(opts: {
   octokit: Octokit;
@@ -127,18 +213,15 @@ export async function collectFailingJobLogs(opts: {
       for (const m of text.matchAll(/\bcommit\s*:?\s*([0-9a-f]{7,40})\b/gi)) if (m[1]) commits.add(m[1]);
       const flagged = (set: Set<string>): string[] => [...set].slice(0, CI_EVIDENCE_LIMITS.maxFlagged);
       const lines = text.split('\n').map((l) => l.replace(LOG_TIMESTAMP, '').replace(ANSI_ESCAPE, ''));
-      let truncated = lines.length > CI_EVIDENCE_LIMITS.maxLogLines;
-      let excerpt = lines.slice(-CI_EVIDENCE_LIMITS.maxLogLines).join('\n');
-      if (excerpt.length > CI_EVIDENCE_LIMITS.maxLogChars) {
-        excerpt = excerpt.slice(-CI_EVIDENCE_LIMITS.maxLogChars);
-        truncated = true;
-      }
+      const { excerpt, truncated, failingStep } = selectLogExcerpt(lines);
+      const redact = (value: string): string => redactSecrets(redactGitHubCredentials(value));
       const url = run.html_url || run.details_url;
       jobLogs.push({
         name,
         jobId: run.id,
-        excerpt: redactSecrets(redactGitHubCredentials(excerpt)),
+        excerpt: redact(excerpt),
         truncated,
+        ...(failingStep ? { failingStep: redact(failingStep) } : {}),
         ...(url ? { url } : {}),
         ...(files.size > 0 ? { files: flagged(files) } : {}),
         ...(commits.size > 0 ? { commits: flagged(commits) } : {}),

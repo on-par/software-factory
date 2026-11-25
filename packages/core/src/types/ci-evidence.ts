@@ -42,6 +42,7 @@ export interface CiJobLogExcerpt {
   jobId: number;
   excerpt: string;
   truncated: boolean;
+  failingStep?: string;
   /** Link to the check run the log came from (#3998). */
   url?: string;
   /** Up to 10 files the log flags: PR-changed files named verbatim plus `File:`/`Path:` lines (#3998). */

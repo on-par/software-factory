@@ -229,7 +229,8 @@ export function ciCheckReworkSummary(
 ): CheckSummary {
   const lines = checks.map((c) => `- ${c.name} (${c.conclusion})${c.summary ? ` — ${c.summary}` : ''}`);
   const logs = jobLogs.map(
-    (l) => `\n--- ${l.name} log tail (job ${l.jobId})${l.truncated ? ', truncated' : ''} ---\n${l.excerpt}`,
+    (l) =>
+      `\n--- ${l.name} log excerpt (job ${l.jobId}${l.failingStep ? `, failing step: ${l.failingStep}` : ''})${l.truncated ? ', truncated' : ''} ---\n${l.excerpt}`,
   );
   const details = [
     'CI jobs failing on this PR (not failing on the base branch):',

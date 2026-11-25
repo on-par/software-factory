@@ -15,6 +15,7 @@ export function renderCiFailureNote(evidence: CiFailureEvidence | undefined): st
     if (reason) lines.push(safe(`  attribution: ${reason}`));
     const log = evidence.jobLogs?.find((l) => l.name === check.name);
     if (log) {
+      if (log.failingStep) lines.push(safe(`  failing step: ${log.failingStep}`));
       lines.push(safe(`  flagged files: ${list(log.files)}`));
       lines.push(`  flagged commits: ${list(log.commits)}`);
     }
