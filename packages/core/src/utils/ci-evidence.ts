@@ -92,8 +92,10 @@ const ANSI_ESCAPE = new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g');
 const RUN_STEP = /^##\[group\]Run (.+)$/;
 const GROUP = /^##\[group\](.+)$/;
 const ERROR_LINE = /^##\[error\]/;
-const SUMMARY_MARKER =
-  /^\s*(?:(?:--- )?FAIL(?:ED)?\b|(?:Test Files|Test Suites|Tests):?\s+\d+ failed|\d+ failing\b)|Failed Tests\b/;
+const LINE_START_SUMMARY =
+  /^\s*(?:(?:--- )?FAIL(?:ED)?\b|(?:Test Files|Test Suites|Tests):?\s+\d+ failed|\d+ failing\b)/;
+const FAILED_TESTS_BANNER = /Failed Tests\b/;
+const isSummaryMarker = (line: string): boolean => LINE_START_SUMMARY.test(line) || FAILED_TESTS_BANNER.test(line);
 const TEST_MARKER = /^\s*[✘✗×]\s/;
 const CONTEXT_BEFORE = 20;
 const CONTEXT_AFTER = 30;
@@ -151,9 +153,7 @@ function joinKept(lines: readonly string[], keep: readonly boolean[]): string {
 export function selectLogExcerpt(lines: readonly string[]): SelectedLogExcerpt {
   const { maxLogLines, maxLogChars } = CI_EVIDENCE_LIMITS;
   const firstError = lines.findIndex((l) => ERROR_LINE.test(l));
-  const markers = lines.flatMap((l, i) =>
-    i === firstError || SUMMARY_MARKER.test(l) || TEST_MARKER.test(l) ? [i] : [],
-  );
+  const markers = lines.flatMap((l, i) => (i === firstError || isSummaryMarker(l) || TEST_MARKER.test(l) ? [i] : []));
   if (markers.length === 0) {
     const tail = lines.slice(-maxLogLines).join('\n');
     const capped = tail.length > maxLogChars;
@@ -161,7 +161,7 @@ export function selectLogExcerpt(lines: readonly string[]): SelectedLogExcerpt {
   }
   const steps = stepHeaders(lines);
   const failingHeader = steps[firstError >= 0 ? firstError : markers[0]];
-  const rank = (i: number): number => (steps[i] === failingHeader ? 0 : 2) + (SUMMARY_MARKER.test(lines[i]) ? 0 : 1);
+  const rank = (i: number): number => (steps[i] === failingHeader ? 0 : 2) + (isSummaryMarker(lines[i]) ? 0 : 1);
   const keep = keepWindows(
     lines.length,
     [...markers].sort((a, b) => rank(a) - rank(b)),
