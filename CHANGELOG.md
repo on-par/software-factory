@@ -13,6 +13,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- `factory --help` now names GitHub Copilot CLI among the supported coding agent CLIs in its prerequisites (#4355)
 - The README intro now names OpenCode and GitHub Copilot CLI alongside Claude Code, Codex and Ollama (#4354)
 
 ## 0.9.49 - 2026-11-23
