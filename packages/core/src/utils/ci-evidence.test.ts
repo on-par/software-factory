@@ -3,7 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { fakeOctokit } from '../test-support/index.js';
 import { recordArgs } from '../test-support/recorders.js';
-import { CI_EVIDENCE_LIMITS, collectCiFailureEvidence, collectFailingJobLogs } from './ci-evidence.js';
+import {
+  CI_EVIDENCE_LIMITS,
+  collectCiFailureEvidence,
+  collectFailingJobLogs,
+  selectLogExcerpt,
+} from './ci-evidence.js';
 
 function ciOctokit(runs: unknown[] | Error, alerts?: unknown[] | Error | null) {
   const listForRef = vi.fn(async () => {
@@ -22,6 +27,31 @@ function ciOctokit(runs: unknown[] | Error, alerts?: unknown[] | Error | null) {
 }
 
 const base = { owner: 'o', repo: 'r', ref: 'branch', prNumber: 123 };
+
+const noise = (label: string, n: number): string[] => Array.from({ length: n }, (_, i) => `${label} output ${i}`);
+
+function anchoredLog(): string[] {
+  return [
+    '##[group]Set up job',
+    ...noise('setup', 9),
+    '##[endgroup]',
+    '##[group]Run npm ci',
+    ...noise('install', 88),
+    '##[group]Run npm test',
+    ...noise('test', 399),
+    ' FAIL  src/widget.test.ts > widget > renders',
+    'AssertionError: expected 1 to be 2',
+    ' × widget > renders the label',
+    ' Test Files  1 failed | 4 passed (5)',
+    '      Tests  1 failed | 20 passed (21)',
+    '##[error]Process completed with exit code 1.',
+    '##[group]Run ./scripts/collect-diagnostics.sh',
+    ...noise('diagnostics', 199),
+    '##[group]Run actions/upload-artifact@v4',
+    ...noise('upload', 92),
+    '##[error]Artifact upload failed: storage quota exceeded',
+  ];
+}
 
 describe('collectCiFailureEvidence (#2814)', () => {
   it('collects failing checks and CodeQL alerts from the PR merge ref', async () => {
@@ -227,11 +257,114 @@ describe('collectFailingJobLogs (#3537)', () => {
     });
   });
 
+  it('anchors the excerpt on the test failure, not a later unrelated step error (#4337)', async () => {
+    const { octokit } = logOctokit([run(1, 'test')], { 1: anchoredLog().join('\n') });
+    const { jobLogs } = await collectFailingJobLogs({ octokit, ...args, checkNames: ['test'] });
+    const [log] = jobLogs;
+    expect(log.excerpt).toContain(' Test Files  1 failed | 4 passed (5)');
+    expect(log.excerpt).toContain(' × widget > renders the label');
+    expect(log.excerpt).toContain(' FAIL  src/widget.test.ts > widget > renders');
+    expect(log.failingStep).toBe('npm test');
+    expect(log.truncated).toBe(true);
+    expect(log.excerpt.split('\n').length).toBeLessThanOrEqual(CI_EVIDENCE_LIMITS.maxLogLines);
+  });
+
   it('stringifies non-string data and applies the char cap', async () => {
     const { octokit } = logOctokit([run(1, 'a'), run(2, 'b')], { 1: 'x'.repeat(20000), 2: 5 });
     const { jobLogs } = await collectFailingJobLogs({ octokit, ...args, checkNames: ['a', 'b'] });
     expect(jobLogs[0].excerpt).toHaveLength(CI_EVIDENCE_LIMITS.maxLogChars);
     expect(jobLogs[0].truncated).toBe(true);
     expect(jobLogs[1].excerpt).toBe('5');
+  });
+});
+
+describe('selectLogExcerpt (#4337)', () => {
+  const stepWith = (marker: string): string[] => [
+    '##[group]Run make check',
+    ...noise('a', 199),
+    marker,
+    ...noise('b', 199),
+  ];
+
+  it.each([
+    ' FAIL  src/a.test.ts > adds',
+    'FAILED tests/test_math.py::test_add',
+    '--- FAIL: TestAdd (0.00s)',
+    '⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯',
+    ' Test Files  1 failed | 2 passed (3)',
+    '      Tests  3 failed | 9 passed (12)',
+    'Tests:       2 failed, 5 passed, 7 total',
+    '  2 failing',
+    '  ✘ adds numbers',
+    '  ✗ adds numbers',
+    '   × adds numbers',
+    '##[error]Process completed with exit code 1.',
+  ])('anchors on %j and names its step', (marker) => {
+    const result = selectLogExcerpt(stepWith(marker));
+    expect(result.excerpt.split('\n')).toEqual([...noise('a', 199).slice(-20), marker, ...noise('b', 30)]);
+    expect(result).toMatchObject({ truncated: true, failingStep: 'make check' });
+  });
+
+  it('falls back to the last 150 lines when no marker is found', () => {
+    const lines = ['##[group]Run make check', ...noise('a', 300)];
+    const result = selectLogExcerpt(lines);
+    expect(result).toEqual({ excerpt: lines.slice(-CI_EVIDENCE_LIMITS.maxLogLines).join('\n'), truncated: true });
+  });
+
+  it('returns a short log with markers whole', () => {
+    const lines = ['##[group]Run npm test', 'case a', ' FAIL  src/a.test.ts', '##[error]Process completed'];
+    expect(selectLogExcerpt(lines)).toEqual({ excerpt: lines.join('\n'), truncated: false, failingStep: 'npm test' });
+  });
+
+  it('joins disjoint windows with an elision line', () => {
+    const lines = ['##[group]Run npm test', ...noise('a', 99), ' FAIL  first', ...noise('b', 299), ' FAIL  second'];
+    const out = selectLogExcerpt(lines).excerpt.split('\n');
+    expect(out).toContain('… 249 lines omitted …');
+    expect(out).toEqual(expect.arrayContaining([' FAIL  first', ' FAIL  second']));
+    expect(out[0]).toBe('a output 79');
+    expect(out).toHaveLength(51 + 1 + 21);
+  });
+
+  it('keeps the failing step summary when other steps print many markers', () => {
+    const lint = Array.from({ length: 10 }, (_, i) => [`  ✗ style rule ${i}`, ...noise(`lint${i}`, 99)]).flat();
+    const lines = [
+      '##[group]Run npm run lint',
+      ...lint,
+      '##[group]Run npm test',
+      ...noise('test', 100),
+      ' Test Files  1 failed | 4 passed (5)',
+      ...noise('tail', 50),
+      '##[error]Process completed with exit code 1.',
+    ];
+    const result = selectLogExcerpt(lines);
+    expect(result.failingStep).toBe('npm test');
+    expect(result.excerpt).toContain(' Test Files  1 failed | 4 passed (5)');
+    expect(result.excerpt).toContain('##[error]Process completed with exit code 1.');
+    expect(result.excerpt.split('\n').length).toBeLessThanOrEqual(CI_EVIDENCE_LIMITS.maxLogLines);
+  });
+
+  it.each([
+    ['a setup group before any run step', ['##[group]Set up job', 'x', '##[error]no runner'], 'Set up job'],
+    [
+      'the run step around a nested group',
+      ['##[group]Run actions/checkout@v4', '##[group]Fetch', '##[error]x'],
+      'actions/checkout@v4',
+    ],
+    ['the step holding the first error', ['##[group]Run a', ' FAIL  t', '##[group]Run b', '##[error]boom'], 'b'],
+    ['no step when the log has no group', [' FAIL  t'], undefined],
+  ])('names %s', (_label, lines, step) => {
+    expect(selectLogExcerpt(lines).failingStep).toBe(step);
+  });
+
+  const wide = (label: string, n: number, width: number): string[] => noise(label, n).map((l) => l.padEnd(width, '.'));
+
+  it.each([
+    ['a long anchored log', [...wide('a', 199, 500), ' FAIL  t', ...wide('b', 199, 500)], 'a output 179.'],
+    ['a short anchored log', [' FAIL  t', ...wide('a', 19, 1000)], ' FAIL  t\n'],
+  ])('applies the char cap to %s', (_label, lines, start) => {
+    const result = selectLogExcerpt(lines);
+    expect(result.excerpt).toHaveLength(CI_EVIDENCE_LIMITS.maxLogChars);
+    expect(result.excerpt.startsWith(start)).toBe(true);
+    expect(result.truncated).toBe(true);
   });
 });

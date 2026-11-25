@@ -44,6 +44,31 @@ describe('renderCiFailureNote (#3998)', () => {
     expect(note).toContain('flagged commits: none flagged');
   });
 
+  it.each([
+    ['present', { failingStep: 'npm test' }, true],
+    ['absent', {}, false],
+  ])('renders the failing step line only when %s', (_label, extra, shown) => {
+    const note = renderCiFailureNote({
+      failingChecks: [{ name: 'unit', conclusion: 'failure' }],
+      alerts: [],
+      truncated: false,
+      jobLogs: [{ name: 'unit', jobId: 1, excerpt: '', truncated: false, ...extra }],
+    });
+    expect(note.includes('  failing step: npm test')).toBe(shown);
+  });
+
+  it('redacts secrets in the failing step', () => {
+    const token = `ghp_${'A1b2'.repeat(9)}`;
+    const note = renderCiFailureNote({
+      failingChecks: [{ name: 'unit', conclusion: 'failure' }],
+      alerts: [],
+      truncated: false,
+      jobLogs: [{ name: 'unit', jobId: 1, excerpt: '', truncated: false, failingStep: `curl -H ${token}` }],
+    });
+    expect(note).toContain('failing step: curl -H');
+    expect(note).not.toContain(token);
+  });
+
   it('bounds checks and flagged lists to 10', () => {
     const many = Array.from({ length: 15 }, (_, i) => `f${i}.ts`);
     const ev: CiFailureEvidence = {
