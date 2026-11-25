@@ -1,0 +1,15 @@
+{
+  "key": "4354",
+  "issue": 4354,
+  "lane": "",
+  "worktree": "/home/factory/work/repo",
+  "specPath": "/home/factory/work/repo/.factory/state/plans/issue-4354.md",
+  "startedAt": "2026-11-25T23:14:30.235Z",
+  "branch": "factory/4354-readme-intro-list-opencode-and-c",
+  "status": "shipping",
+  "route": "claude",
+  "model": "claude-sonnet-5-5",
+  "attempts": 1,
+  "updatedAt": "2026-11-25T23:28:38.838Z",
+  "repo": "on-par/software-factory"
+}
