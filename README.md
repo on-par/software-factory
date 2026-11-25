@@ -2,7 +2,7 @@
 
 On PAR Dev's Software Factory is a local CLI that takes a GitHub issue through plan, build and check with AI agents, then opens a ready-for-review PR. You decide what merges.
 
-Built in TypeScript. Routes work across Claude and Codex, with experimental local models through Ollama, and logs cost per task.
+Built in TypeScript. Routes work across Claude Code and Codex, with experimental support for OpenCode, GitHub Copilot CLI and local models through Ollama, and logs cost per task.
 
 ![On PAR Dev's Software Factory running a lane on a real product repo (sped up)](https://raw.githubusercontent.com/on-par/software-factory/main/docs/assets/factory-run.gif)
 
