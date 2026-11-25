@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- `--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` read `config.yaml` and `constitution.md` from a directory outside the checkout, ranked below `--config` / `FACTORY_CONFIG_*` and the constitution overrides (#4338)
+
 ## 0.9.49 - 2026-11-23
 
 Local model provider probing is now opt-in, so factory-cli no longer connects to a local Ollama port unless Ollama is configured (#4345). Releases stage on npm and move `latest` only after a clean-container install of factory-cli succeeds (#4344).

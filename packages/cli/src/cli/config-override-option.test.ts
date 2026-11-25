@@ -15,6 +15,8 @@ afterEach(async () => {
   delete process.env.FACTORY_CONFIG_PATH_SOURCE;
   delete process.env.FACTORY_CONSTITUTION_PATH;
   delete process.env.FACTORY_CONSTITUTION_PATH_SOURCE;
+  delete process.env.FACTORY_PROJECT_CONFIG_DIR;
+  delete process.env.FACTORY_PROJECT_CONFIG_DIR_SOURCE;
   await tmp.cleanup();
 });
 
@@ -53,6 +55,33 @@ describe('applyConfigOverrideOptions (#3906)', () => {
 
   it('a missing --config file exits 2 from the program', async () => {
     const res = await runMainWith(undefined, '--config', '/nope/missing.yaml', 'ship', '5');
+    expect(res).toEqual({ exited: true, code: 2 });
+  });
+});
+
+describe('--project-config (#4338)', () => {
+  it('flag wins over env var', () => {
+    const cwd = tmp.makeSync('project-cwd-');
+    const dirA = join(cwd, 'a');
+    const dirB = join(cwd, 'b');
+    mkdirSync(dirA);
+    mkdirSync(dirB);
+    writeFileSync(join(dirA, 'config.yaml'), 'version: 2\ndisk:\n  minFreeGb: 1\n');
+    writeFileSync(join(dirB, 'config.yaml'), 'version: 2\ndisk:\n  minFreeGb: 2\n');
+    const env: NodeJS.ProcessEnv = { FACTORY_PROJECT_CONFIG_DIR: dirA };
+    applyConfigOverrideOptions({ projectConfig: 'b' }, cwd, env);
+    expect(env.FACTORY_PROJECT_CONFIG_DIR).toBe(dirB);
+    expect(env.FACTORY_PROJECT_CONFIG_DIR_SOURCE).toBe('--project-config');
+  });
+
+  it('a missing --project-config directory throws', () => {
+    expect(() => applyConfigOverrideOptions({ projectConfig: 'nope' }, '/nowhere', {})).toThrow(
+      '--project-config: no such directory',
+    );
+  });
+
+  it('a missing --project-config directory exits 2 from the program', async () => {
+    const res = await runMainWith(undefined, '--project-config', '/nope/missing', 'ship', '5');
     expect(res).toEqual({ exited: true, code: 2 });
   });
 });

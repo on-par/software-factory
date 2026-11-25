@@ -4,12 +4,17 @@ A host, for example a disposable container, can control a run's config and const
 
 | Rank | Source                                                                    | What it is                                                 |
 | ---- | ------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| 1    | `FACTORY_CONFIG_OVERRIDES`                                                | A YAML fragment deep-merged over the winner of ranks 2-4   |
+| 1    | `FACTORY_CONFIG_OVERRIDES`                                                | A YAML fragment deep-merged over the winner of ranks 2-5   |
 | 2    | `--config <path>`, else `FACTORY_CONFIG_PATH`, else `FACTORY_CONFIG_YAML` | A whole-file override; it replaces the repo file wholesale |
-| 3    | `.factory/config.yaml` (or `.yml` / `.json`)                              | The repo's file                                            |
-| 4    | Packaged defaults                                                         | Used when none of the above exists                         |
+| 3    | `--project-config <dir>`, else `FACTORY_PROJECT_CONFIG_DIR`               | `config.yaml` in a directory outside the checkout          |
+| 4    | `.factory/config.yaml` (or `.yml` / `.json`)                              | The repo's file                                            |
+| 5    | Packaged defaults                                                         | Used when none of the above exists                         |
 
-Constitutions follow the same idea: `--constitution <path>`, else `FACTORY_CONSTITUTION_PATH`, else inline `FACTORY_CONSTITUTION`, each replacing the repo's `.factory/constitution.md`.
+Constitutions follow the same idea, highest first: `--constitution <path>`, else `FACTORY_CONSTITUTION_PATH`, else inline `FACTORY_CONSTITUTION`, else `constitution.md` in the project config directory, else the repo's `.factory/constitution.md`, else the repo instruction files or the bundled constitution.
+
+## Project config directory
+
+`--project-config <dir>` (the flag wins) or `FACTORY_PROJECT_CONFIG_DIR` points a run at a directory outside the checkout. Its `config.yaml` and `constitution.md` replace the repo's `.factory/` files wholesale, with no fallback to them. The external `config.yaml` is always checked with the strict schemas. A missing directory, a missing or empty file, or an invalid config fails before PLAN with an error naming the source and the file. The container job path does not mount the directory, so a host path given to a container job fails as a missing directory.
 
 The per-key environment variables that already exist still apply on top of the resolved config.
 
