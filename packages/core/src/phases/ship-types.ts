@@ -15,6 +15,7 @@ export interface ShipResult {
   ciFailure?: CiFailureEvidence;
   alreadyDelivered?: boolean;
   headSha?: string;
+  noNewCommit?: boolean;
   draft?: boolean;
   ciPending?: boolean;
   draftReason?: ShipDraftReason;

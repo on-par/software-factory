@@ -47,6 +47,7 @@ export type EventKind =
   | 'ci-failed'
   | 'ci-infra'
   | 'ci-never-started'
+  | 'ci-rework-no-change'
   | 'ci-rescued'
   | 'claim_expired_released'
   | 'claim_lost'
@@ -287,6 +288,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'ci-infra': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   // An awaiting-ci PR still had no CI run at ci.awaitingCiCapHours (#3208). Parks; a CI or config problem, not a failing build.
   'ci-never-started': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
+  'ci-rework-no-change': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   // The one-shot infra rerun (#2365) did not go green (#2366). Not a park.
   'ci-rescue-failed': { severity: 'warn', isPark: false, isTerminal: false },
   conflict: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },

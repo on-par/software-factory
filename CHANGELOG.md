@@ -15,6 +15,10 @@ section to `## X.Y.Z - date`. See
 
 - The README intro now names OpenCode and GitHub Copilot CLI alongside Claude Code, Codex and Ollama (#4354)
 
+### Fixed
+
+- run: a CI or preview rework round whose worker makes no new commit now stops at once and parks `ci-rework-no-change`, with the original ship failure in the park message, instead of running the re-CHECK and SHIP again. A first ship now records the pushed remote head on a CI or preview failure, so the round-1 no-op guard has the head to compare against (#4337)
+
 ## 0.9.49 - 2026-11-23
 
 Local model provider probing is now opt-in, so factory-cli no longer connects to a local Ollama port unless Ollama is configured (#4345). Releases stage on npm and move `latest` only after a clean-container install of factory-cli succeeds (#4344).

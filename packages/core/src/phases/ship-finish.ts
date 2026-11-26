@@ -16,6 +16,7 @@ export async function finishShip(ctx: {
   repoName: string;
   prNumber: number;
   headSha?: string;
+  pushedSha?: string;
   ciOutcome?: InfraRerunOutcome;
   ciWatchError?: string;
 }): Promise<ShipResult> {
@@ -23,7 +24,7 @@ export async function finishShip(ctx: {
   const { octokit, worktree, log } = opts;
   const ciPending = ciOutcome === 'timeout' || ciWatchError !== undefined;
 
-  let resolvedSha = headSha;
+  let resolvedSha = headSha ?? ctx.pushedSha;
   const currentSha = async (): Promise<string> => {
     resolvedSha ??= (await run('git rev-parse HEAD', { cwd: worktree })).stdout.trim();
     return resolvedSha;

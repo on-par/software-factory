@@ -130,6 +130,8 @@ describe('shipPhase — CI rework re-entry (#2816)', () => {
       ok: false,
       ciOutcome: 'failure',
       reason: `CI rework produced no new commit on ${BRANCH}`,
+      headSha: PREV_SHA,
+      noNewCommit: true,
     });
     expect(commands.some((c) => c.startsWith('git push'))).toBe(false);
   });
