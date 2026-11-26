@@ -1,0 +1,15 @@
+{
+  "key": "4355",
+  "issue": 4355,
+  "lane": "",
+  "worktree": "/home/factory/work/repo",
+  "specPath": "/home/factory/work/repo/.factory/state/plans/issue-4355.md",
+  "startedAt": "2026-11-25T23:56:19.789Z",
+  "branch": "factory/4355-factory-help-name-github-copilot",
+  "status": "shipping",
+  "route": "claude",
+  "model": "claude-sonnet-5-5",
+  "attempts": 1,
+  "updatedAt": "2026-11-26T00:09:15.288Z",
+  "repo": "on-par/software-factory"
+}
