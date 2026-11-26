@@ -1,8 +1,8 @@
 // packages/cli/src/cli/first-run.ts — designed first-run copy: overview + structured error messages
 
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 
-import { openCodeVersion } from '@on-par/factory-core/internal';
+import { excludeProjectRunState, openCodeVersion, resolveProjectConfigDir } from '@on-par/factory-core/internal';
 
 import { CliExitError } from './errors.js';
 
@@ -54,6 +54,20 @@ export function missingTokenMessage(): string {
 
 export function notInitializedMessage(): string {
   return 'factory not initialized — run `factory init` first';
+}
+
+export async function requireRunInputs(
+  repoRoot: string,
+  paths: { root: string; state: string; logs: string; plans: string },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const project = resolveProjectConfigDir(env);
+  if (!project) {
+    if (!existsSync(paths.root)) throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
+    return;
+  }
+  await excludeProjectRunState(repoRoot, paths.state, env);
+  for (const dir of [paths.logs, paths.plans]) mkdirSync(dir, { recursive: true });
 }
 
 export function requireFactoryInitialized(root: string): void {

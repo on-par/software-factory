@@ -9,7 +9,6 @@ const CHECKOUT_INPUTS = [
   ...REPO_CONFIG_FILENAMES.map((name) => `.factory/${name}`),
   '.factory/constitution.md',
   '.factory/agent-memory',
-  '.factory/state/product',
   '.factory/tests',
 ];
 

@@ -38,7 +38,7 @@ import {
 } from '@on-par/factory-core';
 import { shipHostBuildSlot } from './host-slot.js';
 import { claimReworkRequests } from './ship-review-rework.js';
-import { holdRunInputs, reportConfigSource } from './config-override-option.js';
+import { excludeProjectRunState, holdRunInputs, reportConfigSource } from './config-override-option.js';
 import { shipRunStateRecorder } from './ship-pr-state.js';
 import type { CheckResumeRecord, SlicePlanStore, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
@@ -95,6 +95,7 @@ export async function shipIssue(
   const configPaths = ctx?.paths ?? getFactoryPaths(repoRoot);
   const release = holdRunInputs(configPaths.config);
   try {
+    await excludeProjectRunState(repoRoot, configPaths.state);
     reportConfigSource(repoRoot, configPaths.events, issueNum);
     return await shipIssueFrom(repoRoot, issueNum, opts, ctx, deps);
   } finally {
