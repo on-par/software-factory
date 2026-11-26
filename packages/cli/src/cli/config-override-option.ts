@@ -14,6 +14,8 @@ import {
   validateProjectInputs,
 } from '@on-par/factory-core/internal';
 
+export { excludeProjectRunState } from '@on-par/factory-core/internal';
+
 /** Resolve each set flag to an absolute path and hand it to every command, lane and CHECK
  *  subprocess through env. A missing file throws. */
 export function applyConfigOverrideOptions(

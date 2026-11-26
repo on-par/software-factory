@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import { resolveProjectConfigDir } from './run-config-ladder.js';
 
@@ -32,4 +32,11 @@ export function readProductInput(checkoutPath: string, deps: ReadProductDeps = {
   const { path } = resolveProjectInput('product', checkoutPath, env);
   if (!fileExists(path)) return undefined;
   return readFile(path).trim() || undefined;
+}
+
+export function writeProductInput(checkoutPath: string, product: string, env: NodeJS.ProcessEnv = process.env): string {
+  const { path } = resolveProjectInput('product', checkoutPath, env);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, product);
+  return path;
 }

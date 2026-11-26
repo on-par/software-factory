@@ -236,6 +236,7 @@ import {
   formatBaseMovedRefusal,
   PRODUCT_NAME_PATTERN,
   readProductInput,
+  writeProductInput,
 } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
 import { runIssueStack } from './stack-run.js';
@@ -330,6 +331,7 @@ import {
   missingTokenMessage,
   notInitializedMessage,
   requireFactoryInitialized,
+  requireRunInputs,
 } from './first-run.js';
 import { resolveFactoryCheckoutCommit, runFilingPreview } from './filing.js';
 import { cmdRisk } from './risk.js';
@@ -1243,8 +1245,7 @@ export async function cmdConstitution(
     const content = readFileSync(resolve(constitutionsDir, `${opts.product}.md`), 'utf-8');
     writeIfAbsent(constitutionPath, content, '.factory/constitution.md', opts.force || scaffold);
 
-    ensureDir(paths.state);
-    writeFileSync(paths.product, opts.product);
+    writeProductInput(paths.product, opts.product);
     console.log(styleText('green', `Active product: ${opts.product}`));
     return;
   }
@@ -2265,9 +2266,7 @@ async function cmdShip(
   }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  if (!existsSync(paths.root)) {
-    throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
-  }
+  await requireRunInputs(repoRoot, paths);
 
   const mergeNotice = mergeScopeNotice(process.env, issueNum);
   if (mergeNotice) {
@@ -2364,9 +2363,7 @@ async function cmdRunIssue(
   }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  if (!existsSync(paths.root)) {
-    throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
-  }
+  await requireRunInputs(repoRoot, paths);
 
   const {
     runChildren: _removed,

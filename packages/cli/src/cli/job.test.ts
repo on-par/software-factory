@@ -1,8 +1,9 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
+import { resolveTestsCommand } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import YAML from 'yaml';
 
 import {
@@ -325,5 +326,118 @@ describe('jobStatusLine', () => {
     expect(jobStatusLine({ ...input, run: undefined, exitCode: 1, error: undefined }).exitReason).toBe(
       'the run produced no result',
     );
+  });
+});
+
+describe('project config directory in a container job (#4341)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function mounted(files: string[] = ['config.yaml', 'constitution.md']): string {
+    const dir = tempDirs.makeSync('factory-job-project-');
+    for (const f of files) {
+      mkdirSync(dirname(join(dir, f)), { recursive: true });
+      writeFileSync(join(dir, f), 'x');
+    }
+    return dir;
+  }
+
+  it.each([
+    { name: 'env var', env: {}, source: 'FACTORY_PROJECT_CONFIG_DIR' },
+    { name: 'flag', env: { FACTORY_PROJECT_CONFIG_DIR_SOURCE: '--project-config' }, source: '--project-config' },
+  ])('fails before the job starts when the directory is not mounted ($name)', ({ env, source }) => {
+    const hostPath = join(tempDirs.makeSync('factory-job-host-'), 'srv', 'project');
+    const result = exitCodeOf(() => validateJobFlags(OPTS, { ...ENV, ...env, FACTORY_PROJECT_CONFIG_DIR: hostPath }));
+    expect(result).toEqual({ code: 2, message: `factory job: ${source}: no such directory: ${hostPath}` });
+  });
+
+  it('accepts a mounted directory and leaves the flags unchanged', () => {
+    const dir = mounted();
+    expect(validateJobFlags(OPTS, { ...ENV, FACTORY_PROJECT_CONFIG_DIR: dir })).toEqual(validateJobFlags(OPTS, ENV));
+  });
+
+  it.each([
+    {
+      name: 'over the repo files and container defaults',
+      clone: ['clone/.factory/config.yaml', 'clone/.factory/constitution.md'],
+      env: {},
+      config: (dir: string) => `FACTORY_PROJECT_CONFIG_DIR (${join(dir, 'config.yaml')})`,
+      constitution: (dir: string) => `FACTORY_PROJECT_CONFIG_DIR (${join(dir, 'constitution.md')})`,
+    },
+    {
+      name: 'below FACTORY_CONFIG_YAML and FACTORY_CONSTITUTION',
+      clone: [],
+      env: { FACTORY_CONFIG_YAML: 'version: 2', FACTORY_CONSTITUTION: 'c' },
+      config: () => 'FACTORY_CONFIG_YAML',
+      constitution: () => 'FACTORY_CONSTITUTION',
+    },
+    {
+      name: 'labelled with the flag',
+      clone: [],
+      env: { FACTORY_PROJECT_CONFIG_DIR_SOURCE: '--project-config' },
+      config: (dir: string) => `--project-config (${join(dir, 'config.yaml')})`,
+      constitution: (dir: string) => `--project-config (${join(dir, 'constitution.md')})`,
+    },
+  ])('ranks the mounted directory $name', ({ clone, env, config, constitution }) => {
+    const dir = mounted();
+    const l = layout(clone);
+    const out = resolveJobConfigSources(
+      { cloneDir: l.clone, factoryDir: undefined, containerDefaultsPath: DEFAULTS_PATH, exists: l.exists },
+      { ...env, FACTORY_PROJECT_CONFIG_DIR: dir },
+    );
+    expect(out).toEqual({
+      env: { FACTORY_PROJECT_CONFIG_DIR: dir },
+      writeContainerDefaults: false,
+      configSource: config(dir),
+      constitutionSource: constitution(dir),
+    });
+  });
+
+  it('hands the child run the normalised absolute mount path', () => {
+    const dir = mounted();
+    const l = layout([]);
+    const out = resolveJobConfigSources(
+      { cloneDir: l.clone, factoryDir: undefined, containerDefaultsPath: DEFAULTS_PATH, exists: l.exists },
+      { FACTORY_PROJECT_CONFIG_DIR: `${dir}/./sub/..` },
+    );
+    expect(out.env).toEqual({ FACTORY_PROJECT_CONFIG_DIR: dir });
+  });
+
+  it('a mounted .factory dir still outranks the project config directory', () => {
+    const dir = mounted();
+    const l = layout(['mounted/config.yaml', 'mounted/constitution.md']);
+    const out = resolveJobConfigSources(
+      { cloneDir: l.clone, factoryDir: l.factory, containerDefaultsPath: DEFAULTS_PATH, exists: l.exists },
+      { FACTORY_PROJECT_CONFIG_DIR: dir },
+    );
+    expect(out).toMatchObject({
+      env: {
+        FACTORY_PROJECT_CONFIG_DIR: dir,
+        FACTORY_CONFIG_PATH: join(l.factory, 'config.yaml'),
+        FACTORY_CONSTITUTION_PATH: join(l.factory, 'constitution.md'),
+      },
+      configSource: `mounted .factory dir (${join(l.factory, 'config.yaml')})`,
+    });
+  });
+
+  it('points the container CHECK pytest command at the mounted tests/', async () => {
+    const dir = mounted(['config.yaml', 'constitution.md', 'tests/test_external.py']);
+    const l = layout([]);
+    mkdirSync(join(l.clone, '.factory', 'tests'), { recursive: true });
+    writeFileSync(join(l.clone, '.factory', 'tests', 'test_checkout.py'), 'def test_checkout(): pass\n');
+    const sources = resolveJobConfigSources(
+      { cloneDir: l.clone, factoryDir: undefined, containerDefaultsPath: DEFAULTS_PATH, exists: l.exists },
+      { FACTORY_PROJECT_CONFIG_DIR: dir },
+    );
+    for (const [key, value] of Object.entries(sources.env)) vi.stubEnv(key, value);
+
+    const command = await resolveTestsCommand({ worktree: l.clone, checks: null });
+
+    expect(command).toEqual({
+      runner: 'pytest',
+      argv: ['python3', '-m', 'pytest', join(dir, 'tests')],
+      label: 'pytest',
+    });
   });
 });

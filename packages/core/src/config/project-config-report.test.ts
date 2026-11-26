@@ -48,7 +48,6 @@ describe('project config report (#4340)', () => {
         '.factory/config.yaml',
         '.factory/config.yml',
         '.factory/constitution.md',
-        '.factory/state/product',
         '.factory/tests',
       ],
     },
@@ -59,6 +58,15 @@ describe('project config report (#4340)', () => {
     },
   ])('lists ignored checkout inputs by path ($name)', ({ files, ignored }) => {
     expect(ignoredCheckoutInputs(checkout(files))).toEqual(ignored);
+  });
+
+  it.each([
+    { name: 'product', files: ['.factory/state/product'] },
+    { name: 'events and logs', files: ['.factory/state/events.ndjson', '.factory/state/logs/run.log'] },
+    { name: 'plans and locks', files: ['.factory/state/plans/issue-1.md', '.factory/state/locks/run/issue-1'] },
+    { name: 'input lookalikes', files: ['.factory/state/config.yaml', '.factory/state/agent-memory/core.md'] },
+  ])('lists no runtime state under .factory/state/ ($name)', ({ files }) => {
+    expect(ignoredCheckoutInputs(checkout(files))).toEqual([]);
   });
 
   it.each([

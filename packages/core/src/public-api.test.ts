@@ -642,6 +642,8 @@ const INTERNAL_API_KEYS = [
   'ticketKeyOf',
   'PRODUCT_NAME_PATTERN',
   'readProductInput',
+  'writeProductInput',
+  'excludeProjectRunState',
   'validateProjectInputs',
   'projectConfigReport',
   'resolveProjectConfigDir',
