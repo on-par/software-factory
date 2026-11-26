@@ -73,13 +73,13 @@ describe('project config directory inputs (#4339)', () => {
     {
       mode: 'external' as const,
       product: 'external-product',
-      sources: ['.factory/tests/'],
+      sources: (external: string) => [`${join(external, 'tests')}/`],
       testsArg: (external: string) => join(external, 'tests'),
     },
     {
       mode: 'unset' as const,
       product: 'checkout-product',
-      sources: ['.factory/tests/'],
+      sources: () => ['.factory/tests/'],
       testsArg: () => '.factory/tests',
     },
   ])('product and tests read from external directory ($mode)', async ({ mode, product, sources, testsArg }) => {
@@ -90,7 +90,7 @@ describe('project config directory inputs (#4339)', () => {
     const command = await resolveTestsCommand(testsCtx(checkout));
 
     expect(readProductInput(productPath(checkout))).toBe(product);
-    expect(await detectPythonTestSurface(checkout)).toEqual({ present: true, sources });
+    expect(await detectPythonTestSurface(checkout)).toEqual({ present: true, sources: sources(external) });
     expect(command.argv).toEqual(['python3', '-m', 'pytest', testsArg(external)]);
   });
 

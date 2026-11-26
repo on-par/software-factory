@@ -5,6 +5,7 @@ import { basename, join, resolve } from 'node:path';
 
 import { parse as parseYaml, YAMLParseError } from 'yaml';
 
+import type { ProjectConfigSourcePayload } from '../events/payloads.js';
 import { deepMergeConfig, factoryRuntimeConfigIssues, isPlainObject, type ConfigSchemaIssue } from './index.js';
 import { readRepoConfigFile, resolveRepoConfigPath } from './repo-config-file.js';
 import { repoRoutingConfigIssues } from './repo.js';
@@ -174,10 +175,21 @@ export function resolveProjectConstitution(
   return { text: readConstitutionFile(path, project.source), source: project.source, path };
 }
 
-export function describeConfigSources(config: RunConfigLadder, constitution: string): string {
+function describeProjectConfig(project: ProjectConfigSourcePayload | undefined): string {
+  if (!project) return '';
+  const external = `; external source: ${project.source} (${project.dir})`;
+  if (project.ignoredInputs.length === 0) return external;
+  return `${external}; ignored checkout inputs: ${project.ignoredInputs.join(', ')}`;
+}
+
+export function describeConfigSources(
+  config: RunConfigLadder,
+  constitution: string,
+  project?: ProjectConfigSourcePayload,
+): string {
   let label: string = config.source;
   if (config.source === 'repo') label = `.factory/${basename(config.path ?? 'config.yaml')}`;
   else if (config.path !== undefined) label = `${config.source} (${config.path})`;
   const changed = config.overrideKeys.length > 0 ? `; overrides changed: ${config.overrideKeys.join(', ')}` : '';
-  return `config: ${label}; constitution: ${constitution}${changed}`;
+  return `config: ${label}; constitution: ${constitution}${changed}${describeProjectConfig(project)}`;
 }

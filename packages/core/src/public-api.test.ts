@@ -643,6 +643,8 @@ const INTERNAL_API_KEYS = [
   'PRODUCT_NAME_PATTERN',
   'readProductInput',
   'validateProjectInputs',
+  'projectConfigReport',
+  'resolveProjectConfigDir',
 ];
 describe('public API surface (ADR-0004)', () => {
   it('root export exposes exactly the documented public API', () => {

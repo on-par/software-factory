@@ -3,9 +3,12 @@ export { describeChecksProbe, resolveCompileCommand, resolveLintCommands, resolv
 export { holdRunConfigSnapshot, lastRunConfigLadder } from '../config/run-config-source.js';
 export { PRODUCT_NAME_PATTERN, readProductInput } from '../config/project-inputs.js';
 export { validateProjectInputs } from '../config/project-input-validation.js';
+export { projectConfigReport } from '../config/project-config-report.js';
+export type { ProjectConfigSourcePayload } from '../events/payloads.js';
 export {
   describeConfigSources,
   resolveConstitutionOverride,
+  resolveProjectConfigDir,
   type RunConfigLadder,
 } from '../config/run-config-ladder.js';
 export {

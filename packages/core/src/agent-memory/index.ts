@@ -73,19 +73,24 @@ ${result.content.trim()}
 export async function scanAgentMemory(
   root: string,
   maxBytes: number = AGENT_MEMORY_MAX_BYTES,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<Array<{ file: string; bytes: number; oversized: boolean }>> {
+  let dir: string;
+  let label: string;
   let names: string[];
   try {
-    names = await readdir(join(root, AGENT_MEMORY_DIR));
+    const location = resolveProjectInput('agent-memory', join(root, AGENT_MEMORY_DIR), env);
+    dir = location.path;
+    label = location.external ? location.path : AGENT_MEMORY_DIR;
+    names = await readdir(dir);
   } catch {
     return [];
   }
   const out: Array<{ file: string; bytes: number; oversized: boolean }> = [];
   for (const name of names.filter((n) => n.endsWith('.md')).sort()) {
     try {
-      const info = await stat(join(root, AGENT_MEMORY_DIR, name));
-      if (info.isFile())
-        out.push({ file: `${AGENT_MEMORY_DIR}/${name}`, bytes: info.size, oversized: info.size > maxBytes });
+      const info = await stat(join(dir, name));
+      if (info.isFile()) out.push({ file: `${label}/${name}`, bytes: info.size, oversized: info.size > maxBytes });
     } catch {
       // vanished or unreadable entry: skip
     }
