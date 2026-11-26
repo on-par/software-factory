@@ -8,7 +8,9 @@ import {
   holdRunConfigSnapshot,
   lastRunConfigLadder,
   logEvent,
+  projectConfigReport,
   resolveConstitutionOverride,
+  resolveProjectConfigDir,
   validateProjectInputs,
 } from '@on-par/factory-core/internal';
 
@@ -41,6 +43,7 @@ export function applyConfigOverrideOptions(
 export function constitutionSourceLabel(repoRoot: string): string {
   return (
     resolveConstitutionOverride()?.source ??
+    resolveProjectConfigDir()?.source ??
     (existsSync(join(repoRoot, '.factory', 'constitution.md'))
       ? '.factory/constitution.md'
       : 'repo instruction files / bundled')
@@ -52,9 +55,10 @@ export function reportConfigSource(repoRoot: string, eventsFile: string, issueNu
   const ladder = lastRunConfigLadder();
   if (!ladder) return;
   const constitution = constitutionSourceLabel(repoRoot);
-  const text = describeConfigSources(ladder, constitution);
+  const projectConfig = projectConfigReport(repoRoot);
+  const text = describeConfigSources(ladder, constitution, projectConfig);
   console.log(`factory: ${text}`);
-  logEvent(eventsFile, 'config_source', issueNum, text, { level: 'info' });
+  logEvent(eventsFile, 'config_source', issueNum, text, { level: 'info', projectConfig });
 }
 
 export function holdRunInputs(configPath: string, env: NodeJS.ProcessEnv = process.env): () => void {

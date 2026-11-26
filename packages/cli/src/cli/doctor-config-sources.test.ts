@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { configSourcesCheck, holdDoctorConfigSources } from './doctor-config-sources.js';
@@ -31,6 +34,36 @@ describe('doctor config sources (#3906)', () => {
       constitution: { source: 'FACTORY_CONSTITUTION' },
     });
     expect(out.checks.find((c) => c.name === 'config sources')?.detail).toContain('disk.minFreeGb');
+  });
+
+  it.each([
+    { name: '--project-config', viaFlag: true, source: '--project-config' },
+    { name: 'FACTORY_PROJECT_CONFIG_DIR', viaFlag: false, source: 'FACTORY_PROJECT_CONFIG_DIR' },
+  ])('shows external source ($name) (#4340)', async ({ viaFlag, source }) => {
+    h.execSyncImpl = (cmd: string) => (cmd.includes('rev-parse') ? h.repoRoot : '');
+    coreFakes.isCommandAvailable.mockImplementation(() => false);
+    const dir = mkdtempSync(join(h.repoRoot, 'external-'));
+    writeFileSync(join(dir, 'config.yaml'), 'version: 2\n');
+    writeFileSync(join(dir, 'constitution.md'), 'External standards');
+    mkdirSync(join(h.repoRoot, '.factory', 'tests'), { recursive: true });
+    writeFileSync(join(h.repoRoot, '.factory', 'constitution.md'), 'Checkout standards');
+    vi.stubEnv('FACTORY_PROJECT_CONFIG_DIR', viaFlag ? '' : dir);
+    vi.stubEnv('FACTORY_PROJECT_CONFIG_DIR_SOURCE', '');
+    const flag = viaFlag ? ['--project-config', dir] : [];
+
+    await runMainWith(undefined, ...flag, 'doctor', '--json');
+
+    const out = JSON.parse(logged().slice(logged().indexOf('{'))) as {
+      sources: { constitution: { source: string }; projectConfig?: unknown };
+      checks: { name: string; detail: string }[];
+    };
+    const ignoredInputs = ['.factory/constitution.md', '.factory/tests'];
+    expect(out.sources.projectConfig).toEqual({ source, dir, ignoredInputs });
+    expect(out.sources.constitution).toEqual({ source });
+    expect(out.checks.find((c) => c.name === 'config sources')?.detail).toBe(
+      `config: ${source} (${join(dir, 'config.yaml')}); constitution: ${source}; external source: ${source} (${dir}); ignored checkout inputs: ${ignoredInputs.join(', ')}`,
+    );
+    expect(logged()).not.toContain('Checkout standards');
   });
 
   it('turns a ladder error into a failing row instead of throwing', () => {

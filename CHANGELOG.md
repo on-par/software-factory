@@ -11,6 +11,7 @@ section to `## X.Y.Z - date`. See
 
 - `--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` read `config.yaml` and `constitution.md` from a directory outside the checkout, ranked below `--config` / `FACTORY_CONFIG_*` and the constitution overrides (#4338)
 - `--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` also supply `agent-memory/`, `product` and `tests/`, in place of the checkout's `.factory/agent-memory/`, active product file and `.factory/tests/`. An invalid file there fails before PLAN with an error naming the source and the file (#4339)
+- With `--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` set, the `factory: config:` line, the `config_source` event (new `projectConfig` field) and `factory doctor` (text and `--json` `sources.projectConfig`) name the external directory and list, by path only, the checkout `.factory/` inputs it replaced. `factory doctor` also checks the external `agent-memory/`, and the pytest probe names the external `tests/` directory. Output with no external source is unchanged (#4340)
 
 ### Changed
 

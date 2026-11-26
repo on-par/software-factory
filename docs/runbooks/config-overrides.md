@@ -57,7 +57,15 @@ Every override is checked with the same strict schemas as the repo file. A bad o
 
 ## Reporting and redaction
 
-`run-issue`, `run-brief`, `ship` and `run` print `factory: config: <source>; constitution: <source>` and record a `config_source` event. `factory doctor` shows a `config sources` row and a `sources` object under `--json`. Only key paths that the fragment changed are listed, never values. A key whose last segment ends in `Env`, or contains `token`, `secret`, `password`, `apikey` or `credential`, is shown as `<redacted key>`.
+`run-issue`, `run-brief`, `ship` and `run` print `factory: config: <source>; constitution: <source>` and record a `config_source` event. `factory doctor` shows a `config sources` row and a `sources` object under `--json`. Only key paths that the fragment changed are listed, never values.
+
+When a project config directory is set, the line, the event and the doctor row add `external source: <source> (<dir>)`. If the checkout also has `.factory/` inputs that the directory replaces, they add `ignored checkout inputs:` and the repo-relative paths, sorted. The inputs checked are `.factory/config.yaml` (or `.yml` / `.json`), `.factory/constitution.md`, `.factory/agent-memory`, `.factory/state/product` and `.factory/tests`. Only paths are listed, never file contents. For example:
+
+```text
+factory: config: --project-config (/srv/project/config.yaml); constitution: --project-config; external source: --project-config (/srv/project); ignored checkout inputs: .factory/config.yaml, .factory/constitution.md
+```
+
+The `config_source` event carries the same data in a `projectConfig` field, `{ "source": "--project-config", "dir": "/srv/project", "ignoredInputs": [".factory/config.yaml", ".factory/constitution.md"] }`. `ignoredInputs` is `[]` when the checkout has none of these inputs. `factory doctor --json` puts the same object at `sources.projectConfig`. `factory doctor` checks the lane memory files in the directory's `agent-memory/`, and the CHECK probe names the directory's `tests/` as the pytest source. With no project config directory, none of these fields or segments appear. A key whose last segment ends in `Env`, or contains `token`, `secret`, `password`, `apikey` or `credential`, is shown as `<redacted key>`.
 
 ## A daemon snapshot wins
 

@@ -8,7 +8,7 @@ import { loadRepoConfig } from '../config/repo.js';
 import { resolveProjectInput } from '../config/project-inputs.js';
 import { REPO_CONFIG_FILENAMES } from '../config/repo-config-file.js';
 import { runConfigOrigin, runConfigSource } from '../config/run-config-source.js';
-import { detectPythonTestSurface, fileExists, type WorktreeProbe } from './probe.js';
+import { detectPythonTestSurface, factoryTestsSource, fileExists, type WorktreeProbe } from './probe.js';
 
 export interface PackageJson {
   scripts?: Record<string, string>;
@@ -87,7 +87,7 @@ export async function resolveTestsCommand(ctx: LintCommandSource): Promise<Tests
   if (!pythonSurface.present) return { runner: 'none', argv: [], label: '' };
   return {
     runner: 'pytest',
-    argv: pythonSurface.sources.includes('.factory/tests/')
+    argv: pythonSurface.sources.includes(factoryTestsSource())
       ? ['python3', '-m', 'pytest', resolveProjectInput('tests', '.factory/tests').path]
       : ['python3', '-m', 'pytest'],
     label: 'pytest',
