@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
+import { resolveProjectInput } from '../config/project-inputs.js';
 import { globToRegExp } from '../review/floor.js';
 
 export interface PackageJson {
@@ -141,7 +142,8 @@ export async function detectPythonTestSurface(worktree: string): Promise<PythonT
 
   if (await containsPythonTestFile(join(worktree, 'tests'))) sources.push('tests/');
 
-  if (await containsPythonTestFile(join(worktree, '.factory/tests'))) sources.push('.factory/tests/');
+  const factoryTests = resolveProjectInput('tests', join(worktree, '.factory/tests')).path;
+  if (await containsPythonTestFile(factoryTests)) sources.push('.factory/tests/');
 
   const topLevel = await readdir(worktree, { withFileTypes: true }).catch(() => []);
   if (topLevel.some((entry) => entry.isFile() && PYTHON_TEST_FILE.test(entry.name))) sources.push('test_*.py');

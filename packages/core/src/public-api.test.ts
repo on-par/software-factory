@@ -640,6 +640,9 @@ const INTERNAL_API_KEYS = [
   // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
   'wrapCommandInSandbox', // Linear write-back (#3894)
   'ticketKeyOf',
+  'PRODUCT_NAME_PATTERN',
+  'readProductInput',
+  'validateProjectInputs',
 ];
 describe('public API surface (ADR-0004)', () => {
   it('root export exposes exactly the documented public API', () => {

@@ -234,6 +234,8 @@ import {
   listBlockedBy,
   checkResumeBaseDrift,
   formatBaseMovedRefusal,
+  PRODUCT_NAME_PATTERN,
+  readProductInput,
 } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
 import { runIssueStack } from './stack-run.js';
@@ -1092,7 +1094,7 @@ function branchPrefixOrExit(raw: string | undefined, configPath: string): string
 // Product names become a filename in the constitutions dir; keep them to a safe,
 // listable charset. Leading '_' is reserved (listProducts hides `_*.md`).
 export function assertValidProduct(product: string): void {
-  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(product)) {
+  if (!PRODUCT_NAME_PATTERN.test(product)) {
     throw new InvalidProductNameError(
       `invalid product name '${product}': use letters, digits, '.', '_' or '-' and do not start with '_' or '.'`,
     );
@@ -1102,6 +1104,7 @@ export function assertValidProduct(product: string): void {
 export interface ReadActiveProductDeps {
   fileExists?: (p: string) => boolean;
   readFile?: (p: string) => string;
+  env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -1110,10 +1113,7 @@ export interface ReadActiveProductDeps {
  * or contains only whitespace.
  */
 export function readActiveProduct(productPath: string, deps: ReadActiveProductDeps = {}): string | undefined {
-  const { fileExists = existsSync, readFile = (p: string) => readFileSync(p, 'utf-8') } = deps;
-  if (!fileExists(productPath)) return undefined;
-  const product = readFile(productPath).trim();
-  return product || undefined;
+  return readProductInput(productPath, deps);
 }
 
 /** Extract the template's ```markdown skeleton and fill in the product name. */

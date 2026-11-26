@@ -16,6 +16,20 @@ Constitutions follow the same idea, highest first: `--constitution <path>`, else
 
 `--project-config <dir>` (the flag wins) or `FACTORY_PROJECT_CONFIG_DIR` points a run at a directory outside the checkout. Its `config.yaml` and `constitution.md` replace the repo's `.factory/` files wholesale, with no fallback to them. The external `config.yaml` is always checked with the strict schemas. A missing directory, a missing or empty file, or an invalid config fails before PLAN with an error naming the source and the file. The container job path does not mount the directory, so a host path given to a container job fails as a missing directory.
 
+The directory also supplies the run's other inputs, again with no fallback to the checkout:
+
+| Input                    | Replaces                          |
+| ------------------------ | --------------------------------- |
+| `agent-memory/<lane>.md` | `.factory/agent-memory/<lane>.md` |
+| `product`                | The active product file           |
+| `tests/`                 | `.factory/tests/`                 |
+
+Each one is optional. When one is present, it is checked before PLAN, and an invalid file fails the run with an error naming the source and the file, for example `Invalid FACTORY_PROJECT_CONFIG_DIR (/srv/project/agent-memory/core.md): 5000 bytes, over the 4096-byte cap`. These rules apply:
+
+- `agent-memory/` holds only regular `.md` files of UTF-8 text, each at most 4096 bytes. In the checkout, an oversized file is ignored with a warning. In the project config directory, it fails the run.
+- `product` is a regular UTF-8 file that holds one product name: letters, digits, `.`, `_` or `-`, not starting with `.` or `_`.
+- `tests/` is a directory that holds only regular files and directories. Symlinks are rejected.
+
 The per-key environment variables that already exist still apply on top of the resolved config.
 
 ## Examples
