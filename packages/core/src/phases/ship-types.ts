@@ -16,6 +16,7 @@ export interface ShipResult {
   alreadyDelivered?: boolean;
   headSha?: string;
   noNewCommit?: boolean;
+  ciFlaky?: { checks: string[] };
   draft?: boolean;
   ciPending?: boolean;
   draftReason?: ShipDraftReason;

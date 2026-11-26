@@ -5,7 +5,13 @@ import type { CostEntry, FactoryEvent, RunOutcome } from '@on-par/factory-core';
 import type { RunResultJson, RunResultOutcome } from './json-contract.js';
 import type { MergeResult } from './run-issue-merge.js';
 
-const CI_PARKS: ReadonlySet<string> = new Set(['ci-failed', 'ci-infra', 'ci-never-started', 'ci-rework-no-change']);
+const CI_PARKS: ReadonlySet<string> = new Set([
+  'ci-failed',
+  'ci-infra',
+  'ci-never-started',
+  'ci-rework-no-change',
+  'ci-flaky',
+]);
 
 /** The end state `factory run --issue` reached (#3908); it wins over the merge result and the ship outcome. */
 export interface LifecycleResult {
