@@ -26,6 +26,7 @@ export interface CiAttributionItem {
   attributable: boolean;
   /** e.g. 'file changed by this PR', 'also failing on base main@abc123def456', 'base checks unavailable', 'not open on base main'. */
   reason: string;
+  baseResult?: 'failing' | 'passing' | 'none';
 }
 
 /** Attribution of a SHIP CI failure (#2817). baseline = no item is attributable to the PR. */

@@ -72,6 +72,8 @@ const PARK_HINTS: Record<ParkReason, string> = {
     'no CI run ever registered on the PR head. Fix the workflow triggers or the token that opens PRs, push to start CI, then run `factory unpark <n>`.',
   'ci-rework-no-change':
     'the CI rework worker made no new commit on the PR. Fix CI on the PR, then run `factory unpark <n>`.',
+  'ci-flaky':
+    'a failing check with no result on the base commit still failed after one rerun. Fix or stabilise that check on the PR, then run `factory unpark <n>`.',
   held: 'a human must act first. Follow the instructions above, then run `factory unpark <n>`.',
   config: 'fix the named config file and line, then run `factory unpark <n>`.',
   'check-infra':

@@ -138,6 +138,7 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
       rerun,
       deadlineMs: opts.ciDeadlineMs,
       baseBranch: SHIP_BASE_BRANCH,
+      prBase: base,
       ciWatch: opts.ciWatch,
       log,
     });

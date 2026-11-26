@@ -18,6 +18,7 @@ section to `## X.Y.Z - date`. See
 ### Fixed
 
 - run: a CI or preview rework round whose worker makes no new commit now stops at once and parks `ci-rework-no-change`, with the original ship failure in the park message, instead of running the re-CHECK and SHIP again. A first ship now records the pushed remote head on a CI or preview failure, so the round-1 no-op guard has the head to compare against (#4337)
+- ship: a failing CI check with no result on the PR's base commit, such as a PR-only smoke test, no longer goes straight to a CI rework round. SHIP first reruns its failed jobs once, sharing the one-rerun-per-head budget with the infra rerun. A green rerun ships with no rework round and logs `ci-flaky-rerun-green`. A rerun that still fails parks `ci-flaky` with the PR left open. Checks that pass or fail on base keep today's handling (#4337)
 
 ## 0.9.49 - 2026-11-23
 
