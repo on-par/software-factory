@@ -35,6 +35,17 @@ describe('shipParkReason', () => {
     expect(shipParkReason({ ok: false })).toBe('fail');
   });
 
+  it.each([
+    { label: 'a re-entry that found no new commit', ship: { ok: false, ciOutcome: 'failure', noNewCommit: true } },
+    {
+      label: 'a no-new-commit re-entry with a failed preview',
+      ship: { ok: false, noNewCommit: true, previewCheck: preview('fail') },
+    },
+  ] satisfies { label: string; ship: ShipResult }[])('parks $label as ci-rework-no-change', ({ ship }) => {
+    expect(shipParkReason(ship)).toBe('ci-rework-no-change');
+    expect(parkedPrAction(shipParkReason(ship), false)).toBe('leave');
+  });
+
   it('parks a SHIP that failed on unknown CI as fail, which closes its draft PR instead of readying it', () => {
     const ciUnknown: ShipResult = { ok: false, prNumber: 123, ciPending: true, draft: true };
     expect(shipParkReason(ciUnknown)).toBe('fail');
