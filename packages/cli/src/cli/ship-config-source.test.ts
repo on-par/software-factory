@@ -1,5 +1,5 @@
 // shipIssue reports the config and constitution sources and fails a bad override before PLAN (#3906).
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
@@ -46,5 +46,20 @@ describe('shipIssue config sources (#3906)', () => {
     vi.stubEnv('FACTORY_PROJECT_CONFIG_DIR', dir);
 
     await expect(shipIssue(5, {})).rejects.toThrow(join(dir, 'config.yaml'));
+  });
+
+  it.each([
+    { file: 'agent-memory/notes.txt', reason: 'not a .md lane memory file' },
+    { file: 'product', reason: "invalid product name '_x'" },
+  ])('invalid external $file names source and file before PLAN (#4339)', async ({ file, reason }) => {
+    const dir = tmp.makeSync('ship-project-inputs-');
+    writeFileSync(join(dir, 'config.yaml'), 'version: 2\n');
+    mkdirSync(join(dir, 'agent-memory'));
+    writeFileSync(join(dir, file), '_x');
+    vi.stubEnv('FACTORY_PROJECT_CONFIG_DIR', dir);
+
+    const expected = `Invalid FACTORY_PROJECT_CONFIG_DIR (${join(dir, file)}): ${reason}`;
+    await expect(shipIssue(5, {})).rejects.toThrow(expected);
+    expect(process.env.FACTORY_RUN_CONFIG_JSON).toBeUndefined();
   });
 });

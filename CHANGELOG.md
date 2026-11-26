@@ -10,6 +10,7 @@ section to `## X.Y.Z - date`. See
 ### Added
 
 - `--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` read `config.yaml` and `constitution.md` from a directory outside the checkout, ranked below `--config` / `FACTORY_CONFIG_*` and the constitution overrides (#4338)
+- `--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` also supply `agent-memory/`, `product` and `tests/`, in place of the checkout's `.factory/agent-memory/`, active product file and `.factory/tests/`. An invalid file there fails before PLAN with an error naming the source and the file (#4339)
 
 ### Changed
 

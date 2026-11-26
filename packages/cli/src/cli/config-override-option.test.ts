@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { applyConfigOverrideOptions, constitutionSourceLabel } from './config-override-option.js';
+import { applyConfigOverrideOptions, constitutionSourceLabel, holdRunInputs } from './config-override-option.js';
 import { h, installShipHarness, runMainWith } from './test-support/ship-harness.js';
 
 installShipHarness();
@@ -95,5 +95,25 @@ describe('constitutionSourceLabel', () => {
     expect(constitutionSourceLabel(root)).toBe('.factory/constitution.md');
     vi.stubEnv('FACTORY_CONSTITUTION', 'inline');
     expect(constitutionSourceLabel(root)).toBe('FACTORY_CONSTITUTION');
+  });
+});
+
+describe('holdRunInputs (#4339)', () => {
+  it.each([
+    { name: 'valid', product: 'web-app', error: undefined, snapshot: '{"version":2}' },
+    { name: 'invalid', product: '_x', error: "invalid product name '_x'", snapshot: undefined },
+  ])('snapshots config and checks external inputs ($name)', ({ product, error, snapshot }) => {
+    const dir = tmp.makeSync('hold-inputs-');
+    writeFileSync(join(dir, 'config.yaml'), 'version: 2\n');
+    writeFileSync(join(dir, 'product'), product);
+    vi.stubEnv('FACTORY_PROJECT_CONFIG_DIR', dir);
+
+    let release: (() => void) | undefined;
+    if (error) expect(() => holdRunInputs(join(dir, 'unused.yaml'))).toThrow(error);
+    else release = holdRunInputs(join(dir, 'unused.yaml'));
+
+    expect(process.env.FACTORY_RUN_CONFIG_JSON).toBe(snapshot);
+    release?.();
+    expect(process.env.FACTORY_RUN_CONFIG_JSON).toBeUndefined();
   });
 });

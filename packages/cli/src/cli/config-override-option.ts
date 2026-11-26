@@ -5,9 +5,11 @@ import { join, resolve } from 'node:path';
 
 import {
   describeConfigSources,
+  holdRunConfigSnapshot,
   lastRunConfigLadder,
   logEvent,
   resolveConstitutionOverride,
+  validateProjectInputs,
 } from '@on-par/factory-core/internal';
 
 /** Resolve each set flag to an absolute path and hand it to every command, lane and CHECK
@@ -53,4 +55,15 @@ export function reportConfigSource(repoRoot: string, eventsFile: string, issueNu
   const text = describeConfigSources(ladder, constitution);
   console.log(`factory: ${text}`);
   logEvent(eventsFile, 'config_source', issueNum, text, { level: 'info' });
+}
+
+export function holdRunInputs(configPath: string, env: NodeJS.ProcessEnv = process.env): () => void {
+  const release = holdRunConfigSnapshot(configPath, env);
+  try {
+    validateProjectInputs(env);
+    return release;
+  } catch (err) {
+    release();
+    throw err;
+  }
 }

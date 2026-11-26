@@ -1,6 +1,8 @@
 export { listBuiltInCheckers } from './index.js';
 export { describeChecksProbe, resolveCompileCommand, resolveLintCommands, resolveTestsCommand } from './index.js';
 export { holdRunConfigSnapshot, lastRunConfigLadder } from '../config/run-config-source.js';
+export { PRODUCT_NAME_PATTERN, readProductInput } from '../config/project-inputs.js';
+export { validateProjectInputs } from '../config/project-input-validation.js';
 export {
   describeConfigSources,
   resolveConstitutionOverride,
