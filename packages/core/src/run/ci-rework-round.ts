@@ -35,6 +35,7 @@ export interface CiReworkRoundPlan {
 export type CiReworkRoundOutcome =
   | { kind: 'shipped'; ship: ShipResult }
   | { kind: 'never-ran' }
+  | { kind: 'no-change' }
   | { kind: 'suppressed'; findings: CiSuppressionFinding[] }
   | { kind: 'ended'; outcome: RunOutcome };
 
@@ -87,6 +88,8 @@ export async function runCiReworkRound(
     findings = [guardError(`could not read the CI rework diff: ${errorMessage(err)}`)];
   }
   if (findings.length > 0) return { kind: 'suppressed', findings };
+  const after = await ports.readHead(worktree).catch(() => undefined);
+  if (after === before && after === plan.reentry.previousHeadSha) return { kind: 'no-change' };
   const recheck = await ctx.checkPhase(ctx.checkOpts);
   const ended = await ctx.onRecheck(recheck, plan.round);
   if (ended) return { kind: 'ended', outcome: ended };

@@ -5,6 +5,7 @@ import type { ParkReason } from './outcome.js';
 
 export function shipParkReason(ship: ShipResult): ParkReason {
   if (ship.denied) return 'escalate';
+  if (ship.noNewCommit) return 'ci-rework-no-change';
   if (ship.previewCheck && ship.previewCheck.status !== 'pass') return 'fail';
   if (ship.visualProof && !['pass', 'not-required'].includes(ship.visualProof.status)) return 'fail';
   if (ship.ciOutcome === 'infra-failure') return 'ci-infra';
