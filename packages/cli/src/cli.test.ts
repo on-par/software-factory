@@ -3404,6 +3404,9 @@ More prose here.
       expect(PREREQUISITES_TEXT).toMatch(/supported coding agent/);
       expect(PREREQUISITES_TEXT).toMatch(/Codex/);
       expect(PREREQUISITES_TEXT).toMatch(/OpenCode/);
+      expect(PREREQUISITES_TEXT).toMatch(/Claude Code/);
+      expect(PREREQUISITES_TEXT).toMatch(/\bPi\b/);
+      expect(PREREQUISITES_TEXT).toContain('GitHub Copilot CLI');
       expect(PREREQUISITES_TEXT).not.toMatch(/Claude Code CLI installed and authenticated \(Claude subscription\)/);
     });
 

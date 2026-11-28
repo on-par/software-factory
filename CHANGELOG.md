@@ -26,6 +26,7 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Changed
 
+- `factory --help` now names GitHub Copilot CLI among the supported coding agent CLIs in its prerequisites (#4355)
 - The README intro now names OpenCode and GitHub Copilot CLI alongside Claude Code, Codex and Ollama (#4354)
 
 ### Fixed
