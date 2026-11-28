@@ -69,7 +69,7 @@ export function parseMergeTimeout(raw: string | undefined): number | undefined {
   throw new CliExitError('factory: --merge-timeout must be a positive duration like 30m or 2h', 2);
 }
 
-const CI_PARKS: ReadonlySet<string> = new Set(['ci-failed', 'ci-infra', 'ci-rework-no-change']);
+const CI_PARKS: ReadonlySet<string> = new Set(['ci-failed', 'ci-infra', 'ci-rework-no-change', 'ci-flaky']);
 
 /** A run that parked on CI still has a PR worth driving to its CI verdict under --merge. */
 export function shouldDriveAfterShipFailure(outcome: RunOutcome | undefined): boolean {

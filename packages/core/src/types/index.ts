@@ -382,6 +382,7 @@ export interface FactoryEvent {
   model?: string;
   tokens?: { input: number; output: number };
   durationMs?: number;
+  projectConfig?: { source: string; dir: string; ignoredInputs: string[] };
 }
 
 // ---------- Cost Tracking ----------

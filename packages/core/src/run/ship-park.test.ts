@@ -46,6 +46,16 @@ describe('shipParkReason', () => {
     expect(parkedPrAction(shipParkReason(ship), false)).toBe('leave');
   });
 
+  it.each([
+    {
+      label: 'a still-red rerun of a check with no base result',
+      ship: { ok: false, ciOutcome: 'failure', ciFlaky: { checks: ['smoke'] } },
+    },
+  ] satisfies { label: string; ship: ShipResult }[])('parks $label as ci-flaky', ({ ship }) => {
+    expect(shipParkReason(ship)).toBe('ci-flaky');
+    expect(parkedPrAction(shipParkReason(ship), false)).toBe('leave');
+  });
+
   it('parks a SHIP that failed on unknown CI as fail, which closes its draft PR instead of readying it', () => {
     const ciUnknown: ShipResult = { ok: false, prNumber: 123, ciPending: true, draft: true };
     expect(shipParkReason(ciUnknown)).toBe('fail');

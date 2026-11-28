@@ -7,9 +7,18 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.50 - 2026-11-25
+
+A run can now take its whole project config from a directory outside the checkout with `--project-config <dir>` or `FACTORY_PROJECT_CONFIG_DIR`, so a repo with no `.factory/` folder can run, and container jobs can mount that directory (#4338, #4339, #4340, #4341). CI rework no longer wastes a round on a no-op, reruns a check with no base result once before rework, and gets log excerpts anchored on the failure (#4337).
+All seven published `@on-par` packages move to 0.9.50 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - `--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` read `config.yaml` and `constitution.md` from a directory outside the checkout, ranked below `--config` / `FACTORY_CONFIG_*` and the constitution overrides (#4338)
+- `--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` also supply `agent-memory/`, `product` and `tests/`, in place of the checkout's `.factory/agent-memory/`, active product file and `.factory/tests/`. An invalid file there fails before PLAN with an error naming the source and the file (#4339)
+- With `--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` set, the `factory: config:` line, the `config_source` event (new `projectConfig` field) and `factory doctor` (text and `--json` `sources.projectConfig`) name the external directory and list, by path only, the checkout `.factory/` inputs it replaced. `factory doctor` also checks the external `agent-memory/`, and the pytest probe names the external `tests/` directory. Output with no external source is unchanged (#4340)
+- With `--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` set, `factory run-issue`, `ship` and `run-brief` run in a checkout that has no `.factory/` folder. The run adds `/.factory/state/` to the checkout's local git exclude file, so its run-time state never shows in `git status`. `factory constitution --product` writes the product to `<dir>/product`. `factory job` treats the directory as its in-container mount path: it checks the directory before it clones, ranks it below `FACTORY_CONFIG_YAML` / `FACTORY_CONSTITUTION` and above the repo files and container defaults, and passes its absolute path to the run. The ignored-inputs report no longer lists `.factory/state/product`, because files under `.factory/state/` are run-time state (#4341)
 
 ### Changed
 
@@ -19,6 +28,8 @@ section to `## X.Y.Z - date`. See
 ### Fixed
 
 - run: a CI or preview rework round whose worker makes no new commit now stops at once and parks `ci-rework-no-change`, with the original ship failure in the park message, instead of running the re-CHECK and SHIP again. A first ship now records the pushed remote head on a CI or preview failure, so the round-1 no-op guard has the head to compare against (#4337)
+- ship: a failing CI check with no result on the PR's base commit, such as a PR-only smoke test, no longer goes straight to a CI rework round. SHIP first reruns its failed jobs once, sharing the one-rerun-per-head budget with the infra rerun. A green rerun ships with no rework round and logs `ci-flaky-rerun-green`. A rerun that still fails parks `ci-flaky` with the PR left open. Checks that pass or fail on base keep today's handling (#4337)
+- ci-evidence: the job log excerpt a CI rework round gets is now anchored on the failure instead of the last 150 lines. It keeps context around the first `##[error]`, test-runner failure summaries and failed-test lines, preferring the failing step, and the excerpt header names that step. A log with no failure marker still falls back to the tail (#4337)
 
 ## 0.9.49 - 2026-11-23
 

@@ -31,6 +31,10 @@ docker run --rm -e GH_TOKEN -e CLAUDE_CODE_OAUTH_TOKEN \
 | `--workdir <dir>`                                 | Parent of the clone (default `~/work`). The clone is `<dir>/<name>`; a non-empty directory is an error.  |
 | `--factory-dir <dir>` / `FACTORY_JOB_FACTORY_DIR` | A mounted `.factory` directory holding `config.yaml` and/or `constitution.md`.                           |
 
+`--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` names the in-container mount path of a project config
+directory (`config.yaml`, `constitution.md`, `agent-memory/`, `product`, `tests/`), never a host path. See
+[Project config directory](#config-order) below.
+
 `factory job` runs `gh auth setup-git`, writes `~/.claude.json` (onboarding done) when absent, clones the repo,
 sets a local git identity if none is configured, then runs `factory run-issue <n> --in-place --json [--merge]` in
 the clone. The clone's `.factory/state/` is git-excluded (and `.factory/` too when the repo has none).
@@ -44,11 +48,20 @@ First match wins. The log line `factory job: config source: …; constitution so
 | 1   | `--config` / `FACTORY_CONFIG_PATH`          | `--constitution` / `FACTORY_CONSTITUTION_PATH`    |
 | 2   | mounted `--factory-dir` config file         | mounted `--factory-dir`/`constitution.md`         |
 | 3   | `FACTORY_CONFIG_YAML`                       | `FACTORY_CONSTITUTION`                            |
-| 4   | the repo's committed `.factory/config.yaml` | the repo's `.factory/constitution.md`             |
-| 5   | container defaults                          | the repo instruction files / bundled constitution |
+| 4   | project config dir `config.yaml`            | project config dir `constitution.md`              |
+| 5   | the repo's committed `.factory/config.yaml` | the repo's `.factory/constitution.md`             |
+| 6   | container defaults                          | the repo instruction files / bundled constitution |
 
 `FACTORY_CONFIG_OVERRIDES` is merged over whichever config wins (the run config ladder, #3906); the log notes
 that overrides are in effect. A `--factory-dir` with neither a config file nor `constitution.md` is an error.
+
+**Project config directory**: mount the directory read-only and set `FACTORY_PROJECT_CONFIG_DIR` (or pass
+`--project-config`) to the in-container mount path, for example
+`--mount type=bind,src=<host dir>,dst=/factory/project,readonly -e FACTORY_PROJECT_CONFIG_DIR=/factory/project`.
+The job checks the directory before it clones and exits 2 with an error naming the source when it is missing, which
+is what happens when a host path is passed as-is. The run gets the absolute mount path, so agent memory, the product
+and CHECK's `tests/` all resolve inside the container, and the clone's `.factory/` gets no tracked file. See
+[config-overrides.md](../runbooks/config-overrides.md#container-jobs).
 
 **Container defaults** (only when nothing above supplies a config): `sandbox.runtime: none` (the container is the
 sandbox) and `disk.minFreeGb: 2`. Containers typically have 16 GB of disk, so the stock 10 GB free-space floor would

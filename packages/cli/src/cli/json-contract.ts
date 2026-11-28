@@ -162,6 +162,7 @@ export const logsLineJsonSchema = z.object({
   model: z.string().optional(),
   tokens: z.object({ input: z.number(), output: z.number() }).optional(),
   durationMs: z.number().optional(),
+  projectConfig: loosePayloadSchema.optional(),
   cursor: z.string().optional(),
 });
 

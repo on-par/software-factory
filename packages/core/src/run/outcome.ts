@@ -10,6 +10,7 @@ export type ParkReason = Extract<
   | 'ci-infra'
   | 'ci-never-started'
   | 'ci-rework-no-change'
+  | 'ci-flaky'
   | 'held'
   | 'config'
   | 'blocked'

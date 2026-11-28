@@ -294,7 +294,12 @@ export async function shipWithCiRework(
     reship: (recheck: CheckPhaseResult, reentry: CiReworkReentry) =>
       shipPhase({ ...shipOpts, checkSummary: recheck.summary, reworkRounds: recheck.reworkRounds, reentry }),
   };
-  while (!ship.ok && ship.prNumber !== undefined && (ship.ciOutcome === 'failure' || isPreviewRework(ship))) {
+  while (
+    !ship.ok &&
+    !ship.ciFlaky &&
+    ship.prNumber !== undefined &&
+    (ship.ciOutcome === 'failure' || isPreviewRework(ship))
+  ) {
     let plan: CiReworkRoundPlan & { label: string };
     if (ship.previewCheck && isPreviewRework(ship)) {
       if (rounds >= roundLimit) {

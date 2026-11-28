@@ -2,7 +2,7 @@
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { resolveRepoConfigPath } from '@on-par/factory-core/internal';
+import { resolveProjectConfigDir, resolveRepoConfigPath } from '@on-par/factory-core/internal';
 
 import { CliExitError } from './errors.js';
 import type { JobStatusJson } from './job-status-contract.js';
@@ -49,6 +49,14 @@ function fail(message: string): never {
   throw new CliExitError(`factory job: ${message}`, 2);
 }
 
+function projectConfigOrFail(env: NodeJS.ProcessEnv): ReturnType<typeof resolveProjectConfigDir> {
+  try {
+    return resolveProjectConfigDir(env);
+  } catch (err) {
+    return fail((err as Error).message);
+  }
+}
+
 /** Validate the flags and the secrets' presence (never their values). Throws CliExitError(2). */
 export function validateJobFlags(opts: JobCommandInput, env: NodeJS.ProcessEnv = process.env): JobFlags {
   const repo = opts.repo ?? '';
@@ -66,6 +74,7 @@ export function validateJobFlags(opts: JobCommandInput, env: NodeJS.ProcessEnv =
     missing.push('CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY');
   }
   if (missing.length > 0) fail(`missing required environment: ${missing.join(', ')}`);
+  projectConfigOrFail(env);
   const home = blank(env.HOME) ? homedir() : env.HOME;
   const factoryDirRaw = opts.factoryDir ?? env.FACTORY_JOB_FACTORY_DIR;
   return {
@@ -102,6 +111,9 @@ export function resolveJobConfigSources(input: ResolveInput, env: NodeJS.Process
     fail(`--factory-dir ${factoryDir} has no config file or constitution.md`);
   }
 
+  const project = projectConfigOrFail(env);
+  if (project) extra.FACTORY_PROJECT_CONFIG_DIR = project.dir;
+
   const repoConfig = resolveRepoConfigPath(join(cloneDir, '.factory'));
   if (!blank(env.FACTORY_CONFIG_PATH)) {
     const label = env.FACTORY_CONFIG_PATH_SOURCE === '--config' ? '--config' : 'FACTORY_CONFIG_PATH';
@@ -111,6 +123,8 @@ export function resolveJobConfigSources(input: ResolveInput, env: NodeJS.Process
     configSource = `mounted .factory dir (${mountedConfig})`;
   } else if (!blank(env.FACTORY_CONFIG_YAML)) {
     configSource = 'FACTORY_CONFIG_YAML';
+  } else if (project) {
+    configSource = `${project.source} (${resolveRepoConfigPath(project.dir)})`;
   } else if (exists(repoConfig)) {
     configSource = `repo .factory/${repoConfig.split(/[\\/]/).pop()}`;
   } else {
@@ -129,6 +143,8 @@ export function resolveJobConfigSources(input: ResolveInput, env: NodeJS.Process
     constitutionSource = `mounted .factory dir (${mountedConstitution})`;
   } else if (!blank(env.FACTORY_CONSTITUTION)) {
     constitutionSource = 'FACTORY_CONSTITUTION';
+  } else if (project) {
+    constitutionSource = `${project.source} (${join(project.dir, 'constitution.md')})`;
   } else if (exists(clonedConstitution)) {
     constitutionSource = 'repo .factory/constitution.md';
   } else {

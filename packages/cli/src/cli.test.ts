@@ -3377,6 +3377,20 @@ More prose here.
         }),
       ).toBeUndefined();
     });
+
+    it.each([
+      { name: 'the project config directory', env: { FACTORY_PROJECT_CONFIG_DIR: tmpdir() }, expected: 'external' },
+      { name: 'the checkout when unset', env: {}, expected: 'checkout' },
+    ])('reads product from $name (#4339)', ({ env, expected }) => {
+      const external = join(tmpdir(), 'product');
+      expect(
+        readActiveProduct('/repo/.factory/product', {
+          env,
+          fileExists: (p) => p === external || p === '/repo/.factory/product',
+          readFile: (p) => (p === external ? 'external' : 'checkout'),
+        }),
+      ).toBe(expected);
+    });
   });
 
   describe('publish contract', () => {
