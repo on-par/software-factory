@@ -9,6 +9,8 @@ export type ParkReason = Extract<
   | 'ci-failed'
   | 'ci-infra'
   | 'ci-never-started'
+  | 'ci-rework-no-change'
+  | 'ci-flaky'
   | 'held'
   | 'config'
   | 'blocked'
@@ -16,6 +18,7 @@ export type ParkReason = Extract<
   | 'sandbox-env'
   | 'check-infra'
   | 'time-budget'
+  | 'not-ready'
 >;
 
 import type { BuildRoutePin } from '../config/repo.js';

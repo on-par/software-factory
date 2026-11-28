@@ -55,6 +55,8 @@ const STAMPED: Record<ParkReason, true> = {
   'ci-failed': true,
   'ci-infra': true,
   'ci-never-started': true,
+  'ci-rework-no-change': true,
+  'ci-flaky': true,
   held: true,
   config: true,
   blocked: true,
@@ -62,6 +64,7 @@ const STAMPED: Record<ParkReason, true> = {
   'sandbox-env': true,
   'check-infra': true,
   'time-budget': true,
+  'not-ready': true,
 };
 
 type Slot = NonNullable<RunAttribution['plan']>;

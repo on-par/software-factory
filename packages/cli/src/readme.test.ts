@@ -462,3 +462,30 @@ describe('README no-CI wait', () => {
     expect(noCiWaitProblems('a PR with no checks reported yet counts as pending')).toEqual([]);
   });
 });
+
+const INTRO_ENGINES = ['Claude', 'Codex', 'OpenCode', 'GitHub Copilot', 'Ollama'];
+const OLD_INTRO =
+  'Built in TypeScript. Routes work across Claude and Codex, with experimental local models through Ollama, and logs cost per task.';
+
+function introEngineProblems(text: string): string[] {
+  const intro = text.split('\n').find((l) => l.startsWith('Built in TypeScript.'));
+  if (intro === undefined) return ['missing intro line'];
+  return INTRO_ENGINES.filter((e) => !intro.includes(e)).map((e) => `intro missing: ${e}`);
+}
+
+describe('README intro engines', () => {
+  it('README.md and packages/cli/README.md intro names every engine', () => {
+    expect(introEngineProblems(rootReadme)).toEqual([]);
+    expect(introEngineProblems(cliReadme)).toEqual([]);
+  });
+});
+
+describe('README intro engines guard self-test', () => {
+  it('rejects the pre-fix intro that omits OpenCode and GitHub Copilot', () => {
+    expect(introEngineProblems(OLD_INTRO)).toEqual(['intro missing: OpenCode', 'intro missing: GitHub Copilot']);
+  });
+
+  it('reports a missing intro line on an empty README', () => {
+    expect(introEngineProblems('')).toEqual(['missing intro line']);
+  });
+});

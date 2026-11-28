@@ -100,10 +100,25 @@ export interface BaseFailingChecks {
   baseRef: string;
   baseSha: string;
   failing: string[];
+  passing?: string[];
 }
 
 export function needsBaseChecks(evidence: CiFailureEvidence | undefined): boolean {
   return !!evidence && evidence.failingChecks.some((c) => !(/codeql/i.test(c.name) && evidence.alerts.length > 0));
+}
+
+function classifyCheckOnBase(
+  name: string,
+  base: BaseFailingChecks,
+  baseLabel: string,
+): Pick<CiAttributionItem, 'attributable' | 'reason' | 'baseResult'> {
+  if (base.failing.includes(name)) {
+    return { attributable: false, reason: `also failing on base ${baseLabel}`, baseResult: 'failing' };
+  }
+  if (!base.passing) return { attributable: true, reason: `not failing on base ${baseLabel}` };
+  return base.passing.includes(name)
+    ? { attributable: true, reason: `passing on base ${baseLabel}`, baseResult: 'passing' }
+    : { attributable: true, reason: `no result on base ${baseLabel}`, baseResult: 'none' };
 }
 
 export function attributeCiFailure(
@@ -130,13 +145,7 @@ export function attributeCiFailure(
       items.push({ kind: 'check', ref: check.name, attributable: true, reason: 'base checks unavailable' });
       continue;
     }
-    const onBase = base.failing.includes(check.name);
-    items.push({
-      kind: 'check',
-      ref: check.name,
-      attributable: !onBase,
-      reason: onBase ? `also failing on base ${baseLabel}` : `not failing on base ${baseLabel}`,
-    });
+    items.push({ kind: 'check', ref: check.name, ...classifyCheckOnBase(check.name, base, baseLabel) });
   }
   const baseline = items.length > 0 && items.every((i) => !i.attributable) && !evidence.errors?.length;
   return { baseline, ...(base ? { baseRef: base.baseRef, baseSha: base.baseSha } : {}), items };
@@ -169,15 +178,25 @@ export async function listBaseFailingChecks(
   prNumber: number,
 ): Promise<BaseFailingChecks> {
   const { data: pr } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
-  const baseRef = pr.base.ref;
+  return listBranchCheckResults(octokit, owner, repo, pr.base.ref);
+}
+
+export async function listBranchCheckResults(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  baseRef: string,
+): Promise<BaseFailingChecks> {
   const { data: branch } = await octokit.rest.repos.getBranch({ owner, repo, branch: baseRef });
   const baseSha = branch.commit.sha;
   const runs = await listAllCheckRuns(octokit, owner, repo, baseSha, 100, 10);
   const failing = new Set<string>();
+  const passing = new Set<string>();
   for (const run of runs) {
-    if (run.name && run.status === 'completed' && !isPassingConclusion(run.conclusion)) failing.add(run.name);
+    if (!run.name || run.status !== 'completed') continue;
+    (isPassingConclusion(run.conclusion) ? passing : failing).add(run.name);
   }
-  return { baseRef, baseSha, failing: [...failing] };
+  return { baseRef, baseSha, failing: [...failing], passing: [...passing].filter((n) => !failing.has(n)) };
 }
 
 export async function listBaseCodeqlAlerts(
@@ -229,7 +248,8 @@ export function ciCheckReworkSummary(
 ): CheckSummary {
   const lines = checks.map((c) => `- ${c.name} (${c.conclusion})${c.summary ? ` — ${c.summary}` : ''}`);
   const logs = jobLogs.map(
-    (l) => `\n--- ${l.name} log tail (job ${l.jobId})${l.truncated ? ', truncated' : ''} ---\n${l.excerpt}`,
+    (l) =>
+      `\n--- ${l.name} log excerpt (job ${l.jobId}${l.failingStep ? `, failing step: ${l.failingStep}` : ''})${l.truncated ? ', truncated' : ''} ---\n${l.excerpt}`,
   );
   const details = [
     'CI jobs failing on this PR (not failing on the base branch):',

@@ -6,6 +6,7 @@ import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredP
 import type {
   AllProvidersDownPayload,
   ParkPayload,
+  ProjectConfigSourcePayload,
   ProviderCappedPayload,
   ProviderFailoverPayload,
 } from '../events/payloads.js';
@@ -66,6 +67,7 @@ export function logEvent(
     attribution?: RunAttribution;
     paths?: string[];
     mode?: 'mechanical';
+    projectConfig?: ProjectConfigSourcePayload;
   } & Pick<
     LogExtra,
     'providerAuthRejected' | 'providerBreakerClose' | 'providerRestored' | 'providerRefused' | 'claimLost'
@@ -100,6 +102,7 @@ export function logEvent(
   if (extra?.durationMs !== undefined) meta.durationMs = extra.durationMs;
   if (extra?.paths) meta.paths = extra.paths;
   if (extra?.mode) meta.mode = extra.mode;
+  if (extra?.projectConfig) meta.projectConfig = extra.projectConfig;
   logger[level](type, msg, Object.keys(meta).length > 0 ? meta : undefined);
 }
 

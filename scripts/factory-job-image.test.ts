@@ -18,10 +18,15 @@ interface Job {
   steps: Step[];
 }
 
+interface PublishJob extends Job {
+  outputs?: Record<string, string>;
+}
+
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
 const dockerfile = read('../docker/factory-job/Dockerfile');
 const lines = dockerfile.split('\n');
-const image = (parse(read('../.github/workflows/publish.yml')) as { jobs: Record<string, Job> }).jobs.image as Job;
+const jobs = (parse(read('../.github/workflows/publish.yml')) as { jobs: Record<string, PublishJob> }).jobs;
+const image = jobs.image as Job;
 const buildStep = image.steps.find((s) => s.uses?.startsWith('docker/build-push-action@')) as Step;
 
 describe('docker/factory-job/Dockerfile', () => {
@@ -82,8 +87,8 @@ describe('docker/factory-job/Dockerfile', () => {
 });
 
 describe('.github/workflows/publish.yml image job', () => {
-  it('builds linux/amd64 and linux/arm64 only on a v tag after npm publish', () => {
-    expect(image.needs).toBe('publish');
+  it('builds linux/amd64 and linux/arm64 only on a v tag after the install check promoted the release', () => {
+    expect(image.needs).toBe('promote');
     expect(image.if).toBe("startsWith(github.ref, 'refs/tags/v')");
     expect(image.permissions).toEqual({ contents: 'read', packages: 'write' });
     expect(buildStep.with?.platforms).toBe('linux/amd64,linux/arm64');
@@ -136,5 +141,29 @@ describe('.github/workflows/publish.yml image job', () => {
 
   it('pins every action by a version tag', () => {
     for (const step of image.steps.filter((s) => s.uses !== undefined)) expect(step.uses).toMatch(/@v\d+$/);
+  });
+});
+
+describe('.github/workflows/publish.yml release ordering', () => {
+  const promote = jobs.promote as PublishJob;
+  const release = jobs.release as PublishJob;
+
+  it('promotes only a published version, with the publish job OIDC auth and no token', () => {
+    expect(jobs.publish?.outputs?.version).toBe('${{ steps.publish.outputs.version }}');
+    expect(promote.needs).toBe('publish');
+    expect(promote.if).toBe("needs.publish.outputs.published == 'true'");
+    expect(promote.permissions).toEqual({ contents: 'read', 'id-token': 'write' });
+    const step = promote.steps.find((s) => s.run === 'bash scripts/promote-release.sh') as Step;
+    expect(step.env).toEqual({ PROMOTE_VERSION: '${{ needs.publish.outputs.version }}' });
+    expect(JSON.stringify(promote)).not.toMatch(/NODE_AUTH_TOKEN|NPM_TOKEN|secrets\./);
+  });
+
+  it('creates the GitHub release and runs the drift check only after promote', () => {
+    expect(release.needs).toBe('promote');
+    expect(release.if).toBe("startsWith(github.ref, 'refs/tags/v')");
+    const runs = release.steps.map((s) => s.run).filter(Boolean);
+    expect(runs.indexOf('bash scripts/github-release.sh')).toBeLessThan(
+      runs.indexOf('bash scripts/release-drift-check.sh'),
+    );
   });
 });

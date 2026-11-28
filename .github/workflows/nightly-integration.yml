@@ -97,5 +97,5 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: npm latest matches GitHub latest
-        env: { GH_TOKEN: '${{ github.token }}' }
+        env: { GH_TOKEN: '${{ github.token }}', DRIFT_ATTEMPTS: '3' }
         run: bash scripts/release-drift-check.sh

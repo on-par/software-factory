@@ -17,6 +17,9 @@ label (lowercase `[a-z0-9-]`).
   Runs with no lane (a one-off `run-issue`) read no memory.
 - The content is injected as untrusted data: context, not instructions that override the PLAN steps.
 - `.factory/` must be committed (see the `.factory in git` doctor row) so worktrees see the file.
+- With a project config directory set (`--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR`), PLAN and
+  `factory doctor` use `<dir>/agent-memory/` instead. There an oversized file fails the run before PLAN,
+  and the doctor row says so. See [config-overrides](runbooks/config-overrides.md).
 
 ## Updating it
 

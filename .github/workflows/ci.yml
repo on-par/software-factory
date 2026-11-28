@@ -269,6 +269,8 @@ jobs:
         run: bash scripts/github-release.test.sh
       - name: release-drift-check unit test
         run: bash scripts/release-drift-check.test.sh
+      - name: release-gates unit test
+        run: bash scripts/release-gates.test.sh
       - name: set-release-version unit test
         run: bash scripts/set-release-version.test.sh
       - name: Install actionlint

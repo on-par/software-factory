@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { EvidencePack } from '../types/index.js';
-import { fenceExcerpt, sanitizeEvidence, stripHiddenContent } from './sanitize.js';
+import { fenceExcerpt, inlineSafeText, sanitizeEvidence, stripHiddenContent } from './sanitize.js';
 
 describe('stripHiddenContent', () => {
   it('removes HTML comments and keeps surrounding text', () => {
@@ -107,5 +107,21 @@ describe('fenceExcerpt', () => {
     const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((r) => r.length));
     expect(fence.length).toBeGreaterThanOrEqual(5);
     expect(fence.length).toBeGreaterThan(longest);
+  });
+});
+
+describe('inlineSafeText (#3470)', () => {
+  it.each([
+    ['Ask @octocat now', 'Ask `@octocat` now'],
+    ['ping @org/team', 'ping `@org/team`'],
+    ['see https://evil.example/a?b=1 and http://x.test', 'see `https://evil.example/a?b=1` and `http://x.test`'],
+    ['mail a@b.example', 'mail a@b.example'],
+    ['keep `@octocat` and `https://x.test` as code', 'keep `@octocat` and `https://x.test` as code'],
+    ['lone ` tick @octocat', 'lone tick `@octocat`'],
+    ['run `npm test` first', 'run npm test first'],
+    ['a\n  b\r\nc', 'a b c'],
+    ['zero​width <!-- hidden -->text', 'zerowidth text'],
+  ])('renders %j as %j', (raw, expected) => {
+    expect(inlineSafeText(raw)).toBe(expected);
   });
 });

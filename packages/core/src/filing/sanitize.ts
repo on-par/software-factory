@@ -31,6 +31,16 @@ export function stripHiddenContent(text: string): string {
   return out;
 }
 
+const LINKABLE_RE = /\b[a-z][a-z0-9+.-]*:\/\/\S+|(?<![\w@])@[A-Za-z0-9][A-Za-z0-9-]*(?:\/[A-Za-z0-9_.-]+)?/gi;
+
+export function inlineSafeText(text: string): string {
+  return stripHiddenContent(text)
+    .replaceAll('`', '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(LINKABLE_RE, (ref) => `\`${ref}\``);
+}
+
 /** Strip hidden content from every string field of an EvidencePack (non-mutating). */
 export function sanitizeEvidence(evidence: EvidencePack): EvidencePack {
   const out: EvidencePack = {

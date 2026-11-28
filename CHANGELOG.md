@@ -10,6 +10,56 @@ section to `## X.Y.Z - date`. See
 ### Changed
 
 - agents: the experimental `copilot-cli` harness's JSON parser, activity events and error map now follow Copilot CLI 1.0.114's documented session events. They are tested against synthetic fixtures but not yet checked against a live run. A tool call denied without containment now goes back to the agent: a run that still ends with a non-empty final message and exit 0 keeps its result and logs the denial, and only an empty final message fails as `permission_denied`. The harness never passes `--trust-folder` (#4330)
+## 0.9.50 - 2026-11-25
+
+A run can now take its whole project config from a directory outside the checkout with `--project-config <dir>` or `FACTORY_PROJECT_CONFIG_DIR`, so a repo with no `.factory/` folder can run, and container jobs can mount that directory (#4338, #4339, #4340, #4341). CI rework no longer wastes a round on a no-op, reruns a check with no base result once before rework, and gets log excerpts anchored on the failure (#4337).
+All seven published `@on-par` packages move to 0.9.50 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Added
+
+- `--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` read `config.yaml` and `constitution.md` from a directory outside the checkout, ranked below `--config` / `FACTORY_CONFIG_*` and the constitution overrides (#4338)
+- `--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` also supply `agent-memory/`, `product` and `tests/`, in place of the checkout's `.factory/agent-memory/`, active product file and `.factory/tests/`. An invalid file there fails before PLAN with an error naming the source and the file (#4339)
+- With `--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` set, the `factory: config:` line, the `config_source` event (new `projectConfig` field) and `factory doctor` (text and `--json` `sources.projectConfig`) name the external directory and list, by path only, the checkout `.factory/` inputs it replaced. `factory doctor` also checks the external `agent-memory/`, and the pytest probe names the external `tests/` directory. Output with no external source is unchanged (#4340)
+- With `--project-config <dir>` / `FACTORY_PROJECT_CONFIG_DIR` set, `factory run-issue`, `ship` and `run-brief` run in a checkout that has no `.factory/` folder. The run adds `/.factory/state/` to the checkout's local git exclude file, so its run-time state never shows in `git status`. `factory constitution --product` writes the product to `<dir>/product`. `factory job` treats the directory as its in-container mount path: it checks the directory before it clones, ranks it below `FACTORY_CONFIG_YAML` / `FACTORY_CONSTITUTION` and above the repo files and container defaults, and passes its absolute path to the run. The ignored-inputs report no longer lists `.factory/state/product`, because files under `.factory/state/` are run-time state (#4341)
+
+### Changed
+
+- The README intro now names OpenCode and GitHub Copilot CLI alongside Claude Code, Codex and Ollama (#4354)
+
+### Fixed
+
+- run: a CI or preview rework round whose worker makes no new commit now stops at once and parks `ci-rework-no-change`, with the original ship failure in the park message, instead of running the re-CHECK and SHIP again. A first ship now records the pushed remote head on a CI or preview failure, so the round-1 no-op guard has the head to compare against (#4337)
+- ship: a failing CI check with no result on the PR's base commit, such as a PR-only smoke test, no longer goes straight to a CI rework round. SHIP first reruns its failed jobs once, sharing the one-rerun-per-head budget with the infra rerun. A green rerun ships with no rework round and logs `ci-flaky-rerun-green`. A rerun that still fails parks `ci-flaky` with the PR left open. Checks that pass or fail on base keep today's handling (#4337)
+- ci-evidence: the job log excerpt a CI rework round gets is now anchored on the failure instead of the last 150 lines. It keeps context around the first `##[error]`, test-runner failure summaries and failed-test lines, preferring the failing step, and the excerpt header names that step. A log with no failure marker still falls back to the tail (#4337)
+
+## 0.9.49 - 2026-11-23
+
+Local model provider probing is now opt-in, so factory-cli no longer connects to a local Ollama port unless Ollama is configured (#4345). Releases stage on npm and move `latest` only after a clean-container install of factory-cli succeeds (#4344).
+All seven published `@on-par` packages move to 0.9.49 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Fixed
+
+- router: **heads-up:** factory-cli no longer probes a local model provider port without configuration. Ollama models are routed, and the Ollama endpoint is probed, only when Ollama is configured: `OLLAMA_BASE_URL` is set, local-only mode is on (`FACTORY_LOCAL_ONLY=1`), or the repo config sets `providers.ollama: true` or names an Ollama model in `tiers`, `models.pins` or `models.registry`. Otherwise Ollama models are skipped with no network attempt and routing moves to the next model, as when the probe reports Ollama unreachable. A local Ollama on the default port that relied on no configuration now needs `OLLAMA_BASE_URL=http://127.0.0.1:11434`
+- release: a release no longer goes Latest before npm can install it. `publish.yml` publishes all seven packages under the `staging` dist-tag, with `@on-par/factory-core` first; the other six wait until it resolves on the registry, and it is republished up to 3 times if it does not. A new `promote` job installs `@on-par/factory-cli@<v>` in a clean `node:24-slim` container and checks `factory --version` before it moves `latest` or `next` for all seven. The GitHub release, the drift check and the factory-job image run only after that. The drift check covers every package and waits about 10 minutes. **Ops:** each package's npm trusted publisher must have **Allow npm dist-tag** turned on (docs/runbooks/npm-trusted-publishing.md).
+
+## 0.9.48 - 2026-11-23
+
+PLAN's readiness gate is now the ADR-0167 judge verdict instead of template headings. A not-ready ticket parks with questions, and enrichment no longer rewrites the issue body (#3470).
+All seven published `@on-par` packages move to 0.9.48 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Added
+
+- kpis: `factory kpis --json` reports `readinessVerdicts` (`ready`, `withAssumptions`, `notReady` runs by latest judge verdict), `notReadyParkRate` (runs parked `not-ready` over all runs) and `lateNotReadyRuns` (runs judged ready that PLAN then escalated as `missing-info` or `contradiction`) (#3470)
+
+### Changed
+
+- config: new `readiness.judge: enforce | advisory | off` key (default `advisory`, `FACTORY_READINESS_JUDGE` beats it) for the PLAN readiness judge (ADR-0167, #3470)
+- config: **heads-up:** `readiness.updateIssueBody` and `FACTORY_READINESS_UPDATE_BODY` are deprecated and ignored, with one warning when the config loads; the factory no longer writes enriched sections back into the issue body (#3470)
+- plan: **heads-up:** PLAN's readiness gate is the model verdict from `readiness_judge`, for every work source, not the template headings. `ready` and `ready-with-assumptions` proceed, and the assumptions go to PLAN in an untrusted block and to the PR body. In `enforce` mode a `not-ready` ticket parks `not-ready` with its questions in the park comment and no PLAN call, and a judge failure escalates; `advisory` logs and proceeds; `off` makes no judge call. The fast path needs a `ready` verdict (the heading score only in `off` mode). The `readiness` event is logged right after the verdict, also on fast-path runs, and carries an optional `judge` object. Enrichment and the `readiness_enrich` route are removed (ADR-0167, #3470)
+- check: an epic, which the judge skips, no longer exits 1 for missing epic headings; the heading score stays advisory, as in PLAN (ADR-0167, #3470)
 
 ## 0.9.47 - 2026-11-21
 

@@ -8,8 +8,13 @@ import {
   findSliceIndex,
   finishOutcome,
   logSandboxPolicy,
+  TERMINAL_EVENT_KINDS,
   type RunRequestInput,
 } from './ship-steps.js';
+
+it('treats a not-ready park as a terminal event (#3470)', () => {
+  expect(TERMINAL_EVENT_KINDS.has('not-ready')).toBe(true);
+});
 
 it('passes the resolved factory state and primary git directory to Codex', () => {
   const repoRoot = '/tmp/primary';
@@ -58,6 +63,10 @@ it('passes the resolved factory state and primary git directory to Codex', () =>
   expect(request.continuation).toBeUndefined();
   const handoff = { headSha: 'a'.repeat(40) } as NonNullable<typeof request.continuation>;
   expect(buildRunRequest({ ...input, ctx: { continueFrom: { handoff } } }).continuation).toBe(handoff);
+  expect(request.readinessJudge).toBe('advisory');
+  expect(request.readinessCacheDir).toBe(paths.readinessCache);
+  const enforce = { sandbox: {}, readiness: { judge: 'enforce' } } as FactoryConfig;
+  expect(buildRunRequest({ ...input, factoryConfig: enforce }).readinessJudge).toBe('enforce');
 });
 
 it('buildRunRequest adds sandbox.writablePaths to codex writable roots', () => {

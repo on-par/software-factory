@@ -35,7 +35,7 @@ const PUBLIC_API_KEYS = [
   'resolveSizeGateMaxSlices',
   'SIZE_GATE_MODES',
   'resolveDesignRegressionBlock',
-  'resolveReadinessUpdateIssueBody',
+  'resolveReadinessJudgeMode',
   'resolvePlanApproval',
   'resolveProcessGroupGraceMs',
   'resolveCiWatchDeadlineMs',
@@ -640,6 +640,13 @@ const INTERNAL_API_KEYS = [
   // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
   'wrapCommandInSandbox', // Linear write-back (#3894)
   'ticketKeyOf',
+  'PRODUCT_NAME_PATTERN',
+  'readProductInput',
+  'writeProductInput',
+  'excludeProjectRunState',
+  'validateProjectInputs',
+  'projectConfigReport',
+  'resolveProjectConfigDir',
 ];
 describe('public API surface (ADR-0004)', () => {
   it('root export exposes exactly the documented public API', () => {

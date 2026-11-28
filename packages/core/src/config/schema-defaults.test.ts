@@ -31,7 +31,7 @@ describe('FactoryConfigSchema defaults', () => {
     expect(c.sweep).toStrictEqual({ loopIntervalSeconds: 300, staleThresholdMultiplier: 2 });
     expect(c.plan_approval).toStrictEqual({ enabled: false });
     expect(c.design).toStrictEqual({ blockUnresolvedRegressions: false });
-    expect(c.readiness).toStrictEqual({ updateIssueBody: true });
+    expect(c.readiness).toStrictEqual({ judge: 'advisory' });
     expect(c.build).toStrictEqual({ publishFromBuild: false, contextCeiling: { 'codex-cli': 120000 } });
     expect(c.kpis).toStrictEqual({ defectWindowDays: 14 });
     expect(c.discovery).toStrictEqual({ enabled: true, schedule: 'weekly', maxCandidates: 5 });

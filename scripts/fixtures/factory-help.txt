@@ -15,6 +15,7 @@ Options:
   --state-root <path>                    Keep factory state and config outside the checkout: an absolute path, ~/..., or "auto" (~/.factory/<owner>/<name>); env FACTORY_STATE_ROOT
   --config <path>                        Use this config file for the run instead of .factory/config.yaml; env FACTORY_CONFIG_PATH / FACTORY_CONFIG_YAML, merged with FACTORY_CONFIG_OVERRIDES
   --constitution <path>                  Use this constitution file for the run instead of the repo constitution; env FACTORY_CONSTITUTION_PATH / FACTORY_CONSTITUTION
+  --project-config <dir>                 Read config.yaml and constitution.md from this directory instead of .factory/; env FACTORY_PROJECT_CONFIG_DIR; --config / --constitution and their env vars still win
   -h, --help                             display help for command
 
 Run work:

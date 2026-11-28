@@ -21,7 +21,6 @@ const TASK_PHASE: Record<string, string> = {
   build_opencode: 'build',
   build_copilot: 'build',
   build_command: 'build',
-  readiness_enrich: 'plan',
   readiness_judge: 'plan',
   decompose: 'plan',
   feedback_triage: 'plan',

@@ -31,6 +31,7 @@ import { PrConfigSections } from './pr-section.js';
 import { LandConfigSections } from './land-section.js';
 import { DiskConfigSchema } from './disk-policy.js';
 import { FACTORY_RUNTIME_CONFIG_KEYS } from './runtime-config-keys.js';
+import { READINESS_JUDGE_MODES, warnReadinessUpdateBodyOnce } from './readiness-mode.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS, retiredHarnessReplacement } from '../harness/catalog.js';
@@ -210,8 +211,8 @@ export const FactoryConfigSchema = z.object({
     .object({ blockUnresolvedRegressions: z.boolean().default(dDesign.blockUnresolvedRegressions) })
     .default({ blockUnresolvedRegressions: dDesign.blockUnresolvedRegressions }),
   readiness: z
-    .object({ updateIssueBody: z.boolean().default(dReadiness.updateIssueBody) })
-    .default({ updateIssueBody: dReadiness.updateIssueBody }),
+    .object({ judge: z.enum(READINESS_JUDGE_MODES).default(dReadiness.judge), updateIssueBody: z.boolean().optional() })
+    .default({ judge: dReadiness.judge }),
   build: z
     .object({
       publishFromBuild: z.boolean().default(dBuild.publishFromBuild),
@@ -409,6 +410,7 @@ export const FactoryConfigSchema = z.object({
 // hand-built configs (tests, sims) need not spell out an empty section.
 export type ModelsConfig = Omit<z.infer<typeof ModelsConfigSchema>, 'harnesses'> & {
   harnesses?: Record<string, HarnessDeclaration>;
+  ollamaConfigured?: boolean;
 };
 export type RoutesConfig = z.infer<typeof RoutesConfigSchema>;
 export type FactoryConfig = z.infer<typeof FactoryConfigSchema>;
@@ -511,7 +513,10 @@ export function factoryRuntimeConfigIssues(raw: Record<string, unknown>): Config
  *  model-routing keys are ignored here; `loadRepoConfig` owns them. */
 export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
   const explicit = runConfigSource();
-  if (explicit === undefined && !existsSync(configPath)) return loadFactoryConfig();
+  if (explicit === undefined && !existsSync(configPath)) {
+    warnReadinessUpdateBodyOnce(configPath, {});
+    return loadFactoryConfig();
+  }
 
   let raw: unknown;
   if (explicit !== undefined) {
@@ -527,6 +532,7 @@ export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
     throw new Error(`Invalid ${configPath}: expected a JSON object`);
   }
   warnCodexSandboxOnce(configPath, raw);
+  warnReadinessUpdateBodyOnce(configPath, raw);
   const sizeGateWarned = warnSizeGateModeOnce(configPath, raw);
 
   const result = FactoryConfigSchema.safeParse(mergeRuntimeOverlay(raw));
@@ -623,14 +629,6 @@ export function resolveDesignRegressionBlock(config: FactoryConfig, env: NodeJS.
     env,
     'FACTORY_DESIGN_BLOCK_REGRESSIONS',
     config.design?.blockUnresolvedRegressions ?? dDesign.blockUnresolvedRegressions,
-  );
-}
-
-export function resolveReadinessUpdateIssueBody(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
-  return resolveEnabledFlag(
-    env,
-    'FACTORY_READINESS_UPDATE_BODY',
-    config.readiness?.updateIssueBody ?? dReadiness.updateIssueBody,
   );
 }
 

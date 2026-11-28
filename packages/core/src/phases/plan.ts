@@ -14,16 +14,10 @@ import { buildConstitutionContext } from '../constitutions/index.js';
 import { findUnresolvedRegressions, parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
 import { buildFastPathSpec, isFastPathEligible } from '../efficiency/fast-path.js';
 import type { EventKind } from '../events/kinds.js';
-import {
-  buildReadinessEnrichmentPrompt,
-  buildReadinessEnrichmentRetryPrompt,
-  composeEnrichedIssueBody,
-  scoreEnrichedIssueReadiness,
-  stripEnrichedBlock,
-  type ReadinessEnrichmentRetryContext,
-} from '../readiness/enrich.js';
 import type { SizeGateMode } from '../config/index.js';
+import type { ReadinessJudgeMode } from '../config/readiness-mode.js';
 import type { BuildRoutePin } from '../config/repo.js';
+import { runReadinessGate, writeReadinessNotes } from './plan-readiness.js';
 import type { PlanResult } from './plan-result.js';
 import { settlePlanRoute } from './plan-route.js';
 import { codexUnavailable, type RouteCapabilities } from './route-capabilities.js';
@@ -50,7 +44,12 @@ import { classifyEscalation } from './plan-escalation.js';
 import { routeStackSlice } from './plan-stack-slice.js';
 import type { Constitution, FailoverReason, ReadinessInfo } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
-import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
+import {
+  UNTRUSTED_ISSUE_BODY_NOTICE,
+  UNTRUSTED_READINESS_NOTES_NOTICE,
+  wrapUntrustedIssueBody,
+  wrapUntrustedReadinessNotes,
+} from '../utils/untrusted-input.js';
 import {
   OUTLINE_STEP,
   OUTLINE_TEMPLATE,
@@ -83,8 +82,6 @@ export { classifyEscalation };
 export { buildDesignArtifactRetryPrompt, MAX_DESIGN_ARTIFACT_RETRIES };
 export { type BuildRouteName, defaultBuildRoute, resolveRunnableBuildRoute, runnableBuildRoutes };
 
-const GITHUB_ISSUE_UPDATE_API_VERSION = '2026-03-10';
-
 export interface PlanPromptOpts {
   issue: WorkKey;
   issueTitle: string;
@@ -97,6 +94,13 @@ export interface PlanPromptOpts {
   sizeGate?: { passed: boolean; reason?: string; enforced: boolean };
   stackSizeGate?: boolean;
   previousAttempt?: string;
+  readinessAssumptions?: readonly { aspect: string; text: string }[];
+}
+
+function readinessNotesBlock(assumptions: PlanPromptOpts['readinessAssumptions']): string {
+  if (!assumptions || assumptions.length === 0) return '';
+  const lines = assumptions.map((a) => `- [${a.aspect}] ${a.text}`).join('\n');
+  return `## Readiness assumptions\n\n${UNTRUSTED_READINESS_NOTES_NOTICE}\n\n${wrapUntrustedReadinessNotes(lines)}\n\n`;
 }
 
 export function buildPlanPrompt(opts: PlanPromptOpts): string {
@@ -131,7 +135,7 @@ ${UNTRUSTED_ISSUE_BODY_NOTICE}
 
 ${wrapUntrustedIssueBody(issueBody)}
 
-${opts.previousAttempt ? `${opts.previousAttempt}\n\n` : ''}Steps:
+${readinessNotesBlock(opts.readinessAssumptions)}${opts.previousAttempt ? `${opts.previousAttempt}\n\n` : ''}Steps:
 1. Read the issue above fully. Read CONTEXT.md if present. Any Accepted ADRs in this checkout
    are already summarized above — treat them as binding constraints and open docs/adr/<file>
    only if you need the full text. (Any CLAUDE.md/AGENTS.md standards are already included
@@ -319,7 +323,8 @@ async function planPhaseImpl(opts: {
   routeCapabilities?: RouteCapabilities;
   workSource?: { kind: WorkRequestSourceKind; params: unknown };
   workSources?: WorkSourceRegistry;
-  enforceReadiness?: boolean;
+  readinessJudge?: ReadinessJudgeMode;
+  readinessCacheDir?: string;
   fastPath?: boolean;
   enforceSizeGate?: boolean;
   sizeGateMode?: SizeGateMode;
@@ -329,7 +334,6 @@ async function planPhaseImpl(opts: {
   sizeBudget?: SizeBudget;
   sliceIndex?: number;
   blockUnresolvedRegressions?: boolean;
-  updateIssueBodyOnEnrich?: boolean;
   localOnly?: boolean;
   preferredRoute?: BuildRoutePin;
   laneId?: string;
@@ -376,94 +380,27 @@ async function planPhaseImpl(opts: {
   const runnableRoutes = runnableBuildRoutes(router);
   const failureRoute = defaultBuildRoute(runnableRoutes);
 
-  let readiness = scoreEnrichedIssueReadiness({ title: issueTitle, body: issueBody, labels: work.labels });
-  if (
-    opts.enforceReadiness &&
-    source.kind === GITHUB_ISSUE_SOURCE &&
-    readiness.template === 'factory-task' &&
-    !readiness.pass
-  ) {
-    const params = source.params as GithubIssueParams;
-    const [owner, name] = params.repo.split('/');
-    const updateIssueBody = opts.updateIssueBodyOnEnrich ?? true;
-    const maxEnrichmentAttempts = 2;
-    log('readiness_enrichment_started', `enriching incomplete factory-task issue #${params.issue}`);
-    try {
-      let previous: ReadinessEnrichmentRetryContext | null = null;
-      let lastModel = '';
-      let lastReason = '';
-      let enriched = false;
-      for (let attempt = 1; attempt <= maxEnrichmentAttempts; attempt++) {
-        const input = { title: issueTitle, body: stripEnrichedBlock(issueBody), missing: readiness.missing };
-        const prompt =
-          previous === null
-            ? buildReadinessEnrichmentPrompt(input)
-            : buildReadinessEnrichmentRetryPrompt(input, previous);
-        const enrichment = await router.run('readiness_enrich', prompt, {
-          worktree,
-          sandbox: opts.sandbox,
-          timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
-          onLog: (msg) => log('router', msg),
-        });
-        lastModel = enrichment.model;
-        const candidate = scoreIssueReadiness({ title: issueTitle, body: enrichment.output, labels: work.labels });
-        if (candidate.template === 'factory-task' && candidate.pass) {
-          const composed = composeEnrichedIssueBody(issueBody, enrichment.output);
-          if (updateIssueBody) {
-            await octokit.rest.issues.update({
-              owner,
-              repo: name,
-              issue_number: params.issue,
-              body: composed,
-              headers: { 'X-GitHub-Api-Version': GITHUB_ISSUE_UPDATE_API_VERSION },
-            });
-          }
-          issueBody = composed;
-          readiness = candidate;
-          log(
-            'readiness_enrichment_succeeded',
-            updateIssueBody
-              ? `enriched factory-task issue #${params.issue} with ${enrichment.model}; updated the GitHub issue body (original text kept, enriched sections added under <!-- factory:enriched -->). To keep enrichment in memory only, set readiness.updateIssueBody: false in .factory/config.yaml or FACTORY_READINESS_UPDATE_BODY=0`
-              : `enriched factory-task issue #${params.issue} with ${enrichment.model} in memory only; GitHub issue body left unchanged (readiness.updateIssueBody: false / FACTORY_READINESS_UPDATE_BODY=0)`,
-            {
-              model: enrichment.model,
-            },
-          );
-          enriched = true;
-          break;
-        }
-        lastReason = `enrichment output failed readiness (${candidate.template}; missing: ${candidate.missing.join(', ') || 'none'})`;
-        log(
-          'readiness_enrichment_failed',
-          attempt < maxEnrichmentAttempts
-            ? `${lastReason} — retrying with the missing heading(s) named (attempt ${attempt}/${maxEnrichmentAttempts})`
-            : `${lastReason} — after ${maxEnrichmentAttempts} attempt(s)`,
-        );
-        previous = { previousOutput: enrichment.output, template: candidate.template, stillMissing: candidate.missing };
-      }
-      if (!enriched) {
-        return {
-          ok: false,
-          route: failureRoute,
-          specPath,
-          model: lastModel,
-          escalate: lastReason,
-          designArtifact: null,
-        };
-      }
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      log('readiness_enrichment_failed', `enrichment failed: ${reason}`);
-      return {
-        ok: false,
-        route: failureRoute,
-        specPath,
-        model: '',
-        escalate: `readiness enrichment failed: ${reason}`,
-        designArtifact: null,
-      };
-    }
+  const gate = await runReadinessGate({
+    mode: opts.readinessJudge ?? 'off',
+    work,
+    router,
+    worktree,
+    sandbox: opts.sandbox,
+    cacheDir: opts.readinessCacheDir,
+    log,
+  });
+  if (gate.kind === 'stop') {
+    return {
+      ok: false,
+      route: failureRoute,
+      specPath,
+      model: '',
+      escalate: gate.escalate,
+      designArtifact: null,
+      ...(gate.questions ? { parkReason: 'not-ready' as const, questions: gate.questions } : {}),
+    };
   }
+  let readiness = gate.readiness;
 
   const sizeBudget = opts.sizeBudget ?? { tokenBudget: DEFAULT_TOKEN_BUDGET, maxFiles: DEFAULT_MAX_FILES };
   const stackMode = opts.sizeGateMode === 'stack';
@@ -568,7 +505,7 @@ async function planPhaseImpl(opts: {
     opts.fastPath &&
     !codexUnavailable(routeCapabilities) &&
     fastPathRouteOk &&
-    isFastPathEligible({ issueBody, readinessPassed: readiness.pass })
+    isFastPathEligible({ issueBody, readinessPassed: gate.fastPathReady ?? readiness.pass })
   ) {
     const fastPath = buildFastPathSpec({ issue: issueNumberOf(issue), title: issueTitle, issueBody });
     await writeSpec(specPath, {
@@ -577,6 +514,7 @@ async function planPhaseImpl(opts: {
       designJson: JSON.stringify(fastPath.frontmatter.design, null, 2),
       designMd: renderDesignArtifact(fastPath.frontmatter.design, issueNumberOf(issue)),
     });
+    await writeReadinessNotes(specPath, gate.notes);
     log('fast_path', 'complete bounded issue bypassed model PLAN and emitted a compact Codex spec');
     return {
       ok: true,
@@ -589,12 +527,6 @@ async function planPhaseImpl(opts: {
   }
 
   log('plan', `Starting plan phase`);
-
-  log(
-    'readiness',
-    `issue readiness ${Math.round(readiness.score * 100)}% (${readiness.template})${readiness.pass ? '' : ` — missing: ${readiness.missing.join(', ')}`}`,
-    { readiness },
-  );
 
   log('adr_inject_started', 'reading accepted ADRs for design-constraint injection');
   const adrInjectStartedAt = Date.now();
@@ -645,6 +577,7 @@ async function planPhaseImpl(opts: {
         sizeGate,
         stackSizeGate: stackMode && enforceSizeGate && !opts.parkOverBudget,
         previousAttempt: opts.previousAttempt,
+        readinessAssumptions: gate.notes?.assumptions,
       }),
       steering,
     );
@@ -852,6 +785,7 @@ async function planPhaseImpl(opts: {
       log('design_artifact_invalid', designArtifactInvalidMessage(designErrors, designRetries + 1));
     }
 
+    await writeReadinessNotes(specPath, gate.notes);
     log('plan', `Plan complete with model ${result.model}, route: ${route}`, { model: result.model });
 
     const planResult: PlanResult = {

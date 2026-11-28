@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Runs the "Publish to npm" step of publish.yml (#2335). A skipped or failed publish
 # can never show green: every path ends with exactly one job-summary line and a
-# `published=true|false` step output.
+# `published=true|false` step output (plus `version=<v>` when published).
 #   PUBLISHED <name@version ...>   all packages in scripts/publish-workspaces.txt are out
 #   NOT PUBLISHED: <reason>        anything else; the step fails unless it was a dry run
 #
-# The version and npm dist-tag come from the tag name (#2244):
-#   vX.Y.Z-next.N  ->  version X.Y.Z-next.N, --tag next
-#   vX.Y.Z         ->  version X.Y.Z,        --tag latest
-# A green CI run on a push to main publishes a prerelease to `next` with no tag: the
+# Every package publishes under the `staging` dist-tag, @on-par/factory-core first (see
+# publish-workspaces.sh); the promote job (promote-release.sh) later moves the final tag.
+# The version and final dist-tag come from the tag name (#2244):
+#   vX.Y.Z-next.N  ->  version X.Y.Z-next.N, final tag next
+#   vX.Y.Z         ->  version X.Y.Z,        final tag latest
+# A green CI run on a push to main publishes a prerelease for `next` with no tag: the
 # version is the npm `latest` of @on-par/factory-cli with the patch bumped, plus `-next.N`,
 # where N is one more than the highest N already published for that X.Y.Z by any listed
 # package.
@@ -136,10 +138,6 @@ else
       ;;
   esac
 fi
-case "$version" in
-  *-*) channel=next ;;
-  *) channel=latest ;;
-esac
 
 npm_version="$(npm --version 2>/dev/null)" || npm_version=""
 npm_version="${npm_version//$'\r'/}"
@@ -151,7 +149,7 @@ npm_version_ok "$npm_version" || rc=$?
 [ "$rc" = 0 ] || not_published "npm $npm_version is older than $NPM_MIN_VERSION, the minimum for npm trusted publishing (OIDC)" 1
 echo "npm $npm_version >= $NPM_MIN_VERSION"
 
-bash scripts/publish-workspaces.sh --tag "$channel" --dry-run || not_published "dry-run failed" 1
+bash scripts/publish-workspaces.sh --tag staging --dry-run || not_published "dry-run failed" 1
 [ "$dry_run" = false ] || not_published "dry-run, not published" 0
 
 open=""
@@ -163,8 +161,10 @@ for n in ${PUBLISH_BLOCKERS-195 151}; do
 done
 [ -z "$open" ] || not_published "v1.0 blockers still open:$open" 1
 
-bash scripts/publish-workspaces.sh --tag "$channel" ||
-  not_published "npm publish failed; packages before the failing one in scripts/publish-workspaces.txt may already be on the registry (a rerun skips them)" 1
+rc=0
+bash scripts/publish-workspaces.sh --tag staging || rc=$?
+[ "$rc" != 3 ] || not_published "@on-par/factory-core@$version never resolved on the registry; nothing else was published" 1
+[ "$rc" = 0 ] || not_published "npm publish failed; packages published before the failing one stay on the registry under staging (a rerun skips them)" 1
 
 published=""
 while IFS= read -r name || [ -n "$name" ]; do
@@ -173,5 +173,6 @@ while IFS= read -r name || [ -n "$name" ]; do
   [ -z "$name" ] || published="$published $name@$version"
 done <scripts/publish-workspaces.txt
 
-summary "PUBLISHED$published (--tag $channel)"
+summary "PUBLISHED$published (--tag staging)"
 set_output true
+if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "version=$version" >>"$GITHUB_OUTPUT"; fi

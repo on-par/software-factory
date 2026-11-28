@@ -33,7 +33,7 @@ import { type ContextCeilingNotice, contextCeilingFor, contextCeilingNotice } fr
 import { costRow } from './cost-row.js';
 import { ModelRouterError, type RouterAttempt } from './executor-error.js';
 import { describeFailureDetail } from './failure-detail.js';
-import { claimOllamaSkipNotice, type OllamaProbeResult, probeOllama } from './ollama-probe.js';
+import { claimOllamaSkipNotice, ollamaNotConfigured, type OllamaProbeResult, probeOllama } from './ollama-probe.js';
 import { throwIfWorktreeMissing, worktreeExists } from './missing-worktree.js';
 import { filterModelsByRequires } from './requires.js';
 import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
@@ -314,6 +314,7 @@ export class ModelRouter {
   private contextCeilings: Readonly<Record<string, number>> = { 'codex-cli': DEFAULT_CODEX_CONTEXT_CEILING };
   private stageSkipProviders?: ReadonlySet<string>;
   private codexWorkspacePaths?: { primaryRepoRoot: string; writableRoots: readonly string[] };
+  private modelsOllamaConfigured: boolean;
 
   constructor(
     modelsConfig: ModelsConfig,
@@ -326,6 +327,11 @@ export class ModelRouter {
     private sleepFn: SleepFn = sleep,
   ) {
     this.registry = new ModelRegistry(modelsConfig);
+    this.modelsOllamaConfigured = modelsConfig.ollamaConfigured === true;
+  }
+
+  private get ollamaConfigured(): boolean {
+    return this.modelsOllamaConfigured || this.localOnly || !!process.env.OLLAMA_BASE_URL;
   }
 
   get registryRef() {
@@ -606,7 +612,7 @@ export class ModelRouter {
       }
       const modelProvider = this.registry.get(model)?.provider;
       if (modelProvider === 'ollama' && this.executor.probeOllama) {
-        ollamaProbe ??= await this.executor.probeOllama();
+        ollamaProbe ??= this.ollamaConfigured ? await this.executor.probeOllama() : ollamaNotConfigured();
         if (!ollamaProbe.reachable) {
           if (claimOllamaSkipNotice()) {
             onLog(`Skipping Ollama models: ${ollamaProbe.endpoint} unreachable (${ollamaProbe.reason})`);

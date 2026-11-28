@@ -9,6 +9,7 @@ import { dirname, resolve } from 'node:path';
 
 import { rotateEventLog } from '../events/tail.js';
 import { resolveEventLogRotation, type EventLogRotation } from '../events/rotation.js';
+import type { ProjectConfigSourcePayload } from '../events/payloads.js';
 import type { RunAttribution } from '../run/outcome.js';
 import type { EscalateKind } from '../types/index.js';
 import type {
@@ -78,6 +79,7 @@ export interface LogExtra {
   tokens?: { input: number; output: number };
   durationMs?: number;
   attribution?: RunAttribution;
+  projectConfig?: ProjectConfigSourcePayload;
 }
 
 export interface LoggerOptions {
@@ -192,6 +194,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.model ? { model: extra.model } : {}),
       ...(extra?.tokens ? { tokens: extra.tokens } : {}),
       ...(extra?.durationMs !== undefined ? { durationMs: extra.durationMs } : {}),
+      ...(extra?.projectConfig ? { projectConfig: extra.projectConfig } : {}),
     };
     const line = JSON.stringify(event) + '\n';
     appendLine(eventsFile, line, rotation, opts.lock);

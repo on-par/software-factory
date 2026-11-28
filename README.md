@@ -2,7 +2,7 @@
 
 On PAR Dev's Software Factory is a local CLI that takes a GitHub issue through plan, build and check with AI agents, then opens a ready-for-review PR. You decide what merges.
 
-Built in TypeScript. Routes work across Claude and Codex, with experimental local models through Ollama, and logs cost per task.
+Built in TypeScript. Routes work across Claude Code and Codex, with experimental support for OpenCode, GitHub Copilot CLI and local models through Ollama, and logs cost per task.
 
 ![On PAR Dev's Software Factory running a lane on a real product repo (sped up)](https://raw.githubusercontent.com/on-par/software-factory/main/docs/assets/factory-run.gif)
 
@@ -77,6 +77,8 @@ factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue
 ```
 
 While SHIP waits for CI, a PR with no checks reported yet counts as pending. If the CI watch itself fails (for example a GitHub API error), CI counts as unknown: SHIP fails with `CI unknown`, never marks the PR ready, and the run parks `fail`. `factory ship` ends at a green, ready-for-review PR. Merging stays with you: merge it, or run `factory land <N>`. `factory run` processes the whole queue in parallel lanes.
+
+Before PLAN, a model judges whether the issue is clear enough to build; headings are not required, and the factory never edits the issue. `readiness.judge` picks the mode: `advisory` (default) logs the verdict and always proceeds, `enforce` parks an unclear issue as `not-ready` with the judge's questions in one issue comment, and `off` skips the judge. Answer the questions by editing the issue description, then run `factory unpark <N>`. Any assumptions the judge made are listed under `## Assumptions` in the PR body.
 
 ## GitHub Actions
 

@@ -138,3 +138,9 @@ export interface ProviderCappedPayload {
   /** Provider error detail, passed through redactSecrets. */
   detail: string;
 }
+
+export interface ProjectConfigSourcePayload {
+  source: string;
+  dir: string;
+  ignoredInputs: string[];
+}

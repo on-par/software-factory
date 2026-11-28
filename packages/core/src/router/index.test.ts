@@ -186,13 +186,13 @@ describe('readiness_judge cheap routing (#783)', () => {
     const judge = router.resolveAll('readiness_judge');
     expect(judge.indexOf('claude-haiku-5-5')).toBeGreaterThanOrEqual(0);
     expect(judge.indexOf('claude-haiku-5-5')).toBe(judge.indexOf('claude-sonnet-5') - 1);
-    for (const task of ['decompose', 'readiness_enrich', 'triage']) {
+    for (const task of ['decompose', 'triage']) {
       expect(router.resolveAll(task)).not.toContain('claude-haiku-5-5');
     }
   });
 });
 
-describe('readiness_enrich failover to Codex (#2466)', () => {
+describe('triage-tier failover to Codex (#2466)', () => {
   const realModels = loadModelsConfig();
   const realRoutes = loadRoutesConfig();
   const harnessOf = (router: ModelRouter, model: string) => router.registryRef.getHarnessId(model);
@@ -209,7 +209,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
         if (harnessOf(router(), model) === 'claude-cli') {
           throw new HarnessError('Failed to authenticate: OAuth session expired', 'local_auth');
         }
-        return 'ENRICHED';
+        return 'DONE';
       },
     };
   }
@@ -222,7 +222,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
       false,
       executor(() => router, calls),
     );
-    await expect(router.run('readiness_enrich', 'enrich')).rejects.toMatchObject({ reason: 'local_auth' });
+    await expect(router.run('triage', 'triage')).rejects.toMatchObject({ reason: 'local_auth' });
     expect(calls.length).toBeGreaterThan(0);
     expect(calls.every((m) => harnessOf(router, m) === 'claude-cli')).toBe(true);
   });
@@ -236,7 +236,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
       executor(() => router, calls),
     );
     const logs: string[] = [];
-    await router.run('readiness_enrich', 'enrich', { onLog: (m) => logs.push(m) }).catch(() => undefined);
+    await router.run('triage', 'triage', { onLog: (m) => logs.push(m) }).catch(() => undefined);
     await router.run('plan', 'plan', { onLog: (m) => logs.push(m) });
     await router.run('triage', 'triage', { onLog: (m) => logs.push(m) });
     expect(calls.filter((m) => harnessOf(router, m) === 'claude-cli')).toHaveLength(1);
@@ -254,7 +254,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
     );
     const { calls: reported, fn: sink } = recordArgs(() => {});
     router.setLocalAuthSink(sink);
-    await router.run('readiness_enrich', 'enrich').catch(() => undefined);
+    await router.run('triage', 'triage').catch(() => undefined);
     await router.run('plan', 'plan');
     expect(reported).toEqual([['claude']]);
   });
@@ -269,9 +269,9 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
     router.setLocalAuthSink(() => {
       throw new Error('disk full');
     });
-    await expect(router.run('readiness_enrich', 'enrich')).rejects.toMatchObject({ reason: 'local_auth' });
+    await expect(router.run('triage', 'triage')).rejects.toMatchObject({ reason: 'local_auth' });
     const result = await router.run('plan', 'plan');
-    expect(result.output).toBe('ENRICHED');
+    expect(result.output).toBe('DONE');
   });
 
   it('fails with local_auth when every model for a task signed out earlier in the run (#2495)', async () => {
@@ -281,7 +281,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
       false,
       executor(() => router, []),
     );
-    await router.run('readiness_enrich', 'enrich').catch(() => undefined);
+    await router.run('triage', 'triage').catch(() => undefined);
     await expect(router.run('build_claude', 'build')).rejects.toMatchObject({ reason: 'local_auth' });
   });
 
@@ -294,7 +294,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
       executor(() => router, calls),
     );
     router.skipMissingHarnessClis((cmd) => cmd === 'codex');
-    const result = await router.run('readiness_enrich', 'enrich');
+    const result = await router.run('triage', 'triage');
     expect(calls.every((m) => harnessOf(router, m) === 'codex-cli')).toBe(true);
     expect(result.model).toBe('gpt-5.6-luna-high');
   });
@@ -307,7 +307,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
       executor(() => router, []),
     );
     router.skipMissingHarnessClis(() => false);
-    await expect(router.run('readiness_enrich', 'enrich')).rejects.toThrow(/readiness_enrich/);
+    await expect(router.run('triage', 'triage')).rejects.toThrow(/triage/);
   });
 });
 
@@ -1323,7 +1323,11 @@ const okResponse = {
 };
 
 describe('Ollama reachability probe', () => {
-  beforeEach(resetOllamaProbeCache);
+  beforeEach(() => {
+    resetOllamaProbeCache();
+    vi.stubEnv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434');
+  });
+  afterEach(() => vi.unstubAllEnvs());
 
   const def = (provider: 'ollama' | 'anthropic'): ModelsConfig['models'][string] => ({
     provider,

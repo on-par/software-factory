@@ -295,10 +295,10 @@ describe('shipped defaults', () => {
     });
   });
 
-  it('has 26 routes, each pointing at a known tier', () => {
+  it('has 25 routes, each pointing at a known tier', () => {
     const routeIds = Object.keys(defaultRoutesConfig.routes);
-    expect(routeIds).toHaveLength(26);
-
+    expect(routeIds).toHaveLength(25);
+    expect(routeIds).not.toContain('readiness_enrich');
     const tierIds = new Set(Object.keys(defaultModelsConfig.tiers));
     for (const [route, def] of Object.entries(defaultRoutesConfig.routes)) {
       expect(tierIds.has(def.tier), `route '${route}' references unknown tier '${def.tier}'`).toBe(true);
@@ -317,7 +317,7 @@ describe('shipped defaults', () => {
     expect(defaultFactoryConfig.filing.maxPerDay).toBe(20);
     expect(defaultFactoryConfig.ingest.maxPerCycle).toBe(20);
     expect(defaultFactoryConfig.design.blockUnresolvedRegressions).toBe(false);
-    expect(defaultFactoryConfig.readiness.updateIssueBody).toBe(true);
+    expect(defaultFactoryConfig.readiness).toStrictEqual({ judge: 'advisory' });
   });
 });
 

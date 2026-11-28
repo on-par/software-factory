@@ -59,9 +59,9 @@ const RUNTIME_NOTES: Record<string, string> = {
     'behaviorDelta row is not in openQuestions (default false logs design_regression_unresolved only). ' +
     'FACTORY_DESIGN_BLOCK_REGRESSIONS=1/0 beats it.',
   readiness:
-    'PLAN readiness enrichment for incomplete factory-task issues. updateIssueBody: true (default) writes the ' +
-    'enriched sections back to the GitHub issue under a <!-- factory:enriched --> block, below the original text, ' +
-    'which is kept verbatim; false keeps enrichment in memory only. FACTORY_READINESS_UPDATE_BODY=1/0 beats it.',
+    'Readiness judge at PLAN (ADR-0167). judge: enforce parks a not-ready ticket with its questions in the park comment; ' +
+    'advisory (default) logs the verdict and proceeds; off skips the judge. FACTORY_READINESS_JUDGE beats it. The factory ' +
+    'never edits the ticket: updateIssueBody and FACTORY_READINESS_UPDATE_BODY are deprecated and ignored with a warning.',
   build:
     'BUILD policy. publishFromBuild: true lets the claude BUILD worker push, open a PR and wait for CI before ' +
     'CHECK (the old behavior). Default false keeps BUILD commit-only on every route; SHIP pushes and opens the PR ' +

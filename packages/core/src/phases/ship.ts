@@ -80,6 +80,7 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
   const reentry = opts.reentry;
   let watchRef = branch;
   let headSha: string | undefined;
+  let pushedSha: string | undefined;
 
   const synced =
     opts.syncMain && !reentry && base === SHIP_BASE_BRANCH
@@ -90,12 +91,13 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
     if ('stop' in pushed) return pushed.stop;
     ({ watchRef, headSha } = pushed);
   } else if (prNumber) {
-    const stop = await syncExistingPr({ run, worktree, branch, prNumber, log });
-    if (stop) return stop;
+    const existing = await syncExistingPr({ run, worktree, branch, prNumber, log });
+    if ('stop' in existing) return existing.stop;
+    pushedSha = existing.headSha;
   }
 
   if (!prNumber) {
-    const stop = await pushNewBranch({
+    const pushed = await pushNewBranch({
       run,
       worktree,
       branch,
@@ -106,7 +108,8 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
       recordedRemoteSha: opts.recordedRemoteSha,
       log,
     });
-    if (stop) return stop;
+    if ('stop' in pushed) return pushed.stop;
+    pushedSha = pushed.headSha;
     const opened = await openOrFindPr({ opts, inlineWork, ticket, stack, base, owner, repoName, walkthrough });
     if ('stop' in opened) return opened.stop;
     prNumber = opened.prNumber;
@@ -131,10 +134,11 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
       repoName,
       prNumber,
       watchRef,
-      headSha,
+      headSha: headSha ?? pushedSha,
       rerun,
       deadlineMs: opts.ciDeadlineMs,
       baseBranch: SHIP_BASE_BRANCH,
+      prBase: base,
       ciWatch: opts.ciWatch,
       log,
     });
@@ -142,5 +146,5 @@ async function shipPhaseImpl(opts: ShipPhaseOptions): Promise<ShipResult> {
     ({ ciOutcome, ciWatchError } = ci);
   }
 
-  return finishShip({ opts, run, owner, repoName, prNumber, headSha, ciOutcome, ciWatchError });
+  return finishShip({ opts, run, owner, repoName, prNumber, headSha, pushedSha, ciOutcome, ciWatchError });
 }

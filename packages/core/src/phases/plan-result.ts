@@ -8,7 +8,8 @@ export interface PlanResult {
   specPath: string;
   model: string;
   escalate?: string;
-  parkReason?: 'config';
+  parkReason?: 'config' | 'not-ready';
+  questions?: { aspect: string; text: string }[];
   designArtifact: DesignArtifact | null;
   sliced?: { sliceCount: number };
   slice?: { plan: SlicePlan; index: number };

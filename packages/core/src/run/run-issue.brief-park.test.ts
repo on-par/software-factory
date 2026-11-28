@@ -58,7 +58,6 @@ const request: RunRequest = {
   failover: { enabled: false, cooldownMs: 60_000, fallbackModel: 'claude-sonnet-5' },
   efficiency: { maxReworkRounds: 1, fastPath: false },
   processGroupGraceMs: 50,
-  readinessUpdateIssueBody: true,
   sizeGateMode: 'stack',
   worktreeKeepsPath: keepsFile,
 };

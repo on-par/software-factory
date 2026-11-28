@@ -1,6 +1,5 @@
 // packages/cli/src/cli/run-brief.ts — the factory run-brief handler, moved out of index.ts (#3762)
 
-import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { styleText } from 'node:util';
 
@@ -33,7 +32,7 @@ import {
 } from '@on-par/factory-core/internal';
 
 import { CliExitError } from './errors.js';
-import { availableAgentClis, missingAgentCliMessage, notInitializedMessage } from './first-run.js';
+import { availableAgentClis, missingAgentCliMessage, requireRunInputs } from './first-run.js';
 import { withRepoRunLock } from './repo-run-lock.js';
 import { recordDraftPrFlag } from './run-flags.js';
 import { validateRunReportFlags, withRunReport } from './run-report.js';
@@ -169,9 +168,7 @@ async function prepareRunBrief(opts: RunBriefOptions, rt: RunBriefRuntime) {
   }
   const repoRoot = await rt.getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  if (!existsSync(paths.root)) {
-    throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
-  }
+  await requireRunInputs(repoRoot, paths);
 
   const branchPrefix = rt.branchPrefixOrExit(opts.branchPrefix, paths.config);
   baseBranchOrExit(opts.baseBranch);

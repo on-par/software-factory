@@ -41,7 +41,6 @@ const routes: RoutesConfig = {
   version: 1,
   routes: {
     plan: { tier: 'boss', description: 'stub' },
-    readiness_enrich: { tier: 'boss', description: 'stub' },
     decompose: { tier: 'boss', description: 'stub' },
   },
 };
@@ -150,7 +149,6 @@ describe('planPhase command route (#2872)', () => {
       router: new ModelRouter(models, routes, false, stub),
       constitution: null,
       sandbox,
-      enforceReadiness: false,
       octokit: {
         rest: {
           issues: { get: async () => ({ data: { title: 'Fix sandbox default', body: 'Use workspace-write' } }) },
@@ -197,7 +195,6 @@ npm test`;
       constitution: null,
       octokit: { rest: { issues: { get: async () => ({ data: { title: 'Fix status output', body } }) } } } as any,
       log: () => {},
-      enforceReadiness: true,
       ...(preferredRoute ? { preferredRoute } : {}),
     });
 
@@ -262,7 +259,6 @@ npm test`;
       constitution: null,
       octokit: { rest: { issues: { get: async () => ({ data: { title: 'Fix status output', body } }) } } } as any,
       log: () => {},
-      enforceReadiness: true,
     });
 
     expect(result.ok).toBe(true);
