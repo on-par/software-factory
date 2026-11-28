@@ -98,16 +98,28 @@ function copilotToolStart(data: Json): Activity {
   const server = str(data.mcpServerName);
   const args = isPlainObject(data.arguments) ? data.arguments : {};
   const main = MAIN_INPUT_KEYS.map((key) => str(args[key])).find(Boolean) || str(data.arguments);
-  if (server) return { kind: 'mcp', name: `${server}.${tool}`, summary: main || `${server}.${tool}` };
+  const mcp = `${server}.${str(data.mcpToolName) || tool}`;
+  if (server) return { kind: 'mcp', name: mcp, summary: main || mcp };
   return { kind: 'tool_call', name: tool, summary: main || tool };
 }
 
 function copilotToolEnd(data: Json): Activity {
   const ok = data.success === true;
-  const text = ok ? str(field(data.result, 'content')) : str(field(data.error, 'message')) || str(data.error);
+  const text = str(ok ? field(data.result, 'content') : field(data.error, 'message'));
   const status = ok ? 'ok' : 'error';
   return { kind: 'tool_result', summary: text.trim() ? `${status}: ${text}` : status };
 }
+
+const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
+export function copilotExitCode(event: Json): number | undefined {
+  if (isCount(event.exitCode)) return event.exitCode;
+  const nested = field(event.data, 'exitCode');
+  return isCount(nested) ? nested : undefined;
+}
+
+export const isCopilotSubAgentMessage = (event: Json): boolean =>
+  str(event.agentId) !== '' || str(field(event.data, 'parentToolCallId')) !== '';
 
 export function copilotActivity(parsed: Json): Activity[] {
   const data = isPlainObject(parsed.data) ? parsed.data : {};
@@ -117,11 +129,11 @@ export function copilotActivity(parsed: Json): Activity[] {
     case 'tool.execution_complete':
       return [copilotToolEnd(data)];
     case 'assistant.message':
-      return str(data.parentToolCallId) ? [] : [{ kind: 'text', summary: str(data.content) }];
+      return isCopilotSubAgentMessage(parsed) ? [] : [{ kind: 'text', summary: str(data.content) }];
     case 'session.error':
       return [{ kind: 'result', summary: `error: ${str(data.message) || str(data.errorType) || 'session error'}` }];
     case 'result':
-      return [{ kind: 'result', summary: `exit ${String(parsed.exitCode ?? '?')}` }];
+      return [{ kind: 'result', summary: `exit ${String(copilotExitCode(parsed) ?? '?')}` }];
     default:
       return [];
   }

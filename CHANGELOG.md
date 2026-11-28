@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- agents: the experimental `copilot-cli` harness's JSON parser, activity events and error map now follow Copilot CLI 1.0.114's documented session events. They are tested against synthetic fixtures but not yet checked against a live run. A tool call denied without containment now goes back to the agent: a run that still ends with a non-empty final message and exit 0 keeps its result and logs the denial, and only an empty final message fails as `permission_denied`. The harness never passes `--trust-folder` (#4330)
+
 ## 0.9.50 - 2026-11-25
 
 A run can now take its whole project config from a directory outside the checkout with `--project-config <dir>` or `FACTORY_PROJECT_CONFIG_DIR`, so a repo with no `.factory/` folder can run, and container jobs can mount that directory (#4338, #4339, #4340, #4341). CI rework no longer wastes a round on a no-op, reruns a check with no base result once before rework, and gets log excerpts anchored on the failure (#4337).

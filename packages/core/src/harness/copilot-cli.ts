@@ -6,8 +6,13 @@ import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { COPILOT_TOKEN_ENV } from '../utils/github-credentials.js';
 import { shellEscape } from '../utils/index.js';
-import { agentEventStdout, copilotActivity } from './agent-events.js';
-import { classifyCopilotFailure, COPILOT_CONTAINMENT_HINT, type CopilotFailure } from './copilot-error.js';
+import { agentEventStdout, copilotActivity, copilotExitCode, isCopilotSubAgentMessage } from './agent-events.js';
+import {
+  classifyCopilotFailure,
+  classifyCopilotSessionError,
+  COPILOT_CONTAINMENT_HINT,
+  type CopilotFailure,
+} from './copilot-error.js';
 import type { CodingHarness, HarnessFailureReason, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { HarnessError } from './index.js';
 import { defaultClassifyError, type ProviderFailure } from './provider-failure.js';
@@ -19,11 +24,13 @@ export interface ParsedCopilotJson {
   text: string;
   usage?: HarnessUsage;
   errorText: string;
+  sessionFailure?: CopilotFailure;
   exitCode?: number;
-  deniedTool: boolean;
+  deniedTools: number;
 }
 
 const CONTAINED_RUNTIMES: ReadonlySet<string> = new Set(['sandbox-exec', 'firejail']);
+const UNAPPROVABLE = 'denied-no-approval-rule-and-could-not-request-from-user';
 const DENIED_TOOL = /permission denied and could not request permission/i;
 const GENERIC_REASONS: ReadonlySet<HarnessFailureReason> = new Set(['error', 'unknown']);
 
@@ -33,12 +40,19 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const text = (value: unknown): string => (typeof value === 'string' ? value : '');
 
 function sessionErrorText(data: Record<string, unknown>): string {
-  const status = isCount(data.statusCode) ? ` (status ${data.statusCode})` : '';
-  return [text(data.errorType), text(data.message)].filter(Boolean).join(': ') + status;
+  const code = text(data.errorCode);
+  const tags = [code && `code ${code}`, isCount(data.statusCode) ? `status ${data.statusCode}` : ''].filter(Boolean);
+  const head = [text(data.errorType), text(data.message)].filter(Boolean).join(': ');
+  return tags.length > 0 ? `${head} (${tags.join(', ')})` : head;
 }
 
-function toolErrorText(data: Record<string, unknown>): string {
-  return isRecord(data.error) ? text(data.error.message) : text(data.error);
+function deniedToolKey(event: Record<string, unknown>, data: Record<string, unknown>): string | undefined {
+  const fallback = text(data.toolCallId) || text(data.requestId) || text(event.id) || 'unknown';
+  if (event.type === 'permission.completed') {
+    return isRecord(data.result) && data.result.kind === UNAPPROVABLE ? fallback : undefined;
+  }
+  if (event.type !== 'tool.execution_complete' || data.success !== false || !isRecord(data.error)) return undefined;
+  return DENIED_TOOL.test(text(data.error.message)) ? fallback : undefined;
 }
 
 function typedEvents(stdout: string): Record<string, unknown>[] {
@@ -57,13 +71,16 @@ export function parseCopilotJson(stdout: string): ParsedCopilotJson | undefined 
   const events = typedEvents(stdout);
   let finalText = '';
   let exitCode: number | undefined;
-  let deniedTool = false;
+  let sessionFailure: CopilotFailure | undefined;
+  const denied = new Set<string>();
   const errors: string[] = [];
   const usage = { input: 0, output: 0, cacheRead: 0, sawCacheRead: false, turns: 0 };
 
   for (const event of events) {
     const data = isRecord(event.data) ? event.data : {};
-    if (event.type === 'assistant.message' && !text(data.parentToolCallId)) {
+    const deniedKey = deniedToolKey(event, data);
+    if (deniedKey !== undefined) denied.add(deniedKey);
+    if (event.type === 'assistant.message' && !isCopilotSubAgentMessage(event)) {
       finalText = text(data.content);
     } else if (event.type === 'assistant.usage' && isCount(data.inputTokens) && isCount(data.outputTokens)) {
       usage.turns++;
@@ -75,11 +92,9 @@ export function parseCopilotJson(stdout: string): ParsedCopilotJson | undefined 
       }
     } else if (event.type === 'session.error') {
       errors.push(sessionErrorText(data));
-    } else if (event.type === 'tool.execution_complete' && data.success === false) {
-      const message = toolErrorText(data);
-      if (DENIED_TOOL.test(message)) deniedTool = true;
-    } else if (event.type === 'result' && typeof event.exitCode === 'number') {
-      exitCode = event.exitCode;
+      sessionFailure = classifyCopilotSessionError(data) ?? sessionFailure;
+    } else if (event.type === 'result') {
+      exitCode = copilotExitCode(event) ?? exitCode;
     }
   }
 
@@ -87,7 +102,8 @@ export function parseCopilotJson(stdout: string): ParsedCopilotJson | undefined 
   return {
     text: finalText,
     errorText: errors.filter(Boolean).join('\n'),
-    deniedTool,
+    deniedTools: denied.size,
+    ...(sessionFailure ? { sessionFailure } : {}),
     ...(exitCode === undefined ? {} : { exitCode }),
     ...(usage.turns > 0
       ? {
@@ -106,6 +122,9 @@ export interface CopilotAllowAllDecision {
   allowAll: boolean;
   why: string;
 }
+
+const deniedWithoutContainment = (parsed: ParsedCopilotJson, decision: CopilotAllowAllDecision): boolean =>
+  parsed.deniedTools > 0 && !decision.allowAll;
 
 export function copilotAllowAllDecision(
   request: Pick<HarnessRequest, 'sandbox' | 'copilotAllowAll'>,
@@ -193,7 +212,7 @@ export class CopilotCliHarness implements CodingHarness {
         throw this.processFailure(err, decision, timeoutSeconds);
       }
     });
-    return this.result(stdout, decision);
+    return this.result(stdout, decision, request.task);
   }
 
   private logDecision(task: string, decision: CopilotAllowAllDecision): void {
@@ -243,8 +262,10 @@ export class CopilotCliHarness implements CodingHarness {
     decision: CopilotAllowAllDecision,
   ): CopilotFailure {
     const failure = classifyCopilotFailure(diagnostic, exitCode);
+    if (failure.cause !== undefined) return failure;
+    if (parsed?.sessionFailure) return { ...parsed.sessionFailure, detail: failure.detail };
     if (!GENERIC_REASONS.has(failure.reason)) return failure;
-    if (parsed?.deniedTool && !decision.allowAll) {
+    if (parsed && parsed.text.trim() === '' && deniedWithoutContainment(parsed, decision)) {
       return { ...failure, reason: 'permission_denied', kind: 'other', cause: COPILOT_CONTAINMENT_HINT };
     }
     if (parsed && parsed.text.trim() === '' && parsed.errorText === '') {
@@ -253,7 +274,7 @@ export class CopilotCliHarness implements CodingHarness {
     return failure;
   }
 
-  private result(stdout: string, decision: CopilotAllowAllDecision): HarnessResult {
+  private result(stdout: string, decision: CopilotAllowAllDecision, task: string): HarnessResult {
     const parsed = parseCopilotJson(stdout);
     if (!parsed) {
       throw new HarnessError(
@@ -272,14 +293,20 @@ export class CopilotCliHarness implements CodingHarness {
         { exitCode: 0, stdout, ...(parsed.errorText ? { diagnostic: parsed.errorText } : {}), kind: failure.kind },
       );
     }
+    const denied = deniedWithoutContainment(parsed, decision);
     if (parsed.text.trim() === '') {
-      const denied = parsed.deniedTool && !decision.allowAll;
       throw new HarnessError(
         denied
           ? `copilot CLI returned an empty final message after a denied tool call: ${COPILOT_CONTAINMENT_HINT}`
           : 'copilot CLI returned an empty final message',
         denied ? 'permission_denied' : 'empty_response',
         { exitCode: 0, kind: denied ? 'other' : 'unavailable' },
+      );
+    }
+    if (denied) {
+      const n = parsed.deniedTools;
+      this.log(
+        `copilot: ${n} tool call${n === 1 ? ' was' : 's were'} denied without containment for task ${task}; the final message stands and CHECK judges the work`,
       );
     }
     return { output: parsed.text, ...(parsed.usage ? { usage: parsed.usage } : {}) };

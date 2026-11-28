@@ -1,6 +1,51 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
-import { classifyCopilotFailure } from './copilot-error.js';
+import { classifyCopilotFailure, classifyCopilotSessionError } from './copilot-error.js';
+
+const FIXTURES = new URL('../__fixtures__/copilot-cli/', import.meta.url);
+
+function sessionErrorData(name: string): Record<string, unknown> {
+  const raw = readFileSync(fileURLToPath(new URL(`copilot-cli-synthetic-1.0.114.${name}.jsonl`, FIXTURES)), 'utf8');
+  const errorLine = raw.split('\n').find((l) => l.includes('"type":"session.error"')) ?? '{}';
+  const event = JSON.parse(errorLine) as { data?: Record<string, unknown> };
+  return event.data ?? {};
+}
+
+describe('classifyCopilotSessionError', () => {
+  it.each([
+    ['a rejected token', 'error-token-rejected', 'local_auth', 'auth', 'the Copilot token was rejected'],
+    [
+      'a used-up allowance (pattern documented-only)',
+      'error-allowance',
+      'usage_cap',
+      'usage_cap',
+      'the Copilot premium request allowance is used up',
+    ],
+    ['a 429 (pattern documented-only)', 'error-rate-limit', 'rate_limit', 'rate_limit', undefined],
+  ])('maps %s to its reason and kind (synthetic 1.0.114 fixture)', (_label, name, reason, kind, cause) => {
+    const failure = classifyCopilotSessionError(sessionErrorData(name));
+    expect([failure?.reason, failure?.kind, failure?.cause]).toEqual([reason, kind, cause]);
+  });
+
+  it.each([
+    ['errorCode no_account', { errorType: 'authentication', errorCode: 'no_account', message: 'x' }, 'local_auth'],
+    ['statusCode 402 alone', { errorType: 'query', message: 'x', statusCode: 402 }, 'usage_cap'],
+    ['statusCode 429 alone', { errorType: 'query', message: 'x', statusCode: 429 }, 'rate_limit'],
+    ['a user_*_rate_limited errorCode', { errorType: 'query', errorCode: 'user_weekly_rate_limited' }, 'rate_limit'],
+  ])('maps documented ErrorData %s (documented-only)', (_label, data, reason) => {
+    expect(classifyCopilotSessionError(data)?.reason).toBe(reason);
+  });
+
+  it('names the missing credential for no_account and leaves other error types to text classification', () => {
+    expect(classifyCopilotSessionError({ errorType: 'authentication', errorCode: 'no_account' })?.cause).toBe(
+      'no Copilot credential: set COPILOT_GITHUB_TOKEN or run `copilot login`',
+    );
+    expect(classifyCopilotSessionError({ errorType: 'context_limit', message: 'too long' })).toBeUndefined();
+  });
+});
 
 describe('classifyCopilotFailure', () => {
   it.each([
@@ -18,22 +63,32 @@ describe('classifyCopilotFailure', () => {
       'local_auth',
       'auth',
     ],
-    ['no plan or organization policy (docs string)', 'Error: Access denied by policy settings', 'local_auth', 'auth'],
     [
-      'denied tool call (unverified: from a public issue report)',
+      'no plan or organization policy (docs string; pattern documented-only)',
+      'Error: Access denied by policy settings',
+      'local_auth',
+      'auth',
+    ],
+    [
+      'denied tool call (public issue report wording, used by the synthetic 1.0.114 fixture)',
       'Permission denied and could not request permission from user',
       'permission_denied',
       'other',
     ],
-    ['quota exhausted (unverified: changelog wording only)', 'Quota exceeded', 'usage_cap', 'usage_cap'],
-    ['premium requests exhausted (unverified)', 'premium requests exhausted for this month', 'usage_cap', 'usage_cap'],
+    ['quota exhausted (changelog wording; pattern documented-only)', 'Quota exceeded', 'usage_cap', 'usage_cap'],
     [
-      'session rate limit (unverified: changelog wording only)',
+      'premium requests exhausted (pattern documented-only)',
+      'premium requests exhausted for this month',
+      'usage_cap',
+      'usage_cap',
+    ],
+    [
+      'session rate limit (changelog wording; pattern documented-only)',
       'session rate limit reached',
       'rate_limit',
       'rate_limit',
     ],
-    ['HTTP 429 (unverified)', 'api: Too Many Requests (status 429)', 'rate_limit', 'rate_limit'],
+    ['HTTP 429 text (pattern documented-only)', 'query: Too Many Requests (status 429)', 'rate_limit', 'rate_limit'],
   ])('%s', (_label, text, reason, kind) => {
     expect(classifyCopilotFailure(text, 1)).toMatchObject({ reason, kind });
   });

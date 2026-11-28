@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
@@ -44,22 +47,24 @@ const registry = new ModelRegistry({
   routingRules: {},
 });
 
+const FIXTURES = new URL('../__fixtures__/copilot-cli/', import.meta.url);
+const fixture = (name: string) =>
+  readFileSync(fileURLToPath(new URL(`copilot-cli-synthetic-1.0.114.${name}.jsonl`, FIXTURES)), 'utf8');
+
+function withoutEvent(stdout: string, type: string): string {
+  const kept = stdout.split('\n').filter((l) => !l.includes(`"type":"${type}"`));
+  return kept.join('\n');
+}
+
 const line = (event: Record<string, unknown>) => JSON.stringify(event);
 const message = (content: string, extra: Record<string, unknown> = {}) =>
-  line({ type: 'assistant.message', data: { messageId: 'm', content, toolRequests: [], ...extra } });
-const usage = (inputTokens: number, outputTokens: number, cacheReadTokens?: number) =>
-  line({ type: 'assistant.usage', data: { inputTokens, outputTokens, cacheReadTokens } });
+  line({ type: 'assistant.message', data: { messageId: 'msg-0001', content, toolRequests: [], ...extra } });
 const transcript = (...lines: string[]) => `${lines.join('\n')}\n`;
 
-const SUCCESS = transcript(
-  line({ type: 'assistant.message_delta', data: { messageId: 'm', deltaContent: 'Wor' } }),
-  line({ type: 'tool.execution_start', data: { toolCallId: 't', toolName: 'bash', arguments: { command: 'ls' } } }),
-  line({ type: 'tool.execution_complete', data: { toolCallId: 't', success: true } }),
-  usage(100, 20, 40),
-  message('Work done.'),
-  usage(50, 10),
-  line({ type: 'result', exitCode: 0 }),
-);
+const SUCCESS = fixture('success');
+const SUCCESS_OUTPUT = 'Added a unit test for the parser and ran it.';
+const NO_ALLOW_ALL_LINE =
+  'copilot: no --allow-all for task build_copilot (the OS sandbox is off); tool calls that need approval are denied';
 
 interface Recorded {
   cmd: string;
@@ -120,6 +125,16 @@ describe('buildCopilotCommand', () => {
     expect(cmd).toContain(' --allow-all --model ');
     expect(cmd.endsWith("--model 'gpt-5.4' < '/tmp/p.txt'")).toBe(true);
   });
+
+  it.each([
+    ['without --allow-all', { allowAll: false, promptPath: '/tmp/p.txt' }],
+    ['with --allow-all and a model', { allowAll: true, providerModel: 'gpt-5.4', promptPath: '/tmp/p.txt' }],
+  ])(
+    'never passes --trust-folder %s, so repository hooks, workspace MCP servers and plugin settings stay unloaded',
+    (_label, opts) => {
+      expect(buildCopilotCommand(opts)).not.toContain('--trust-folder');
+    },
+  );
 });
 
 describe('copilotAllowAllDecision', () => {
@@ -151,7 +166,7 @@ describe('CopilotCliHarness.run', () => {
       request({ prompt: 'SECRET PROMPT TEXT', worktree: '/tmp/wt', env: { PORT: '3142', COPILOT_ALLOW_ALL: 'true' } }),
     );
     const [call] = exec.calls;
-    expect(result.output).toBe('Work done.');
+    expect(result.output).toBe(SUCCESS_OUTPUT);
     expect(call?.cmd).not.toContain('SECRET PROMPT TEXT');
     expect(call?.cmd).not.toContain('--allow-all');
     expect(call?.cmd).not.toContain('--model');
@@ -217,24 +232,36 @@ describe('CopilotCliHarness.run', () => {
     expect(exec.calls[0]?.cmd).not.toContain('copilot-pinned');
   });
 
-  it('returns usage only from reported token counts and never a cost', async () => {
-    const withUsage = await new CopilotCliHarness(recordingExec(SUCCESS), quiet).run(request());
-    expect(withUsage.usage).toEqual({ inputTokens: 150, outputTokens: 30, numTurns: 2, cacheReadTokens: 40 });
-    const noUsage = await new CopilotCliHarness(recordingExec(transcript(message('ok'))), quiet).run(request());
-    expect(noUsage.usage).toBeUndefined();
+  it('sums token counts from every assistant.usage event, sub-agent included, and never a cost (synthetic 1.0.114 fixture)', async () => {
+    const result = await new CopilotCliHarness(recordingExec(SUCCESS), quiet).run(request());
+    expect(result.usage).toEqual({ inputTokens: 3000, outputTokens: 240, numTurns: 3, cacheReadTokens: 1400 });
   });
 
-  it('keeps an ESCALATE: line in the final message byte for byte and drops one from an earlier message', async () => {
-    const final = '  Investigated.\nESCALATE: needs-info: which API version?\n';
-    const early = transcript(message('ESCALATE: needs-info: early'), message(final));
-    expect((await new CopilotCliHarness(recordingExec(early), quiet).run(request())).output).toBe(final);
-    const late = transcript(message('ESCALATE: needs-info: early'), message('Done after all.'));
-    expect((await new CopilotCliHarness(recordingExec(late), quiet).run(request())).output).toBe('Done after all.');
+  it('returns no usage when the run has no assistant.usage event, ignoring the result record usage (synthetic 1.0.114 fixture)', async () => {
+    const result = await new CopilotCliHarness(recordingExec(fixture('escalate-final')), quiet).run(request());
+    expect(result.usage).toBeUndefined();
   });
 
-  it('ignores sub-agent messages when picking the final message', async () => {
-    const stdout = transcript(message('Top level.'), message('from a sub-agent', { parentToolCallId: 'tool-9' }));
-    expect((await new CopilotCliHarness(recordingExec(stdout), quiet).run(request())).output).toBe('Top level.');
+  it('returns the final top-level message verbatim with its ESCALATE: line byte for byte (synthetic 1.0.114 fixture)', async () => {
+    const result = await new CopilotCliHarness(recordingExec(fixture('escalate-final')), quiet).run(request());
+    expect(result.output).toBe(
+      '  Investigated the client.\nESCALATE: needs-info: which API version should the client target?\n',
+    );
+  });
+
+  it('drops an ESCALATE: line that only an earlier message carried (synthetic 1.0.114 fixture)', async () => {
+    const result = await new CopilotCliHarness(recordingExec(fixture('escalate-earlier')), quiet).run(request());
+    expect(result.output).toBe('Updated the client to API version 2.');
+  });
+
+  it('never takes a sub-agent message as the final message (synthetic 1.0.114 fixture)', () => {
+    const lines = SUCCESS.split('\n');
+    const throughSubAgent = lines.slice(
+      0,
+      lines.findIndex((l) => l.includes('"type":"subagent.completed"')),
+    );
+    expect(throughSubAgent.join('\n')).toContain('Sub-agent note');
+    expect(parseCopilotJson(throughSubAgent.join('\n'))?.text).toBe('');
   });
 
   it('rejects an empty final message as empty_response', async () => {
@@ -249,48 +276,71 @@ describe('CopilotCliHarness.run', () => {
     expect(err.details.stdout).toBe('plain text answer\n');
   });
 
-  it('rejects a failed result record even when the process exited 0', async () => {
-    const stdout = transcript(
-      line({ type: 'session.error', data: { errorType: 'quota', message: 'Quota exceeded' } }),
-      line({ type: 'result', exitCode: 1 }),
-    );
-    const err = await rejection(new CopilotCliHarness(recordingExec(stdout), quiet));
+  it('rejects a failed result record even when the process exited 0 (synthetic 1.0.114 fixture)', async () => {
+    const err = await rejection(new CopilotCliHarness(recordingExec(fixture('error-allowance')), quiet));
     expect(err.reason).toBe('usage_cap');
     expect(err.details.kind).toBe('usage_cap');
-    expect(err.message).toContain('(exit 1)');
+    expect(err.message).toBe(
+      'copilot CLI reported a failed run (exit 1): the Copilot premium request allowance is used up',
+    );
   });
 
   it('treats a session error followed by a final message and exit 0 as a recovered success', async () => {
     const stdout = transcript(
-      line({ type: 'session.error', data: { message: 'transient', statusCode: 500 } }),
+      line({ type: 'session.error', data: { errorType: 'query', message: 'transient', statusCode: 500 } }),
       message('Recovered.'),
       line({ type: 'result', exitCode: 0 }),
     );
     expect((await new CopilotCliHarness(recordingExec(stdout), quiet).run(request())).output).toBe('Recovered.');
   });
 
-  it('names containment when a denied tool call leaves an empty final message and --allow-all was not passed', async () => {
-    const stdout = transcript(
-      line({
-        type: 'tool.execution_complete',
-        data: { success: false, error: { message: 'Permission denied and could not request permission from user' } },
-      }),
-      message(''),
+  it('keeps the result of a run whose denied tool call was followed by a final message and exit 0, and logs the denial once (synthetic 1.0.114 fixture)', async () => {
+    const lines: string[] = [];
+    const harness = new CopilotCliHarness(recordingExec(fixture('denied-recovered')), { log: (l) => lines.push(l) });
+    const result = await harness.run(request());
+    expect(result.output).toBe(
+      'The shell command was denied, so I reviewed the tests by reading them. The fix is in place.',
     );
-    const err = await rejection(new CopilotCliHarness(recordingExec(stdout), quiet));
-    expect(err.reason).toBe('permission_denied');
-    expect(err.message).toContain('sandbox.copilotAllowAll: true only inside an isolated runtime');
+    expect(lines).toEqual([
+      NO_ALLOW_ALL_LINE,
+      'copilot: 1 tool call was denied without containment for task build_copilot; the final message stands and CHECK judges the work',
+    ]);
   });
 
-  it('classifies a non-zero exit with a denied tool call as permission_denied', async () => {
-    const stdout = transcript(
-      line({
-        type: 'tool.execution_complete',
-        data: { success: false, error: 'Permission denied and could not request permission from user' },
-      }),
-    );
-    const err = await rejection(new CopilotCliHarness(failingExec({ code: 1, stdout, stderr: '' }), quiet));
-    expect(err.reason).toBe('permission_denied');
+  it('logs no denial when --allow-all was passed (synthetic 1.0.114 fixture)', async () => {
+    const lines: string[] = [];
+    const harness = new CopilotCliHarness(recordingExec(fixture('denied-recovered')), { log: (l) => lines.push(l) });
+    await harness.run(request({ copilotAllowAll: true }));
+    expect(lines).toEqual(['copilot: --allow-all for task build_copilot (sandbox.copilotAllowAll: true in config)']);
+  });
+
+  it.each([
+    ['the process exited 0 and the result record says 1', recordingExec(fixture('denied-empty'))],
+    ['the process exited 1', failingExec({ code: 1, stdout: fixture('denied-empty'), stderr: '' })],
+  ])(
+    'names containment when a denied tool call leaves an empty final message and %s (synthetic 1.0.114 fixture)',
+    async (_label, exec) => {
+      const err = await rejection(new CopilotCliHarness(exec, quiet));
+      expect(err.reason).toBe('permission_denied');
+      expect(err.details.kind).toBe('other');
+      expect(err.message).toContain('sandbox.copilotAllowAll: true only inside an isolated runtime');
+    },
+  );
+
+  it.each([
+    ['permission.completed with the documented denied kind alone', 'tool.execution_complete'],
+    ['the tool error alone', 'permission.completed'],
+  ])('detects a denied tool call from %s (synthetic 1.0.114 fixture)', async (_label, dropped) => {
+    const stdout = withoutEvent(fixture('denied-empty'), dropped);
+    expect(parseCopilotJson(stdout)?.deniedTools).toBe(1);
+    expect((await rejection(new CopilotCliHarness(recordingExec(stdout), quiet))).reason).toBe('permission_denied');
+  });
+
+  it('does not count a permission that was approved or denied by a rule as unapprovable', () => {
+    const completed = (kind: string, toolCallId: string) =>
+      line({ type: 'permission.completed', data: { requestId: toolCallId, toolCallId, result: { kind } } });
+    const stdout = transcript(completed('approved', 'call-0001'), completed('denied-by-rules', 'call-0002'));
+    expect(parseCopilotJson(stdout)?.deniedTools).toBe(0);
   });
 
   it('classifies a non-zero exit with an empty final message and no error as empty_response', async () => {
@@ -311,14 +361,32 @@ describe('CopilotCliHarness.run', () => {
     expect(missing.reason).toBe('cli_missing');
   });
 
-  it('reads the reason from a session.error status code on a failed exit', async () => {
-    const stdout = transcript(
-      line({ type: 'session.error', data: { errorType: 'api', message: 'Too Many Requests', statusCode: 429 } }),
-    );
-    const err = await rejection(new CopilotCliHarness(failingExec({ code: 1, stdout, stderr: '' }), quiet));
-    expect(err.reason).toBe('rate_limit');
-    expect(err.details.diagnostic).toBe('api: Too Many Requests (status 429)');
-  });
+  it.each([
+    ['a rejected token', 'error-token-rejected', 'local_auth', 'auth', 'authentication: Authentication failed'],
+    [
+      'a used-up allowance (pattern documented-only)',
+      'error-allowance',
+      'usage_cap',
+      'usage_cap',
+      'quota: The premium request allowance for this account is used up. (status 402)',
+    ],
+    [
+      'a 429 (pattern documented-only)',
+      'error-rate-limit',
+      'rate_limit',
+      'rate_limit',
+      'rate_limit: Request was throttled. Try again later. (code rate_limited, status 429)',
+    ],
+  ])(
+    'reads the reason for %s from session.error on a failed exit (synthetic 1.0.114 fixture)',
+    async (_label, name, reason, kind, diagnostic) => {
+      const stdout = fixture(name);
+      const err = await rejection(new CopilotCliHarness(failingExec({ code: 1, stdout, stderr: '' }), quiet));
+      expect(err.reason).toBe(reason);
+      expect(err.details.kind).toBe(kind);
+      expect(err.details.diagnostic).toBe(diagnostic);
+    },
+  );
 });
 
 describe('CopilotCliHarness.classifyError', () => {
@@ -345,5 +413,23 @@ describe('parseCopilotJson', () => {
 
   it('handles CRLF line endings', () => {
     expect(parseCopilotJson(`${message('crlf')}\r\n`)?.text).toBe('crlf');
+  });
+
+  it('ignores the fixture note, session.idle and other unknown event types (synthetic 1.0.114 fixture)', () => {
+    const [note = ''] = SUCCESS.split('\n');
+    const idle = line({ type: 'session.idle', data: {}, ephemeral: true });
+    expect(parseCopilotJson(transcript(note, idle))).toEqual({ text: '', errorText: '', deniedTools: 0 });
+  });
+
+  it.each([
+    ['at the top level', { type: 'result', exitCode: 3 }],
+    ['under data', { type: 'result', data: { exitCode: 3 } }],
+  ])('reads a numeric result exit code %s', (_label, record) => {
+    expect(parseCopilotJson(transcript(line(record)))?.exitCode).toBe(3);
+  });
+
+  it('skips a sub-agent message in the older shape that carried data.parentToolCallId', () => {
+    const stdout = transcript(message('Top level.'), message('from a sub-agent', { parentToolCallId: 'call-0009' }));
+    expect(parseCopilotJson(stdout)?.text).toBe('Top level.');
   });
 });

@@ -184,6 +184,8 @@ not ready, 2 is invalid).
 
 ## GitHub Copilot CLI
 
+Experimental: not yet proven on a live run.
+
 ### Install and log in
 
 Install the CLI with `npm install -g @github/copilot`. You need a GitHub Copilot plan that allows
@@ -224,7 +226,8 @@ stdin from a temporary file. The prompt never appears in the command line. It re
 `COPILOT_ALLOW_ALL`, `COPILOT_ASSISTED_APPROVAL`, `GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS`,
 `GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP` and `GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS` from the child
 environment, so a repository's hooks, workspace MCP servers and extensions do not load and no
-environment variable can grant tool approval. The factory does not override Copilot's own configuration, so approvals you saved
+environment variable can grant tool approval. It never passes `--trust-folder`, so the worktree's
+hooks, workspace MCP servers and repository plugin settings stay untrusted. The factory does not override Copilot's own configuration, so approvals you saved
 (`~/.copilot/permissions-config.json`, `allowedUrls` in `settings.json`), user-level hooks, trusted
 folders and a `COPILOT_HOME` that points at them still apply; start an isolated runtime from a fresh
 Copilot home.
@@ -242,7 +245,10 @@ Otherwise Copilot runs without `--allow-all`. Tool calls that need approval are 
 nobody can answer an approval prompt in a non-interactive run, so BUILD usually cannot edit files. The
 run logs the decision and its reason once per task, for example
 `copilot: no --allow-all for task build_copilot (the OS sandbox is off); tool calls that need approval are denied`.
-When a denied tool call ends the run, the failure is `permission_denied` and its message names the
+Copilot passes a denial back to the agent, so it can try another way. If the run still ends with a
+non-empty final message and exit 0, the result stands, CHECK judges the work, and the run logs one
+line such as `copilot: 1 tool call was denied without containment for task build_copilot; the final message stands and CHECK judges the work`.
+If the final message is empty, the failure is `permission_denied` and its message names the
 containment that was missing.
 
 Under the OS sandbox, `~/.copilot` is writable. With `sandbox.network.mode: enforce`, add the Copilot
@@ -256,9 +262,15 @@ section shows `copilot installed` (with the CLI version) and `copilot signed in`
 
 ### Known gaps
 
-- The JSON event mapping follows Copilot CLI's documented session events (`assistant.message`,
-  `assistant.usage`, `tool.execution_start`, `tool.execution_complete`, `session.error` and the final
-  `result` record). It has not yet been checked against a recorded transcript.
+- The JSON event parser and its test fixtures are synthetic, unverified against a live run. They are
+  built from GitHub's documented Copilot CLI 1.0.114 session event types (`assistant.message`,
+  `assistant.usage`, `tool.execution_start`, `tool.execution_complete`, `permission.completed`,
+  `session.error`) and its CLI reference. The final `result` record is not in those types; the
+  parser reads its `exitCode` at the top level or under `data`. A live capture will replace the
+  fixtures.
+- The factory treats `AGENTS.md` as auto-loaded by Copilot and leaves it out of the BUILD prompt.
+  Copilot CLI documents that it loads custom instructions from `AGENTS.md`, but not whether it does
+  so in a folder that is not trusted, which is how the factory runs it. This is unverified.
 - Effort is not passed. Session resume and sign-in helpers are not supported.
 - Copilot is not in any default tier. Pin it, as in [Recipe: Copilot-only](#recipe-copilot-only).
 

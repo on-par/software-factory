@@ -1,0 +1,6 @@
+{"type":"fixture.note","data":{"note":"synthetic, built from documented Copilot CLI 1.0.114 output; unverified against a live run"}}
+{"id":"evt-0001","parentId":null,"timestamp":"2026-01-01T00:00:00.000Z","type":"user.message","data":{"content":"Synthetic prompt: update the client for the new API."}}
+{"id":"evt-0002","parentId":"evt-0001","timestamp":"2026-01-01T00:00:01.000Z","type":"assistant.turn_start","data":{"turnId":"1"}}
+{"id":"evt-0003","parentId":"evt-0002","timestamp":"2026-01-01T00:00:02.000Z","type":"assistant.message","data":{"messageId":"msg-0001","turnId":"1","content":"  Investigated the client.\nESCALATE: needs-info: which API version should the client target?\n","toolRequests":[]}}
+{"id":"evt-0004","parentId":"evt-0003","timestamp":"2026-01-01T00:00:03.000Z","type":"session.idle","data":{},"ephemeral":true}
+{"type":"result","exitCode":0,"usage":{"premiumRequests":1,"totalApiDurationMs":4200,"sessionDurationMs":9000}}
