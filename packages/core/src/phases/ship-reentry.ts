@@ -28,7 +28,7 @@ export async function pushReentry(ctx: {
   if (localSha && localSha === reentry.previousHeadSha) {
     const reason = `CI rework produced no new commit on ${branch}`;
     log('ship', reason);
-    return { stop: { ok: false, prNumber, ciOutcome: 'failure', reason, headSha: localSha } };
+    return { stop: { ok: false, prNumber, ciOutcome: 'failure', reason, headSha: localSha, noNewCommit: true } };
   }
   try {
     await run(`git push origin ${shellEscape(branch)}`, { cwd: worktree });

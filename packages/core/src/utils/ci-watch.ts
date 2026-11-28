@@ -280,7 +280,7 @@ export interface InfraRerunWatchOptions extends WatchChecksOptions {
   onRescueFailed?: (failure: CiRescueFailure) => void;
 }
 
-const DEFAULT_RERUN_BUDGET: CiRerunBudget = new Set();
+export const DEFAULT_RERUN_BUDGET: CiRerunBudget = new Set();
 
 async function infraFailedJobs(
   octokit: Octokit,

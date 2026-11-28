@@ -220,6 +220,43 @@ describe('attributeCiFailure (#2817)', () => {
     expect(a.items[0]).toMatchObject({ attributable: true, reason: `not failing on base main@${'a'.repeat(12)}` });
   });
 
+  it.each([
+    {
+      state: 'failing on base',
+      name: 'test',
+      attributable: false,
+      baseResult: 'failing',
+      reason: 'also failing on base',
+    },
+    {
+      state: 'passing on base',
+      name: 'lint',
+      attributable: true,
+      baseResult: 'passing',
+      reason: 'passing on base',
+    },
+    {
+      state: 'with no result on base',
+      name: 'deploy-preview-smoke',
+      attributable: true,
+      baseResult: 'none',
+      reason: 'no result on base',
+    },
+  ])('classifies a check $state when the base reports passing checks (#4337)', (row) => {
+    const withPassing = { ...base, passing: ['lint'] };
+    const a = attributeCiFailure(ev({ failingChecks: [{ name: row.name, conclusion: 'failure' }] }), [], withPassing);
+    expect(a.items).toEqual([
+      {
+        kind: 'check',
+        ref: row.name,
+        attributable: row.attributable,
+        baseResult: row.baseResult,
+        reason: `${row.reason} main@${'a'.repeat(12)}`,
+      },
+    ]);
+    expect(a.baseline).toBe(!row.attributable);
+  });
+
   it('attributes checks when base is unavailable', () => {
     const a = attributeCiFailure(ev({ failingChecks: [{ name: 'test', conclusion: 'failure' }] }), [], undefined);
     expect(a.items[0]).toMatchObject({ attributable: true, reason: 'base checks unavailable' });
@@ -264,6 +301,7 @@ describe('listBaseFailingChecks', () => {
                 check_runs: [
                   { name: 'test', status: 'completed', conclusion: 'failure' },
                   { name: 'test', status: 'completed', conclusion: 'timed_out' },
+                  { name: 'test', status: 'completed', conclusion: 'success' },
                   { name: 'lint', status: 'completed', conclusion: 'success' },
                   { name: 'skip', status: 'completed', conclusion: 'skipped' },
                   { name: 'pending', status: 'in_progress', conclusion: null },
@@ -278,6 +316,7 @@ describe('listBaseFailingChecks', () => {
       baseRef: 'main',
       baseSha: 'deadbeef',
       failing: ['test'],
+      passing: ['lint', 'skip'],
     });
   });
 });
@@ -339,8 +378,20 @@ describe('ciCheckReworkSummary (#3537)', () => {
     expect(result).toMatchObject({ checker: 'ci_checks', result: 'FAIL' });
     expect(result.details).toContain('- test (2/3) (failure) — 1 failed');
     expect(result.details).toContain('- static (failure)');
-    expect(result.details).toContain('--- test (2/3) log tail (job 7), truncated ---\nexpected 1 to be 78');
+    expect(result.details).toContain('--- test (2/3) log excerpt (job 7), truncated ---\nexpected 1 to be 78');
     expect(result.details).toContain('Log fetch errors: static: no job id');
+  });
+
+  it.each([
+    [{ failingStep: 'npm test' }, '--- unit log excerpt (job 3, failing step: npm test) ---\nboom'],
+    [{}, '--- unit log excerpt (job 3) ---\nboom'],
+  ])('shows the failing step only when present (%o)', (extra, header) => {
+    const summary = ciCheckReworkSummary(
+      [{ name: 'unit', conclusion: 'failure' }],
+      [{ name: 'unit', jobId: 3, excerpt: 'boom', truncated: false, ...extra }],
+      [],
+    );
+    expect(summary.results[0].details).toContain(header);
   });
 
   it('omits the error line when there are none', () => {

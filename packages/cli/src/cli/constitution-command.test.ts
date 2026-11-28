@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync, writeFil
 import { basename, join } from 'node:path';
 
 import { listBuiltInCheckers } from '@on-par/factory-core/internal';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   DEFAULT_CODE_FIXTURE,
@@ -12,6 +12,7 @@ import {
   logged,
   paths,
   runMain,
+  tmp,
 } from './test-support/cli-commands-harness.js';
 
 installCliCommandsHarness();
@@ -225,6 +226,40 @@ describe('cli commands (via main dispatch)', () => {
       await expect(runMain('constitution', '--init', 'gizmo')).rejects.toThrow(
         'constitution template is missing its ```markdown skeleton block',
       );
+    });
+
+    it.each([
+      { name: 'unset', external: false },
+      { name: 'set', external: true },
+    ])('--product writes the product to the project config directory ($name)', async ({ external }) => {
+      writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha constitution\n');
+      const dir = tmp.makeSync('constitution-project-config-');
+      if (external) vi.stubEnv('FACTORY_PROJECT_CONFIG_DIR', dir);
+      try {
+        const res = await runMain('constitution', '--product', 'alpha');
+        expect(res.exited).toBe(false);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+      const read = (p: string) => (existsSync(p) ? readFileSync(p, 'utf-8') : undefined);
+      expect({ external: read(join(dir, 'product')), checkout: read(paths().product) }).toEqual(
+        external ? { external: 'alpha', checkout: undefined } : { external: undefined, checkout: 'alpha' },
+      );
+      expect(logged()).toContain('Active product: alpha');
+    });
+
+    it('--product fails naming the source when the project config directory is missing', async () => {
+      writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha constitution\n');
+      const missing = join(tmp.makeSync('constitution-missing-'), 'gone');
+      vi.stubEnv('FACTORY_PROJECT_CONFIG_DIR', missing);
+      try {
+        await expect(runMain('constitution', '--product', 'alpha')).rejects.toThrow(
+          `FACTORY_PROJECT_CONFIG_DIR: no such directory: ${missing}`,
+        );
+      } finally {
+        vi.unstubAllEnvs();
+      }
+      expect(existsSync(paths().product)).toBe(false);
     });
 
     it('--help documents .factory/constitution.md as the source of truth and --product seeding', async () => {

@@ -82,6 +82,8 @@ export const TERMINAL_EVENT_KINDS = new Set<EventKind>([
   'not-ready',
   'ci-failed',
   'ci-infra',
+  'ci-rework-no-change',
+  'ci-flaky',
   'timeout',
 ]);
 

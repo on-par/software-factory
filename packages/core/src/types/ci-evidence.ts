@@ -26,6 +26,7 @@ export interface CiAttributionItem {
   attributable: boolean;
   /** e.g. 'file changed by this PR', 'also failing on base main@abc123def456', 'base checks unavailable', 'not open on base main'. */
   reason: string;
+  baseResult?: 'failing' | 'passing' | 'none';
 }
 
 /** Attribution of a SHIP CI failure (#2817). baseline = no item is attributable to the PR. */
@@ -42,6 +43,7 @@ export interface CiJobLogExcerpt {
   jobId: number;
   excerpt: string;
   truncated: boolean;
+  failingStep?: string;
   /** Link to the check run the log came from (#3998). */
   url?: string;
   /** Up to 10 files the log flags: PR-changed files named verbatim plus `File:`/`Path:` lines (#3998). */

@@ -1,7 +1,12 @@
 // src/cli/doctor-config-sources.ts — the `config sources` doctor row and `--json` sources field (#3906).
 
-import { describeConfigSources, holdRunConfigSnapshot, lastRunConfigLadder } from '@on-par/factory-core/internal';
-import type { RunConfigLadder } from '@on-par/factory-core/internal';
+import {
+  describeConfigSources,
+  holdRunConfigSnapshot,
+  lastRunConfigLadder,
+  projectConfigReport,
+} from '@on-par/factory-core/internal';
+import type { ProjectConfigSourcePayload, RunConfigLadder } from '@on-par/factory-core/internal';
 
 import { constitutionSourceLabel } from './config-override-option.js';
 import { REPO_SECTION, type DoctorCheck } from './doctor.js';
@@ -9,15 +14,20 @@ import { REPO_SECTION, type DoctorCheck } from './doctor.js';
 export interface DoctorConfigSources {
   config: { source: string; path?: string; overrideKeys: string[] };
   constitution: { source: string };
+  projectConfig?: ProjectConfigSourcePayload;
 }
 
 /** The `config sources` row: which config and constitution the run would start from; keys only, never values. */
-export function configSourcesCheck(ladder: RunConfigLadder, constitution: string): DoctorCheck {
+export function configSourcesCheck(
+  ladder: RunConfigLadder,
+  constitution: string,
+  projectConfig?: ProjectConfigSourcePayload,
+): DoctorCheck {
   return {
     name: 'config sources',
     section: REPO_SECTION,
     ok: true,
-    detail: describeConfigSources(ladder, constitution),
+    detail: describeConfigSources(ladder, constitution, projectConfig),
   };
 }
 
@@ -38,11 +48,10 @@ export function holdDoctorConfigSources(repoRoot: string, configPath: string): H
       return { release, check: { name: 'config sources', ok: true, detail: 'packaged defaults' }, sources: null };
     const config: DoctorConfigSources['config'] = { source: ladder.source, overrideKeys: ladder.overrideKeys };
     if (ladder.path !== undefined) config.path = ladder.path;
-    return {
-      release,
-      check: configSourcesCheck(ladder, constitution),
-      sources: { config, constitution: { source: constitution } },
-    };
+    const projectConfig = projectConfigReport(repoRoot);
+    const sources: DoctorConfigSources = { config, constitution: { source: constitution } };
+    if (projectConfig) sources.projectConfig = projectConfig;
+    return { release, check: configSourcesCheck(ladder, constitution, projectConfig), sources };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     const check: DoctorCheck = {

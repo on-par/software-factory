@@ -169,6 +169,11 @@
     "durationMs": {
       "type": "number"
     },
+    "projectConfig": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
     "cursor": {
       "type": "string"
     }

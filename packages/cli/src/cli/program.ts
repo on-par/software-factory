@@ -31,12 +31,20 @@ export function buildProgram(handlers: ProgramHandlers, deps: CliDeps): Command 
     .option(
       '--constitution <path>',
       'Use this constitution file for the run instead of the repo constitution; env FACTORY_CONSTITUTION_PATH / FACTORY_CONSTITUTION',
+    )
+    .option(
+      '--project-config <dir>',
+      'Read config.yaml and constitution.md from this directory instead of .factory/; env FACTORY_PROJECT_CONFIG_DIR; --config / --constitution and their env vars still win',
     );
 
   program.hook('preAction', async () => {
     try {
-      const { config, constitution } = program.opts<{ config?: string; constitution?: string }>();
-      applyConfigOverrideOptions({ config, constitution }, process.cwd());
+      const { config, constitution, projectConfig } = program.opts<{
+        config?: string;
+        constitution?: string;
+        projectConfig?: string;
+      }>();
+      applyConfigOverrideOptions({ config, constitution, projectConfig }, process.cwd());
     } catch (e) {
       throw new handlers.CliExitError(`factory: ${(e as Error).message}`, 2);
     }

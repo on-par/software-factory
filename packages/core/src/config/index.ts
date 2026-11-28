@@ -410,6 +410,7 @@ export const FactoryConfigSchema = z.object({
 // hand-built configs (tests, sims) need not spell out an empty section.
 export type ModelsConfig = Omit<z.infer<typeof ModelsConfigSchema>, 'harnesses'> & {
   harnesses?: Record<string, HarnessDeclaration>;
+  ollamaConfigured?: boolean;
 };
 export type RoutesConfig = z.infer<typeof RoutesConfigSchema>;
 export type FactoryConfig = z.infer<typeof FactoryConfigSchema>;

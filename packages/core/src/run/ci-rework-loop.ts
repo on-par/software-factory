@@ -274,6 +274,7 @@ export async function shipWithCiRework(
   let lastCiFailure = ship.ciFailure;
   let suffix = '';
   let diagnose = false;
+  let noChange = false;
   const suppressionPark = (findings: CiSuppressionFinding[]): ShipWithCiReworkResult => {
     const described = describeSuppression(findings);
     ports.events('ship')('ship', `${described} after CI rework round ${rounds} (PR #${ship.prNumber})`);
@@ -293,7 +294,12 @@ export async function shipWithCiRework(
     reship: (recheck: CheckPhaseResult, reentry: CiReworkReentry) =>
       shipPhase({ ...shipOpts, checkSummary: recheck.summary, reworkRounds: recheck.reworkRounds, reentry }),
   };
-  while (!ship.ok && ship.prNumber !== undefined && (ship.ciOutcome === 'failure' || isPreviewRework(ship))) {
+  while (
+    !ship.ok &&
+    !ship.ciFlaky &&
+    ship.prNumber !== undefined &&
+    (ship.ciOutcome === 'failure' || isPreviewRework(ship))
+  ) {
     let plan: CiReworkRoundPlan & { label: string };
     if (ship.previewCheck && isPreviewRework(ship)) {
       if (rounds >= roundLimit) {
@@ -450,6 +456,11 @@ export async function shipWithCiRework(
       suffix = ` — ${plan.label} rework worker never ran`;
       break;
     }
+    if (step.kind === 'no-change') {
+      suffix = ` — ${plan.label} rework worker made no change (no new commit) on PR #${ship.prNumber} (${request.branch})`;
+      noChange = true;
+      break;
+    }
     ship = step.ship;
   }
   if (ship.ok) return { ship };
@@ -460,5 +471,6 @@ export async function shipWithCiRework(
       ? `ship phase failed: ${ship.reason}${suffix}`
       : `ship phase failed${suffix}`;
   const full = note && !ship.denied ? `${message}\n${note}` : message;
-  return { ship, parked: { reason: shipParkReason(ship), message: full, ciFailure: lastCiFailure ?? ship.ciFailure } };
+  const reason = noChange ? 'ci-rework-no-change' : shipParkReason(ship);
+  return { ship, parked: { reason, message: full, ciFailure: lastCiFailure ?? ship.ciFailure } };
 }

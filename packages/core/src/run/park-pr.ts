@@ -20,6 +20,8 @@ export function parkedPrAction(reason: ParkReason, greenAndChecked: boolean): 'c
     case 'conflict':
       return 'close';
     case 'ci-failed':
+    case 'ci-rework-no-change':
+    case 'ci-flaky':
       return 'leave';
     case 'fail':
     case 'timeout':

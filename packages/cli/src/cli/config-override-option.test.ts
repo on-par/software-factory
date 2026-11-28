@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { applyConfigOverrideOptions, constitutionSourceLabel } from './config-override-option.js';
+import { applyConfigOverrideOptions, constitutionSourceLabel, holdRunInputs } from './config-override-option.js';
 import { h, installShipHarness, runMainWith } from './test-support/ship-harness.js';
 
 installShipHarness();
@@ -15,6 +15,8 @@ afterEach(async () => {
   delete process.env.FACTORY_CONFIG_PATH_SOURCE;
   delete process.env.FACTORY_CONSTITUTION_PATH;
   delete process.env.FACTORY_CONSTITUTION_PATH_SOURCE;
+  delete process.env.FACTORY_PROJECT_CONFIG_DIR;
+  delete process.env.FACTORY_PROJECT_CONFIG_DIR_SOURCE;
   await tmp.cleanup();
 });
 
@@ -57,6 +59,33 @@ describe('applyConfigOverrideOptions (#3906)', () => {
   });
 });
 
+describe('--project-config (#4338)', () => {
+  it('flag wins over env var', () => {
+    const cwd = tmp.makeSync('project-cwd-');
+    const dirA = join(cwd, 'a');
+    const dirB = join(cwd, 'b');
+    mkdirSync(dirA);
+    mkdirSync(dirB);
+    writeFileSync(join(dirA, 'config.yaml'), 'version: 2\ndisk:\n  minFreeGb: 1\n');
+    writeFileSync(join(dirB, 'config.yaml'), 'version: 2\ndisk:\n  minFreeGb: 2\n');
+    const env: NodeJS.ProcessEnv = { FACTORY_PROJECT_CONFIG_DIR: dirA };
+    applyConfigOverrideOptions({ projectConfig: 'b' }, cwd, env);
+    expect(env.FACTORY_PROJECT_CONFIG_DIR).toBe(dirB);
+    expect(env.FACTORY_PROJECT_CONFIG_DIR_SOURCE).toBe('--project-config');
+  });
+
+  it('a missing --project-config directory throws', () => {
+    expect(() => applyConfigOverrideOptions({ projectConfig: 'nope' }, '/nowhere', {})).toThrow(
+      '--project-config: no such directory',
+    );
+  });
+
+  it('a missing --project-config directory exits 2 from the program', async () => {
+    const res = await runMainWith(undefined, '--project-config', '/nope/missing', 'ship', '5');
+    expect(res).toEqual({ exited: true, code: 2 });
+  });
+});
+
 describe('constitutionSourceLabel', () => {
   it('names the committed instance, the override, or the fallback', () => {
     const root = tmp.makeSync('label-root-');
@@ -66,5 +95,25 @@ describe('constitutionSourceLabel', () => {
     expect(constitutionSourceLabel(root)).toBe('.factory/constitution.md');
     vi.stubEnv('FACTORY_CONSTITUTION', 'inline');
     expect(constitutionSourceLabel(root)).toBe('FACTORY_CONSTITUTION');
+  });
+});
+
+describe('holdRunInputs (#4339)', () => {
+  it.each([
+    { name: 'valid', product: 'web-app', error: undefined, snapshot: '{"version":2}' },
+    { name: 'invalid', product: '_x', error: "invalid product name '_x'", snapshot: undefined },
+  ])('snapshots config and checks external inputs ($name)', ({ product, error, snapshot }) => {
+    const dir = tmp.makeSync('hold-inputs-');
+    writeFileSync(join(dir, 'config.yaml'), 'version: 2\n');
+    writeFileSync(join(dir, 'product'), product);
+    vi.stubEnv('FACTORY_PROJECT_CONFIG_DIR', dir);
+
+    let release: (() => void) | undefined;
+    if (error) expect(() => holdRunInputs(join(dir, 'unused.yaml'))).toThrow(error);
+    else release = holdRunInputs(join(dir, 'unused.yaml'));
+
+    expect(process.env.FACTORY_RUN_CONFIG_JSON).toBe(snapshot);
+    release?.();
+    expect(process.env.FACTORY_RUN_CONFIG_JSON).toBeUndefined();
   });
 });
