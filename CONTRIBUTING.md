@@ -85,3 +85,7 @@ and the publish gate are in [docs/ops/docs-and-changelog.md](docs/ops/docs-and-c
 ## Design decisions
 
 Record significant design decisions as ADRs in [docs/adr/](docs/adr/) (see its README).
+
+## Outside contributions
+
+Every pull request from an outside contributor gets a human maintainer review before it is closed for any reason. We never close an outside pull request as superseded by a factory rebuild. If the factory does rebuild the change, the new pull request credits the original author with a `Co-authored-by:` trailer and links their pull request.

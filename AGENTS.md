@@ -7,6 +7,8 @@ Software Factory is a TypeScript monorepo (npm workspaces under `packages/`) tha
 - Run `bash scripts/verify.sh --no-e2e` and get it green before every commit. Run it from the repo root. Exception: a factory BUILD under the focused handoff in `.factory/constitution.md` runs the focused commands before each commit, and CHECK runs the full gate before SHIP.
 - Never lower a coverage threshold in `vitest.config.ts`. When the ratchet says coverage rose, raise the threshold in the same PR.
 - Never merge past a required check that is genuinely `FAILURE` (`gh pr merge --admin` or equivalent). `main` must always be green.
+- Every pull request from an outside contributor gets a human maintainer review before it is closed for any reason. Never close an outside pull request as superseded by a factory rebuild.
+- If the factory rebuilds an outside contributor's change, the new pull request credits the original author with a `Co-authored-by:` trailer and links their pull request.
 - Write or update the colocated `*.test.ts` next to every source change.
 - Package boundaries (config ← core ← cli, zero-dependency config, published-name imports, ADR-0004 subpaths) are enforced by the `anti-slop/package-boundaries` lint rule in `npm run lint`; its messages say how to fix a finding.
 - Model routing lives in `packages/config/src/defaults.ts`. Do not hard-code model lists in `core`.
